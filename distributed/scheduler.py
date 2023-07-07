@@ -5084,7 +5084,7 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 if "stimulus_id" in inspect.signature(plugin.remove_worker).parameters:
                     result = plugin.remove_worker(
-                        scheduler=self, worker=address, stimulus_id=stimulus_id
+                        scheduler=self, worker=address, stimulus_id=stimulus_id  # type: ignore
                     )
                 else:
                     result = plugin.remove_worker(scheduler=self, worker=address)

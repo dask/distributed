@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(repr=False)
 class ShuffleState(abc.ABC):
     _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
 
@@ -47,10 +47,10 @@ class ShuffleState(abc.ABC):
         """Transform the shuffle state into a JSON-serializable message"""
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} {self.id}[{self.run_id}]>"
+        return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 
 
-@dataclass
+@dataclass(repr=False)
 class DataFrameShuffleState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
     worker_for: dict[int, str]
@@ -67,7 +67,7 @@ class DataFrameShuffleState(ShuffleState):
         }
 
 
-@dataclass
+@dataclass(repr=False)
 class ArrayRechunkState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
     worker_for: dict[NDIndex, str]
@@ -322,9 +322,22 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             recs.update({dt.key: "released"})
         return recs
 
-    def remove_worker(
-        self, scheduler: Scheduler, worker: str, stimulus_id: str
+    def _restart_shuffle(
+        self, id: ShuffleId, scheduler: Scheduler, *, stimulus_id: str
     ) -> None:
+        recs = self._restart_recommendations(id)
+        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+
+    def remove_worker(  # type: ignore
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
+    ) -> None:
+        for shuffle_id, shuffle in self._archived.items():
+            if shuffle._archived_by == stimulus_id:
+                if worker not in shuffle.participating_workers:
+                    continue
+
+                self._restart_shuffle(shuffle_id, scheduler, stimulus_id=stimulus_id)
+
         # If processing the transactions causes a task to get released, this
         # removes the shuffle from self.states. Therefore, we must iterate
         # over a copy.
@@ -332,21 +345,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             if worker not in shuffle.participating_workers:
                 continue
 
-            recs = self._restart_recommendations(shuffle_id)
-
-            self.scheduler.transitions(recs, stimulus_id=stimulus_id)
-
             exception = RuntimeError(f"Worker {worker} left during active {shuffle!r}")
-            self._clean_on_scheduler(shuffle_id, stimulus_id)
             self._fail_on_workers(shuffle, str(exception))
-        for shuffle_id, shuffle in self._archived.copy().items():
-            if shuffle._archived_by == stimulus_id:
-                if worker not in shuffle.participating_workers:
-                    continue
-
-                recs = self._restart_recommendations(shuffle_id)
-
-                self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+            self._clean_on_scheduler(shuffle_id, stimulus_id)
+            self._restart_shuffle(shuffle_id, scheduler, stimulus_id=stimulus_id)
 
     def _cleanup(self, id: ShuffleId, stimulus_id: str | None) -> None:
         try:
@@ -372,6 +374,9 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         shuffle_id = id_from_key(key)
         self._cleanup(shuffle_id, stimulus_id)
 
+        if finish == "forgotten":
+            self._archived.pop(shuffle_id, None)
+
     def _fail_on_workers(self, shuffle: ShuffleState, message: str) -> None:
         worker_msgs = {
             worker: [
@@ -387,7 +392,10 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         self.scheduler.send_all({}, worker_msgs)
 
     def _clean_on_scheduler(self, id: ShuffleId, stimulus_id: str | None) -> None:
-        shuffle = self.states.pop(id)
+        try:
+            shuffle = self.states.pop(id)
+        except KeyError:
+            return
         shuffle._archived_by = stimulus_id
         self._archived[id] = shuffle
 
