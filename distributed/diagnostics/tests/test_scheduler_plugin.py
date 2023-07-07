@@ -17,6 +17,7 @@ async def test_simple(c, s, a, b):
             self.count = 0
 
         def transition(self, key, start, finish, stimulus_id, *args, **kwargs):
+            assert stimulus_id is not None
             if start == "processing" and finish == "memory":
                 self.count += 1
 
@@ -53,6 +54,7 @@ async def test_add_remove_worker(s):
 
         def remove_worker(self, worker, scheduler, *, stimulus_id):
             assert scheduler is s
+            assert stimulus_id is not None
             events.append(("remove_worker", worker))
 
     plugin = MyPlugin()
@@ -71,6 +73,37 @@ async def test_add_remove_worker(s):
         ("add_worker", b.address),
         ("remove_worker", a.address),
         ("remove_worker", b.address),
+    ]
+
+    events[:] = []
+    s.remove_plugin(plugin.name)
+    async with Worker(s.address):
+        pass
+    assert events == []
+
+
+@gen_cluster(nthreads=[])
+async def test_remove_worker_without_stimulus_id_deprecated(s):
+    events = []
+
+    class DeprecatedPlugin(SchedulerPlugin):
+        name = "DeprecatedPlugin"
+
+        def remove_worker(self, worker, scheduler):
+            assert scheduler is s
+            events.append(("remove_worker", worker))
+
+    plugin = DeprecatedPlugin()
+    with pytest.warns(FutureWarning, match="Not supporting the `stimulus_id`"):
+        s.add_plugin(plugin)
+    assert events == []
+
+    a = Worker(s.address)
+    await a
+    await a.close()
+
+    assert events == [
+        ("remove_worker", a.address),
     ]
 
     events[:] = []
