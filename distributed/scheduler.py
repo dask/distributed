@@ -1979,7 +1979,7 @@ class SchedulerState:
                 for plugin in list(self.plugins.values()):
                     try:
                         plugin.transition(
-                            key, start, actual_finish, stimulus_id, **kwargs
+                            key, start, actual_finish, stimulus_id=stimulus_id, **kwargs
                         )
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
