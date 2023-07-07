@@ -2868,10 +2868,6 @@ class WorkerState:
                     ts, run_id=ev.run_id, stimulus_id=ev.stimulus_id
                 )
             )
-        elif ts.state == "error":
-            instructions.append(
-                TaskErredMsg.from_task(ts, run_id=ev.run_id, stimulus_id=ev.stimulus_id)
-            )
         elif ts.state in {
             "released",
             "fetch",
@@ -2879,6 +2875,7 @@ class WorkerState:
             "missing",
             "cancelled",
             "resumed",
+            "error",
         }:
             recommendations[ts] = "waiting"
 

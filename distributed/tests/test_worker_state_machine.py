@@ -1334,6 +1334,20 @@ def test_gather_dep_failure(ws):
     ws.validate = False
 
 
+def test_recompute_erred_task(ws):
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("x", run_id=1, stimulus_id="s1"),
+        ExecuteFailureEvent.dummy("x", run_id=1, stimulus_id="s2"),
+        ComputeTaskEvent.dummy("x", run_id=2, stimulus_id="s3"),
+    )
+    assert instructions == [
+        Execute(key="x", stimulus_id="s1"),
+        TaskErredMsg.match(key="x", run_id=1, stimulus_id="s2"),
+        Execute(key="x", stimulus_id="s3"),
+    ]
+    assert ws.tasks["x"].state == "executing"
+
+
 def test_transfer_incoming_metrics(ws):
     assert ws.transfer_incoming_bytes == 0
     assert ws.transfer_incoming_count == 0
