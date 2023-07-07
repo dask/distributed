@@ -610,6 +610,10 @@ class ShuffleWorkerExtension:
             shuffle = await self._get_shuffle_run(shuffle_id, run_id)
             await shuffle.inputs_done()
 
+    async def _close_shuffle_run(self, shuffle: ShuffleRun) -> None:
+        await shuffle.close()
+        self._runs.remove(shuffle)
+
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
         """Fails the shuffle run with the message as exception and triggers cleanup.
 
@@ -626,11 +630,9 @@ class ShuffleWorkerExtension:
         exception = RuntimeError(message)
         shuffle.fail(exception)
 
-        async def _(extension: ShuffleWorkerExtension, shuffle: ShuffleRun) -> None:
-            await shuffle.close()
-            extension._runs.remove(shuffle)
-
-        self.worker._ongoing_background_tasks.call_soon(_, self, shuffle)
+        self.worker._ongoing_background_tasks.call_soon(
+            self._close_shuffle_run, shuffle
+        )
 
     def add_partition(
         self,
@@ -853,10 +855,12 @@ class ShuffleWorkerExtension:
         assert not self.closed
 
         self.closed = True
+
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
-            await shuffle.close()
-            self._runs.remove(shuffle)
+            self.worker._ongoing_background_tasks.call_soon(
+                self._close_shuffle_run, shuffle
+            )
         try:
             self._executor.shutdown(cancel_futures=True)
         except Exception:  # pragma: no cover
