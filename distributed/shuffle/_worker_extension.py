@@ -703,7 +703,7 @@ class ShuffleWorkerExtension:
                 shuffle_id=shuffle_id,
             )
         if run_id > shuffle.run_id:
-            raise RuntimeError(f"{shuffle} stale, expected run_id=={run_id}")
+            raise RuntimeError(f"run_id invalid, got {shuffle}")
         elif run_id < shuffle.run_id:
             raise RuntimeError(f"{run_id=} stale, got {shuffle}")
 
