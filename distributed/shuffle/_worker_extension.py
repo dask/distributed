@@ -702,9 +702,9 @@ class ShuffleWorkerExtension:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
             )
-        if run_id < shuffle.run_id:
+        if run_id > shuffle.run_id:
             raise RuntimeError(f"{shuffle} stale, expected run_id=={run_id}")
-        elif run_id > shuffle.run_id:
+        elif run_id < shuffle.run_id:
             # This should never happen
             raise RuntimeError(f"{shuffle} invalid, expected run_id=={run_id}")
 
