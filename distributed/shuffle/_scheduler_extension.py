@@ -310,7 +310,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         for shuffle_id, shuffle in self.states.items():
             if worker not in shuffle.participating_workers:
                 continue
-            exception = RuntimeError(f"Worker {worker} left during active {shuffle_id}")
+            exception = RuntimeError(f"Worker {worker} left during active {shuffle}")
             self.erred_shuffles[shuffle_id] = exception
             self._fail_on_workers(shuffle, str(exception))
 
