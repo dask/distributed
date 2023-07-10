@@ -77,6 +77,7 @@ async def clean_worker(
 
     while extension._runs and not deadline.expired:
         await asyncio.sleep(interval)
+    assert extension.closed
     for dirpath, dirnames, filenames in os.walk(worker.local_directory):
         assert "shuffle" not in dirpath
         for fn in dirnames + filenames:
