@@ -53,6 +53,8 @@ async def test_create_with_client(c, s):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_remove_with_client(c, s):
+    existing_plugins = s.worker_plugins.copy()
+    n_existing_plugins = len(existing_plugins)
     await c.register_worker_plugin(MyPlugin(123), name="foo")
     await c.register_worker_plugin(MyPlugin(546), name="bar")
 
@@ -62,18 +64,18 @@ async def test_remove_with_client(c, s):
         assert worker._my_plugin_status == "teardown"
 
         # check that on the scheduler registered worker plugins we only have 'bar'
-        assert len(s.worker_plugins) == 1
+        assert len(s.worker_plugins) == n_existing_plugins + 1
         assert "bar" in s.worker_plugins
 
         # check on the worker plugins that we only have 'bar'
-        assert len(worker.plugins) == 1
+        assert len(worker.plugins) == n_existing_plugins + 1
         assert "bar" in worker.plugins
 
         # let's remove 'bar' and we should have none worker plugins
         await c.unregister_worker_plugin("bar")
         assert worker._my_plugin_status == "teardown"
-        assert not s.worker_plugins
-        assert not worker.plugins
+        assert s.worker_plugins == existing_plugins
+        assert len(worker.plugins) == n_existing_plugins
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -87,7 +89,9 @@ async def test_remove_with_client_raises(c, s):
 
 @gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
 async def test_create_on_construction(c, s, a, b):
-    assert len(a.plugins) == len(b.plugins) == 1
+    assert len(a.plugins) == len(b.plugins)
+    assert any(isinstance(plugin, MyPlugin) for plugin in a.plugins.values())
+    assert any(isinstance(plugin, MyPlugin) for plugin in b.plugins.values())
     assert a._my_plugin_status == "setup"
     assert a._my_plugin_data == 5
 
@@ -195,9 +199,10 @@ async def test_default_name(c, s, w):
     class MyCustomPlugin(WorkerPlugin):
         pass
 
+    n_existing_plugins = len(w.plugins)
     await c.register_worker_plugin(MyCustomPlugin())
-    assert len(w.plugins) == 1
-    assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
+    assert len(w.plugins) == n_existing_plugins + 1
+    assert any(name.startswith("MyCustomPlugin-") for name in w.plugins)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
