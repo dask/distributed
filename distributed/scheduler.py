@@ -1978,19 +1978,9 @@ class SchedulerState:
                     self.tasks[ts.key] = ts
                 for plugin in list(self.plugins.values()):
                     try:
-                        if (
-                            "stimulus_id"
-                            in inspect.signature(plugin.transition).parameters
-                        ):
-                            plugin.transition(
-                                key,
-                                start,
-                                actual_finish,
-                                stimulus_id=stimulus_id,
-                                **kwargs,
-                            )
-                        else:
-                            plugin.transition(key, start, actual_finish, **kwargs)
+                        plugin.transition(
+                            key, start, actual_finish, stimulus_id=stimulus_id, **kwargs
+                        )
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
@@ -5082,12 +5072,16 @@ class Scheduler(SchedulerState, ServerNode):
         awaitables = []
         for plugin in list(self.plugins.values()):
             try:
-                if "stimulus_id" in inspect.signature(plugin.remove_worker).parameters:
+                try:
                     result = plugin.remove_worker(
-                        scheduler=self, worker=address, stimulus_id=stimulus_id  # type: ignore
+                        scheduler=self, worker=address, stimulus_id=stimulus_id
                     )
-                else:
-                    result = plugin.remove_worker(scheduler=self, worker=address)
+                except TypeError as e:
+                    parameters = inspect.signature(plugin.remove_worker).parameters
+                    if "stimulus_id" not in parameters and "kwargs" not in parameters:
+                        result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
+                    else:
+                        raise e
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:
@@ -5740,6 +5734,14 @@ class Scheduler(SchedulerState, ServerNode):
             warnings.warn(
                 f"Scheduler already contains a plugin with name {name}; overwriting.",
                 category=UserWarning,
+            )
+
+        parameters = inspect.signature(plugin.remove_worker).parameters
+        if "stimulus_id" not in parameters and "kwargs" not in parameters:
+            warnings.warn(
+                "The `stimulus_id` keyword argument has been added to `SchedulerPlugin.remove_worker`. "
+                "Not supporting the `stimulus_id` keyword argument or `**kwargs` will no longer be supported in future versions.",
+                FutureWarning,
             )
 
         self.plugins[name] = plugin
@@ -8438,7 +8440,9 @@ class WorkerStatusPlugin(SchedulerPlugin):
         except CommClosedError:
             scheduler.remove_plugin(name=self.name)
 
-    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
+    def remove_worker(
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
+    ) -> None:
         try:
             self.bcomm.send(["remove", worker])
         except CommClosedError:

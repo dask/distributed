@@ -21,7 +21,13 @@ from distributed.utils import log_errors, recursive_to_dict
 
 if TYPE_CHECKING:
     # Recursive imports
-    from distributed.scheduler import Scheduler, SchedulerState, TaskState, WorkerState
+    from distributed.scheduler import (
+        Scheduler,
+        SchedulerState,
+        TaskState,
+        TaskStateState,
+        WorkerState,
+    )
 
 # Stealing requires multiple network bounces and if successful also task
 # submission which may include code serialization. Therefore, be very
@@ -155,7 +161,9 @@ class WorkStealing(SchedulerPlugin):
     def add_worker(self, scheduler: Any = None, worker: Any = None) -> None:
         self.stealable[worker] = tuple(set() for _ in range(15))
 
-    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
+    def remove_worker(
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
+    ) -> None:
         del self.stealable[worker]
 
     def teardown(self) -> None:
@@ -167,11 +175,10 @@ class WorkStealing(SchedulerPlugin):
     def transition(
         self,
         key: str,
-        start: str,
-        finish: str,
-        compute_start: Any = None,
-        compute_stop: Any = None,
+        start: TaskStateState,
+        finish: TaskStateState,
         *args: Any,
+        stimulus_id: str,
         **kwargs: Any,
     ) -> None:
         if finish == "processing":

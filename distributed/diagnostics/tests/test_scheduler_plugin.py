@@ -16,7 +16,8 @@ async def test_simple(c, s, a, b):
             scheduler.add_plugin(self, name="counter")
             self.count = 0
 
-        def transition(self, key, start, finish, *args, **kwargs):
+        def transition(self, key, start, finish, stimulus_id, *args, **kwargs):
+            assert stimulus_id is not None
             if start == "processing" and finish == "memory":
                 self.count += 1
 
@@ -51,8 +52,9 @@ async def test_add_remove_worker(s):
             assert scheduler is s
             events.append(("add_worker", worker))
 
-        def remove_worker(self, worker, scheduler):
+        def remove_worker(self, worker, scheduler, *, stimulus_id):
             assert scheduler is s
+            assert stimulus_id is not None
             events.append(("remove_worker", worker))
 
     plugin = MyPlugin()
@@ -81,6 +83,37 @@ async def test_add_remove_worker(s):
 
 
 @gen_cluster(nthreads=[])
+async def test_remove_worker_without_stimulus_id_deprecated(s):
+    events = []
+
+    class DeprecatedPlugin(SchedulerPlugin):
+        name = "DeprecatedPlugin"
+
+        def remove_worker(self, worker, scheduler):
+            assert scheduler is s
+            events.append(("remove_worker", worker))
+
+    plugin = DeprecatedPlugin()
+    with pytest.warns(FutureWarning, match="Not supporting the `stimulus_id`"):
+        s.add_plugin(plugin)
+    assert events == []
+
+    a = Worker(s.address)
+    await a
+    await a.close()
+
+    assert events == [
+        ("remove_worker", a.address),
+    ]
+
+    events[:] = []
+    s.remove_plugin(plugin.name)
+    async with Worker(s.address):
+        pass
+    assert events == []
+
+
+@gen_cluster(nthreads=[])
 async def test_async_add_remove_worker(s):
     events = []
 
@@ -91,7 +124,7 @@ async def test_async_add_remove_worker(s):
             assert scheduler is s
             events.append(("add_worker", worker))
 
-        async def remove_worker(self, worker, scheduler):
+        async def remove_worker(self, worker, scheduler, *, stimulus_id):
             assert scheduler is s
             events.append(("remove_worker", worker))
 
@@ -135,7 +168,7 @@ async def test_async_and_sync_add_remove_worker(s):
             await asyncio.sleep(0)
             events.append((self.name, "add_worker", worker))
 
-        async def remove_worker(self, scheduler, worker):
+        async def remove_worker(self, scheduler, worker, *, stimulus_id):
             assert scheduler is s
             self.in_remove_worker.set()
             await self.block_remove_worker.wait()
@@ -149,7 +182,7 @@ async def test_async_and_sync_add_remove_worker(s):
             assert scheduler is s
             events.append((self.name, "add_worker", worker))
 
-        def remove_worker(self, worker, scheduler):
+        def remove_worker(self, worker, scheduler, *, stimulus_id):
             assert scheduler is s
             events.append((self.name, "remove_worker", worker))
 
@@ -229,7 +262,7 @@ async def test_failing_async_add_remove_worker(s):
             await asyncio.sleep(0)
             raise RuntimeError("Async add_worker failed")
 
-        async def remove_worker(self, scheduler, worker):
+        async def remove_worker(self, scheduler, worker, *, stimulus_id):
             assert scheduler is s
             await asyncio.sleep(0)
             raise RuntimeError("Async remove_worker failed")
@@ -257,7 +290,7 @@ async def test_failing_sync_add_remove_worker(s):
             assert scheduler is s
             raise RuntimeError("Async add_worker failed")
 
-        def remove_worker(self, scheduler, worker):
+        def remove_worker(self, scheduler, worker, *, stimulus_id):
             assert scheduler is s
             raise RuntimeError("Async remove_worker failed")
 

@@ -69,6 +69,7 @@ class ShuffleAnnotationChaosPlugin(SchedulerPlugin):
         start: TaskStateState,
         finish: TaskStateState,
         *args: Any,
+        stimulus_id: str,
         **kwargs: Any,
     ) -> None:
         assert self.scheduler

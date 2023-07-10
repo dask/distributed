@@ -30,7 +30,7 @@ class TaskStreamPlugin(SchedulerPlugin):
         self.scheduler = scheduler
         self.index = 0
 
-    def transition(self, key, start, finish, *args, **kwargs):
+    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
         if start == "processing":
             if key not in self.scheduler.tasks:
                 return

@@ -328,7 +328,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         recs = self._restart_recommendations(id)
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
 
-    def remove_worker(  # type: ignore
+    def remove_worker(
         self, scheduler: Scheduler, worker: str, *, stimulus_id: str
     ) -> None:
         for shuffle_id, shuffle in self._archived.items():
@@ -364,7 +364,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         start: TaskStateState,
         finish: TaskStateState,
         *args: Any,
-        stimulus_id: str | None = None,
+        stimulus_id: str,
         **kwargs: Any,
     ) -> None:
         if finish not in ("released", "forgotten"):

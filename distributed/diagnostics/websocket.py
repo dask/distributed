@@ -21,7 +21,7 @@ class WebsocketPlugin(SchedulerPlugin):
         """Run when a new worker enters the cluster"""
         self.socket.send("add_worker", {"worker": worker})
 
-    def remove_worker(self, scheduler=None, worker=None, **kwargs):
+    def remove_worker(self, scheduler=None, worker=None, *, stimulus_id=None, **kwargs):
         """Run when a worker leaves the cluster"""
         self.socket.send("remove_worker", {"worker": worker})
 
@@ -37,7 +37,7 @@ class WebsocketPlugin(SchedulerPlugin):
         """Run when a new graph / tasks enter the scheduler"""
         self.socket.send("update_graph", {"client": client})
 
-    def transition(self, key, start, finish, *args, **kwargs):
+    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
         """Run whenever a task changes state
 
         Parameters
@@ -48,6 +48,8 @@ class WebsocketPlugin(SchedulerPlugin):
             One of released, waiting, processing, memory, error.
         finish : string
             Final state of the transition.
+        stimulus_id: string
+            ID of stimulus causing the transition.
         *args, **kwargs : More options passed when transitioning
             This may include worker ID, compute time, etc.
         """
