@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from dask.dataframe import DataFrame
 
     # circular dependency
-    from distributed.shuffle._worker_extension import ShuffleWorkerExtension
+    from distributed.shuffle._worker_extension import ShuffleWorkerPlugin
 
 ShuffleId = NewType("ShuffleId", str)
 
@@ -32,7 +32,7 @@ class ShuffleType(Enum):
     ARRAY_RECHUNK = "ArrayRechunk"
 
 
-def _get_worker_extension() -> ShuffleWorkerExtension:
+def _get_worker_extension() -> ShuffleWorkerPlugin:
     from distributed import get_worker
 
     try:
@@ -42,7 +42,7 @@ def _get_worker_extension() -> ShuffleWorkerExtension:
             "`shuffle='p2p'` requires Dask's distributed scheduler. This task is not running on a Worker; "
             "please confirm that you've created a distributed Client and are submitting this computation through it."
         ) from e
-    extension: ShuffleWorkerExtension | None = worker.extensions.get("shuffle")
+    extension: ShuffleWorkerPlugin | None = worker.extensions.get("shuffle")
     if extension is None:
         raise RuntimeError(
             f"The worker {worker.address} does not have a ShuffleExtension. "

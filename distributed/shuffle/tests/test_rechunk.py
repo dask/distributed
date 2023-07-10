@@ -19,7 +19,7 @@ from dask.array.utils import assert_eq
 
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import Split, split_axes
-from distributed.shuffle._scheduler_extension import get_worker_for_hash_sharding
+from distributed.shuffle._scheduler_plugin import get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import ShuffleId
 from distributed.shuffle._worker_extension import ArrayRechunkRun
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool

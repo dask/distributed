@@ -85,16 +85,16 @@ class ArrayRechunkState(ShuffleState):
         }
 
 
-class ShuffleSchedulerExtension(SchedulerPlugin):
+class ShuffleSchedulerPlugin(SchedulerPlugin):
     """
-    Shuffle extension for the scheduler
+    Shuffle plugin for the scheduler
 
-    Today this mostly just collects heartbeat messages for the dashboard,
-    but in the future it may be responsible for more
+    This coordinates the individual worker plugins to ensure correctness
+    and collects heartbeat messages for the dashboard.
 
     See Also
     --------
-    ShuffleWorkerExtension
+    ShuffleWorkerPlugin
     """
 
     scheduler: Scheduler

@@ -98,7 +98,7 @@ from distributed.queues import QueueExtension
 from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
-from distributed.shuffle import ShuffleSchedulerExtension
+from distributed.shuffle import ShuffleSchedulerPlugin
 from distributed.spans import SpansSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
@@ -170,7 +170,7 @@ DEFAULT_EXTENSIONS = {
     "events": EventExtension,
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
-    "shuffle": ShuffleSchedulerExtension,
+    "shuffle": ShuffleSchedulerPlugin,
     "spans": SpansSchedulerExtension,
     "stealing": WorkStealing,
 }

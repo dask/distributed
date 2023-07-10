@@ -29,15 +29,15 @@ from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._scheduler_extension import (
-    ShuffleSchedulerExtension,
+from distributed.shuffle._scheduler_plugin import (
+    ShuffleSchedulerPlugin,
     get_worker_for_range_sharding,
 )
 from distributed.shuffle._shuffle import ShuffleId, barrier_key
 from distributed.shuffle._worker_extension import (
     DataFrameShuffleRun,
     ShuffleRun,
-    ShuffleWorkerExtension,
+    ShuffleWorkerPlugin,
     convert_partition,
     list_of_buffers_to_table,
     split_by_partition,
@@ -1451,7 +1451,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
 from distributed.worker import DEFAULT_EXTENSIONS
 
 
-class BlockedShuffleReceiveShuffleWorkerExtension(ShuffleWorkerExtension):
+class BlockedShuffleReceiveShuffleWorkerPlugin(ShuffleWorkerPlugin):
     def __init__(self, worker: Worker) -> None:
         super().__init__(worker)
         self.in_shuffle_receive = asyncio.Event()
@@ -1466,7 +1466,7 @@ class BlockedShuffleReceiveShuffleWorkerExtension(ShuffleWorkerExtension):
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @mock.patch.dict(
     DEFAULT_EXTENSIONS,
-    {"shuffle": BlockedShuffleReceiveShuffleWorkerExtension},
+    {"shuffle": BlockedShuffleReceiveShuffleWorkerPlugin},
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
@@ -1505,7 +1505,7 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
     await clean_scheduler(s, timeout=2)
 
 
-class BlockedBarrierShuffleWorkerExtension(ShuffleWorkerExtension):
+class BlockedBarrierShuffleWorkerPlugin(ShuffleWorkerPlugin):
     def __init__(self, worker: Worker) -> None:
         super().__init__(worker)
         self.in_barrier = asyncio.Event()
@@ -1520,7 +1520,7 @@ class BlockedBarrierShuffleWorkerExtension(ShuffleWorkerExtension):
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @mock.patch.dict(
     DEFAULT_EXTENSIONS,
-    {"shuffle": BlockedBarrierShuffleWorkerExtension},
+    {"shuffle": BlockedBarrierShuffleWorkerPlugin},
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
@@ -1566,7 +1566,7 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
 
 @mock.patch.dict(
     DEFAULT_EXTENSIONS,
-    {"shuffle": BlockedBarrierShuffleWorkerExtension},
+    {"shuffle": BlockedBarrierShuffleWorkerPlugin},
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_shuffle_run_consistency(c, s, a):
@@ -1639,7 +1639,7 @@ async def test_shuffle_run_consistency(c, s, a):
     await clean_scheduler(s, timeout=2)
 
 
-class BlockedShuffleAccessAndFailWorkerExtension(ShuffleWorkerExtension):
+class BlockedShuffleAccessAndFailWorkerExtension(ShuffleWorkerPlugin):
     def __init__(self, worker: Worker) -> None:
         super().__init__(worker)
         self.in_get_or_create_shuffle = asyncio.Event()
@@ -1753,7 +1753,7 @@ class BlockedRemoveWorkerSchedulerPlugin(SchedulerPlugin):
         await self.block_remove_worker.wait()
 
 
-class BlockedBarrierSchedulerExtension(ShuffleSchedulerExtension):
+class BlockedBarrierSchedulerExtension(ShuffleSchedulerPlugin):
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.in_barrier = asyncio.Event()
