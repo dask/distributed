@@ -856,7 +856,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self._runs.add(shuffle)
         return shuffle
 
-    async def close(self) -> None:
+    async def teardown(self, worker: Worker) -> None:
         assert not self.closed
 
         self.closed = True

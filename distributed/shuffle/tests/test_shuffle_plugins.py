@@ -11,7 +11,7 @@ from distributed.shuffle._scheduler_plugin import (
     ShuffleSchedulerPlugin,
     get_worker_for_range_sharding,
 )
-from distributed.shuffle._worker_extension import (
+from distributed.shuffle._worker_plugin import (
     ShuffleWorkerPlugin,
     split_by_partition,
     split_by_worker,

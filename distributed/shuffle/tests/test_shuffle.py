@@ -34,7 +34,7 @@ from distributed.shuffle._scheduler_plugin import (
     get_worker_for_range_sharding,
 )
 from distributed.shuffle._shuffle import ShuffleId, barrier_key
-from distributed.shuffle._worker_extension import (
+from distributed.shuffle._worker_plugin import (
     DataFrameShuffleRun,
     ShuffleRun,
     ShuffleWorkerPlugin,
@@ -333,7 +333,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._scheduler_extension.get_worker_for_range_sharding",
+        "distributed.shuffle._scheduler_plugin.get_worker_for_range_sharding",
         mock_get_worker_for_range_sharding,
     ):
         df = dask.datasets.timeseries(
@@ -366,7 +366,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._scheduler_extension.get_worker_for_range_sharding",
+        "distributed.shuffle._scheduler_plugin.get_worker_for_range_sharding",
         mock_mock_get_worker_for_range_sharding,
     ):
         async with Nanny(s.address, nthreads=1) as n:
@@ -430,7 +430,7 @@ class BlockedInputsDoneShuffle(DataFrameShuffleRun):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_extension.DataFrameShuffleRun",
+    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -474,7 +474,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_extension.DataFrameShuffleRun",
+    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -521,7 +521,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
 @pytest.mark.slow
 @mock.patch(
-    "distributed.shuffle._worker_extension.DataFrameShuffleRun",
+    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)])

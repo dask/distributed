@@ -5,7 +5,7 @@ from distributed.shuffle._merge import HashJoinP2PLayer, hash_join_p2p
 from distributed.shuffle._rechunk import rechunk_p2p
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import P2PShuffleLayer, rearrange_by_column_p2p
-from distributed.shuffle._worker_extension import ShuffleWorkerPlugin
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
 __all__ = [
     "check_minimal_arrow_version",

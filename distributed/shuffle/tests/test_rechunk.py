@@ -21,7 +21,7 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import Split, split_axes
 from distributed.shuffle._scheduler_plugin import get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import ShuffleId
-from distributed.shuffle._worker_extension import ArrayRechunkRun
+from distributed.shuffle._worker_plugin import ArrayRechunkRun
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
 

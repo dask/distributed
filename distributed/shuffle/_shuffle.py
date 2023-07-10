@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from dask.dataframe import DataFrame
 
     # circular dependency
-    from distributed.shuffle._worker_extension import ShuffleWorkerPlugin
+    from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
 ShuffleId = NewType("ShuffleId", str)
 
@@ -32,7 +32,7 @@ class ShuffleType(Enum):
     ARRAY_RECHUNK = "ArrayRechunk"
 
 
-def _get_worker_extension() -> ShuffleWorkerPlugin:
+def _get_worker_plugin() -> ShuffleWorkerPlugin:
     from distributed import get_worker
 
     try:
@@ -60,7 +60,7 @@ def shuffle_transfer(
     parts_out: set[int],
 ) -> int:
     try:
-        return _get_worker_extension().add_partition(
+        return _get_worker_plugin().add_partition(
             input,
             shuffle_id=id,
             type=ShuffleType.DATAFRAME,
@@ -77,7 +77,7 @@ def shuffle_unpack(
     id: ShuffleId, output_partition: int, barrier_run_id: int, meta: pd.DataFrame
 ) -> pd.DataFrame:
     try:
-        return _get_worker_extension().get_output_partition(
+        return _get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_partition, meta=meta
         )
     except Reschedule as e:
@@ -88,7 +88,7 @@ def shuffle_unpack(
 
 def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
     try:
-        return _get_worker_extension().barrier(id, run_ids)
+        return _get_worker_plugin().barrier(id, run_ids)
     except Exception as e:
         raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
 

@@ -10,7 +10,7 @@ from distributed.exceptions import Reschedule
 from distributed.shuffle._shuffle import (
     ShuffleId,
     ShuffleType,
-    _get_worker_extension,
+    _get_worker_plugin,
     barrier_key,
     shuffle_barrier,
 )
@@ -36,7 +36,7 @@ def rechunk_transfer(
     old: ChunkedAxes,
 ) -> int:
     try:
-        return _get_worker_extension().add_partition(
+        return _get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
             shuffle_id=id,
@@ -52,7 +52,7 @@ def rechunk_unpack(
     id: ShuffleId, output_chunk: NDIndex, barrier_run_id: int
 ) -> np.ndarray:
     try:
-        return _get_worker_extension().get_output_partition(
+        return _get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_chunk
         )
     except Reschedule as e:
