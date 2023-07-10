@@ -702,10 +702,11 @@ class ShuffleWorkerExtension:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
             )
-        if run_id > shuffle.run_id:
-            raise RuntimeError(f"{run_id=} invalid, got {shuffle}")
-        elif run_id < shuffle.run_id:
+
+        if shuffle.run_id > run_id:
             raise RuntimeError(f"{run_id=} stale, got {shuffle}")
+        elif shuffle.run_id < run_id:
+            raise RuntimeError(f"{run_id=} invalid, got {shuffle}")
 
         if shuffle._exception:
             raise shuffle._exception

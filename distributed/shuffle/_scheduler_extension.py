@@ -122,7 +122,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     async def barrier(self, id: ShuffleId, run_id: int) -> None:
         shuffle = self.states[id]
-        assert shuffle.run_id == run_id
+        assert shuffle.run_id == run_id, f"{run_id=} does not match {shuffle}"
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
         await self.scheduler.broadcast(
             msg=msg, workers=list(shuffle.participating_workers)
