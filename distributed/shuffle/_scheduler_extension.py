@@ -123,7 +123,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
 
     async def barrier(self, id: ShuffleId, run_id: int) -> None:
         shuffle = self.states[id]
-        assert shuffle.run_id == run_id
+        assert shuffle.run_id == run_id, f"{run_id=} does not match {shuffle}"
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
         await self.scheduler.broadcast(
             msg=msg,
@@ -135,12 +135,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if shuffle.run_id > run_id:
             return {
                 "status": "error",
-                "message": f"Request stale, expected run_id=={run_id} for {shuffle}",
+                "message": f"Request stale, expected {run_id=} for {shuffle}",
             }
         elif shuffle.run_id < run_id:
             return {
                 "status": "error",
-                "message": f"Request invalid, expected run_id=={run_id} for {shuffle}",
+                "message": f"Request invalid, expected {run_id=} for {shuffle}",
             }
         ts = self.scheduler.tasks[key]
         self._set_restriction(ts, worker)
