@@ -12,6 +12,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.protocol.pickle import dumps
 from distributed.shuffle._rechunk import ChunkedAxes, NDIndex
 from distributed.shuffle._shuffle import (
     ShuffleId,
@@ -19,6 +20,7 @@ from distributed.shuffle._shuffle import (
     barrier_key,
     id_from_key,
 )
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
 if TYPE_CHECKING:
     from distributed.scheduler import (
@@ -116,6 +118,12 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self.states = {}
         self.erred_shuffles = {}
         self.scheduler.add_plugin(self)
+
+    async def start(self, scheduler: Scheduler) -> None:
+        worker_plugin = ShuffleWorkerPlugin()
+        await self.scheduler.register_worker_plugin(
+            None, dumps(worker_plugin), name="shuffle"
+        )
 
     def shuffle_ids(self) -> set[ShuffleId]:
         return set(self.states)

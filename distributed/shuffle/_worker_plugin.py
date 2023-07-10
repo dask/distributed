@@ -572,7 +572,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     memory_limiter_disk: ResourceLimiter
     closed: bool
 
-    def __init__(self, worker: Worker) -> None:
+    def setup(self, worker: Worker) -> None:
         # Attach to worker
         worker.handlers["shuffle_receive"] = self.shuffle_receive
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done

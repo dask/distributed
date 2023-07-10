@@ -91,7 +91,6 @@ from distributed.protocol import pickle, to_serialize
 from distributed.protocol.serialize import _is_dumpable
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
-from distributed.shuffle import ShuffleWorkerPlugin
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.spans import SpansWorkerExtension
 from distributed.threadpoolexecutor import ThreadPoolExecutor
@@ -172,7 +171,6 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 DEFAULT_EXTENSIONS: dict[str, type] = {
     "pubsub": PubSubWorkerExtension,
-    "shuffle": ShuffleWorkerPlugin,
     "spans": SpansWorkerExtension,
 }
 
