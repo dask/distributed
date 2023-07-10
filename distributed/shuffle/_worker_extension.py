@@ -99,7 +99,10 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         self._closed_event = asyncio.Event()
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} {self.id}[{self.run_id}] on {self.local_address}>"
+        return f"<{self.__class__.__name__}: id={self.id!r}, run_id={self.run_id!r}, local_address={self.local_address!r}, closed={self.closed!r}, transferred={self.transferred!r}>"
+
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__}<{self.id}[{self.run_id}]> on {self.local_address}"
 
     def __hash__(self) -> int:
         return self.run_id
@@ -162,9 +165,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         if self.closed:
             if self._exception:
                 raise self._exception
-            raise ShuffleClosedError(
-                f"Shuffle {self.id} has been closed on {self.local_address}"
-            )
+            raise ShuffleClosedError(f"{self} has already been closed")
 
     async def inputs_done(self) -> None:
         self.raise_if_closed()
@@ -346,7 +347,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
     async def add_partition(self, data: np.ndarray, partition_id: NDIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
+            raise RuntimeError(f"Cannot add more partitions to {self}")
 
         def _() -> dict[str, list[tuple[ArrayRechunkShardID, bytes]]]:
             """Return a mapping of worker addresses to a list of tuples of shard IDs
@@ -511,7 +512,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
     async def add_partition(self, data: pd.DataFrame, partition_id: int) -> int:
         self.raise_if_closed()
         if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
+            raise RuntimeError(f"Cannot add more partitions to {self}")
 
         def _() -> dict[str, list[tuple[int, bytes]]]:
             out = split_by_worker(
@@ -585,6 +586,12 @@ class ShuffleWorkerExtension:
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
         self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
+
+    def __str__(self) -> str:
+        return f"ShuffleWorkerExtension on {self.worker.address}"
+
+    def __repr__(self) -> str:
+        return f"<ShuffleWorkerExtension, worker={self.worker.address_safe!r}, closed={self.closed}>"
 
     # Handlers
     ##########
@@ -696,10 +703,10 @@ class ShuffleWorkerExtension:
                 shuffle_id=shuffle_id,
             )
         if run_id < shuffle.run_id:
-            raise RuntimeError("Stale shuffle")
+            raise RuntimeError(f"{shuffle} stale, expected run_id=={run_id}")
         elif run_id > shuffle.run_id:
             # This should never happen
-            raise RuntimeError("Invalid shuffle state")
+            raise RuntimeError(f"{shuffle} invalid, expected run_id=={run_id}")
 
         if shuffle._exception:
             raise shuffle._exception
@@ -729,9 +736,7 @@ class ShuffleWorkerExtension:
             )
 
         if self.closed:
-            raise ShuffleClosedError(
-                f"{self.__class__.__name__} already closed on {self.worker.address}"
-            )
+            raise ShuffleClosedError(f"{self} has already been closed")
         if shuffle._exception:
             raise shuffle._exception
         return shuffle
@@ -790,9 +795,7 @@ class ShuffleWorkerExtension:
         assert result["status"] == "OK"
 
         if self.closed:
-            raise ShuffleClosedError(
-                f"{self.__class__.__name__} already closed on {self.worker.address}"
-            )
+            raise ShuffleClosedError(f"{self} has already been closed")
         if shuffle_id in self.shuffles:
             existing = self.shuffles[shuffle_id]
             if existing.run_id >= result["run_id"]:
