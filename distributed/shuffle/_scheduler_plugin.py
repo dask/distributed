@@ -115,6 +115,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
         self.states = {}
+        self.scheduler.add_plugin(self, name="shuffle")
         self._archived = {}
 
     async def start(self, scheduler: Scheduler) -> None:
