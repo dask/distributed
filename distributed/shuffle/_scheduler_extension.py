@@ -46,7 +46,7 @@ class ShuffleState(abc.ABC):
     def to_msg(self) -> dict[str, Any]:
         """Transform the shuffle state into a JSON-serializable message"""
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 
 
@@ -135,13 +135,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if shuffle.run_id > run_id:
             return {
                 "status": "error",
-                "message": f"Request stale, expected run_id=={run_id} for {shuffle!r}",
+                "message": f"Request stale, expected run_id=={run_id} for {shuffle}",
             }
         elif shuffle.run_id < run_id:
-            # This should never happen
             return {
                 "status": "error",
-                "message": f"Request invalid, expected run_id=={run_id} for {shuffle!r}",
+                "message": f"Request invalid, expected run_id=={run_id} for {shuffle}",
             }
         ts = self.scheduler.tasks[key]
         self._set_restriction(ts, worker)
@@ -344,8 +343,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         for shuffle_id, shuffle in self.states.copy().items():
             if worker not in shuffle.participating_workers:
                 continue
-
-            exception = RuntimeError(f"Worker {worker} left during active {shuffle!r}")
+            exception = RuntimeError(f"Worker {worker} left during active {shuffle}")
             self._fail_on_workers(shuffle, str(exception))
             self._clean_on_scheduler(shuffle_id, stimulus_id)
             self._restart_shuffle(shuffle_id, scheduler, stimulus_id=stimulus_id)
@@ -372,10 +370,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if not key.startswith("shuffle-barrier-"):
             return
         shuffle_id = id_from_key(key)
-        self._cleanup(shuffle_id, stimulus_id)
-
-        if finish == "forgotten":
-            self._archived.pop(shuffle_id, None)
+        try:
+            shuffle = self.states[shuffle_id]
+        except KeyError:
+            return
+        self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
+        self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
 
     def _fail_on_workers(self, shuffle: ShuffleState, message: str) -> None:
         worker_msgs = {
