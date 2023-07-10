@@ -81,6 +81,7 @@ async def check_worker_cleanup(
 
     while plugin._runs and not deadline.expired:
         await asyncio.sleep(interval)
+    assert not plugin._runs
     if closed:
         assert plugin.closed
     for dirpath, dirnames, filenames in os.walk(worker.local_directory):
