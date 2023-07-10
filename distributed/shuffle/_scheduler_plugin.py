@@ -12,6 +12,7 @@ from itertools import product
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.protocol.pickle import dumps
 from distributed.shuffle._rechunk import ChunkedAxes, NDIndex
 from distributed.shuffle._shuffle import (
     ShuffleId,
@@ -19,6 +20,7 @@ from distributed.shuffle._shuffle import (
     barrier_key,
     id_from_key,
 )
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
 if TYPE_CHECKING:
     from distributed.scheduler import (
@@ -32,7 +34,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass(repr=False)
+@dataclass
 class ShuffleState(abc.ABC):
     _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
 
@@ -50,7 +52,7 @@ class ShuffleState(abc.ABC):
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 
 
-@dataclass(repr=False)
+@dataclass
 class DataFrameShuffleState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
     worker_for: dict[int, str]
@@ -67,7 +69,7 @@ class DataFrameShuffleState(ShuffleState):
         }
 
 
-@dataclass(repr=False)
+@dataclass
 class ArrayRechunkState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
     worker_for: dict[NDIndex, str]
@@ -86,16 +88,14 @@ class ArrayRechunkState(ShuffleState):
         }
 
 
-class ShuffleSchedulerExtension(SchedulerPlugin):
+class ShuffleSchedulerPlugin(SchedulerPlugin):
     """
-    Shuffle extension for the scheduler
-
-    Today this mostly just collects heartbeat messages for the dashboard,
-    but in the future it may be responsible for more
-
+    Shuffle plugin for the scheduler
+    This coordinates the individual worker plugins to ensure correctness
+    and collects heartbeat messages for the dashboard.
     See Also
     --------
-    ShuffleWorkerExtension
+    ShuffleWorkerPlugin
     """
 
     scheduler: Scheduler
@@ -115,8 +115,13 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
         self.states = {}
-        self.scheduler.add_plugin(self)
         self._archived = {}
+
+    async def start(self, scheduler: Scheduler) -> None:
+        worker_plugin = ShuffleWorkerPlugin()
+        await self.scheduler.register_worker_plugin(
+            None, dumps(worker_plugin), name="shuffle"
+        )
 
     def shuffle_ids(self) -> set[ShuffleId]:
         return set(self.states)
@@ -353,7 +358,7 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
             shuffle = self.states[id]
         except KeyError:
             return
-        self._fail_on_workers(shuffle, message=f"{shuffle!r} forgotten")
+        self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
         self._clean_on_scheduler(id, stimulus_id)
 
     def transition(
