@@ -133,12 +133,12 @@ class ShuffleSchedulerExtension(SchedulerPlugin):
         if shuffle.run_id > run_id:
             return {
                 "status": "error",
-                "message": f"Request stale, expected run_id=={run_id} for {shuffle}",
+                "message": f"Request stale, expected {run_id=} for {shuffle}",
             }
         elif shuffle.run_id < run_id:
             return {
                 "status": "error",
-                "message": f"Request invalid, expected run_id=={run_id} for {shuffle}",
+                "message": f"Request invalid, expected {run_id=} for {shuffle}",
             }
         ts = self.scheduler.tasks[key]
         self._set_restriction(ts, worker)
