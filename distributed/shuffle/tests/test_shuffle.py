@@ -73,7 +73,7 @@ async def check_worker_cleanup(
     worker: Worker,
     closed: bool = False,
     interval: float = 0.01,
-    timeout: int | None = None,
+    timeout: int | None = 5,
 ) -> None:
     """Assert that the worker has no shuffle state"""
     deadline = Deadline.after(timeout)
@@ -92,7 +92,7 @@ async def check_worker_cleanup(
 
 
 async def check_scheduler_cleanup(
-    scheduler: Scheduler, interval: float = 0.01, timeout: int | None = None
+    scheduler: Scheduler, interval: float = 0.01, timeout: int | None = 5
 ) -> None:
     """Assert that the scheduler has no shuffle state"""
     deadline = Deadline.after(timeout)
@@ -905,9 +905,9 @@ async def test_clean_after_forgotten_early(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     del out
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -958,9 +958,9 @@ async def test_repeat_shuffle_instance(c, s, a, b, wait_until_forgotten):
 
     await c.compute(out)
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
@@ -987,9 +987,9 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
 
     await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -1563,9 +1563,9 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
     y = await c.compute(df.x.size)
     assert x == y
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 class BlockedBarrierShuffleWorkerPlugin(ShuffleWorkerPlugin):
@@ -1619,9 +1619,9 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
     y = await y
     assert x == y
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -1692,8 +1692,8 @@ async def test_shuffle_run_consistency(c, s, a):
     await out
     del out
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_scheduler_cleanup(s)
 
 
 class BlockedShuffleAccessAndFailWorkerPlugin(ShuffleWorkerPlugin):
