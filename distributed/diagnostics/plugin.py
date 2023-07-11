@@ -13,6 +13,7 @@ import zipfile
 from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import dask.config
 from dask.utils import funcname, tmpfile
 
 if TYPE_CHECKING:
@@ -706,6 +707,8 @@ class Environ(NannyPlugin):
 
     async def setup(self, nanny):
         nanny.env.update(self.environ)
+        config = dask.config.collect_env(self.environ)
+        dask.config.update(nanny.config, config)
 
 
 class UploadDirectory(NannyPlugin):
