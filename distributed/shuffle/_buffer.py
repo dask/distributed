@@ -141,6 +141,7 @@ class ShardsBuffer(Generic[ShardType]):
             async with self._shards_available:
                 await self._shards_available.wait_for(_continue)
                 if self._inputs_done and not self.shards:
+                    self._shards_available.notify_all()
                     break
                 part_id = max(self.sizes, key=self.sizes.__getitem__)
                 if self.max_message_size > 0:
@@ -256,7 +257,12 @@ class ShardsBuffer(Generic[ShardType]):
         self.bytes_memory = 0
         async with self._shards_available:
             self._shards_available.notify_all()
-        await asyncio.gather(*self._tasks)
+        try:
+            await asyncio.gather(*self._tasks)
+        except Exception:
+            pass
+        async with self._shards_available:
+            self._shards_available.notify_all()
 
     async def __aenter__(self) -> "ShardsBuffer":
         return self
