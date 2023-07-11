@@ -10,7 +10,7 @@ import yaml
 from distributed.deploy.spec import run_spec
 
 
-@click.command(name="spec", context_settings=dict(ignore_unknown_options=True))
+@click.command(name="spec", context_settings=dict(ignore_unknown_options=True))  # type: ignore[arg-type]
 @click.argument("args", nargs=-1)
 @click.option("--spec", type=str, default="", help="")
 @click.option("--spec-file", type=str, default=None, help="")

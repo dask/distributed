@@ -12,7 +12,7 @@ from distributed.deploy.old_ssh import SSHCluster
 logger = logging.getLogger("distributed.dask_ssh")
 
 
-@click.command(
+@click.command(  # type: ignore[arg-type]
     name="ssh",
     help=dedent(
         """Launch a Dask cluster over SSH. A 'dask scheduler' process will run on the
