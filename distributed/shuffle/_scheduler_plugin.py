@@ -158,6 +158,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 self.heartbeats[shuffle_id][ws.address].update(d)
 
     def get(self, id: ShuffleId, worker: str) -> dict[str, Any]:
+        assert worker in self.scheduler.workers
         state = self.states[id]
         state.participating_workers.add(worker)
         return state.to_msg()
@@ -169,6 +170,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         worker: str,
         spec: dict[str, Any],
     ) -> dict:
+        assert worker in self.scheduler.workers
         try:
             return self.get(id, worker)
         except KeyError:
