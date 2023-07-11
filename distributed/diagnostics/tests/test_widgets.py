@@ -8,7 +8,10 @@ from unittest import mock
 import pytest
 from packaging.version import parse as parse_version
 
+from dask.utils import key_split
+
 from distributed.client import wait
+from distributed.spans import span
 from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
 
 ipywidgets = pytest.importorskip("ipywidgets")
@@ -207,6 +210,7 @@ async def test_multibar_complete(c, s, a, b):
     y2 = c.submit(dec, y1, key="y-2")
     e = c.submit(throws, y2, key="e")
     other = c.submit(inc, 123, key="other")
+    await other.cancel()
 
     p = MultiProgressWidget([e.key], scheduler=s.address, complete=True)
     await p.listen()
@@ -225,6 +229,51 @@ def test_fast(client):
     p = progress(L3, multi=True, complete=True, notebook=True)
     client.sync(p.listen)
     assert set(p._last_response["all"]) == {"inc", "dec", "add"}
+
+
+@mock_widget()
+def test_multibar_with_spans(client):
+    """Test progress(group_by='spans'"""
+    with span("span 1"):
+        L = client.map(inc, range(100))
+    with span("span 2"):
+        L2 = client.map(dec, L)
+    with span("span 3"):
+        L3 = client.map(add, L, L2)
+    with span("other span"):
+        _ = client.submit(inc, 123)
+    e = client.submit(throws, L3)
+
+    p = progress(e, complete=True, multi=True, notebook=True, group_by="spans")
+    client.sync(p.listen)
+
+    # keys are tuples of (group_name, group_id), just get names
+    bar_items = {k[0]: v.value for k, v in p.bars.items()}
+    bar_texts = {k[0]: v.value for k, v in p.bar_texts.items()}
+    bar_labels = {k[0]: v.value for k, v in p.bar_labels.items()}
+
+    assert bar_items == {"span 1": 1, "span 2": 1, "span 3": 1, "default": 0}
+    assert bar_texts.keys() == {"span 1", "span 2", "span 3", "default"}
+    assert all("100 / 100" in v for k, v in bar_texts.items() if k != "default")
+    assert bar_labels.keys() == {"span 1", "span 2", "span 3", "default"}
+    assert all(f">{k}<" in v for k, v in bar_labels.items())
+
+
+@mock_widget()
+def test_multibar_func_warns(client):
+    """Deprecate `func`, use `group_by`"""
+    L = client.map(inc, range(100))
+    L2 = client.map(dec, L)
+    L3 = client.map(add, L, L2)
+
+    # ensure default value if nothing is set
+    p = MultiProgressWidget(L3)
+    assert p.group_by == key_split
+
+    with pytest.warns(
+        DeprecationWarning, match="`func` is deprecated, use `group_by` instead"
+    ):
+        MultiProgressWidget(L3, func="foo")
 
 
 @mock_widget()
