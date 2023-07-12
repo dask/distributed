@@ -334,6 +334,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     ) -> None:
         recs = self._restart_recommendations(id)
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+        self.scheduler.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def remove_worker(
         self, scheduler: Scheduler, worker: str, *, stimulus_id: str
