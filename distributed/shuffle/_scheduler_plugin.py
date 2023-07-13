@@ -391,10 +391,12 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         shuffle_id = id_from_key(key)
         try:
             shuffle = self.active_shuffles[shuffle_id]
-            self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
-            self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
         except KeyError:
             pass
+        else:
+            self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
+            self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
+
         if finish == "forgotten":
             shuffles = self._shuffles.pop(shuffle_id)
             for shuffle in shuffles:
@@ -419,10 +421,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self.scheduler.send_all({}, worker_msgs)
 
     def _clean_on_scheduler(self, id: ShuffleId, stimulus_id: str | None) -> None:
-        try:
-            shuffle = self.active_shuffles.pop(id)
-        except KeyError:
-            return
+        shuffle = self.active_shuffles.pop(id)
         if not shuffle._archived_by and stimulus_id:
             shuffle._archived_by = stimulus_id
             self._archived_by_stimulus[stimulus_id].add(shuffle)
