@@ -1877,8 +1877,7 @@ class Client(SyncMethodMixin):
             resources.
         retries : int or None (default to None)
             Number of allowed automatic retries if the task fails. The default
-            value is `None`, which will use the configuration settings in
-            ~/.config/dask/ or /etc/dask/, see https://docs.dask.org/en/latest/configuration.html
+            value is `None`, which will not trigger any retries for the task.
         priority : Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
