@@ -19,6 +19,7 @@ from dask.context import thread_state
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
+from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
@@ -552,7 +553,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         return self.worker_for[id]
 
 
-class ShuffleWorkerExtension:
+class ShuffleWorkerPlugin(WorkerPlugin):
     """Interface between a Worker and a Shuffle.
 
     This extension is responsible for
@@ -571,7 +572,7 @@ class ShuffleWorkerExtension:
     memory_limiter_disk: ResourceLimiter
     closed: bool
 
-    def __init__(self, worker: Worker) -> None:
+    def setup(self, worker: Worker) -> None:
         # Attach to worker
         worker.handlers["shuffle_receive"] = self.shuffle_receive
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
@@ -588,10 +589,10 @@ class ShuffleWorkerExtension:
         self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
 
     def __str__(self) -> str:
-        return f"ShuffleWorkerExtension on {self.worker.address}"
+        return f"ShuffleWorkerPlugin on {self.worker.address}"
 
     def __repr__(self) -> str:
-        return f"<ShuffleWorkerExtension, worker={self.worker.address_safe!r}, closed={self.closed}>"
+        return f"<ShuffleWorkerPlugin, worker={self.worker.address_safe!r}, closed={self.closed}>"
 
     # Handlers
     ##########
@@ -638,7 +639,7 @@ class ShuffleWorkerExtension:
         exception = RuntimeError(message)
         shuffle.fail(exception)
 
-        async def _(extension: ShuffleWorkerExtension, shuffle: ShuffleRun) -> None:
+        async def _(extension: ShuffleWorkerPlugin, shuffle: ShuffleRun) -> None:
             await shuffle.close()
             extension._runs.remove(shuffle)
 
@@ -805,7 +806,7 @@ class ShuffleWorkerExtension:
                 existing.fail(RuntimeError("Stale Shuffle"))
 
                 async def _(
-                    extension: ShuffleWorkerExtension, shuffle: ShuffleRun
+                    extension: ShuffleWorkerPlugin, shuffle: ShuffleRun
                 ) -> None:
                     await shuffle.close()
                     extension._runs.remove(shuffle)
@@ -855,7 +856,7 @@ class ShuffleWorkerExtension:
         self._runs.add(shuffle)
         return shuffle
 
-    async def close(self) -> None:
+    async def teardown(self, worker: Worker) -> None:
         assert not self.closed
 
         self.closed = True
