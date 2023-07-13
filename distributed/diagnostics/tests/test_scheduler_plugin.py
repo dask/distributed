@@ -16,7 +16,7 @@ async def test_simple(c, s, a, b):
             scheduler.add_plugin(self, name="counter")
             self.count = 0
 
-        def transition(self, key, start, finish, stimulus_id, *args, **kwargs):
+        def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
             assert stimulus_id is not None
             if start == "processing" and finish == "memory":
                 self.count += 1

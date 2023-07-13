@@ -37,7 +37,7 @@ class WebsocketPlugin(SchedulerPlugin):
         """Run when a new graph / tasks enter the scheduler"""
         self.socket.send("update_graph", {"client": client})
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         """Run whenever a task changes state
 
         Parameters

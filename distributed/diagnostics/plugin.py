@@ -44,7 +44,7 @@ class SchedulerPlugin:
     ...     def __init__(self):
     ...         self.counter = 0
     ...
-    ...     def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    ...     def transition(self, key, start, finish, *args, **kwargs):
     ...         if start == 'processing' and finish == 'memory':
     ...             self.counter += 1
     ...

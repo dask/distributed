@@ -107,7 +107,7 @@ class Progress(SchedulerPlugin):
                 k, None, "erred", stimulus_id="progress-setup", exception=True
             )
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         if key in self.keys and start == "processing" and finish == "memory":
             logger.debug("Progress sees key %s", key)
             self.keys.remove(key)
@@ -206,7 +206,7 @@ class MultiProgress(Progress):
             )
         logger.debug("Set up Progress keys")
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing" and finish == "memory":
             s = self.keys.get(self.func(key), None)
             if s and key in s:
@@ -269,7 +269,7 @@ class AllProgress(SchedulerPlugin):
 
         scheduler.add_plugin(self)
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         ts = self.scheduler.tasks[key]
         prefix = ts.prefix.name
         self.all[prefix].add(key)
@@ -329,7 +329,7 @@ class GroupTiming(SchedulerPlugin):
         # The number of threads at the time
         self.nthreads = [self.scheduler.total_nthreads] * 2
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         # We are mostly interested in when tasks complete for now, so just look
         # for when processing transitions to memory. Later we could also extend
         # this if we can come up with useful visual channels to show it in.
