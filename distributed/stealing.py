@@ -161,9 +161,7 @@ class WorkStealing(SchedulerPlugin):
     def add_worker(self, scheduler: Any = None, worker: Any = None) -> None:
         self.stealable[worker] = tuple(set() for _ in range(15))
 
-    def remove_worker(
-        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
-    ) -> None:
+    def remove_worker(self, scheduler: Scheduler, worker: str, **kwargs: Any) -> None:
         del self.stealable[worker]
 
     def teardown(self) -> None:

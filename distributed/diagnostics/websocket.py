@@ -21,7 +21,7 @@ class WebsocketPlugin(SchedulerPlugin):
         """Run when a new worker enters the cluster"""
         self.socket.send("add_worker", {"worker": worker})
 
-    def remove_worker(self, scheduler=None, worker=None, *, stimulus_id=None, **kwargs):
+    def remove_worker(self, scheduler=None, worker=None, **kwargs):
         """Run when a worker leaves the cluster"""
         self.socket.send("remove_worker", {"worker": worker})
 
