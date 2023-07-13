@@ -281,6 +281,7 @@ distributed:
         - cuml
         - prefect
         - xgboost
+        - coiled
     erred-tasks:
       max-history: 100
 
@@ -313,7 +314,7 @@ distributed:
       interval: 500ms
       disk: true  # Monitor host-wide disk I/O
       host-cpu: false  # Monitor host-wide CPU usage, with very granular breakdown
-      gil: 
+      gil:
         enabled: true  # Monitor GIL contention
         interval: "1ms"  # Frequency to poll GIL
     event-loop: tornado
