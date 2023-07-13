@@ -650,12 +650,13 @@ async def test_crashed_worker_during_unpack(c, s, a):
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
+        x = await c.compute(df.x.size)
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        x, y = c.compute([df.x.size, out.x.size])
+        y = c.compute(out.x.size)
+
         await wait_until_worker_has_tasks("shuffle-p2p", killed_worker_address, 1, s)
         await n.process.process.kill()
 
-        x = await x
         y = await y
         assert x == y
 
