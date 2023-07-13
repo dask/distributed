@@ -168,7 +168,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 self.heartbeats[shuffle_id][ws.address].update(d)
 
     def get(self, id: ShuffleId, worker: str) -> dict[str, Any]:
-        assert worker in self.scheduler.workers
+        if worker not in self.scheduler.workers:
+            raise RuntimeError(f"Scheduler is unaware of this worker {worker!r}")
         state = self.active_shuffles[id]
         state.participating_workers.add(worker)
         return state.to_msg()
@@ -181,7 +182,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         worker: str,
         spec: dict[str, Any],
     ) -> dict:
-        assert worker in self.scheduler.workers
+        if worker not in self.scheduler.workers:
+            raise RuntimeError(f"Scheduler is unaware of this worker {worker!r}")
         try:
             return self.get(id, worker)
         except KeyError:

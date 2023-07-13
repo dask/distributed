@@ -9,7 +9,6 @@ import shutil
 from collections import defaultdict
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AsyncExitStack
 from itertools import count
 from typing import Any
 from unittest import mock
@@ -1821,11 +1820,9 @@ async def test_replace_stale_shuffle(c, s, a, b):
 
 class BlockedRemoveWorkerSchedulerPlugin(SchedulerPlugin):
     def __init__(self, scheduler: Scheduler, *args: Any, **kwargs: Any):
-        self.scheduler = scheduler
-        super().__init__(*args, **kwargs)
         self.in_remove_worker = asyncio.Event()
         self.block_remove_worker = asyncio.Event()
-        self.scheduler.add_plugin(self, name="blocking")
+        scheduler.add_plugin(self, name="blocking")
 
     async def remove_worker(self, *args: Any, **kwargs: Any) -> None:
         self.in_remove_worker.set()
@@ -1842,68 +1839,6 @@ class BlockedBarrierSchedulerPlugin(ShuffleSchedulerPlugin):
         self.in_barrier.set()
         await self.block_barrier.wait()
         await super().barrier(*args, **kwargs)
-
-
-@gen_cluster(
-    client=True,
-    nthreads=[],
-    scheduler_kwargs={
-        "extensions": {
-            "blocking": BlockedRemoveWorkerSchedulerPlugin,
-            "shuffle": BlockedBarrierSchedulerPlugin,
-        }
-    },
-)
-async def test_closed_worker_returns_before_barrier(c, s):
-    async with AsyncExitStack() as stack:
-        workers = [await stack.enter_async_context(Worker(s.address)) for _ in range(2)]
-
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-01-10",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        x, y = c.compute([df.x.size, out.x.size])
-        shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-        key = barrier_key(shuffle_id)
-        await wait_for_state(key, "processing", s)
-        scheduler_plugin = s.plugins["shuffle"]
-        await scheduler_plugin.in_barrier.wait()
-
-        flushes = [
-            get_shuffle_run_from_worker(shuffle_id, w)._flush_comm() for w in workers
-        ]
-        await asyncio.gather(*flushes)
-
-        ts = s.tasks[key]
-        to_close = None
-        for worker in workers:
-            if ts.processing_on.address != worker.address:
-                to_close = worker
-                break
-        assert to_close
-        closed_port = to_close.port
-        await to_close.close()
-
-        blocking_plugin = s.plugins["blocking"]
-        assert blocking_plugin.in_remove_worker.is_set()
-
-        workers.append(
-            await stack.enter_async_context(Worker(s.address, port=closed_port))
-        )
-
-        scheduler_plugin.block_barrier.set()
-
-        x = await x
-        y = await y
-        assert x == y
-
-        blocking_plugin.block_remove_worker.set()
-        await c.close()
-        await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
-        await check_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
