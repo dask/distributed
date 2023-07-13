@@ -101,7 +101,7 @@ async def check_scheduler_cleanup(
     while plugin._shuffles and not deadline.expired:
         await asyncio.sleep(interval)
     assert not plugin.active_shuffles
-    assert not plugin._shuffles
+    assert not plugin._shuffles, scheduler.tasks
     assert not plugin._archived_by_stimulus
     assert not plugin.heartbeats
 
@@ -1182,12 +1182,12 @@ async def test_delete_some_results(c, s, a, b):
     while not s.tasks or not any(ts.state == "memory" for ts in s.tasks.values()):
         await asyncio.sleep(0.01)
 
-    x = x.partitions[: x.npartitions // 2].persist()
+    x = x.partitions[: x.npartitions // 2]
+    x = await c.compute(x.size)
 
-    await c.compute(x.size)
-    del x
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
+    del x
     await check_scheduler_cleanup(s)
 
 
