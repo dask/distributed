@@ -338,7 +338,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self.scheduler.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
     def remove_worker(
-        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
     ) -> None:
         for shuffle_id, shuffle in self._archived.items():
             if shuffle._archived_by == stimulus_id:

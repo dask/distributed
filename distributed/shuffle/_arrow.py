@@ -56,7 +56,6 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
     table = pa.concat_tables(shards, promote=True)
-    df = table.to_pandas(self_destruct=True)
 
     def default_types_mapper(pyarrow_dtype: pa.DataType) -> object:
         # Avoid converting strings from `string[pyarrow]` to `string[python]`
@@ -80,14 +79,12 @@ def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
 
 
 def serialize_table(table: pa.Table) -> bytes:
-    import io
-
     import pyarrow as pa
 
-    stream = io.BytesIO()
+    stream = pa.BufferOutputStream()
     with pa.ipc.new_stream(stream, table.schema) as writer:
         writer.write_table(table)
-    return stream.getvalue()
+    return stream.getvalue().to_pybytes()
 
 
 def deserialize_table(buffer: bytes) -> pa.Table:

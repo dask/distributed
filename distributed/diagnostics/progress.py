@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import warnings
 from collections import defaultdict
 from timeit import default_timer
 from typing import ClassVar
@@ -107,7 +108,7 @@ class Progress(SchedulerPlugin):
                 k, None, "erred", stimulus_id="progress-setup", exception=True
             )
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         if key in self.keys and start == "processing" and finish == "memory":
             logger.debug("Progress sees key %s", key)
             self.keys.remove(key)
@@ -142,9 +143,19 @@ class Progress(SchedulerPlugin):
 class MultiProgress(Progress):
     """Progress variant that keeps track of different groups of keys
 
-    See Progress for most details.  This only adds a function ``func=``
-    that splits keys.  This defaults to ``key_split`` which aligns with naming
-    conventions chosen in the dask project (tuples, hyphens, etc..)
+    See Progress for most details.
+
+    Parameters
+    ----------
+
+    func : Callable (deprecated)
+        Function that splits keys. This defaults to ``key_split`` which
+        aligns with naming conventions chosen in the dask project (tuples,
+        hyphens, etc..)
+
+    group_by : Callable | Literal["spans"] | Literal["prefix"], default: "prefix"
+        How to group keys to display multiple bars. Defaults to "prefix",
+        which uses ``key_split`` from dask project
 
     State
     -----
@@ -163,10 +174,24 @@ class MultiProgress(Progress):
     """
 
     def __init__(
-        self, keys, scheduler=None, func=key_split, minimum=0, dt=0.1, complete=False
+        self,
+        keys,
+        scheduler=None,
+        *,
+        func=None,
+        group_by="prefix",
+        minimum=0,
+        dt=0.1,
+        complete=False,
     ):
-        self.func = func
-        name = f"multi-progress-{tokenize(keys, func, minimum, dt, complete)}"
+        if func is not None:
+            warnings.warn(
+                "`func` is deprecated, use `group_by`", category=DeprecationWarning
+            )
+            group_by = func
+        self.group_by = key_split if group_by in (None, "prefix") else group_by
+        self.func = None
+        name = f"multi-progress-{tokenize(keys, group_by, minimum, dt, complete)}"
         super().__init__(
             keys, scheduler, minimum=minimum, dt=dt, complete=complete, name=name
         )
@@ -193,6 +218,22 @@ class MultiProgress(Progress):
         if not self.keys:
             self.stop(exception=None, key=None)
 
+        if self.group_by == "spans":
+            spans_ext = self.scheduler.extensions["spans"]
+            span_defs = spans_ext.spans if spans_ext else None
+
+            def group_key(k):
+                span_id = self.scheduler.tasks[k].group.span_id
+                span_name = ", ".join(span_defs[span_id].name) if span_defs else span_id
+                return span_name, span_id
+
+            group_keys = {k: group_key(k) for k in self.all_keys}
+            self.func = group_keys.get
+        elif self.group_by == "prefix":
+            self.func = key_split
+        else:
+            self.func = self.group_by
+
         # Group keys by func name
         self.keys = valmap(set, groupby(self.func, self.keys))
         self.all_keys = valmap(set, groupby(self.func, self.all_keys))
@@ -206,7 +247,7 @@ class MultiProgress(Progress):
             )
         logger.debug("Set up Progress keys")
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         if start == "processing" and finish == "memory":
             s = self.keys.get(self.func(key), None)
             if s and key in s:
@@ -269,7 +310,7 @@ class AllProgress(SchedulerPlugin):
 
         scheduler.add_plugin(self)
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         ts = self.scheduler.tasks[key]
         prefix = ts.prefix.name
         self.all[prefix].add(key)
@@ -329,7 +370,7 @@ class GroupTiming(SchedulerPlugin):
         # The number of threads at the time
         self.nthreads = [self.scheduler.total_nthreads] * 2
 
-    def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+    def transition(self, key, start, finish, *args, **kwargs):
         # We are mostly interested in when tasks complete for now, so just look
         # for when processing transitions to memory. Later we could also extend
         # this if we can come up with useful visual channels to show it in.

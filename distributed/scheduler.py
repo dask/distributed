@@ -5737,10 +5737,11 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
         parameters = inspect.signature(plugin.remove_worker).parameters
-        if "stimulus_id" not in parameters and "kwargs" not in parameters:
+        if "kwargs" not in parameters:
             warnings.warn(
-                "The `stimulus_id` keyword argument has been added to `SchedulerPlugin.remove_worker`. "
-                "Not supporting the `stimulus_id` keyword argument or `**kwargs` will no longer be supported in future versions.",
+                "The signature of `SchedulerPlugin.remove_worker` now requires `**kwargs` "
+                "to ensure that plugins remain forward-compatible. Not including "
+                "`**kwargs` in the signature will no longer be supported in future versions.",
                 FutureWarning,
             )
 
@@ -8440,9 +8441,7 @@ class WorkerStatusPlugin(SchedulerPlugin):
         except CommClosedError:
             scheduler.remove_plugin(name=self.name)
 
-    def remove_worker(
-        self, scheduler: Scheduler, worker: str, *, stimulus_id: str
-    ) -> None:
+    def remove_worker(self, scheduler: Scheduler, worker: str, **kwargs: Any) -> None:
         try:
             self.bcomm.send(["remove", worker])
         except CommClosedError:

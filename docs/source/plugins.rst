@@ -38,7 +38,7 @@ for more information on RabbitMQ and how to consume the messages.
            self.channel = self.connection.channel()
            self.channel.queue_declare(queue='dask_task_status', durable=True)
 
-       def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+       def transition(self, key, start, finish, *args, **kwargs):
            message = dict(
                key=key,
                start=start,
@@ -74,7 +74,7 @@ the scheduler as so:
        def __init__(self, scheduler):
             self.scheduler = scheduler
 
-       def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+       def transition(self, key, start, finish, *args, **kwargs):
             # Get full TaskState
             ts = self.scheduler.tasks[key]
 
