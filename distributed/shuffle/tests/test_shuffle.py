@@ -23,7 +23,7 @@ from dask.distributed import Event, Nanny, Worker
 from dask.utils import stringify
 
 from distributed.client import Client
-from distributed.scheduler import Scheduler
+from distributed.scheduler import KilledWorker, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
 from distributed.shuffle._limiter import ResourceLimiter
@@ -315,6 +315,32 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out.x.size)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
+    await b.close()
+
+    with pytest.raises(KilledWorker):
+        await out
+
+    await c.close()
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b, closed=True)
+    await check_scheduler_cleanup(s)
+
+
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_during_transfer(c, s, a):
@@ -510,6 +536,54 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out.x.size)
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s)
+    shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
+    shuffleB = get_shuffle_run_from_worker(shuffle_id, b)
+    await shuffleA.in_inputs_done.wait()
+    await shuffleB.in_inputs_done.wait()
+
+    ts = s.tasks[key]
+    processing_worker = a if ts.processing_on.address == a.address else b
+    if processing_worker == a:
+        close_worker, alive_worker = a, b
+        alive_shuffle = shuffleB
+
+    else:
+        close_worker, alive_worker = b, a
+        alive_shuffle = shuffleA
+    await close_worker.close()
+
+    with pytest.raises(KilledWorker):
+        await out
+
+    alive_shuffle.block_inputs_done.set()
+
+    await c.close()
+    await check_worker_cleanup(close_worker, closed=True)
+    await check_worker_cleanup(alive_worker)
+    await check_scheduler_cleanup(s)
+
+
+@mock.patch(
+    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    BlockedInputsDoneShuffle,
+)
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_other_worker_during_barrier(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -632,6 +706,32 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     x = await x
     y = await y
     assert x == y
+
+    await c.close()
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b, closed=True)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out.x.size)
+    await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
+    await b.close()
+
+    with pytest.raises(KilledWorker):
+        await out
 
     await c.close()
     await check_worker_cleanup(a)
