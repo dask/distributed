@@ -249,20 +249,13 @@ class ShardsBuffer(Generic[ShardType]):
         await self.flush()
         if not self._exception:
             assert not self.bytes_memory, (type(self), self.bytes_memory)
-        for t in self._tasks:
-            t.cancel()
         self._accepts_input = False
         self._inputs_done = True
         self.shards.clear()
         self.bytes_memory = 0
         async with self._shards_available:
             self._shards_available.notify_all()
-        try:
-            await asyncio.gather(*self._tasks)
-        except Exception:
-            pass
-        async with self._shards_available:
-            self._shards_available.notify_all()
+        await asyncio.gather(*self._tasks)
 
     async def __aenter__(self) -> "ShardsBuffer":
         return self

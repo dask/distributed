@@ -867,6 +867,10 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             self.worker._ongoing_background_tasks.call_soon(
                 self._close_shuffle_run, shuffle
             )
+
+        while self._runs:
+            await asyncio.sleep(0.1)
+
         try:
             self._executor.shutdown(cancel_futures=True)
         except Exception:  # pragma: no cover
