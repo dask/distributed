@@ -314,6 +314,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     def _restart_recommendations(self, id: ShuffleId) -> Recs:
         barrier_task = self.scheduler.tasks[barrier_key(id)]
         recs: Recs = {}
+
         for dt in barrier_task.dependents:
             if dt.state == "erred":
                 return {}
@@ -356,14 +357,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._fail_on_workers(shuffle, str(exception))
             self._clean_on_scheduler(shuffle_id, stimulus_id)
             self._restart_shuffle(shuffle_id, scheduler, stimulus_id=stimulus_id)
-
-    def _cleanup(self, id: ShuffleId, stimulus_id: str | None) -> None:
-        try:
-            shuffle = self.states[id]
-        except KeyError:
-            return
-        self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
-        self._clean_on_scheduler(id, stimulus_id)
 
     def transition(
         self,
