@@ -98,9 +98,11 @@ async def check_scheduler_cleanup(
     deadline = Deadline.after(timeout)
     plugin = scheduler.plugins["shuffle"]
     assert isinstance(plugin, ShuffleSchedulerPlugin)
-    while plugin.states and not deadline.expired:
+    while plugin._shuffles and not deadline.expired:
         await asyncio.sleep(interval)
-    assert not plugin.states
+    assert not plugin.active_shuffles
+    assert not plugin._shuffles
+    assert not plugin._archived_by_stimulus
     assert not plugin.heartbeats
 
 
@@ -1105,7 +1107,7 @@ async def test_new_worker(c, s, a, b):
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     persisted = shuffled.persist()
-    while not s.plugins["shuffle"].states:
+    while not s.plugins["shuffle"].active_shuffles:
         await asyncio.sleep(0.001)
 
     async with Worker(s.address) as w:
@@ -1688,6 +1690,26 @@ async def test_shuffle_run_consistency(c, s, a):
     # Fetching a stale run from a worker aware of the new run raises an error
     with pytest.raises(RuntimeError, match="stale"):
         await worker_plugin._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
+
+    worker_plugin.block_barrier.set()
+    await out
+    del out
+    while s.tasks:
+        await asyncio.sleep(0)
+    worker_plugin.block_barrier.clear()
+
+    out = dd.shuffle.shuffle(df, "y", shuffle="p2p")
+    out = out.persist()
+    independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    assert shuffle_id != independent_shuffle_id
+
+    independent_shuffle_dict = scheduler_ext.get(
+        independent_shuffle_id, a.worker_address
+    )
+
+    # Check invariant that the new run ID is larger than the previous
+    # for independent shuffles
+    assert new_shuffle_dict["run_id"] < independent_shuffle_dict["run_id"]
 
     worker_plugin.block_barrier.set()
     await out
