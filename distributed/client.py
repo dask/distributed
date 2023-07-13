@@ -1875,8 +1875,10 @@ class Client(SyncMethodMixin):
             requires on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
-        retries : int (default to 0)
-            Number of allowed automatic retries if the task fails
+        retries : int or None (default to None)
+            Number of allowed automatic retries if the task fails. The default
+            value is `None`, which will use the configuration settings in
+            ~/.config/dask/ or /etc/dask/, see https://docs.dask.org/en/latest/configuration.html
         priority : Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
