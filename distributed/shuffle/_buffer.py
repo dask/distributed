@@ -249,6 +249,8 @@ class ShardsBuffer(Generic[ShardType]):
         await self.flush()
         if not self._exception:
             assert not self.bytes_memory, (type(self), self.bytes_memory)
+        for t in self._tasks:
+            t.cancel()
         self._accepts_input = False
         self._inputs_done = True
         self.shards.clear()
