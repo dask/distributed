@@ -23,7 +23,6 @@ from dask.distributed import Event, Nanny, Worker
 from dask.utils import stringify
 
 from distributed.client import Client
-from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
@@ -1816,29 +1815,6 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
-
-
-class BlockedRemoveWorkerSchedulerPlugin(SchedulerPlugin):
-    def __init__(self, scheduler: Scheduler, *args: Any, **kwargs: Any):
-        self.in_remove_worker = asyncio.Event()
-        self.block_remove_worker = asyncio.Event()
-        scheduler.add_plugin(self, name="blocking")
-
-    async def remove_worker(self, *args: Any, **kwargs: Any) -> None:
-        self.in_remove_worker.set()
-        await self.block_remove_worker.wait()
-
-
-class BlockedBarrierSchedulerPlugin(ShuffleSchedulerPlugin):
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
-        self.in_barrier = asyncio.Event()
-        self.block_barrier = asyncio.Event()
-
-    async def barrier(self, *args: Any, **kwargs: Any) -> None:
-        self.in_barrier.set()
-        await self.block_barrier.wait()
-        await super().barrier(*args, **kwargs)
 
 
 @gen_cluster(client=True)
