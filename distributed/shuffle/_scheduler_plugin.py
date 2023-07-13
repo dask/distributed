@@ -176,6 +176,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     def get_or_create(
         self,
         id: ShuffleId,
+        key: str,
         type: str,
         worker: str,
         spec: dict[str, Any],
@@ -187,7 +188,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             # FIXME: The current implementation relies on the barrier task to be
             # known by its name. If the name has been mangled, we cannot guarantee
             # that the shuffle works as intended and should fail instead.
-            self._raise_if_barrier_passed(id)
+            self._raise_if_barrier_unknown(id)
+            self._raise_if_task_not_processing(key)
 
             state: ShuffleState
             if type == ShuffleType.DATAFRAME:
@@ -201,20 +203,21 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             state.participating_workers.add(worker)
             return state.to_msg()
 
-    def _raise_if_barrier_passed(self, id: ShuffleId) -> None:
+    def _raise_if_barrier_unknown(self, id: ShuffleId) -> None:
         key = barrier_key(id)
         try:
-            barrier_task = self.scheduler.tasks[key]
+            self.scheduler.tasks[key]
         except KeyError:
             raise RuntimeError(
                 f"Barrier task with key {key!r} does not exist. This may be caused by "
                 "task fusion during graph generation. Please let us know that you ran "
                 "into this by leaving a comment at distributed#7816."
             )
-        if barrier_task.state not in ("waiting", "queued", "processing", "no-worker"):
-            raise RuntimeError(
-                f"Barrier task with key {key!r} already passed, now in {barrier_task.state}."
-            )
+
+    def _raise_if_task_not_processing(self, key: str) -> None:
+        task = self.scheduler.tasks[key]
+        if task.state != "processing":
+            raise RuntimeError(f"Expected {task} to be processing, is {task.state}.")
 
     def _create_dataframe_shuffle_state(
         self, id: ShuffleId, spec: dict[str, Any]

@@ -716,6 +716,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType,
+        key: str,
         **kwargs: Any,
     ) -> ShuffleRun:
         """Get or create a shuffle matching the ID and data spec.
@@ -726,12 +727,15 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             Unique identifier of the shuffle
         type:
             Type of the shuffle operation
+        key:
+            Task key triggering the function
         """
         shuffle = self.shuffles.get(shuffle_id, None)
         if shuffle is None:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
                 type=type,
+                key=key,
                 kwargs=kwargs,
             )
 
@@ -753,6 +757,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType,
+        key: str,
         kwargs: dict,
     ) -> ShuffleRun:
         ...
@@ -761,6 +766,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType | None = None,
+        key: str | None = None,
         kwargs: dict | None = None,
     ) -> ShuffleRun:
         if type is None:
@@ -772,6 +778,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
+                key=key,
                 type=type,
                 spec={
                     "npartitions": kwargs["npartitions"],
@@ -784,6 +791,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
+                key=key,
                 type=type,
                 spec=kwargs,
                 worker=self.worker.address,
@@ -902,11 +910,13 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         type: ShuffleType,
         **kwargs: Any,
     ) -> ShuffleRun:
+        key = thread_state.key
         return sync(
             self.worker.loop,
             self._get_or_create_shuffle,
             shuffle_id,
             type,
+            key,
             **kwargs,
         )
 
