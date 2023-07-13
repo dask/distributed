@@ -52,6 +52,9 @@ import click
 import psutil
 import tblib.pickling_support
 
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
+
 try:
     import resource
 except ImportError:
@@ -569,7 +572,7 @@ class LoopRunner:
         def run_loop() -> None:
             nonlocal start_exc
             try:
-                asyncio.run(amain())
+                asyncio_run(amain(), loop_factory=get_loop_factory())
             except BaseException as e:
                 if start_evt.is_set():
                     raise

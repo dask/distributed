@@ -23,7 +23,8 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import MACOS, WINDOWS, asyncio_run
+from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.utils import (
     All,
@@ -134,7 +135,7 @@ def test_sync_closed_loop():
     async def get_loop():
         return IOLoop.current()
 
-    loop = asyncio.run(get_loop())
+    loop = asyncio_run(get_loop(), loop_factory=get_loop_factory())
     loop.close()
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -399,7 +400,9 @@ def test_loop_runner(loop_in_thread):
     async def make_looprunner_in_async_context():
         return IOLoop.current(), LoopRunner()
 
-    loop, runner = asyncio.run(make_looprunner_in_async_context())
+    loop, runner = asyncio_run(
+        make_looprunner_in_async_context(), loop_factory=get_loop_factory()
+    )
     with pytest.raises(
         RuntimeError,
         match=r"Accessing the loop property while the loop is not running is not supported",
@@ -423,7 +426,7 @@ def test_loop_runner(loop_in_thread):
         return IOLoop.current()
 
     # Explicit loop
-    loop = asyncio.run(make_io_loop_in_async_context())
+    loop = asyncio_run(make_io_loop_in_async_context(), loop_factory=get_loop_factory())
     with pytest.raises(
         RuntimeError,
         match=r"Constructing LoopRunner\(loop=loop\) without a running loop is not supported",
@@ -449,7 +452,7 @@ def test_loop_runner(loop_in_thread):
         LoopRunner(asynchronous=True)
 
     # Explicit loop
-    loop = asyncio.run(make_io_loop_in_async_context())
+    loop = asyncio_run(make_io_loop_in_async_context(), loop_factory=get_loop_factory())
     with pytest.raises(
         RuntimeError,
         match=r"Constructing LoopRunner\(loop=loop\) without a running loop is not supported",
