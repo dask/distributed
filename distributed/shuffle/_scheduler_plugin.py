@@ -341,12 +341,12 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             recs.update({dt.key: "released"})
 
         if barrier_task.state == "erred":
-            return {}
+            return {}  # pragma: no cover
         recs.update({barrier_task.key: "released"})
 
         for dt in barrier_task.dependencies:
             if dt.state == "erred":
-                return {}
+                return {}  # pragma: no cover
             recs.update({dt.key: "released"})
         return recs
 
