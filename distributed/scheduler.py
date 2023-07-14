@@ -4985,7 +4985,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         host = get_address_host(address)
 
-        ws: WorkerState = self.workers[address]
+        ws = self.workers[address]
 
         event_msg = {
             "action": "remove-worker",
@@ -4995,7 +4995,7 @@ class Scheduler(SchedulerState, ServerNode):
         event_msg["worker"] = address
         self.log_event("all", event_msg)
 
-        logger.info("Remove worker %s", ws)
+        logger.info(f"Remove worker {ws} ({stimulus_id=})")
         if close:
             with suppress(AttributeError, CommClosedError):
                 self.stream_comms[address].send(
@@ -5004,7 +5004,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.remove_resources(address)
 
-        dh: dict = self.host_info[host]
+        dh = self.host_info[host]
         dh_addresses: set = dh["addresses"]
         dh_addresses.remove(address)
         dh["nthreads"] -= ws.nthreads
@@ -5025,7 +5025,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: Recs = {}
 
-        ts: TaskState
         for ts in list(ws.processing):
             k = ts.key
             recommendations[k] = "released"
