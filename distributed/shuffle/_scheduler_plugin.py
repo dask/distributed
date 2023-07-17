@@ -360,6 +360,15 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     def remove_worker(
         self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
     ) -> None:
+        """Restart all active shuffles when a participating worker leaves the cluster.
+
+        .. note::
+            Due to the order of operations in :meth:`~Scheduler.remove_worker`, the
+            shuffle may have already been archived by
+            :meth:`~ShuffleSchedulerPlugin.transition`. In this case, the
+            ``stimulus_id`` is used as a transaction identifier and all archived shuffles
+            with a matching `stimulus_id` are restarted.
+        """
         for shuffle in self._archived_by_stimulus.get(stimulus_id, set()):
             if worker not in shuffle.participating_workers:
                 continue
@@ -386,6 +395,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         stimulus_id: str,
         **kwargs: Any,
     ) -> None:
+        """Clean up scheduler and worker state once a shuffle becomes inactive."""
         if finish not in ("released", "forgotten"):
             return
         if not key.startswith("shuffle-barrier-"):
