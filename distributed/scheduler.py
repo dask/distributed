@@ -5741,7 +5741,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
         parameters = inspect.signature(plugin.remove_worker).parameters
-        if "kwargs" not in parameters:
+        if not any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
             warnings.warn(
                 "The signature of `SchedulerPlugin.remove_worker` now requires `**kwargs` "
                 "to ensure that plugins remain forward-compatible. Not including "
