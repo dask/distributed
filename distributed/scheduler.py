@@ -5076,12 +5076,16 @@ class Scheduler(SchedulerState, ServerNode):
                     result = plugin.remove_worker(
                         scheduler=self, worker=address, stimulus_id=stimulus_id
                     )
-                except TypeError as e:
+                except TypeError:
                     parameters = inspect.signature(plugin.remove_worker).parameters
-                    if "stimulus_id" not in parameters and "kwargs" not in parameters:
+                    if (
+                        "stimulus_id" not in parameters
+                        and not any(p.kind is p.VAR_KEYWORD for p in parameters.values())
+                    ):
+                        # Deprecated (see add_plugin)
                         result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
                     else:
-                        raise e
+                        raise
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:
