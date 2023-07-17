@@ -5078,9 +5078,8 @@ class Scheduler(SchedulerState, ServerNode):
                     )
                 except TypeError:
                     parameters = inspect.signature(plugin.remove_worker).parameters
-                    if (
-                        "stimulus_id" not in parameters
-                        and not any(p.kind is p.VAR_KEYWORD for p in parameters.values())
+                    if "stimulus_id" not in parameters and not any(
+                        p.kind is p.VAR_KEYWORD for p in parameters.values()
                     ):
                         # Deprecated (see add_plugin)
                         result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
