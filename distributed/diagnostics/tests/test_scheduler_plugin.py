@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from distributed import Scheduler, SchedulerPlugin, Worker, get_worker
+from distributed.protocol.pickle import dumps
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
@@ -334,6 +335,39 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
     assert "distributed.scheduler.pickle" in msg
 
     assert n_plugins == len(s.plugins)
+
+
+@gen_cluster(nthreads=[])
+async def test_unregister_scheduler_plugin(s):
+    class Plugin(SchedulerPlugin):
+        def __init__(self):
+            self.name = "plugin"
+
+    plugin = Plugin()
+    await s.register_scheduler_plugin(plugin=dumps(plugin))
+    assert "plugin" in s.plugins
+
+    await s.unregister_scheduler_plugin(name="plugin")
+    assert "plugin" not in s.plugins
+
+    with pytest.raises(ValueError, match="Could not find plugin"):
+        await s.unregister_scheduler_plugin(name="plugin")
+
+
+@gen_cluster(client=True)
+async def test_unregister_scheduler_plugin_from_client(c, s, a, b):
+    class Plugin(SchedulerPlugin):
+        name = "plugin"
+
+    assert "plugin" not in s.plugins
+    await c.register_scheduler_plugin(Plugin())
+    assert "plugin" in s.plugins
+
+    await c.unregister_scheduler_plugin("plugin")
+    assert "plugin" not in s.plugins
+
+    with pytest.raises(ValueError, match="Could not find plugin"):
+        await c.unregister_scheduler_plugin(name="plugin")
 
 
 @gen_cluster(client=True)
