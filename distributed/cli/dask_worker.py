@@ -443,6 +443,9 @@ def main(  # type: ignore[no-untyped-def]
         )
         # Re-raise exceptions from done tasks
         [task.result() for task in done]
+        for nanny in nannies:
+            if hasattr(nanny, "exit_code"):
+                sys.exit(nanny.exit_code)
 
     try:
         asyncio_run(run(), loop_factory=get_loop_factory())
