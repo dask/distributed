@@ -372,7 +372,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._restart_shuffle(shuffle.id, scheduler, stimulus_id=stimulus_id)
 
         # If processing the transactions causes a task to get released, this
-        # removes the shuffle from self.states. Therefore, we must iterate
+        # removes the shuffle from self.active_shuffles. Therefore, we must iterate
         # over a copy.
         for shuffle_id, shuffle in self.active_shuffles.copy().items():
             if worker not in shuffle.participating_workers:
