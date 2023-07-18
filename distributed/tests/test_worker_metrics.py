@@ -304,6 +304,7 @@ async def test_gather_dep_failed(c, s, a, b):
     b.state.validate = False
 
 
+@pytest.mark.repeat(100)
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],

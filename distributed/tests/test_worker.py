@@ -3351,6 +3351,80 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
+@pytest.mark.repeat(10)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_gather_dep_cancelled_error(c, s, a):
+    """Something somewhere in the networking stack raises CancelledError while
+    gather_dep is running
+
+    See Also
+    --------
+    test_get_data_cancelled_error
+    https://github.com/dask/distributed/issues/8006
+    """
+    async with BlockedGetData(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        y = c.submit(inc, x, key="y", workers=[a.address])
+        await b.in_get_data.wait()
+        tasks = {
+            task for task in asyncio.all_tasks() if "gather_dep" in task.get_name()
+        }
+        assert tasks
+        # There should be only one task but cope with finding more just in case a
+        # previous test didn't properly clean up
+        for task in tasks:
+            task.cancel()
+
+        b.block_get_data.set()
+        assert await y == 3
+
+    assert_story(
+        a.state.story("x"),
+        [
+            ("x", "fetch", "flight", "flight", {}),
+            ("x", "flight", "missing", "missing", {}),
+            ("x", "missing", "fetch", "fetch", {}),
+            ("x", "fetch", "flight", "flight", {}),
+            ("x", "flight", "memory", "memory", {"y": "ready"}),
+        ],
+    )
+
+
+@pytest.mark.repeat(10)
+@gen_cluster(client=True, nthreads=[("", 1)], timeout=5)
+async def test_get_data_cancelled_error(c, s, a):
+    """Something somewhere in the networking stack raises CancelledError while
+    get_data is running
+
+    See Also
+    --------
+    test_gather_dep_cancelled_error
+    https://github.com/dask/distributed/issues/8006
+    """
+
+    class FlakyInboundRPC(Worker):
+        flake = 0
+
+        def handle_comm(self, comm):
+            if self.flake:
+                self.flake -= 1
+
+                async def write(*args, **kwargs):
+                    raise asyncio.CancelledError()
+
+                comm.write = write
+
+            return super().handle_comm(comm)
+
+    async with FlakyInboundRPC(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        await wait(x)
+        b.flake = 2
+        y = c.submit(inc, x, key="y", workers=[a.address])
+        assert await y == 3
+        assert b.flake == 0
+
+
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_Worker__to_dict(c, s, a):
     x = c.submit(inc, 1, key="x")
