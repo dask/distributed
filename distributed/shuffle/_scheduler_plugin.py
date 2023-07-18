@@ -180,8 +180,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         worker: str,
         spec: dict[str, Any],
     ) -> dict:
-        if worker not in self.scheduler.workers:
-            raise RuntimeError(f"Scheduler is unaware of this worker {worker!r}")
         try:
             return self.get(id, worker)
         except KeyError:
@@ -444,6 +442,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     def restart(self, scheduler: Scheduler) -> None:
         self.active_shuffles.clear()
         self.heartbeats.clear()
+        self._shuffles.clear()
+        self._archived_by_stimulus.clear()
 
 
 def get_worker_for_range_sharding(
