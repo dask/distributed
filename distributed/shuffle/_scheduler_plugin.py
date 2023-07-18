@@ -6,10 +6,10 @@ import itertools
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from itertools import product
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol.pickle import dumps
@@ -42,7 +42,7 @@ class ShuffleState(abc.ABC):
     run_id: int
     output_workers: set[str]
     participating_workers: set[str]
-    _archived_by: str | None
+    _archived_by: str | None = field(default=None, init=False)
 
     @abc.abstractmethod
     def to_msg(self) -> dict[str, Any]:
@@ -241,7 +241,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             column=column,
             output_workers=output_workers,
             participating_workers=output_workers.copy(),
-            _archived_by=None,
         )
 
     def _pin_output_workers(
@@ -310,7 +309,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             old=old,
             new=new,
             participating_workers=output_workers.copy(),
-            _archived_by=None,
         )
 
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
