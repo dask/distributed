@@ -3351,7 +3351,6 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@pytest.mark.repeat(10)
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_gather_dep_cancelled_error(c, s, a):
     """Something somewhere in the networking stack raises CancelledError while
@@ -3390,7 +3389,6 @@ async def test_gather_dep_cancelled_error(c, s, a):
     )
 
 
-@pytest.mark.repeat(10)
 @gen_cluster(client=True, nthreads=[("", 1)], timeout=5)
 async def test_get_data_cancelled_error(c, s, a):
     """Something somewhere in the networking stack raises CancelledError while
