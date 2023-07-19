@@ -33,6 +33,7 @@ from distributed.utils import (
     LoopRunner,
     RateLimiterFilter,
     TimeoutError,
+    TupleComparable,
     _maybe_complex,
     ensure_ip,
     ensure_memoryview,
@@ -1043,3 +1044,38 @@ def test_rate_limiter_filter(caplog):
         "Hello again!",
         "Hello once more!",
     ]
+
+
+@pytest.mark.parametrize(
+    "obj1,obj2,expected",
+    [
+        [(1, 2), (1, 2), False],
+        [(1, 2), (1, 3), True],
+        [1, 1, False],
+        [1, 2, True],
+        [None, 0, False],
+        [None, (1, 2), True],
+    ],
+)
+def test_tuple_comparable_lt(obj1, obj2, expected):
+    assert (TupleComparable(obj1) < TupleComparable(obj2)) == expected
+
+
+@pytest.mark.parametrize(
+    "obj1,obj2,expected",
+    [
+        [(1, 2), (1, 2), True],
+        [(1, 2), (1, 3), False],
+        [1, 1, True],
+        [1, 2, False],
+        [None, 0, True],
+        [None, (1, 2), False],
+    ],
+)
+def test_tuple_comparable_eq(obj1, obj2, expected):
+    assert (TupleComparable(obj1) == TupleComparable(obj2)) == expected
+
+
+def test_tuple_comparable_error():
+    with pytest.raises(ValueError):
+        TupleComparable("string")
