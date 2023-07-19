@@ -123,6 +123,7 @@ class SchedulerPlugin:
         start: TaskStateState,
         finish: TaskStateState,
         *args: Any,
+        stimulus_id: str,
         **kwargs: Any,
     ) -> None:
         """Run whenever a task changes state
@@ -143,6 +144,8 @@ class SchedulerPlugin:
             One of released, waiting, processing, memory, error.
         finish : string
             Final state of the transition.
+        stimulus_id: string
+            ID of stimulus causing the transition.
         *args, **kwargs :
             More options passed when transitioning
             This may include worker ID, compute time, etc.
@@ -164,7 +167,7 @@ class SchedulerPlugin:
         """
 
     def remove_worker(
-        self, scheduler: Scheduler, worker: str
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
     ) -> None | Awaitable[None]:
         """Run when a worker leaves the cluster
 
