@@ -1853,3 +1853,16 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
     await c.close()
     await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
     await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_set_index_p2p(c, s, *workers):
+    df = pd.DataFrame({"a": [1, 2, 3, 4, 5, 6, 7, 8], "b": 1})
+    ddf = dd.from_pandas(df, npartitions=3)
+    ddf = ddf.set_index("a", shuffle="p2p", divisions=(1, 3, 8))
+    result = await c.compute(ddf)
+    dd.assert_eq(result, df.set_index("a"))
+
+    await c.close()
+    await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
+    await check_scheduler_cleanup(s)
