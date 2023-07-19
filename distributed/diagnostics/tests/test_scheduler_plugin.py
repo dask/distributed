@@ -83,7 +83,37 @@ async def test_add_remove_worker(s):
 
 
 @gen_cluster(nthreads=[])
-async def test_remove_worker_without_stimulus_id_deprecated(s):
+async def test_remove_worker_renamed_kwargs_allowed(s):
+    events = []
+
+    class MyPlugin(SchedulerPlugin):
+        name = "MyPlugin"
+
+        def remove_worker(self, worker, scheduler, **kwds):
+            assert scheduler is s
+            events.append(("remove_worker", worker))
+
+    plugin = MyPlugin()
+    s.add_plugin(plugin)
+    assert events == []
+
+    a = Worker(s.address)
+    await a
+    await a.close()
+
+    assert events == [
+        ("remove_worker", a.address),
+    ]
+
+    events[:] = []
+    s.remove_plugin(plugin.name)
+    async with Worker(s.address):
+        pass
+    assert events == []
+
+
+@gen_cluster(nthreads=[])
+async def test_remove_worker_without_kwargs_deprecated(s):
     events = []
 
     class DeprecatedPlugin(SchedulerPlugin):

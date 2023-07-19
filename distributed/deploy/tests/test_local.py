@@ -14,7 +14,8 @@ from tornado.httpclient import AsyncHTTPClient
 from dask.system import CPU_COUNT
 
 from distributed import Client, LocalCluster, Nanny, Worker, get_client
-from distributed.compatibility import LINUX
+from distributed.compatibility import LINUX, asyncio_run
+from distributed.config import get_loop_factory
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
@@ -670,7 +671,7 @@ def test_ipywidgets_loop(loop):
             box = cluster._cached_widget
             assert isinstance(box, ipywidgets.Widget)
 
-    asyncio.run(amain())
+    asyncio_run(amain(), loop_factory=get_loop_factory())
 
 
 def test_no_ipywidgets(loop, monkeypatch):

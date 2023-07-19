@@ -25,6 +25,8 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.registry import backends, get_backend
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6, get_mp_context, wait_for
@@ -438,7 +440,9 @@ async def run_coro_in_thread(func, *args, **kwargs):
         t = asyncio.create_task(func(*args, **kwargs))
         return await wait_for(t, timeout=10)
 
-    return await asyncio.to_thread(asyncio.run, run_with_timeout())
+    return await asyncio.to_thread(
+        asyncio_run, run_with_timeout(), loop_factory=get_loop_factory()
+    )
 
 
 @gen_test()
