@@ -334,14 +334,20 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if barrier_task.state == "erred":
             # This should never happen, a dependent of the barrier should already
             # be `erred`
-            return {}  # pragma: no cover
+            raise RuntimeError(
+                f"Expected dependents of {barrier_task=} to be 'erred' if "
+                "the barrier is."
+            )  # pragma: no cover
         recs.update({barrier_task.key: "released"})
 
         for dt in barrier_task.dependencies:
             if dt.state == "erred":
                 # This should never happen, a dependent of the barrier should already
                 # be `erred`
-                return {}  # pragma: no cover
+                raise RuntimeError(
+                    f"Expected barrier and its dependents to be "
+                    f"'erred' if the barrier's dependency {dt} is."
+                )  # pragma: no cover
             recs.update({dt.key: "released"})
         return recs
 
