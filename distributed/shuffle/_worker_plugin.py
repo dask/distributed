@@ -1014,8 +1014,7 @@ def convert_chunk(data: bytes) -> np.ndarray:
     shards: dict[NDIndex, np.ndarray] = {}
 
     while file.tell() < len(data):
-        for tpl in pickle.load(file):
-            index, shard = tpl
+        for index, shard in pickle.load(file):
             shards[index] = shard
 
     subshape = [max(dim) + 1 for dim in zip(*shards.keys())]
