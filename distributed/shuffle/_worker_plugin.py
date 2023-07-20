@@ -565,6 +565,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     worker: Worker
     shuffles: dict[ShuffleId, ShuffleRun]
     _runs: set[ShuffleRun]
+    _runs_condition: asyncio.Condition
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
@@ -580,6 +581,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self.worker = worker
         self.shuffles = {}
         self._runs = set()
+        self._runs_condition = asyncio.Condition()
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
@@ -622,7 +624,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
     async def _close_shuffle_run(self, shuffle: ShuffleRun) -> None:
         await shuffle.close()
-        self._runs.remove(shuffle)
+        async with self._runs_condition:
+            self._runs.remove(shuffle)
+            self._runs_condition.notify_all()
 
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
         """Fails the shuffle run with the message as exception and triggers cleanup.
@@ -769,6 +773,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         key: str | None = None,
         kwargs: dict | None = None,
     ) -> ShuffleRun:
+        result: dict[str, Any]
         if type is None:
             result = await self.worker.scheduler.shuffle_get(
                 id=shuffle_id,
@@ -821,49 +826,66 @@ class ShuffleWorkerPlugin(WorkerPlugin):
                     extension._runs.remove(shuffle)
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
-        shuffle: ShuffleRun
-        if result["type"] == ShuffleType.DATAFRAME:
-            shuffle = DataFrameShuffleRun(
-                column=result["column"],
-                worker_for=result["worker_for"],
-                output_workers=result["output_workers"],
-                id=shuffle_id,
-                run_id=result["run_id"],
-                directory=os.path.join(
-                    self.worker.local_directory,
-                    f"shuffle-{shuffle_id}-{result['run_id']}",
-                ),
-                executor=self._executor,
-                local_address=self.worker.address,
-                rpc=self.worker.rpc,
-                scheduler=self.worker.scheduler,
-                memory_limiter_disk=self.memory_limiter_disk,
-                memory_limiter_comms=self.memory_limiter_comms,
-            )
-        elif result["type"] == ShuffleType.ARRAY_RECHUNK:
-            shuffle = ArrayRechunkRun(
-                worker_for=result["worker_for"],
-                output_workers=result["output_workers"],
-                old=result["old"],
-                new=result["new"],
-                id=shuffle_id,
-                run_id=result["run_id"],
-                directory=os.path.join(
-                    self.worker.local_directory,
-                    f"shuffle-{shuffle_id}-{result['run_id']}",
-                ),
-                executor=self._executor,
-                local_address=self.worker.address,
-                rpc=self.worker.rpc,
-                scheduler=self.worker.scheduler,
-                memory_limiter_disk=self.memory_limiter_disk,
-                memory_limiter_comms=self.memory_limiter_comms,
-            )
-        else:  # pragma: no cover
-            raise TypeError(result["type"])
+
+        shuffle = self._create_shuffle_run(shuffle_id, result)
         self.shuffles[shuffle_id] = shuffle
         self._runs.add(shuffle)
         return shuffle
+
+    def _create_shuffle_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> ShuffleRun:
+        shuffle: ShuffleRun
+        if result["type"] == ShuffleType.DATAFRAME:
+            shuffle = self._create_dataframe_shuffle_run(shuffle_id, result)
+        elif result["type"] == ShuffleType.ARRAY_RECHUNK:
+            shuffle = self._create_array_rechunk_run(shuffle_id, result)
+        else:  # pragma: no cover
+            raise TypeError(result["type"])
+        return shuffle
+
+    def _create_dataframe_shuffle_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> DataFrameShuffleRun:
+        return DataFrameShuffleRun(
+            column=result["column"],
+            worker_for=result["worker_for"],
+            output_workers=result["output_workers"],
+            id=shuffle_id,
+            run_id=result["run_id"],
+            directory=os.path.join(
+                self.worker.local_directory,
+                f"shuffle-{shuffle_id}-{result['run_id']}",
+            ),
+            executor=self._executor,
+            local_address=self.worker.address,
+            rpc=self.worker.rpc,
+            scheduler=self.worker.scheduler,
+            memory_limiter_disk=self.memory_limiter_disk,
+            memory_limiter_comms=self.memory_limiter_comms,
+        )
+
+    def _create_array_rechunk_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> ArrayRechunkRun:
+        return ArrayRechunkRun(
+            worker_for=result["worker_for"],
+            output_workers=result["output_workers"],
+            old=result["old"],
+            new=result["new"],
+            id=shuffle_id,
+            run_id=result["run_id"],
+            directory=os.path.join(
+                self.worker.local_directory,
+                f"shuffle-{shuffle_id}-{result['run_id']}",
+            ),
+            executor=self._executor,
+            local_address=self.worker.address,
+            rpc=self.worker.rpc,
+            scheduler=self.worker.scheduler,
+            memory_limiter_disk=self.memory_limiter_disk,
+            memory_limiter_comms=self.memory_limiter_comms,
+        )
 
     async def teardown(self, worker: Worker) -> None:
         assert not self.closed
@@ -876,8 +898,8 @@ class ShuffleWorkerPlugin(WorkerPlugin):
                 self._close_shuffle_run, shuffle
             )
 
-        while self._runs:
-            await asyncio.sleep(0.1)
+        async with self._runs_condition:
+            await self._runs_condition.wait_for(lambda: not self._runs)
 
         try:
             self._executor.shutdown(cancel_futures=True)
