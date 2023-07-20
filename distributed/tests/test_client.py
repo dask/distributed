@@ -405,13 +405,13 @@ async def test_Future_exception(c, s, a, b):
         x = c.submit(div, 1, 0)
         exc = await x.exception()
         assert isinstance(exc, ZeroDivisionError)
-    assert logger.getvalue().startswith("in task: ")
+    assert "Worker: " in logger.getvalue()
 
     with captured_logger("distributed.client") as logger:
         x = c.submit(div, 1, 0)
         with pytest.raises(ZeroDivisionError):
             _ = await x.result()
-    assert logger.getvalue().startswith("in task: ")
+    assert "Worker: " in logger.getvalue()
 
     x = c.submit(div, 1, 1)
     result = await x.exception()
@@ -422,13 +422,13 @@ def test_Future_exception_sync(c):
     with captured_logger("distributed.client") as logger:
         x = c.submit(div, 1, 0)
         assert isinstance(x.exception(), ZeroDivisionError)
-    assert logger.getvalue().startswith("in task: ")
+    assert "Worker: " in logger.getvalue()
 
     with captured_logger("distributed.client") as logger:
         x = c.submit(div, 1, 0)
         with pytest.raises(ZeroDivisionError):
             _ = x.result()
-    assert logger.getvalue().startswith("in task: ")
+    assert "Worker: " in logger.getvalue()
 
     x = c.submit(div, 1, 1)
     assert x.exception() is None

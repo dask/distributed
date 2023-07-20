@@ -10,6 +10,7 @@ import os
 import pickle
 import re
 import sys
+import textwrap
 import threading
 import traceback
 import uuid
@@ -334,9 +335,7 @@ class Future(WrappedKey):
         await self._state.wait()
         if self.status == "error":
             exc = clean_exception(self._state.exception, self._state.traceback)
-            logger.error(
-                f"in task: {self._state.key}\non worker:{self._state.erred_on}"
-            )
+            logger.error(self._state.format_error())
             if raiseit:
                 typ, exc, tb = exc
                 raise exc.with_traceback(tb)
@@ -355,9 +354,7 @@ class Future(WrappedKey):
     async def _exception(self):
         await self._state.wait()
         if self.status == "error":
-            logger.error(
-                f"in task: {self._state.key}\non worker:{self._state.erred_on}"
-            )
+            logger.error(self._state.format_error())
             return self._state.exception
         else:
             return None
@@ -630,6 +627,21 @@ class FutureState:
         self.exception = exception
         self.traceback = traceback
         self._get_event().set()
+
+    def format_error(self):
+        """Pretty-format the error for logging"""
+        frame = self.traceback
+        while frame is not None and frame.tb_next is not None:
+            frame = frame.tb_next
+        func_name = frame.tb_frame.f_code.co_name if frame else "<unknown>"
+        return textwrap.dedent(
+            f"""\
+Compute Failed
+Key:       {self.key}
+Function:  {func_name}
+Exception: {self.exception!r}
+Worker:    {self.erred_on}"""
+        )
 
     def done(self):
         """Returns 'True' if the event is not None and the event is set"""
@@ -2266,7 +2278,7 @@ class Client(SyncMethodMixin):
                         except (KeyError, AttributeError):
                             exc = CancelledError(key)
                         else:
-                            logger.error(f"in task: {st.key}\non worker:{st.erred_on}")
+                            logger.error(st.format_error())
                             raise exception.with_traceback(traceback)
                         raise exc
                     if errors == "skip":
