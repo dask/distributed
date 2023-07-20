@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.utils import TupleComparable
 
 
 class GraphLayout(SchedulerPlugin):
@@ -48,7 +49,9 @@ class GraphLayout(SchedulerPlugin):
     def update_graph(
         self, scheduler, *, dependencies=None, priority=None, tasks=None, **kwargs
     ):
-        stack = sorted(tasks, key=lambda k: priority.get(k, 0), reverse=True)
+        stack = sorted(
+            tasks, key=lambda k: TupleComparable(priority.get(k, 0)), reverse=True
+        )
         while stack:
             key = stack.pop()
             if key in self.x or key not in scheduler.tasks:
@@ -58,7 +61,11 @@ class GraphLayout(SchedulerPlugin):
                 if not all(dep in self.y for dep in deps):
                     stack.append(key)
                     stack.extend(
-                        sorted(deps, key=lambda k: priority.get(k, 0), reverse=True)
+                        sorted(
+                            deps,
+                            key=lambda k: TupleComparable(priority.get(k, 0)),
+                            reverse=True,
+                        )
                     )
                     continue
                 else:
