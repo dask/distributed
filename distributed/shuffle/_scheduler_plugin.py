@@ -364,11 +364,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             ``stimulus_id`` is used as a transaction identifier and all archived shuffles
             with a matching `stimulus_id` are restarted.
         """
-        for shuffle in self._archived_by_stimulus.get(stimulus_id, set()):
-            if worker not in shuffle.participating_workers:
-                continue
-
-            self._restart_shuffle(shuffle.id, scheduler, stimulus_id=stimulus_id)
 
         # If processing the transactions causes a task to get released, this
         # removes the shuffle from self.active_shuffles. Therefore, we must iterate
@@ -379,7 +374,9 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             exception = RuntimeError(f"Worker {worker} left during active {shuffle}")
             self._fail_on_workers(shuffle, str(exception))
             self._clean_on_scheduler(shuffle_id, stimulus_id)
-            self._restart_shuffle(shuffle_id, scheduler, stimulus_id=stimulus_id)
+
+        for shuffle in self._archived_by_stimulus.get(stimulus_id, set()):
+            self._restart_shuffle(shuffle.id, scheduler, stimulus_id=stimulus_id)
 
     def transition(
         self,
