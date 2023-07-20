@@ -347,8 +347,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             NDIndex, list[tuple[NDIndex, np.ndarray]]
         ] = defaultdict(list)
         for buffer in data:
-            for tpl in pickle.loads(buffer):
-                id, shard = tpl
+            for id, shard in pickle.loads(buffer):
                 repartitioned[id].append(shard)
         return {k: pickle.dumps(v) for k, v in repartitioned.items()}
 
