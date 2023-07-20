@@ -58,7 +58,7 @@ repos:
           - types-psutil
           - types-setuptools
           # Typed libraries
-          - click
+          - click!=8.1.4  # https://github.com/pallets/click/issues/2558
           - numpy
           - pytest
           - tornado

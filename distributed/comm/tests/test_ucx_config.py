@@ -11,7 +11,7 @@ import dask
 
 from distributed import Client
 from distributed.comm.ucx import _prepare_ucx_config
-from distributed.utils import get_ip
+from distributed.utils import get_ip, open_port
 from distributed.utils_test import gen_test, popen
 
 try:
@@ -113,7 +113,7 @@ def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
     env = os.environ.copy()
     env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
 
-    port = "13339"
+    port = str(open_port())
     # Using localhost appears to be less flaky than {HOST}. Additionally, this is
     # closer to how other dask worker tests are written.
     sched_addr = f"ucx://127.0.0.1:{port}"

@@ -4,6 +4,7 @@ import asyncio
 import logging.config
 import os
 import sys
+from collections.abc import Callable
 from typing import Any
 
 import yaml
@@ -177,7 +178,7 @@ def initialize_logging(config: dict[Any, Any]) -> None:
             _initialize_logging_old_style(config)
 
 
-def initialize_event_loop(config: dict[Any, Any]) -> None:
+def get_loop_factory() -> Callable[[], asyncio.AbstractEventLoop] | None:
     event_loop = dask.config.get("distributed.admin.event-loop")
     if event_loop == "uvloop":
         uvloop = import_required(
@@ -189,19 +190,18 @@ def initialize_event_loop(config: dict[Any, Any]) -> None:
             "    conda install uvloop\n"
             "    pip install uvloop",
         )
-        uvloop.install()
-    elif event_loop in {"asyncio", "tornado"}:
+        return uvloop.new_event_loop
+    if event_loop in {"asyncio", "tornado"}:
         if sys.platform == "win32":
-            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+            # ProactorEventLoop is not compatible with tornado 6
             # fallback to the pre-3.8 default of Selector
             # https://github.com/tornadoweb/tornado/issues/2608
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    else:
-        raise ValueError(
-            "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
-            % dask.config.get("distributed.admin.event-loop")
-        )
+            return asyncio.SelectorEventLoop
+        return None
+    raise ValueError(
+        "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
+        % dask.config.get("distributed.admin.event-loop")
+    )
 
 
 initialize_logging(dask.config.config)
-initialize_event_loop(dask.config.config)

@@ -153,6 +153,7 @@ def _get_global_client() -> Client | None:
 
 def _set_global_client(c: Client | None) -> None:
     if c is not None:
+        c._set_as_default = True
         _global_clients[_global_client_index[0]] = c
         _global_client_index[0] += 1
 
@@ -919,6 +920,7 @@ class Client(SyncMethodMixin):
             deserializers = serializers
         self._deserializers = deserializers
         self.direct_to_workers = direct_to_workers
+        self._previous_as_current = None
 
         # Communication
         self.scheduler_comm = None
@@ -1112,6 +1114,10 @@ class Client(SyncMethodMixin):
         ------
         ValueError
             If there is no client set, a ValueError is raised
+
+        See also
+        --------
+        default_client
         """
         out = _current_client.get()
         if out:
@@ -1417,8 +1423,6 @@ class Client(SyncMethodMixin):
         bcomm = BatchedSend(interval="10ms", loop=self.loop)
         bcomm.start(comm)
         self.scheduler_comm = bcomm
-        if self._set_as_default:
-            _set_global_client(self)
         self.status = "running"
 
         for msg in self._pending_msg_buffer:
@@ -1506,13 +1510,19 @@ class Client(SyncMethodMixin):
     def __enter__(self):
         if not self._loop_runner.is_started():
             self.start()
+        if self._set_as_default:
+            self._previous_as_current = _current_client.set(self)
         return self
 
     async def __aenter__(self):
         await self
+        if self._set_as_default:
+            self._previous_as_current = _current_client.set(self)
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
+        if self._previous_as_current:
+            _current_client.reset(self._previous_as_current)
         await self._close(
             # if we're handling an exception, we assume that it's more
             # important to deliver that exception than shutdown gracefully.
@@ -1521,6 +1531,8 @@ class Client(SyncMethodMixin):
         )
 
     def __exit__(self, exc_type, exc_value, traceback):
+        if self._previous_as_current:
+            _current_client.reset(self._previous_as_current)
         self.close()
 
     def __del__(self):
@@ -1861,7 +1873,7 @@ class Client(SyncMethodMixin):
         allow_other_workers=False,
         actor=False,
         actors=False,
-        pure=None,
+        pure=True,
         **kwargs,
     ):
         """Submit a function application to the scheduler
@@ -1902,7 +1914,9 @@ class Client(SyncMethodMixin):
             Alias for `actor`
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
+            impure functions like ``np.random.random``. Note that if both
+            ``actor`` and ``pure`` kwargs are set to True, then the value
+            of ``pure`` will be reverted to False, since an actor is stateful.
             See :ref:`pure functions` for more details.
         **kwargs
 
@@ -1941,7 +1955,7 @@ class Client(SyncMethodMixin):
             raise TypeError("First input to submit must be a callable function")
 
         actor = actor or actors
-        if pure is None:
+        if actor:
             pure = not actor
 
         if allow_other_workers not in (True, False, None):
@@ -2000,7 +2014,7 @@ class Client(SyncMethodMixin):
         fifo_timeout="100 ms",
         actor=False,
         actors=False,
-        pure=None,
+        pure=True,
         batch_size=None,
         **kwargs,
     ):
@@ -2044,7 +2058,9 @@ class Client(SyncMethodMixin):
             Alias for `actor`
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
+            impure functions like ``np.random.random``. Note that if both
+            ``actor`` and ``pure`` kwargs are set to True, then the value
+            of ``pure`` will be reverted to False, since an actor is stateful.
             See :ref:`pure functions` for more details.
         batch_size : int, optional (default: just one batch whose size is the entire iterable)
             Submit tasks to the scheduler in batches of (at most)
@@ -2122,7 +2138,7 @@ class Client(SyncMethodMixin):
 
         key = key or funcname(func)
         actor = actor or actors
-        if pure is None:
+        if actor:
             pure = not actor
 
         if allow_other_workers and workers is None:
@@ -5548,6 +5564,10 @@ def default_client(c=None):
     -------
     c : Client
         The client, if one has started
+
+    See also
+    --------
+    Client.current (alias)
     """
     c = c or _get_global_client()
     if c:
@@ -5900,7 +5920,8 @@ def temp_default_client(c):
     old_exec = default_client()
     _set_global_client(c)
     try:
-        yield
+        with c.as_current():
+            yield
     finally:
         _set_global_client(old_exec)
 

@@ -300,4 +300,4 @@ async def test_deserialize_client(c, s, a, b):
     # Ensure cleanup
     from distributed.client import _current_client
 
-    assert _current_client.get() is None
+    assert _current_client.get() is c

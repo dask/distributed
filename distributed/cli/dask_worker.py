@@ -21,6 +21,8 @@ from dask.system import CPU_COUNT
 from distributed import Nanny
 from distributed._signals import wait_for_signals
 from distributed.comm import get_address_host_port
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
@@ -443,7 +445,7 @@ def main(  # type: ignore[no-untyped-def]
         [task.result() for task in done]
 
     try:
-        asyncio.run(run())
+        asyncio_run(run(), loop_factory=get_loop_factory())
     except (TimeoutError, asyncio.TimeoutError):
         # We already log the exception in nanny / worker. Don't do it again.
         if not signal_fired:

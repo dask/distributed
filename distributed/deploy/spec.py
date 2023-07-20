@@ -279,14 +279,7 @@ class SpecCluster(Cluster):
             scheduler_sync_interval=scheduler_sync_interval,
         )
 
-        try:
-            called_from_running_loop = (
-                getattr(loop, "asyncio_loop", None) is asyncio.get_running_loop()
-            )
-        except RuntimeError:
-            called_from_running_loop = asynchronous
-
-        if not called_from_running_loop:
+        if not self.called_from_running_loop:
             self._loop_runner.start()
             self.sync(self._start)
             try:
