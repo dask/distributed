@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import random
 from collections import defaultdict
-from collections.abc import Callable, Collection, Coroutine, Mapping
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+    Iterable,
+    Mapping,
+)
 from functools import partial
 from itertools import cycle
 from typing import Any, TypeVar
@@ -22,52 +30,83 @@ logger = logging.getLogger(__name__)
 
 
 async def gather_from_workers(
-    who_has: Mapping[str, Collection[str]],
+    keys: Iterable[str],
+    who_has: Callable[
+        [list[str]],
+        Mapping[str, Collection[str]] | Awaitable[Mapping[str, Collection[str]]],
+    ],
+    *,
     rpc: ConnectionPool,
-    close: bool = True,
     serializers: list[str] | None = None,
     who: str | None = None,
-) -> tuple[dict[str, object], dict[str, list[str]], list[str]]:
+) -> tuple[dict[str, object], set[str]]:
     """Gather data directly from peers
 
     Parameters
     ----------
-    who_has: dict
-        Dict mapping keys to sets of workers that may have that key
-    rpc: callable
+    keys:
+        keys of tasks to be gathered
+    who_has:
+        function used to refresh who_has from the scheduler.
+        Accepts a single 'keys' parameter and returns a mapping from keys to workers.
+    rpc:
+        RPC channel to use
 
-    Returns dict mapping key to value
+    Returns
+    -------
+    Tuple:
+
+    - Successfully retrieved: ``{task key: task value, ...}``
+    - Failed to retrieve from all workers: ``{task key, ...}``
 
     See Also
     --------
     gather
     _gather
+    Scheduler.get_who_has
     """
     from distributed.worker import get_data_from_worker
 
-    bad_addresses: set[str] = set()
-    missing_workers = set()
-    original_who_has = who_has
-    new_who_has = {k: set(v) for k, v in who_has.items()}
+    to_gather: dict[str, set[str]] = {k: set() for k in keys}
     results: dict[str, object] = {}
-    all_bad_keys: set[str] = set()
+    missing_keys: set[str] = set()
+    missing_workers: set[str] = set()
+    busy_workers: set[str] = set()
 
-    while len(results) + len(all_bad_keys) < len(who_has):
+    while to_gather:
         d = defaultdict(list)
-        rev = dict()
-        bad_keys = set()
-        for key, addresses in new_who_has.items():
-            if key in results:
-                continue
-            try:
-                addr = random.choice(list(addresses - bad_addresses))
-                d[addr].append(key)
-                rev[key] = addr
-            except IndexError:
-                bad_keys.add(key)
-        if bad_keys:
-            all_bad_keys |= bad_keys
-        coroutines = {
+        for key, addresses in to_gather.items():
+            addresses -= missing_workers
+            addresses -= busy_workers
+            if addresses:
+                d[random.choice(list(addresses))].append(key)
+
+        if not d:
+            if busy_workers:
+                await asyncio.sleep(0.15)
+                busy_workers.clear()
+
+            new_who_has = who_has(list(to_gather))
+            if inspect.isawaitable(new_who_has):
+                new_who_has = await new_who_has
+            for key, new_addresses in new_who_has.items():  # type: ignore
+                addresses = set(new_addresses) - missing_workers
+                if addresses:
+                    to_gather[key].update(addresses)
+                    d[random.choice(list(addresses))].append(key)
+                else:
+                    # 1. We failed to connect to all workers reported by the scheduler
+                    #    in previous iterations, or
+                    # 2. All workers holding the data have crashed and the task is not
+                    #    in memory on the scheduler anymore, or
+                    # 3. The scheduler has forgotten the task
+                    missing_keys.add(key)
+                    del to_gather[key]
+
+            if not d:
+                break
+
+        tasks = {
             address: asyncio.create_task(
                 retry_operation(
                     partial(
@@ -77,7 +116,6 @@ async def gather_from_workers(
                         address,
                         who=who,
                         serializers=serializers,
-                        max_connections=False,
                     ),
                     operation="get_data_from_worker",
                 ),
@@ -85,28 +123,39 @@ async def gather_from_workers(
             )
             for address, keys in d.items()
         }
-        response: dict[str, object] = {}
-        for worker, c in coroutines.items():
+        for address, task in tasks.items():
             try:
-                r = await c
-            except OSError:
-                missing_workers.add(worker)
-            except ValueError as e:
-                logger.info(
-                    "Got an unexpected error while collecting from workers: %s", e
+                r = await task
+            except (OSError, asyncio.CancelledError, asyncio.TimeoutError):
+                # Note: CancelledError and asyncio.TimeoutError are rare conditions
+                # that can be raised by the network stack.
+                # See https://github.com/dask/distributed/issues/8006
+                missing_workers.add(address)
+            except Exception:
+                # For example, deserialization error
+                logger.exception(
+                    "Unexpected error while collecting tasks %s from %s",
+                    d[address],
+                    address,
                 )
-                missing_workers.add(worker)
+                for key in d[address]:
+                    missing_keys.add(key)
+                    del to_gather[key]
+                missing_workers.add(address)
             else:
-                response.update(r["data"])
+                if r["status"] == "busy":
+                    busy_workers.add(address)
+                    continue
 
-        bad_addresses |= {v for k, v in rev.items() if k not in response}
-        results.update(response)
+                assert r["status"] == "OK"
+                for key in d[address]:
+                    if key in r["data"]:
+                        results[key] = r["data"][key]
+                        del to_gather[key]
+                    else:
+                        to_gather[key].remove(address)
 
-    return (
-        results,
-        {k: list(original_who_has[k]) for k in all_bad_keys},
-        list(missing_workers),
-    )
+    return results, missing_keys
 
 
 class WrappedKey:

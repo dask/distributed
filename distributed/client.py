@@ -2299,7 +2299,7 @@ class Client(SyncMethodMixin):
         result = pack_data(unpacked, merge(data, bad_data))
         return result
 
-    async def _gather_remote(self, direct, local_worker):
+    async def _gather_remote(self, direct: bool, local_worker: bool) -> dict[str, Any]:
         """Perform gather with workers or scheduler
 
         This method exists to limit and batch many concurrent gathers into a
@@ -2311,22 +2311,26 @@ class Client(SyncMethodMixin):
             self._gather_keys = None  # clear state, these keys are being sent off
             self._gather_future = None
 
-            if direct or local_worker:  # gather directly from workers
-                who_has = await retry_operation(self.scheduler.who_has, keys=keys)
-                data2, missing_keys, missing_workers = await gather_from_workers(
-                    who_has, rpc=self.rpc, close=False
+            if not direct and not local_worker:
+                # ask scheduler to gather data for us
+                return await retry_operation(self.scheduler.gather, keys=keys)
+
+            # gather directly from workers
+            async def who_has(keys: list[str]) -> dict[str, Collection[str]]:
+                return await retry_operation(self.scheduler.who_has, keys=keys)
+
+            data, missing_keys = await gather_from_workers(
+                keys=keys, who_has=who_has, rpc=self.rpc
+            )
+            response: dict[str, Any] = {"status": "OK", "data": data}
+            if missing_keys:
+                response = await retry_operation(
+                    self.scheduler.gather, keys=missing_keys
                 )
-                response = {"status": "OK", "data": data2}
-                if missing_keys:
-                    keys2 = [key for key in keys if key not in data2]
-                    response = await retry_operation(self.scheduler.gather, keys=keys2)
-                    if response["status"] == "OK":
-                        response["data"].update(data2)
+                if response["status"] == "OK":
+                    response["data"].update(data)
 
-            else:  # ask scheduler to gather data for us
-                response = await retry_operation(self.scheduler.gather, keys=keys)
-
-        return response
+            return response
 
     def gather(self, futures, errors="raise", direct=None, asynchronous=None):
         """Gather futures from distributed memory

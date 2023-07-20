@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from unittest import mock
 
 import pytest
@@ -17,7 +18,7 @@ from distributed.utils_comm import (
     subs_multiple,
     unpack_remotedata,
 )
-from distributed.utils_test import BrokenComm, gen_cluster
+from distributed.utils_test import NO_AMM, BlockedGetData, BrokenComm, gen_cluster
 
 
 def test_pack_data():
@@ -46,12 +47,10 @@ async def test_gather_from_workers_permissive(c, s, a, b):
     rpc = await ConnectionPool()
     x = await c.scatter({"x": 1}, workers=a.address)
 
-    data, missing, bad_workers = await gather_from_workers(
-        {"x": [a.address], "y": [b.address]}, rpc=rpc
-    )
+    data, missing = await gather_from_workers(["x", "y"], s.get_who_has, rpc=rpc)
 
     assert data == {"x": 1}
-    assert list(missing) == ["y"]
+    assert missing == {"y"}
 
 
 class BrokenConnectionPool(ConnectionPool):
@@ -64,10 +63,58 @@ async def test_gather_from_workers_permissive_flaky(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
 
     rpc = await BrokenConnectionPool()
-    data, missing, bad_workers = await gather_from_workers({"x": [a.address]}, rpc=rpc)
+    data, missing = await gather_from_workers(["x"], s.get_who_has, rpc=rpc)
 
-    assert missing == {"x": [a.address]}
-    assert bad_workers == [a.address]
+    assert data == {}
+    assert missing == {"x"}
+
+
+@gen_cluster(client=True, nthreads=[], config=NO_AMM)
+async def test_gather_from_workers_cancelled_error(c, s):
+    """Something somewhere in the networking stack raises CancelledError while
+    gather_from_workers is running
+
+    See Also
+    --------
+    test_worker.py::test_gather_dep_cancelled_error
+    test_worker.py::test_get_data_cancelled_error
+    https://github.com/dask/distributed/issues/8006
+    """
+    rpc = await ConnectionPool()
+    async with BlockedGetData(s.address) as a, BlockedGetData(s.address) as b:
+        a.block_get_data.set()
+        b.block_get_data.set()
+        x = await c.scatter({"x": 1}, broadcast=True)
+        assert len(s.tasks["x"].who_has) == 2
+        a.in_get_data.clear()
+        b.in_get_data.clear()
+        a.block_get_data.clear()
+        b.block_get_data.clear()
+
+        fut = asyncio.create_task(
+            gather_from_workers(keys=["x"], who_has=s.get_who_has, rpc=rpc)
+        )
+        await asyncio.wait(
+            [
+                asyncio.create_task(a.in_get_data.wait()),
+                asyncio.create_task(b.in_get_data.wait()),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        tasks = {
+            task for task in asyncio.all_tasks() if "get-data-from-" in task.get_name()
+        }
+        assert tasks
+        # There should be only one task but cope with finding more just in case a
+        # previous test didn't properly clean up
+        for task in tasks:
+            task.cancel()
+
+        a.block_get_data.set()
+        b.block_get_data.set()
+        # gather_from_workers retries transparently from the other worker
+        assert await fut == ({"x": 1}, set())
 
 
 def test_retry_no_exception(cleanup):

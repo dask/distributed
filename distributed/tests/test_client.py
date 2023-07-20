@@ -84,7 +84,9 @@ from distributed.sizeof import sizeof
 from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp_text
 from distributed.utils_test import (
     NO_AMM,
+    BarrierGetData,
     BlockedGatherDep,
+    BlockedGetData,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
     async_poll_for,
@@ -8430,3 +8432,68 @@ async def test_resolves_future_in_dict(c, s, a, b):
     outer_future = c.submit(identity, {"x": inner_future, "y": 2})
     result = await outer_future
     assert result == {"x": 1, "y": 2}
+
+
+@gen_cluster(
+    client=True,
+    config=merge(NO_AMM, {"distributed.worker.memory.pause": False}),
+)
+async def test_replicate_busy(c, s, a, b):
+    """Client.replicate() receives a 'busy' response from a worker"""
+    async with BarrierGetData(s.address, barrier_count=2) as w:
+        x = (await c.scatter({"x": 1}, workers=[w.address]))["x"]
+        # Throttle to 1 simultaneous connection
+        w.status = Status.paused
+        await c.replicate(x)
+        # either a or b will receive 'busy'.
+        # After 0.15s, it will fetch the key from either b or a or from w.
+        assert w.barrier_count in (0, -1)
+    assert dict(a.data) == dict(b.data) == {"x": 1}
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config=merge(NO_AMM, {"distributed.worker.memory.pause": False}),
+)
+async def test_gather_busy(c, s, a, b, direct):
+    """Client.gather() receives a 'busy' response from a worker"""
+    async with BarrierGetData(s.address, barrier_count=2) as w:
+        x = c.submit(inc, 1, key="x", workers=[w.address])
+        await wait(x)
+        # Throttle to 1 simultaneous connection
+        w.status = Status.paused
+
+        async with Client(s.address, asynchronous=True) as c2:
+            assert await asyncio.gather(
+                c.gather(x, direct=direct),
+                c2.gather(Future("x", client=c2), direct=direct),
+            ) == [2, 2]
+
+        assert w.barrier_count == -1
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
+async def test_gather_race_vs_AMM(c, s, a, direct):
+    """Test race condition:
+    Client.gather() tries to get a key from a worker, but in the meantime the
+    Active Memory Manager has moved it to another worker
+    """
+    async with BlockedGetData(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        fut = asyncio.create_task(c.gather(x, direct=direct))
+        await b.in_get_data.wait()
+
+        # Simulate AMM replicate from b to a, followed by AMM drop on b
+        # Can't use s.request_acquire_replicas as it would get stuck on b.block_get_data
+        a.update_data({"x": 3})
+        a.batched_send({"op": "add-keys", "keys": ["x"]})
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2, timeout=5)
+        s.request_remove_replicas(b.address, ["x"], stimulus_id="remove")
+        await async_poll_for(lambda: "x" not in b.data, timeout=5)
+
+        b.block_get_data.set()
+
+    assert await fut == 3  # It's from a; it would be 2 if it were from b

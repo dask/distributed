@@ -39,7 +39,6 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
-    overload,
 )
 
 from tlz import keymap, pluck
@@ -1307,23 +1306,31 @@ class Worker(BaseWorker, ServerNode):
         return list(self.data)
 
     async def gather(self, who_has: dict[str, list[str]]) -> dict[str, Any]:
+        """Endpoint used by Scheduler.replicate()"""
+        first = True
         who_has = {
             k: [coerce_to_address(addr) for addr in v]
             for k, v in who_has.items()
             if k not in self.data
         }
-        result, missing_keys, missing_workers = await gather_from_workers(
-            who_has=who_has, rpc=self.rpc, who=self.address
+
+        async def refresh_who_has(keys: list[str]) -> Mapping[str, Collection[str]]:
+            nonlocal first
+            if first:
+                first = False
+                return who_has
+            return await retry_operation(self.scheduler.who_has, keys=keys)
+
+        result, missing_keys = await gather_from_workers(
+            keys=who_has,
+            who_has=refresh_who_has,
+            rpc=self.rpc,
+            who=self.address,
         )
         self.update_data(data=result)
         if missing_keys:
-            logger.warning(
-                "Could not find data: %s on workers: %s (who_has: %s)",
-                missing_keys,
-                missing_workers,
-                who_has,
-            )
-            return {"status": "partial-fail", "keys": missing_keys}
+            logger.error("Could not find data: %s", missing_keys)
+            return {"status": "partial-fail", "keys": list(missing_keys)}
         else:
             return {"status": "OK"}
 
@@ -1707,17 +1714,11 @@ class Worker(BaseWorker, ServerNode):
     async def get_data(
         self,
         comm: Comm,
-        keys: Collection[str] | None = None,
+        keys: Collection[str],
         who: str | None = None,
         serializers: list[str] | None = None,
-        max_connections: int | None = None,
     ) -> GetDataBusy | Literal[Status.dont_reply]:
-        if max_connections is None:
-            max_connections = self.transfer_outgoing_count_limit
-
-        if keys is None:
-            keys = set()
-
+        max_connections = self.transfer_outgoing_count_limit
         # Allow same-host connections more liberally
         if (
             max_connections
@@ -2845,41 +2846,12 @@ def secede():
     )
 
 
-@overload
 async def get_data_from_worker(
     rpc: ConnectionPool,
     keys: Collection[str],
     worker: str,
     *,
     who: str | None = None,
-    max_connections: Literal[False],
-    serializers: list[str] | None = None,
-    deserializers: list[str] | None = None,
-) -> GetDataSuccess:
-    ...
-
-
-@overload
-async def get_data_from_worker(
-    rpc: ConnectionPool,
-    keys: Collection[str],
-    worker: str,
-    *,
-    who: str | None = None,
-    max_connections: bool | int | None = None,
-    serializers: list[str] | None = None,
-    deserializers: list[str] | None = None,
-) -> GetDataBusy | GetDataSuccess:
-    ...
-
-
-async def get_data_from_worker(
-    rpc: ConnectionPool,
-    keys: Collection[str],
-    worker: str,
-    *,
-    who: str | None = None,
-    max_connections: bool | int | None = None,
     serializers: list[str] | None = None,
     deserializers: list[str] | None = None,
 ) -> GetDataBusy | GetDataSuccess:
@@ -2909,7 +2881,6 @@ async def get_data_from_worker(
             op="get_data",
             keys=keys,
             who=who,
-            max_connections=max_connections,
         )
         try:
             status = response["status"]
