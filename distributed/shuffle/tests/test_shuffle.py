@@ -341,6 +341,59 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
+class BlockedGetOrCreateWorkerPlugin(ShuffleWorkerPlugin):
+    def setup(self, worker: Worker) -> None:
+        super().setup(worker)
+        self.in_get_or_create = asyncio.Event()
+        self.block_get_or_create = asyncio.Event()
+
+    async def _get_or_create_shuffle(self, *args, **kwargs):
+        self.in_get_or_create.set()
+        await self.block_get_or_create.wait()
+        return await super()._get_or_create_shuffle(*args, **kwargs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_get_or_create_from_dangling_transfer(c, s, a, b):
+    await c.register_worker_plugin(BlockedGetOrCreateWorkerPlugin(), name="shuffle")
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out.x.size)
+
+    shuffle_extA = a.plugins["shuffle"]
+    shuffle_extB = b.plugins["shuffle"]
+    shuffle_extB.block_get_or_create.set()
+
+    await shuffle_extA.in_get_or_create.wait()
+    await b.close()
+    await async_poll_for(
+        lambda: not any(ws.processing for ws in s.workers.values()), timeout=5
+    )
+
+    with pytest.raises(KilledWorker):
+        await out
+
+    await async_poll_for(lambda: not s.plugins["shuffle"].active_shuffles, timeout=5)
+    assert a.state.tasks
+    shuffle_extA.block_get_or_create.set()
+    await async_poll_for(lambda: not a.state.tasks, timeout=5)
+
+    assert not s.plugins["shuffle"].active_shuffles
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b, closed=True)
+    await c.close()
+    await check_scheduler_cleanup(s)
+
+
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_during_transfer(c, s, a):
