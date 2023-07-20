@@ -51,9 +51,6 @@ class ShuffleState(abc.ABC):
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 
-    def __eq__(self, other: Any) -> bool:
-        return type(other) == type(self) and other.run_id == self.run_id
-
     def __hash__(self) -> int:
         return hash(self.run_id)
 
