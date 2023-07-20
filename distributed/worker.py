@@ -2097,6 +2097,8 @@ class Worker(BaseWorker, ServerNode):
 
         except Exception as e:
             # e.g. data failed to deserialize
+            # FIXME this will deadlock the cluster
+            #       https://github.com/dask/distributed/issues/6705
             logger.exception(e)
             self.state.log.append(
                 ("gather-dep-failed", worker, to_gather, stimulus_id, time())
