@@ -25,6 +25,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.registry import backends, get_backend
+from distributed.comm.tcp import get_stream_address
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.metrics import time
@@ -1341,6 +1342,15 @@ async def check_addresses(a, b):
 async def test_tcp_adresses(tcp):
     a, b = await get_tcp_comm_pair()
     await check_addresses(a, b)
+
+
+@gen_test()
+async def test_get_stream_address_raises_if_closed():
+    a, b = await get_tcp_comm_pair()
+    a.abort()
+    with pytest.raises(OSError):
+        get_stream_address(a)
+    b.abort()
 
 
 @gen_test()
