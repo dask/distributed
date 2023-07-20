@@ -392,11 +392,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if not key.startswith("shuffle-barrier-"):
             return
         shuffle_id = id_from_key(key)
-        try:
-            shuffle = self.active_shuffles[shuffle_id]
-        except KeyError:
-            pass
-        else:
+
+        if shuffle := self.active_shuffles.get(shuffle_id):
             self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
             self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
 
