@@ -405,7 +405,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
 
         if finish == "forgotten":
-            shuffles = self._shuffles.pop(shuffle_id)
+            shuffles = self._shuffles.pop(shuffle_id, set())
             for shuffle in shuffles:
                 if shuffle._archived_by:
                     archived = self._archived_by_stimulus[shuffle._archived_by]
