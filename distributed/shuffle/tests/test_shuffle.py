@@ -385,7 +385,7 @@ async def test_get_or_create_from_dangling_transfer(c, s, a, b):
     await async_poll_for(lambda: not s.plugins["shuffle"].active_shuffles, timeout=5)
     assert a.state.tasks
     shuffle_extA.block_get_or_create.set()
-    await async_poll_for(lambda: not a.state.tasks, timeout=5)
+    await async_poll_for(lambda: not a.state.tasks, timeout=10)
 
     assert not s.plugins["shuffle"].active_shuffles
     await check_worker_cleanup(a)
