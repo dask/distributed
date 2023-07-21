@@ -5055,7 +5055,7 @@ class Scheduler(SchedulerState, ServerNode):
                         "Task %s marked as failed because %d workers died"
                         " while trying to run it",
                         ts.key,
-                        self.allowed_failures,
+                        ts.suspicious,
                     )
 
         for ts in list(ws.has_what):
