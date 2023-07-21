@@ -164,7 +164,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def get(self, id: ShuffleId, worker: str) -> dict[str, Any]:
         if worker not in self.scheduler.workers:
-            raise RuntimeError(f"Scheduler is unaware of this worker {worker!r}")
+            # This should never happen
+            raise RuntimeError(
+                f"Scheduler is unaware of this worker {worker!r}"
+            )  # pragma: nocover
         state = self.active_shuffles[id]
         state.participating_workers.add(worker)
         return state.to_msg()
