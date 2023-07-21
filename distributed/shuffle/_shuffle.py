@@ -94,8 +94,6 @@ def shuffle_unpack(
 def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
     try:
         return _get_worker_plugin().barrier(id, run_ids)
-    except ShuffleClosedError:
-        raise Reschedule()
     except Exception as e:
         raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
 
