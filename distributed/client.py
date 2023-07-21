@@ -557,6 +557,8 @@ class FutureState:
         "traceback",
         "key",
         "erred_on",
+        "func_args",
+        "func_kwargs",
     )
 
     def __init__(self):
@@ -602,7 +604,7 @@ class FutureState:
         self.status = "pending"
         self._get_event().clear()
 
-    def set_error(self, exception, traceback, erred_on, key):
+    def set_error(self, exception, traceback, erred_on, key, run_spec):
         """Sets the error data
 
         Sets the status to 'error'. Sets the exception, the traceback,
@@ -618,6 +620,8 @@ class FutureState:
             Workers where it errored
         key: Hashable
             Task key
+        run_spec: dict[str, Any]
+            dict with args, kwargs, function
         """
         _, exception, traceback = clean_exception(exception, traceback)
 
@@ -626,6 +630,14 @@ class FutureState:
         self.status = "error"
         self.exception = exception
         self.traceback = traceback
+        if run_spec:
+            func_args = run_spec.get("args")
+            func_kwargs = run_spec.get("kwargs")
+            self.func_args = pickle.loads(func_args) if func_args else ()
+            self.func_kwargs = pickle.loads(func_kwargs) if func_kwargs else {}
+        else:
+            self.func_args = ()
+            self.func_kwargs = {}
         self._get_event().set()
 
     def format_error(self):
@@ -639,6 +651,8 @@ class FutureState:
 Compute Failed
 Key:       {self.key}
 Function:  {func_name}
+args:      {self.func_args}
+kwargs:    {self.func_kwargs}
 Exception: {self.exception!r}
 Worker:    {self.erred_on}"""
         )
@@ -1663,11 +1677,11 @@ class Client(SyncMethodMixin):
             state.retry()
 
     def _handle_task_erred(
-        self, key=None, exception=None, traceback=None, erred_on=None
+        self, key=None, exception=None, traceback=None, erred_on=None, run_spec=None
     ):
         state = self.futures.get(key)
         if state is not None:
-            state.set_error(exception, traceback, erred_on, key)
+            state.set_error(exception, traceback, erred_on, key, run_spec)
 
     def _handle_restart(self):
         logger.info("Receive restart signal from scheduler")
