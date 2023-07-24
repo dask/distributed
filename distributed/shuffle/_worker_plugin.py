@@ -989,7 +989,9 @@ def split_by_worker(
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
     # (cudf support) Avoid pd.Series
-    worker_for = df._constructor_sliced(worker_for)
+    constructor = df._constructor_sliced
+    assert isinstance(constructor, type)
+    worker_for = constructor(worker_for)
     df = df.merge(
         right=worker_for.cat.codes.rename("_worker"),
         left_on=column,
