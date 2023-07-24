@@ -31,9 +31,7 @@ from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import ChunkedAxes, NDIndex
-from distributed.shuffle._rechunk import ShardID as ArrayRechunkShardID
-from distributed.shuffle._rechunk import split_axes
+from distributed.shuffle._rechunk import ChunkedAxes, NDIndex, split_axes
 from distributed.shuffle._shuffle import ShuffleId, ShuffleType
 from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
@@ -46,7 +44,6 @@ if TYPE_CHECKING:
 
     from distributed.worker import Worker
 
-T_transfer_shard_id = TypeVar("T_transfer_shard_id")
 T_partition_id = TypeVar("T_partition_id")
 T_partition_type = TypeVar("T_partition_type")
 T = TypeVar("T")
@@ -54,7 +51,7 @@ T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 
-class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type]):
+class ShuffleRun(Generic[T_partition_id, T_partition_type]):
     def __init__(
         self,
         id: ShuffleId,
@@ -90,7 +87,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.transferred = False
-        self.received: set[T_transfer_shard_id] = set()
+        self.received: set[T_partition_id] = set()
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
@@ -119,7 +116,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
     async def send(
-        self, address: str, shards: list[tuple[T_transfer_shard_id, bytes]]
+        self, address: str, shards: list[tuple[T_partition_id, bytes]]
     ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
@@ -148,12 +145,12 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         }
 
     async def _write_to_comm(
-        self, data: dict[str, list[tuple[T_transfer_shard_id, bytes]]]
+        self, data: dict[str, tuple[T_partition_id, bytes]]
     ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
-    async def _write_to_disk(self, data: dict[NDIndex, list[bytes]]) -> None:
+    async def _write_to_disk(self, data: dict[NDIndex, bytes]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(
             {"_".join(str(i) for i in k): v for k, v in data.items()}
@@ -202,7 +199,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         data: bytes = self._disk_buffer.read("_".join(str(i) for i in id))
         return data
 
-    async def receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
+    async def receive(self, data: list[tuple[T_partition_id, bytes]]) -> None:
         await self._receive(data)
 
     async def _ensure_output_worker(self, i: T_partition_id, key: str) -> None:
@@ -222,7 +219,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Get the address of the worker assigned to the output partition"""
 
     @abc.abstractmethod
-    async def _receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[T_partition_id, bytes]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
     @abc.abstractmethod
@@ -238,7 +235,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Get an output partition to the shuffle run"""
 
 
-class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
+class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
     """State for a single active rechunk execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -320,44 +317,57 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
         self.worker_for = worker_for
         self.split_axes = split_axes(old, new)
 
-    async def _receive(self, data: list[tuple[ArrayRechunkShardID, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[NDIndex, bytes]]) -> None:
         self.raise_if_closed()
 
-        buffers = defaultdict(list)
+        filtered = []
         for d in data:
             id, payload = d
             if id in self.received:
                 continue
+            filtered.append(payload)
             self.received.add(id)
             self.total_recvd += sizeof(d)
-
-            buffers[id.chunk_index].append(payload)
-
         del data
-        if not buffers:
+        if not filtered:
             return
         try:
-            await self._write_to_disk(buffers)
+            shards = await self.offload(self._repartition_shards, filtered)
+            del filtered
+            await self._write_to_disk(shards)
         except Exception as e:
             self._exception = e
             raise
+
+    def _repartition_shards(self, data: list[bytes]) -> dict[NDIndex, bytes]:
+        repartitioned: defaultdict[
+            NDIndex, list[tuple[NDIndex, np.ndarray]]
+        ] = defaultdict(list)
+        for buffer in data:
+            for id, shard in pickle.loads(buffer):
+                repartitioned[id].append(shard)
+        return {k: pickle.dumps(v) for k, v in repartitioned.items()}
 
     async def add_partition(self, data: np.ndarray, partition_id: NDIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
 
-        def _() -> dict[str, list[tuple[ArrayRechunkShardID, bytes]]]:
-            """Return a mapping of worker addresses to a list of tuples of shard IDs
-            and shard data.
+        def _() -> dict[str, tuple[NDIndex, bytes]]:
+            """Return a mapping of worker addresses to a tuple of input partition
+            IDs and shard data.
 
+
+            TODO: Overhaul!
             As shard data, we serialize the payload together with the sub-index of the
             slice within the new chunk. To assemble the new chunk from its shards, it
             needs the sub-index to know where each shard belongs within the chunk.
             Adding the sub-index into the serialized payload on the sender allows us to
             write the serialized payload directly to disk on the receiver.
             """
-            out: dict[str, list[tuple[ArrayRechunkShardID, bytes]]] = defaultdict(list)
+            out: dict[
+                str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]
+            ] = defaultdict(list)
             from itertools import product
 
             ndsplits = product(
@@ -366,11 +376,10 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
 
             for ndsplit in ndsplits:
                 chunk_index, shard_index, ndslice = zip(*ndsplit)
-                id = ArrayRechunkShardID(chunk_index, shard_index)
                 out[self.worker_for[chunk_index]].append(
-                    (id, pickle.dumps((shard_index, data[ndslice])))
+                    (chunk_index, (shard_index, data[ndslice]))
                 )
-            return out
+            return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
 
         out = await self.offload(_)
         await self._write_to_comm(out)
@@ -398,7 +407,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
         return self.worker_for[id]
 
 
-class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
+class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     """State for a single active shuffle execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -500,25 +509,25 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, list[bytes]]:
+    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, bytes]:
         table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {(k,): [serialize_table(v)] for k, v in groups.items()}
+        return {(k,): serialize_table(v) for k, v in groups.items()}
 
     async def add_partition(self, data: pd.DataFrame, partition_id: int) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
 
-        def _() -> dict[str, list[tuple[int, bytes]]]:
+        def _() -> dict[str, tuple[int, bytes]]:
             out = split_by_worker(
                 data,
                 self.column,
                 self.worker_for,
             )
-            out = {k: [(partition_id, serialize_table(t))] for k, t in out.items()}
+            out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
             return out
 
         out = await self.offload(_)
@@ -1046,8 +1055,8 @@ def convert_chunk(data: bytes) -> np.ndarray:
     shards: dict[NDIndex, np.ndarray] = {}
 
     while file.tell() < len(data):
-        index, shard = pickle.load(file)
-        shards[index] = shard
+        for index, shard in pickle.load(file):
+            shards[index] = shard
 
     subshape = [max(dim) + 1 for dim in zip(*shards.keys())]
     assert len(shards) == np.prod(subshape)

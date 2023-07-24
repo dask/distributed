@@ -39,17 +39,17 @@ limit = parse_bytes("10.0 MiB")
 
 
 @pytest.mark.parametrize(
-    "big_payload",
+    "big_payloads",
     [
-        {"big": [gen_bytes(2, limit)]},
-        {"big": [gen_bytes(0.5, limit)] * 4},
-        {f"big-{ix}": [gen_bytes(0.5, limit)] for ix in range(4)},
-        {f"big-{ix}": [gen_bytes(0.5, limit)] * 2 for ix in range(2)},
+        [{"big": gen_bytes(2, limit)}],
+        [{"big": gen_bytes(0.5, limit)}] * 4,
+        [{f"big-{ix}": gen_bytes(0.5, limit)} for ix in range(4)],
+        [{f"big-{ix}": gen_bytes(0.5, limit)} for ix in range(2)] * 2,
     ],
 )
 @gen_test()
-async def test_memory_limit(big_payload):
-    small_payload = {"small": [gen_bytes(0.1, limit)]}
+async def test_memory_limit(big_payloads):
+    small_payload = {"small": gen_bytes(0.1, limit)}
 
     limiter = ResourceLimiter(limit)
 
@@ -83,15 +83,17 @@ async def test_memory_limit(big_payload):
         while not buf.memory_limiter.free():
             await asyncio.sleep(0.1)
         buf.allow_process.clear()
-        big = asyncio.create_task(buf.write(big_payload))
+        big_tasks = [
+            asyncio.create_task(buf.write(big_payload)) for big_payload in big_payloads
+        ]
         small = asyncio.create_task(buf.write(small_payload))
         with pytest.raises(asyncio.TimeoutError):
-            await wait_for(asyncio.shield(big), 0.1)
+            await wait_for(asyncio.shield(asyncio.gather(*big_tasks)), 0.1)
         with pytest.raises(asyncio.TimeoutError):
             await wait_for(asyncio.shield(small), 0.1)
         # Puts only return once we're below memory limit
         buf.allow_process.set()
-        await big
+        await asyncio.gather(*big_tasks)
         await small
         # Once the big write is through, we can write without blocking again
         before = buf.memory_limiter.time_blocked_total
@@ -120,10 +122,10 @@ async def test_memory_limit_blocked_exception():
     limit = parse_bytes("10.0 MiB")
 
     big_payload = {
-        "shard-1": [gen_bytes(2, limit)],
+        "shard-1": gen_bytes(2, limit),
     }
     broken_payload = {
-        "error": ["not-bytes"],
+        "error": "not-bytes",
     }
     limiter = ResourceLimiter(limit)
     async with BufferShardsBroken(

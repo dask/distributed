@@ -196,31 +196,6 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
         return da.Array(graph, name, chunks, meta=x)
 
 
-class ShardID(NamedTuple):
-    """Unique identifier of an individual shard within an array rechunk
-
-    When rechunking a 1d-array with two chunks into a 1d-array with a single chunk
-    >>> old = ((2, 2),)  # doctest: +SKIP
-    >>> new = ((4),)  # doctest: +SKIP
-    >>> rechunk_slicing(old, new)  # doctest: +SKIP
-    {
-        # The first chunk of the old array belongs to the first
-        # chunk of the new array at the first sub-index
-        (0,): [(ShardID((0,), (0,)), (slice(0, 2, None),))],
-
-        # The second chunk of the old array belongs to the first
-        # chunk of the new array at the second sub-index
-        (1,): [(ShardID((0,), (1,)), (slice(0, 2, None),))],
-    }
-    """
-
-    #: Index of the new output chunk to which the shard belongs
-    chunk_index: NDIndex
-    #: Index of the shard within the n-dimensional array of shards that will be
-    # concatenated into the new chunk
-    shard_index: NDIndex
-
-
 class Split(NamedTuple):
     """Slice of a chunk that is concatenated with other splits to create a new chunk
 

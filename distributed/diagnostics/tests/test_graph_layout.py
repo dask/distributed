@@ -99,3 +99,14 @@ async def test_unique_positions(c, s, a, b):
 
     y_positions = [(gl.x[k], gl.y[k]) for k in gl.x]
     assert len(y_positions) == len(set(y_positions))
+
+
+@gen_cluster(client=True)
+async def test_layout_with_priorities(c, s, a, b):
+    gl = GraphLayout(s)
+    s.add_plugin(gl)
+
+    low = c.submit(inc, 1, key="low", priority=1)
+    mid = c.submit(inc, 2, key="mid", priority=2)
+    high = c.submit(inc, 3, key="high", priority=3)
+    await wait([high, mid, low])
