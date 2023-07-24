@@ -17,6 +17,7 @@ from dask.utils import parse_bytes
 from distributed import Client, Nanny, profile, wait
 from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS
+from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
@@ -48,21 +49,57 @@ def test_submit_after_failed_worker_sync(loop):
             assert total.result() == sum(map(inc, range(10)))
 
 
-@pytest.mark.slow()
-@pytest.mark.parametrize("compute_on_failed", [False, True])
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
-async def test_submit_after_failed_worker_async(c, s, a, b, compute_on_failed):
-    async with Nanny(s.address, nthreads=2) as n:
-        await c.wait_for_workers(3)
+@pytest.mark.repeat(20)  # TEMP DO NOT MERGE
+@pytest.mark.slow
+@pytest.mark.parametrize("wait_closing", [False, True])
+@pytest.mark.parametrize("y_on_failed", [False, True])
+@pytest.mark.parametrize("x_on_failed", [False, True])
+@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+async def test_submit_after_failed_worker_async(
+    c, s, a, b, x_on_failed, y_on_failed, wait_closing
+):
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
 
-        L = c.map(inc, range(10))
-        await wait(L)
+    L = c.map(
+        inc,
+        range(10),
+        workers=[b.address if x_on_failed else a.address],
+        allow_other_workers=True,
+    )
 
-        kill_task = asyncio.create_task(n.kill())
-        compute_addr = n.worker_address if compute_on_failed else a.address
-        total = c.submit(sum, L, workers=[compute_addr], allow_other_workers=True)
-        assert await total == sum(range(1, 11))
-        await kill_task
+    await wait(L)
+    total = c.submit(
+        sum,
+        L,
+        key="y",
+        workers=[b.address if y_on_failed else a.address],
+        allow_other_workers=True,
+    )
+
+    done_update_graph = False
+    if wait_closing:
+        in_update_graph = asyncio.Event()
+
+        async def update_graph(*args, **kwargs):
+            in_update_graph.set()
+            await async_poll_for(
+                lambda: b_ws.status == Status.closing, timeout=5, period=0
+            )
+            s.update_graph(*args, **kwargs)
+            nonlocal done_update_graph
+            done_update_graph = True
+
+        s.stream_handlers["update-graph"] = update_graph
+        await in_update_graph.wait()
+
+    await b.close()
+    assert await total == sum(range(1, 11))
+    if wait_closing:
+        # Without this we may never know if s.update_graph raised,
+        # or if the monkey-patch worked to begin with
+        assert done_update_graph
+    assert s.tasks["y"].who_has == {a_ws}
 
 
 @gen_cluster(client=True, timeout=60)

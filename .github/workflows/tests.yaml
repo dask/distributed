@@ -197,8 +197,9 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed \
-            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
+          # TEMP DO NOT MERGE
+          pytest distributed/tests/test_failed_workers.py \
+            -m "not avoid_ci" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \
