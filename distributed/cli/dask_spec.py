@@ -7,6 +7,8 @@ import sys
 import click
 import yaml
 
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 from distributed.deploy.spec import run_spec
 
 
@@ -39,7 +41,7 @@ def main(args: list, spec: str, spec_file: str) -> None:
         except KeyboardInterrupt:
             await asyncio.gather(*(w.close() for w in servers.values()))
 
-    asyncio.run(run())
+    asyncio_run(run(), loop_factory=get_loop_factory())
 
 
 if __name__ == "__main__":

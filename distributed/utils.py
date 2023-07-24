@@ -52,6 +52,9 @@ import click
 import psutil
 import tblib.pickling_support
 
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
+
 try:
     import resource
 except ImportError:
@@ -334,7 +337,12 @@ class SyncMethodMixin:
     @property
     def asynchronous(self):
         """Are we running in the event loop?"""
-        return in_async_call(self.loop, default=getattr(self, "_asynchronous", False))
+        try:
+            return in_async_call(
+                self.loop, default=getattr(self, "_asynchronous", False)
+            )
+        except RuntimeError:
+            return False
 
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
         """Call `func` with `args` synchronously or asynchronously depending on
@@ -564,7 +572,7 @@ class LoopRunner:
         def run_loop() -> None:
             nonlocal start_exc
             try:
-                asyncio.run(amain())
+                asyncio_run(amain(), loop_factory=get_loop_factory())
             except BaseException as e:
                 if start_evt.is_set():
                     raise
@@ -1917,3 +1925,38 @@ else:
 
     async def wait_for(fut: Awaitable[T], timeout: float) -> T:
         return await asyncio.wait_for(fut, timeout)
+
+
+class TupleComparable:
+    """Wrap object so that we can compare tuple, int or None
+
+    When comparing two objects of different types Python fails
+
+    >>> (1, 2) < 1
+    Traceback (most recent call last):
+        ...
+    TypeError: '<' not supported between instances of 'tuple' and 'int'
+
+    This class replaces None with 0, and wraps ints with tuples
+
+    >>> TupleComparable((1, 2)) < TupleComparable(1)
+    False
+    """
+
+    __slots__ = ("obj",)
+
+    def __init__(self, obj):
+        if obj is None:
+            self.obj = (0,)
+        elif isinstance(obj, tuple):
+            self.obj = obj
+        elif isinstance(obj, (int, float)):
+            self.obj = (obj,)
+        else:
+            raise ValueError(f"Object must be tuple, int, float or None, got {obj}")
+
+    def __eq__(self, other):
+        return self.obj == other.obj
+
+    def __lt__(self, other):
+        return self.obj < other.obj

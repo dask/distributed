@@ -83,14 +83,12 @@ def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
 
 
 def serialize_table(table: pa.Table) -> bytes:
-    import io
-
     import pyarrow as pa
 
-    stream = io.BytesIO()
+    stream = pa.BufferOutputStream()
     with pa.ipc.new_stream(stream, table.schema) as writer:
         writer.write_table(table)
-    return stream.getvalue()
+    return stream.getvalue().to_pybytes()
 
 
 def deserialize_table(buffer: bytes) -> pa.Table:

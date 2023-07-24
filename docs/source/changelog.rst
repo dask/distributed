@@ -1,6 +1,122 @@
 Changelog
 =========
 
+.. _v2023.7.1:
+
+2023.7.1
+--------
+
+Released on July 20, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- ``gather_dep`` should handle ``CancelledError`` (:pr:`8013`) `crusaderky`_
+- Pass ``stimulus_id`` to ``SchedulerPlugin.remove_worker`` and ``SchedulerPlugin.transition`` (:pr:`7974`) `Hendrik Makait`_
+- Log ``stimulus_id`` in ``retire_worker`` (:pr:`8003`) `crusaderky`_
+- Use ``BufferOutputStream`` in P2P (:pr:`7991`) `Florian Jetter`_
+- Add Coiled to ignored modules for code sniffing (:pr:`7986`) `Matthew Rocklin`_
+- Progress bar can group tasks by span (:pr:`7952`) `Irina Truong`_
+- Improved error messages for P2P shuffling (:pr:`7979`) `Hendrik Makait`_
+- Reduce removing comms log to debug level (:pr:`7972`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix for ``TypeError: '<' not supported`` in graph dashboard (:pr:`8017`) `Irina Truong`_
+- Fix shuffle code to work with ``pyarrow`` 13 (:pr:`8009`) `Joris Van den Bossche`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add some top-level exposition to the p2p rechunking code (:pr:`7978`) `Lawrence Mitchell`_
+
+Maintenance
+^^^^^^^^^^^
+- Add test when not ``repartitioning`` for ``p2p`` in ``set_index`` (:pr:`8016`) `Patrick Hoefler`_
+- Bump ``JamesIves/github-pages-deploy-action`` from 4.4.2 to 4.4.3 (:pr:`8008`)
+- Configure asyncio loop using ``loop_factory`` kwarg rather than using the ``set_event_loop_policy`` (:pr:`7969`) `Thomas Grainger`_
+- Fix P2P worker cleanup (:pr:`7981`) `Hendrik Makait`_
+- Skip ``click`` v8.1.4 in mypy ``pre-commit`` hook (:pr:`7989`) `Thomas Grainger`_
+- Remove accidental duplicated conversion of ``pyarrow`` ``Table`` to pandas (:pr:`7983`) `Joris Van den Bossche`_
+
+
+.. _v2023.7.0:
+
+2023.7.0
+--------
+
+Released on July 7, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Propagate spans to tasks (:pr:`7898`) `crusaderky`_
+- Make Fine Performance Metrics bar graph horizontal (:pr:`7966`) `crusaderky`_
+- Don't pile up ``context_meter`` callbacks (:pr:`7961`) `crusaderky`_
+- Polish Fine Performance Metrics plot (:pr:`7963`) `crusaderky`_
+- Sign ``task-erred`` with ``run_id`` and reject outdated responses (:pr:`7933`) `Hendrik Makait`_
+- Set ``Client.as_current`` when entering ctx (:pr:`6527`) `Florian Jetter`_
+- Re-run erred task on ``ComputeTaskEvent`` (:pr:`7967`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix crash in spans when ``time()`` is not monotonic (:pr:`7960`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Documentation for Fine Performance Metrics and Spans (:pr:`7945`) `crusaderky`_
+- Update ``client.py`` to be consistent with the docstring (:pr:`7705`) `Sultan Orazbayev`_
+
+Maintenance
+^^^^^^^^^^^
+- Use ``distributed.wait_for`` in ``test_close_async_task_handles_cancellation`` (:pr:`7955`) `Thomas Grainger`_
+- Fix flaky UCX tests (:pr:`7950`) `Peter Andreas Entschev`_
+
+
+.. _v2023.6.1:
+
+2023.6.1
+--------
+
+Released on June 26, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Add idle time to fine performance metrics (:pr:`7938`) `crusaderky`_
+- Spans: capture code snippets (:pr:`7930`) `crusaderky`_
+- Improve memory footprint of P2P rechunking (:pr:`7897`) `Hendrik Makait`_
+- Improve error message on invalid state in ``_handle_remove_replicas`` (:pr:`7920`) `Hendrik Makait`_
+- Make ``ShuffleSchedulerExtension.remove_worker`` more robust (:pr:`7921`) `Hendrik Makait`_
+- Provide more information if occupancy drops below zero (:pr:`7924`) `Hendrik Makait`_
+- Improved conversion between ``pyarrow`` and ``pandas`` in P2P shuffling (:pr:`7896`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Add ``Cluster.called_from_running_loop`` and fix ``Cluster.asynchronous`` (:pr:`7941`) `Jacob Tomlinson`_
+- Fix annotations and spans leaking between threads (:pr:`7935`) `Irina Truong`_
+- Handle null partitions in P2P shuffling (:pr:`7922`) `Jonathan De Troye`_
+- Fix race condition in Fine Performance Metrics sync (:pr:`7927`) `crusaderky`_
+- Avoid (:pr:`7923`) by starting ``run_id`` at 1 (:pr:`7925`) `Hendrik Makait`_
+- Fix glitches in Fine Performance Metrics stacked graph (:pr:`7919`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Wipe the cache after (:pr:`7935`) (:pr:`7946`) `crusaderky`_
+- Remove grace period for unclosed comms in ``gen_cluster`` (:pr:`7937`) `Thomas Grainger`_
+- ``raise pytest.skip`` is redundant (:pr:`7939`) `crusaderky`_
+- Fix ``test_rechunk_with_{fully|partially}_unknown_dimension`` on CI (:pr:`7934`) `Hendrik Makait`_
+- Fix compatibility with ``numpy`` 1.25 (:pr:`7932`) `crusaderky`_
+- Spans: refactor sums of mappings (:pr:`7918`) `crusaderky`_
+- Fix flaky ``test_send_metrics_to_scheduler`` (:pr:`7931`) `crusaderky`_
+- Avoid calls to ``make_current()`` and ``make_clear()`` by using ``asyncio.run`` in ``LoopRunner`` (:pr:`7467`) `Thomas Grainger`_
+- Add ``needs triage`` label to re/opened PRs and issues (:pr:`7916`) `Miles`_
+- Remove ``span_id`` from global metrics on scheduler (:pr:`7917`) `crusaderky`_
+- Add spans to Fine Performance Metrics bokeh dashboard (:pr:`7911`) `crusaderky`_
+- FinePerformanceMetrics dashboard overhaul (:pr:`7910`) `crusaderky`_
+- Check for ``skip-caching`` label (:pr:`7907`) `Miles`_
+- Fix CI changes from (:pr:`7902`) (:pr:`7905`) `Hendrik Makait`_
+- Rename ``get_default_shuffle_algorithm`` to ``get_default_shuffle_method`` (:pr:`7902`) `Hendrik Makait`_
+- Bump actions/checkout from 3.5.2 to 3.5.3 (:pr:`7904`)
+- Refactor P2P rechunk validation (:pr:`7890`) `Hendrik Makait`_
+
+
 .. _v2023.6.0:
 
 2023.6.0
@@ -5027,3 +5143,4 @@ significantly without many new features.
 .. _`ypogorelova`: https://github.com/ypogorelova
 .. _`Patrick Hoefler`: https://github.com/phofl
 .. _`Irina Truong`: https://github.com/j-bennet
+.. _`Joris Van den Bossche`: https://github.com/jorisvandenbossche

@@ -13,8 +13,8 @@ from distributed.utils_test import gen_test
 @gen_test()
 async def test_basic(tmp_path):
     async with DiskShardsBuffer(directory=tmp_path) as mf:
-        await mf.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
-        await mf.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
+        await mf.write({"x": b"0" * 1000, "y": b"1" * 500})
+        await mf.write({"x": b"0" * 1000, "y": b"1" * 500})
 
         await mf.flush()
 
@@ -32,7 +32,7 @@ async def test_basic(tmp_path):
 
 @gen_test()
 async def test_read_before_flush(tmp_path):
-    payload = {"1": [b"foo"]}
+    payload = {"1": b"foo"}
     async with DiskShardsBuffer(directory=tmp_path) as mf:
         with pytest.raises(RuntimeError):
             mf.read(1)
@@ -52,7 +52,7 @@ async def test_read_before_flush(tmp_path):
 @gen_test()
 async def test_many(tmp_path, count):
     async with DiskShardsBuffer(directory=tmp_path) as mf:
-        d = {i: [str(i).encode() * 100] for i in range(count)}
+        d = {i: str(i).encode() * 100 for i in range(count)}
 
         for _ in range(10):
             await mf.write(d)

@@ -11,7 +11,7 @@ from dask.layers import Layer
 
 from distributed.shuffle._shuffle import (
     ShuffleId,
-    _get_worker_extension,
+    _get_worker_plugin,
     barrier_key,
     shuffle_barrier,
     shuffle_transfer,
@@ -167,7 +167,7 @@ def merge_unpack(
 ):
     from dask.dataframe.multi import merge_chunk
 
-    ext = _get_worker_extension()
+    ext = _get_worker_plugin()
     # If the partition is empty, it doesn't contain the hash column name
     left = ext.get_output_partition(
         shuffle_id_left, barrier_left, output_partition, meta=meta_left

@@ -23,7 +23,8 @@ from tornado.ioloop import IOLoop
 
 import dask
 
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import MACOS, WINDOWS, asyncio_run
+from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.utils import (
     All,
@@ -32,6 +33,7 @@ from distributed.utils import (
     LoopRunner,
     RateLimiterFilter,
     TimeoutError,
+    TupleComparable,
     _maybe_complex,
     ensure_ip,
     ensure_memoryview,
@@ -134,7 +136,7 @@ def test_sync_closed_loop():
     async def get_loop():
         return IOLoop.current()
 
-    loop = asyncio.run(get_loop())
+    loop = asyncio_run(get_loop(), loop_factory=get_loop_factory())
     loop.close()
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -399,7 +401,9 @@ def test_loop_runner(loop_in_thread):
     async def make_looprunner_in_async_context():
         return IOLoop.current(), LoopRunner()
 
-    loop, runner = asyncio.run(make_looprunner_in_async_context())
+    loop, runner = asyncio_run(
+        make_looprunner_in_async_context(), loop_factory=get_loop_factory()
+    )
     with pytest.raises(
         RuntimeError,
         match=r"Accessing the loop property while the loop is not running is not supported",
@@ -423,7 +427,7 @@ def test_loop_runner(loop_in_thread):
         return IOLoop.current()
 
     # Explicit loop
-    loop = asyncio.run(make_io_loop_in_async_context())
+    loop = asyncio_run(make_io_loop_in_async_context(), loop_factory=get_loop_factory())
     with pytest.raises(
         RuntimeError,
         match=r"Constructing LoopRunner\(loop=loop\) without a running loop is not supported",
@@ -449,7 +453,7 @@ def test_loop_runner(loop_in_thread):
         LoopRunner(asynchronous=True)
 
     # Explicit loop
-    loop = asyncio.run(make_io_loop_in_async_context())
+    loop = asyncio_run(make_io_loop_in_async_context(), loop_factory=get_loop_factory())
     with pytest.raises(
         RuntimeError,
         match=r"Constructing LoopRunner\(loop=loop\) without a running loop is not supported",
@@ -1040,3 +1044,38 @@ def test_rate_limiter_filter(caplog):
         "Hello again!",
         "Hello once more!",
     ]
+
+
+@pytest.mark.parametrize(
+    "obj1,obj2,expected",
+    [
+        [(1, 2), (1, 2), False],
+        [(1, 2), (1, 3), True],
+        [1, 1, False],
+        [1, 2, True],
+        [None, 0, False],
+        [None, (1, 2), True],
+    ],
+)
+def test_tuple_comparable_lt(obj1, obj2, expected):
+    assert (TupleComparable(obj1) < TupleComparable(obj2)) == expected
+
+
+@pytest.mark.parametrize(
+    "obj1,obj2,expected",
+    [
+        [(1, 2), (1, 2), True],
+        [(1, 2), (1, 3), False],
+        [1, 1, True],
+        [1, 2, False],
+        [None, 0, True],
+        [None, (1, 2), False],
+    ],
+)
+def test_tuple_comparable_eq(obj1, obj2, expected):
+    assert (TupleComparable(obj1) == TupleComparable(obj2)) == expected
+
+
+def test_tuple_comparable_error():
+    with pytest.raises(ValueError):
+        TupleComparable("string")

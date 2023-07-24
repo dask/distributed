@@ -98,7 +98,7 @@ from distributed.queues import QueueExtension
 from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
-from distributed.shuffle import ShuffleSchedulerExtension
+from distributed.shuffle import ShuffleSchedulerPlugin
 from distributed.spans import SpansSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
@@ -170,7 +170,7 @@ DEFAULT_EXTENSIONS = {
     "events": EventExtension,
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
-    "shuffle": ShuffleSchedulerExtension,
+    "shuffle": ShuffleSchedulerPlugin,
     "spans": SpansSchedulerExtension,
     "stealing": WorkStealing,
 }
@@ -1978,7 +1978,9 @@ class SchedulerState:
                     self.tasks[ts.key] = ts
                 for plugin in list(self.plugins.values()):
                     try:
-                        plugin.transition(key, start, actual_finish, **kwargs)
+                        plugin.transition(
+                            key, start, actual_finish, stimulus_id=stimulus_id, **kwargs
+                        )
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
@@ -3700,6 +3702,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_task_stream": self.get_task_stream,
             "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
+            "unregister_scheduler_plugin": self.unregister_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
             "register_nanny_plugin": self.register_nanny_plugin,
@@ -4462,11 +4465,12 @@ class Scheduler(SchedulerState, ServerNode):
             # _generate_taskstates is not the only thing that calls new_task(). A
             # TaskState may have also been created by client_desires_keys or scatter,
             # and only later gained a run_spec.
-            spans_ext.observe_tasks(runnable, code=code)
-            # TaskGroup.span_id could be completely different from the one in the
-            # original annotations, so it has been dropped. Drop it here as well in
-            # order not to confuse SchedulerPlugin authors.
-            resolved_annotations.pop("span", None)
+            span_annotations = spans_ext.observe_tasks(runnable, code=code)
+            # In case of TaskGroup collision, spans may have changed
+            if span_annotations:
+                resolved_annotations["span"] = span_annotations
+            else:
+                resolved_annotations.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
@@ -4884,6 +4888,7 @@ class Scheduler(SchedulerState, ServerNode):
         exception=None,
         stimulus_id=None,
         traceback=None,
+        run_id=None,
         **kwargs,
     ):
         """Mark that a task has erred on a particular worker"""
@@ -4891,6 +4896,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         ts: TaskState = self.tasks.get(key)
         if ts is None or ts.state != "processing":
+            return {}, {}, {}
+
+        if ts.run_id != run_id:
+            if ts.processing_on and ts.processing_on.address == worker:
+                return self._transition(key, "released", stimulus_id)
             return {}, {}, {}
 
         if ts.retries > 0:
@@ -4978,7 +4988,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         host = get_address_host(address)
 
-        ws: WorkerState = self.workers[address]
+        ws = self.workers[address]
 
         event_msg = {
             "action": "remove-worker",
@@ -4988,7 +4998,7 @@ class Scheduler(SchedulerState, ServerNode):
         event_msg["worker"] = address
         self.log_event("all", event_msg)
 
-        logger.info("Remove worker %s", ws)
+        logger.info(f"Remove worker {ws} ({stimulus_id=})")
         if close:
             with suppress(AttributeError, CommClosedError):
                 self.stream_comms[address].send(
@@ -4997,7 +5007,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.remove_resources(address)
 
-        dh: dict = self.host_info[host]
+        dh = self.host_info[host]
         dh_addresses: set = dh["addresses"]
         dh_addresses.remove(address)
         dh["nthreads"] -= ws.nthreads
@@ -5018,7 +5028,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: Recs = {}
 
-        ts: TaskState
         for ts in list(ws.processing):
             k = ts.key
             recommendations[k] = "released"
@@ -5047,7 +5056,7 @@ class Scheduler(SchedulerState, ServerNode):
                         "Task %s marked as failed because %d workers died"
                         " while trying to run it",
                         ts.key,
-                        self.allowed_failures,
+                        ts.suspicious,
                     )
 
         for ts in list(ws.has_what):
@@ -5063,7 +5072,19 @@ class Scheduler(SchedulerState, ServerNode):
         awaitables = []
         for plugin in list(self.plugins.values()):
             try:
-                result = plugin.remove_worker(scheduler=self, worker=address)
+                try:
+                    result = plugin.remove_worker(
+                        scheduler=self, worker=address, stimulus_id=stimulus_id
+                    )
+                except TypeError:
+                    parameters = inspect.signature(plugin.remove_worker).parameters
+                    if "stimulus_id" not in parameters and not any(
+                        p.kind is p.VAR_KEYWORD for p in parameters.values()
+                    ):
+                        # Deprecated (see add_plugin)
+                        result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
+                    else:
+                        raise
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:
@@ -5718,13 +5739,18 @@ class Scheduler(SchedulerState, ServerNode):
                 category=UserWarning,
             )
 
+        parameters = inspect.signature(plugin.remove_worker).parameters
+        if not any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
+            warnings.warn(
+                "The signature of `SchedulerPlugin.remove_worker` now requires `**kwargs` "
+                "to ensure that plugins remain forward-compatible. Not including "
+                "`**kwargs` in the signature will no longer be supported in future versions.",
+                FutureWarning,
+            )
+
         self.plugins[name] = plugin
 
-    def remove_plugin(
-        self,
-        name: str | None = None,
-        plugin: SchedulerPlugin | None = None,
-    ) -> None:
+    def remove_plugin(self, name: str | None = None) -> None:
         """Remove external plugin from scheduler
 
         Parameters
@@ -5771,6 +5797,10 @@ class Scheduler(SchedulerState, ServerNode):
                 await result
 
         self.add_plugin(plugin, name=name, idempotent=idempotent)
+
+    async def unregister_scheduler_plugin(self, name: str) -> None:
+        """Unregister a plugin on the scheduler."""
+        self.remove_plugin(name)
 
     def worker_send(self, worker: str, msg: dict[str, Any]) -> None:
         """Send message to worker
@@ -8414,7 +8444,7 @@ class WorkerStatusPlugin(SchedulerPlugin):
         except CommClosedError:
             scheduler.remove_plugin(name=self.name)
 
-    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
+    def remove_worker(self, scheduler: Scheduler, worker: str, **kwargs: Any) -> None:
         try:
             self.bcomm.send(["remove", worker])
         except CommClosedError:
