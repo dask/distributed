@@ -4840,6 +4840,44 @@ class Client(SyncMethodMixin):
             idempotent=idempotent,
         )
 
+    async def _unregister_scheduler_plugin(self, name):
+        return await self.scheduler.unregister_scheduler_plugin(name=name)
+
+    def unregister_scheduler_plugin(self, name):
+        """Unregisters a scheduler plugin
+
+        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
+
+        Parameters
+        ----------
+        name : str
+            Name of the plugin to unregister. See the :meth:`Client.register_scheduler_plugin`
+            docstring for more information.
+
+        Examples
+        --------
+        >>> class MyPlugin(SchedulerPlugin):
+        ...     def __init__(self, *args, **kwargs):
+        ...         pass  # the constructor is up to you
+        ...     async def start(self, scheduler: Scheduler) -> None:
+        ...         pass
+        ...     async def before_close(self) -> None:
+        ...         pass
+        ...     async def close(self) -> None:
+        ...         pass
+        ...     def restart(self, scheduler: Scheduler) -> None:
+        ...         pass
+
+        >>> plugin = MyPlugin(1, 2, 3)
+        >>> client.register_scheduler_plugin(plugin, name='foo')
+        >>> client.unregister_scheduler_plugin(name='foo')
+
+        See Also
+        --------
+        register_scheduler_plugin
+        """
+        return self.sync(self._unregister_scheduler_plugin, name=name)
+
     def register_worker_callbacks(self, setup=None):
         """
         Registers a setup callback function for all current and future workers.
