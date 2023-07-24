@@ -10,7 +10,7 @@ from packaging.version import parse as parse_version
 
 from distributed.protocol.serialize import dask_deserialize, dask_serialize
 
-CLOUDPICKLE_GTE_20 = parse_version(cloudpickle.__version__) >= parse_version("2.0.0")
+CLOUDPICKLE_GE_20 = parse_version(cloudpickle.__version__) >= parse_version("2.0.0")
 
 HIGHEST_PROTOCOL = pickle.HIGHEST_PROTOCOL
 
@@ -68,7 +68,7 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
             pickler.dump(x)
             result = f.getvalue()
         if b"__main__" in result or (
-            CLOUDPICKLE_GTE_20
+            CLOUDPICKLE_GE_20
             and getattr(inspect.getmodule(x), "__name__", None)
             in cloudpickle.list_registry_pickle_by_value()
         ):
