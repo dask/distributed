@@ -103,7 +103,7 @@ def rearrange_by_column_p2p(
     column: str,
     npartitions: int | None = None,
 ) -> DataFrame:
-    from dask.dataframe import DataFrame
+    from dask.dataframe.core import new_dd_object
 
     meta = df._meta
     check_dtype_support(meta)
@@ -125,7 +125,7 @@ def rearrange_by_column_p2p(
         name_input=df._name,
         meta_input=meta,
     )
-    return DataFrame(
+    return new_dd_object(
         HighLevelGraph.from_collections(name, layer, [df]),
         name,
         meta,
