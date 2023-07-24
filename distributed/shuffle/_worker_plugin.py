@@ -29,6 +29,7 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
+from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import ChunkedAxes, NDIndex, split_axes
 from distributed.shuffle._shuffle import ShuffleId, ShuffleType
@@ -48,10 +49,6 @@ T_partition_type = TypeVar("T_partition_type")
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
-
-
-class ShuffleClosedError(RuntimeError):
-    pass
 
 
 class ShuffleRun(Generic[T_partition_id, T_partition_type]):
@@ -577,6 +574,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     worker: Worker
     shuffles: dict[ShuffleId, ShuffleRun]
     _runs: set[ShuffleRun]
+    _runs_cleanup_condition: asyncio.Condition
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
@@ -592,6 +590,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self.worker = worker
         self.shuffles = {}
         self._runs = set()
+        self._runs_cleanup_condition = asyncio.Condition()
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
@@ -632,6 +631,12 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             shuffle = await self._get_shuffle_run(shuffle_id, run_id)
             await shuffle.inputs_done()
 
+    async def _close_shuffle_run(self, shuffle: ShuffleRun) -> None:
+        await shuffle.close()
+        async with self._runs_cleanup_condition:
+            self._runs.remove(shuffle)
+            self._runs_cleanup_condition.notify_all()
+
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
         """Fails the shuffle run with the message as exception and triggers cleanup.
 
@@ -648,11 +653,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         exception = RuntimeError(message)
         shuffle.fail(exception)
 
-        async def _(extension: ShuffleWorkerPlugin, shuffle: ShuffleRun) -> None:
-            await shuffle.close()
-            extension._runs.remove(shuffle)
-
-        self.worker._ongoing_background_tasks.call_soon(_, self, shuffle)
+        self.worker._ongoing_background_tasks.call_soon(
+            self._close_shuffle_run, shuffle
+        )
 
     def add_partition(
         self,
@@ -726,6 +729,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType,
+        key: str,
         **kwargs: Any,
     ) -> ShuffleRun:
         """Get or create a shuffle matching the ID and data spec.
@@ -736,12 +740,15 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             Unique identifier of the shuffle
         type:
             Type of the shuffle operation
+        key:
+            Task key triggering the function
         """
         shuffle = self.shuffles.get(shuffle_id, None)
         if shuffle is None:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
                 type=type,
+                key=key,
                 kwargs=kwargs,
             )
 
@@ -763,6 +770,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType,
+        key: str,
         kwargs: dict,
     ) -> ShuffleRun:
         ...
@@ -771,8 +779,10 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType | None = None,
+        key: str | None = None,
         kwargs: dict | None = None,
     ) -> ShuffleRun:
+        result: dict[str, Any]
         if type is None:
             result = await self.worker.scheduler.shuffle_get(
                 id=shuffle_id,
@@ -782,6 +792,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
+                key=key,
                 type=type,
                 spec={
                     "npartitions": kwargs["npartitions"],
@@ -794,6 +805,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
+                key=key,
                 type=type,
                 spec=kwargs,
                 worker=self.worker.address,
@@ -812,67 +824,94 @@ class ShuffleWorkerPlugin(WorkerPlugin):
                 return existing
             else:
                 self.shuffles.pop(shuffle_id)
-                existing.fail(RuntimeError("Stale Shuffle"))
+                existing.fail(
+                    RuntimeError("{existing!r} stale, expected run_id=={run_id}")
+                )
 
                 async def _(
                     extension: ShuffleWorkerPlugin, shuffle: ShuffleRun
                 ) -> None:
                     await shuffle.close()
-                    extension._runs.remove(shuffle)
+                    async with extension._runs_cleanup_condition:
+                        extension._runs.remove(shuffle)
+                        extension._runs_cleanup_condition.notify_all()
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
-        shuffle: ShuffleRun
-        if result["type"] == ShuffleType.DATAFRAME:
-            shuffle = DataFrameShuffleRun(
-                column=result["column"],
-                worker_for=result["worker_for"],
-                output_workers=result["output_workers"],
-                id=shuffle_id,
-                run_id=result["run_id"],
-                directory=os.path.join(
-                    self.worker.local_directory,
-                    f"shuffle-{shuffle_id}-{result['run_id']}",
-                ),
-                executor=self._executor,
-                local_address=self.worker.address,
-                rpc=self.worker.rpc,
-                scheduler=self.worker.scheduler,
-                memory_limiter_disk=self.memory_limiter_disk,
-                memory_limiter_comms=self.memory_limiter_comms,
-            )
-        elif result["type"] == ShuffleType.ARRAY_RECHUNK:
-            shuffle = ArrayRechunkRun(
-                worker_for=result["worker_for"],
-                output_workers=result["output_workers"],
-                old=result["old"],
-                new=result["new"],
-                id=shuffle_id,
-                run_id=result["run_id"],
-                directory=os.path.join(
-                    self.worker.local_directory,
-                    f"shuffle-{shuffle_id}-{result['run_id']}",
-                ),
-                executor=self._executor,
-                local_address=self.worker.address,
-                rpc=self.worker.rpc,
-                scheduler=self.worker.scheduler,
-                memory_limiter_disk=self.memory_limiter_disk,
-                memory_limiter_comms=self.memory_limiter_comms,
-            )
-        else:  # pragma: no cover
-            raise TypeError(result["type"])
+
+        shuffle = self._create_shuffle_run(shuffle_id, result)
         self.shuffles[shuffle_id] = shuffle
         self._runs.add(shuffle)
         return shuffle
+
+    def _create_shuffle_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> ShuffleRun:
+        shuffle: ShuffleRun
+        if result["type"] == ShuffleType.DATAFRAME:
+            shuffle = self._create_dataframe_shuffle_run(shuffle_id, result)
+        elif result["type"] == ShuffleType.ARRAY_RECHUNK:
+            shuffle = self._create_array_rechunk_run(shuffle_id, result)
+        else:  # pragma: no cover
+            raise TypeError(result["type"])
+        return shuffle
+
+    def _create_dataframe_shuffle_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> DataFrameShuffleRun:
+        return DataFrameShuffleRun(
+            column=result["column"],
+            worker_for=result["worker_for"],
+            output_workers=result["output_workers"],
+            id=shuffle_id,
+            run_id=result["run_id"],
+            directory=os.path.join(
+                self.worker.local_directory,
+                f"shuffle-{shuffle_id}-{result['run_id']}",
+            ),
+            executor=self._executor,
+            local_address=self.worker.address,
+            rpc=self.worker.rpc,
+            scheduler=self.worker.scheduler,
+            memory_limiter_disk=self.memory_limiter_disk,
+            memory_limiter_comms=self.memory_limiter_comms,
+        )
+
+    def _create_array_rechunk_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> ArrayRechunkRun:
+        return ArrayRechunkRun(
+            worker_for=result["worker_for"],
+            output_workers=result["output_workers"],
+            old=result["old"],
+            new=result["new"],
+            id=shuffle_id,
+            run_id=result["run_id"],
+            directory=os.path.join(
+                self.worker.local_directory,
+                f"shuffle-{shuffle_id}-{result['run_id']}",
+            ),
+            executor=self._executor,
+            local_address=self.worker.address,
+            rpc=self.worker.rpc,
+            scheduler=self.worker.scheduler,
+            memory_limiter_disk=self.memory_limiter_disk,
+            memory_limiter_comms=self.memory_limiter_comms,
+        )
 
     async def teardown(self, worker: Worker) -> None:
         assert not self.closed
 
         self.closed = True
+
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
-            await shuffle.close()
-            self._runs.remove(shuffle)
+            self.worker._ongoing_background_tasks.call_soon(
+                self._close_shuffle_run, shuffle
+            )
+
+        async with self._runs_cleanup_condition:
+            await self._runs_cleanup_condition.wait_for(lambda: not self._runs)
+
         try:
             self._executor.shutdown(cancel_futures=True)
         except Exception:  # pragma: no cover
@@ -904,11 +943,13 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         type: ShuffleType,
         **kwargs: Any,
     ) -> ShuffleRun:
+        key = thread_state.key
         return sync(
             self.worker.loop,
             self._get_or_create_shuffle,
             shuffle_id,
             type,
+            key,
             **kwargs,
         )
 
@@ -920,7 +961,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         meta: pd.DataFrame | None = None,
     ) -> Any:
         """
-        Task: Retrieve a shuffled output partition from the ShuffleExtension.
+        Task: Retrieve a shuffled output partition from the ShuffleWorkerPlugin.
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
