@@ -17,7 +17,6 @@ from dask.utils import parse_bytes
 from distributed import Client, Nanny, profile, wait
 from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS
-from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
@@ -32,6 +31,7 @@ from distributed.utils_test import (
     inc,
     slowadd,
     slowinc,
+    wait_for_state,
 )
 from distributed.worker_state_machine import FreeKeysEvent
 
@@ -50,16 +50,18 @@ def test_submit_after_failed_worker_sync(loop):
 
 
 @pytest.mark.repeat(20)  # TEMP DO NOT MERGE
-@pytest.mark.slow
-@pytest.mark.parametrize("wait_closing", [False, True])
+@pytest.mark.parametrize("when", ["closing", "closed"])
 @pytest.mark.parametrize("y_on_failed", [False, True])
 @pytest.mark.parametrize("x_on_failed", [False, True])
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.comm.timeouts.connect": "1s"},
+)
 async def test_submit_after_failed_worker_async(
-    c, s, a, b, x_on_failed, y_on_failed, wait_closing
+    c, s, a, b, x_on_failed, y_on_failed, when, monkeypatch
 ):
     a_ws = s.workers[a.address]
-    b_ws = s.workers[b.address]
 
     L = c.map(
         inc,
@@ -67,8 +69,26 @@ async def test_submit_after_failed_worker_async(
         workers=[b.address if x_on_failed else a.address],
         allow_other_workers=True,
     )
-
     await wait(L)
+
+    if when == "closed":
+        await b.close()
+        await async_poll_for(lambda: b.address not in s.workers, timeout=5)
+    elif when == "closing":
+        orig_remove_worker = s.remove_worker
+        in_remove_worker = asyncio.Event()
+        wait_remove_worker = asyncio.Event()
+
+        async def remove_worker(*args, **kwargs):
+            in_remove_worker.set()
+            await wait_remove_worker.wait()
+            return await orig_remove_worker(*args, **kwargs)
+
+        monkeypatch.setattr(s, "remove_worker", remove_worker)
+        await b.close()
+        await in_remove_worker.wait()
+        assert s.workers[b.address].status.name == "closing"
+
     total = c.submit(
         sum,
         L,
@@ -77,28 +97,11 @@ async def test_submit_after_failed_worker_async(
         allow_other_workers=True,
     )
 
-    done_update_graph = False
-    if wait_closing:
-        in_update_graph = asyncio.Event()
-
-        async def update_graph(*args, **kwargs):
-            in_update_graph.set()
-            await async_poll_for(
-                lambda: b_ws.status == Status.closing, timeout=5, period=0
-            )
-            s.update_graph(*args, **kwargs)
-            nonlocal done_update_graph
-            done_update_graph = True
-
-        s.stream_handlers["update-graph"] = update_graph
-        await in_update_graph.wait()
-
-    await b.close()
+    await wait_for_state("y", "processing", s, interval=0)
+    assert s.tasks["y"].processing_on is a_ws
+    if when == "closing":
+        wait_remove_worker.set()
     assert await total == sum(range(1, 11))
-    if wait_closing:
-        # Without this we may never know if s.update_graph raised,
-        # or if the monkey-patch worked to begin with
-        assert done_update_graph
     assert s.tasks["y"].who_has == {a_ws}
 
 
