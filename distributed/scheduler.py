@@ -8178,8 +8178,8 @@ def _task_to_client_msgs(ts: TaskState) -> dict[str, list[dict[str, Any]]]:
 
 def decide_worker(
     ts: TaskState,
-    all_workers: set[WorkerState],
-    valid_workers: set[WorkerState] | None,
+    all_workers: Set[WorkerState],
+    valid_workers: Set[WorkerState] | None,
     objective: Callable[[WorkerState], Any],
 ) -> WorkerState | None:
     """
