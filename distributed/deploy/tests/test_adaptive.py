@@ -497,3 +497,9 @@ async def test_scale_up_large_tasks(c, s):
         await asyncio.sleep(0.001)
 
     assert s.adaptive_target() == 10
+
+    more_futures = c.map(slowinc, range(200))
+    while len(s.tasks) != 200:
+        await asyncio.sleep(0.001)
+
+    assert s.adaptive_target() == 200
