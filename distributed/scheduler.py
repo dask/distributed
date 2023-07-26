@@ -8062,8 +8062,24 @@ class Scheduler(SchedulerState, ServerNode):
 
         # CPU
 
-        # TODO consider any user-specified default task durations for queued tasks
-        queued_occupancy = len(self.queued) * self.UNKNOWN_TASK_DURATION
+        if len(self.queued) < 100:
+            queued_occupancy = 0
+            for ts in self.queued:
+                if ts.prefix.duration_average == -1:
+                    queued_occupancy += self.UNKNOWN_TASK_DURATION
+                else:
+                    queued_occupancy += ts.prefix.duration_average
+        else:
+            queued_occupancy = 0
+            queued = random.sample(self.queued._heap, 100)
+            queued = [wr() for _, _, wr in queued]
+            for ts in random.sample(queued, 100):
+                if ts.prefix.duration_average == -1:
+                    queued_occupancy += self.UNKNOWN_TASK_DURATION
+                else:
+                    queued_occupancy += ts.prefix.duration_average
+            queued_occupancy *= len(self.queued) / 100
+
         cpu = math.ceil(
             (self.total_occupancy + queued_occupancy) / target_duration
         )  # TODO: threads per worker
