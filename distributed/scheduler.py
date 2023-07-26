@@ -5920,7 +5920,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> dict[str, Any]:
         """Collect data from workers to the scheduler"""
         data, missing_keys = await gather_from_workers(
-            keys=keys, who_has=self.get_who_has, rpc=self.rpc, serializers=serializers
+            keys, self.get_who_has, rpc=self.rpc, serializers=serializers
         )
         self.log_event("all", {"action": "gather", "count": len(keys)})
 

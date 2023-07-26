@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 async def gather_from_workers(
     keys: Iterable[str],
-    who_has: Callable[
+    get_who_has: Callable[
         [list[str]],
         Mapping[str, Collection[str]] | Awaitable[Mapping[str, Collection[str]]],
     ],
@@ -46,8 +46,8 @@ async def gather_from_workers(
     ----------
     keys:
         keys of tasks to be gathered
-    who_has:
-        function used to refresh who_has from the scheduler.
+    get_who_has:
+        function used to fetch the who_has mapping from the scheduler.
         Accepts a single 'keys' parameter and returns a mapping from keys to workers.
     rpc:
         RPC channel to use
@@ -86,10 +86,10 @@ async def gather_from_workers(
                 await asyncio.sleep(0.15)
                 busy_workers.clear()
 
-            new_who_has = who_has(list(to_gather))
-            if inspect.isawaitable(new_who_has):
-                new_who_has = await new_who_has
-            for key, new_addresses in new_who_has.items():  # type: ignore
+            who_has = get_who_has(list(to_gather))
+            if inspect.isawaitable(who_has):
+                who_has = await who_has
+            for key, new_addresses in who_has.items():  # type: ignore
                 addresses = set(new_addresses) - missing_workers
                 if addresses:
                     to_gather[key].update(addresses)

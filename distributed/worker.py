@@ -1314,7 +1314,7 @@ class Worker(BaseWorker, ServerNode):
             if k not in self.data
         }
 
-        async def refresh_who_has(keys: list[str]) -> Mapping[str, Collection[str]]:
+        async def get_who_has(keys: list[str]) -> Mapping[str, Collection[str]]:
             nonlocal first
             if first:
                 first = False
@@ -1323,7 +1323,7 @@ class Worker(BaseWorker, ServerNode):
 
         result, missing_keys = await gather_from_workers(
             keys=who_has,
-            who_has=refresh_who_has,
+            get_who_has=get_who_has,
             rpc=self.rpc,
             who=self.address,
         )
@@ -1720,11 +1720,7 @@ class Worker(BaseWorker, ServerNode):
     ) -> GetDataBusy | Literal[Status.dont_reply]:
         max_connections = self.transfer_outgoing_count_limit
         # Allow same-host connections more liberally
-        if (
-            max_connections
-            and comm
-            and get_address_host(comm.peer_address) == get_address_host(self.address)
-        ):
+        if get_address_host(comm.peer_address) == get_address_host(self.address):
             max_connections = max_connections * 2
 
         if self.status == Status.paused:

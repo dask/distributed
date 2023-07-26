@@ -2316,11 +2316,11 @@ class Client(SyncMethodMixin):
                 return await retry_operation(self.scheduler.gather, keys=keys)
 
             # gather directly from workers
-            async def who_has(keys: list[str]) -> dict[str, Collection[str]]:
+            async def get_who_has(keys: list[str]) -> dict[str, Collection[str]]:
                 return await retry_operation(self.scheduler.who_has, keys=keys)
 
             data, missing_keys = await gather_from_workers(
-                keys=keys, who_has=who_has, rpc=self.rpc
+                keys, get_who_has, rpc=self.rpc
             )
             response: dict[str, Any] = {"status": "OK", "data": data}
             if missing_keys:
