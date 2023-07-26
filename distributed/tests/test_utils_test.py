@@ -24,7 +24,8 @@ from dask.sizeof import sizeof
 from distributed import Client, Event, Nanny, Scheduler, Worker, config, default_client
 from distributed.batched import BatchedSend
 from distributed.comm.core import connect
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import WINDOWS, asyncio_run
+from distributed.config import get_loop_factory
 from distributed.core import Server, Status, rpc
 from distributed.metrics import time
 from distributed.tests.test_batched import EchoServer
@@ -73,7 +74,7 @@ def test_cluster(cleanup):
             return await scheduler_rpc.identity()
 
     with cluster() as (s, [a, b]):
-        ident = asyncio.run(identity())
+        ident = asyncio_run(identity(), loop_factory=get_loop_factory())
         assert ident["type"] == "Scheduler"
         assert len(ident["workers"]) == 2
 

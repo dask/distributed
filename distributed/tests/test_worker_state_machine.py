@@ -531,6 +531,7 @@ def test_executefailure_to_dict():
     ev = ExecuteFailureEvent(
         stimulus_id="test",
         key="x",
+        run_id=1,
         start=123.4,
         stop=456.7,
         exception=Serialize(ValueError("foo")),
@@ -546,6 +547,7 @@ def test_executefailure_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+        "run_id": 1,
         "start": 123.4,
         "stop": 456.7,
         "exception": "<Serialize: foo>",
@@ -571,6 +573,7 @@ def test_executefailure_dummy():
     ev = ExecuteFailureEvent.dummy("x", stimulus_id="s")
     assert ev == ExecuteFailureEvent(
         key="x",
+        run_id=1,
         start=None,
         stop=None,
         exception=Serialize(None),
@@ -1329,6 +1332,20 @@ def test_gather_dep_failure(ws):
 
     # FIXME https://github.com/dask/distributed/issues/6705
     ws.validate = False
+
+
+def test_recompute_erred_task(ws):
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("x", run_id=1, stimulus_id="s1"),
+        ExecuteFailureEvent.dummy("x", run_id=1, stimulus_id="s2"),
+        ComputeTaskEvent.dummy("x", run_id=2, stimulus_id="s3"),
+    )
+    assert instructions == [
+        Execute(key="x", stimulus_id="s1"),
+        TaskErredMsg.match(key="x", run_id=1, stimulus_id="s2"),
+        Execute(key="x", stimulus_id="s3"),
+    ]
+    assert ws.tasks["x"].state == "executing"
 
 
 def test_transfer_incoming_metrics(ws):

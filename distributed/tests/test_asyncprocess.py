@@ -13,7 +13,8 @@ import psutil
 import pytest
 from tornado.ioloop import IOLoop
 
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS, asyncio_run
+from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.process import AsyncProcess
 from distributed.utils import get_mp_context, wait_for
@@ -389,7 +390,7 @@ def _parent_process(child_pipe):
         t = asyncio.create_task(parent_process_coroutine())
         return await wait_for(t, timeout=10)
 
-    asyncio.run(run_with_timeout())
+    asyncio_run(run_with_timeout(), loop_factory=get_loop_factory())
     raise RuntimeError("this should be unreachable due to os._exit")
 
 

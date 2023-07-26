@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 from unittest import mock
 
 import pytest
 
 from dask.optimization import SubgraphCallable
 
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 from distributed.core import ConnectionPool
 from distributed.utils_comm import (
     WrappedKey,
@@ -81,7 +82,7 @@ def test_retry_no_exception(cleanup):
     async def f():
         return await retry(coro, count=0, delay_min=-1, delay_max=-1)
 
-    assert asyncio.run(f()) is retval
+    assert asyncio_run(f(), loop_factory=get_loop_factory()) is retval
     assert n_calls == 1
 
 
@@ -99,7 +100,7 @@ def test_retry0_raises_immediately(cleanup):
         return await retry(coro, count=0, delay_min=-1, delay_max=-1)
 
     with pytest.raises(RuntimeError, match="RT_ERROR 1"):
-        asyncio.run(f())
+        asyncio_run(f(), loop_factory=get_loop_factory())
 
     assert n_calls == 1
 
@@ -134,7 +135,7 @@ def test_retry_does_retry_and_sleep(cleanup):
 
     with mock.patch("asyncio.sleep", my_sleep):
         with pytest.raises(MyEx, match="RT_ERROR 6"):
-            asyncio.run(f())
+            asyncio_run(f(), loop_factory=get_loop_factory())
 
     assert n_calls == 6
     assert sleep_calls == [0.0, 1.0, 3.0, 6.0, 6.0]

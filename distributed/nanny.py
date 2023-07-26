@@ -28,6 +28,8 @@ from dask.utils import funcname, parse_timedelta
 from distributed import preloading
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 from distributed.core import (
     AsyncTaskGroupClosedError,
     CommClosedError,
@@ -1038,7 +1040,7 @@ class WorkerProcess:
             if silence_logs:
                 logger.setLevel(silence_logs)
 
-            asyncio.run(run())
+            asyncio_run(run(), loop_factory=get_loop_factory())
 
 
 def _get_env_variables(config_key: str) -> dict[str, str]:

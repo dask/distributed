@@ -92,7 +92,6 @@ from distributed.protocol import pickle, to_serialize
 from distributed.protocol.serialize import _is_dumpable
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
-from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.spans import SpansWorkerExtension
 from distributed.threadpoolexecutor import ThreadPoolExecutor
@@ -175,7 +174,6 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 DEFAULT_EXTENSIONS: dict[str, type] = {
     "pubsub": PubSubWorkerExtension,
-    "shuffle": ShuffleWorkerExtension,
     "spans": SpansWorkerExtension,
 }
 
@@ -2086,7 +2084,10 @@ class Worker(BaseWorker, ServerNode):
                 stimulus_id=f"gather-dep-success-{time()}",
             )
 
-        except OSError:
+        # Note: CancelledError and asyncio.TimeoutError are rare conditions
+        # that can be raised by the network stack.
+        # See https://github.com/dask/distributed/issues/8006
+        except (OSError, asyncio.CancelledError, asyncio.TimeoutError):
             logger.exception("Worker stream died during communication: %s", worker)
             self.state.log.append(
                 ("gather-dep-failed", worker, to_gather, stimulus_id, time())
@@ -2099,6 +2100,8 @@ class Worker(BaseWorker, ServerNode):
 
         except Exception as e:
             # e.g. data failed to deserialize
+            # FIXME this will deadlock the cluster
+            #       https://github.com/dask/distributed/issues/6705
             logger.exception(e)
             self.state.log.append(
                 ("gather-dep-failed", worker, to_gather, stimulus_id, time())
@@ -2296,6 +2299,7 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
+                run_id=run_id,
                 stimulus_id=f"run-spec-deserialize-failed-{time()}",
             )
 
@@ -2318,6 +2322,15 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             self.active_keys.add(key)
+            # Propagate span (see distributed.spans). This is useful when spawning
+            # more tasks using worker_client() and for logging.
+            span_ctx = (
+                dask.annotate(span=ts.annotations["span"])
+                if "span" in ts.annotations
+                else contextlib.nullcontext()
+            )
+            span_ctx.__enter__()
+
             try:
                 ts.start_time = time()
                 if iscoroutinefunction(function):
@@ -2366,6 +2379,7 @@ class Worker(BaseWorker, ServerNode):
                         )
             finally:
                 self.active_keys.discard(key)
+                span_ctx.__exit__(None, None, None)
 
             self.threads[key] = result["thread"]
 
@@ -2420,6 +2434,7 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 result,
                 key=key,
+                run_id=run_id,
                 start=result["start"],
                 stop=result["stop"],
                 stimulus_id=f"task-erred-{time()}",
@@ -2430,6 +2445,7 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
+                run_id=run_id,
                 stimulus_id=f"execute-unknown-error-{time()}",
             )
 

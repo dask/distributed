@@ -19,6 +19,7 @@ from dask.context import thread_state
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
+from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._arrow import (
@@ -28,10 +29,9 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
+from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import ChunkedAxes, NDIndex
-from distributed.shuffle._rechunk import ShardID as ArrayRechunkShardID
-from distributed.shuffle._rechunk import split_axes
+from distributed.shuffle._rechunk import ChunkedAxes, NDIndex, split_axes
 from distributed.shuffle._shuffle import ShuffleId, ShuffleType
 from distributed.sizeof import sizeof
 from distributed.utils import log_errors, sync
@@ -44,7 +44,6 @@ if TYPE_CHECKING:
 
     from distributed.worker import Worker
 
-T_transfer_shard_id = TypeVar("T_transfer_shard_id")
 T_partition_id = TypeVar("T_partition_id")
 T_partition_type = TypeVar("T_partition_type")
 T = TypeVar("T")
@@ -52,11 +51,7 @@ T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 
-class ShuffleClosedError(RuntimeError):
-    pass
-
-
-class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type]):
+class ShuffleRun(Generic[T_partition_id, T_partition_type]):
     def __init__(
         self,
         id: ShuffleId,
@@ -92,14 +87,17 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
 
         self.diagnostics: dict[str, float] = defaultdict(float)
         self.transferred = False
-        self.received: set[T_transfer_shard_id] = set()
+        self.received: set[T_partition_id] = set()
         self.total_recvd = 0
         self.start_time = time.time()
         self._exception: Exception | None = None
         self._closed_event = asyncio.Event()
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} {self.id}[{self.run_id}] on {self.local_address}>"
+        return f"<{self.__class__.__name__}: id={self.id!r}, run_id={self.run_id!r}, local_address={self.local_address!r}, closed={self.closed!r}, transferred={self.transferred!r}>"
+
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__}<{self.id}[{self.run_id}]> on {self.local_address}"
 
     def __hash__(self) -> int:
         return self.run_id
@@ -118,7 +116,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
     async def send(
-        self, address: str, shards: list[tuple[T_transfer_shard_id, bytes]]
+        self, address: str, shards: list[tuple[T_partition_id, bytes]]
     ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
@@ -147,12 +145,12 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         }
 
     async def _write_to_comm(
-        self, data: dict[str, list[tuple[T_transfer_shard_id, bytes]]]
+        self, data: dict[str, tuple[T_partition_id, bytes]]
     ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
-    async def _write_to_disk(self, data: dict[NDIndex, list[bytes]]) -> None:
+    async def _write_to_disk(self, data: dict[NDIndex, bytes]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(
             {"_".join(str(i) for i in k): v for k, v in data.items()}
@@ -162,9 +160,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         if self.closed:
             if self._exception:
                 raise self._exception
-            raise ShuffleClosedError(
-                f"Shuffle {self.id} has been closed on {self.local_address}"
-            )
+            raise ShuffleClosedError(f"{self} has already been closed")
 
     async def inputs_done(self) -> None:
         self.raise_if_closed()
@@ -203,7 +199,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         data: bytes = self._disk_buffer.read("_".join(str(i) for i in id))
         return data
 
-    async def receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
+    async def receive(self, data: list[tuple[T_partition_id, bytes]]) -> None:
         await self._receive(data)
 
     async def _ensure_output_worker(self, i: T_partition_id, key: str) -> None:
@@ -223,7 +219,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Get the address of the worker assigned to the output partition"""
 
     @abc.abstractmethod
-    async def _receive(self, data: list[tuple[T_transfer_shard_id, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[T_partition_id, bytes]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
     @abc.abstractmethod
@@ -239,7 +235,7 @@ class ShuffleRun(Generic[T_transfer_shard_id, T_partition_id, T_partition_type])
         """Get an output partition to the shuffle run"""
 
 
-class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
+class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
     """State for a single active rechunk execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -321,44 +317,57 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
         self.worker_for = worker_for
         self.split_axes = split_axes(old, new)
 
-    async def _receive(self, data: list[tuple[ArrayRechunkShardID, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[NDIndex, bytes]]) -> None:
         self.raise_if_closed()
 
-        buffers = defaultdict(list)
+        filtered = []
         for d in data:
             id, payload = d
             if id in self.received:
                 continue
+            filtered.append(payload)
             self.received.add(id)
             self.total_recvd += sizeof(d)
-
-            buffers[id.chunk_index].append(payload)
-
         del data
-        if not buffers:
+        if not filtered:
             return
         try:
-            await self._write_to_disk(buffers)
+            shards = await self.offload(self._repartition_shards, filtered)
+            del filtered
+            await self._write_to_disk(shards)
         except Exception as e:
             self._exception = e
             raise
 
+    def _repartition_shards(self, data: list[bytes]) -> dict[NDIndex, bytes]:
+        repartitioned: defaultdict[
+            NDIndex, list[tuple[NDIndex, np.ndarray]]
+        ] = defaultdict(list)
+        for buffer in data:
+            for id, shard in pickle.loads(buffer):
+                repartitioned[id].append(shard)
+        return {k: pickle.dumps(v) for k, v in repartitioned.items()}
+
     async def add_partition(self, data: np.ndarray, partition_id: NDIndex) -> int:
         self.raise_if_closed()
         if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
+            raise RuntimeError(f"Cannot add more partitions to {self}")
 
-        def _() -> dict[str, list[tuple[ArrayRechunkShardID, bytes]]]:
-            """Return a mapping of worker addresses to a list of tuples of shard IDs
-            and shard data.
+        def _() -> dict[str, tuple[NDIndex, bytes]]:
+            """Return a mapping of worker addresses to a tuple of input partition
+            IDs and shard data.
 
+
+            TODO: Overhaul!
             As shard data, we serialize the payload together with the sub-index of the
             slice within the new chunk. To assemble the new chunk from its shards, it
             needs the sub-index to know where each shard belongs within the chunk.
             Adding the sub-index into the serialized payload on the sender allows us to
             write the serialized payload directly to disk on the receiver.
             """
-            out: dict[str, list[tuple[ArrayRechunkShardID, bytes]]] = defaultdict(list)
+            out: dict[
+                str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]
+            ] = defaultdict(list)
             from itertools import product
 
             ndsplits = product(
@@ -367,11 +376,10 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
 
             for ndsplit in ndsplits:
                 chunk_index, shard_index, ndslice = zip(*ndsplit)
-                id = ArrayRechunkShardID(chunk_index, shard_index)
                 out[self.worker_for[chunk_index]].append(
-                    (id, pickle.dumps((shard_index, data[ndslice])))
+                    (chunk_index, (shard_index, data[ndslice]))
                 )
-            return out
+            return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
 
         out = await self.offload(_)
         await self._write_to_comm(out)
@@ -399,7 +407,7 @@ class ArrayRechunkRun(ShuffleRun[ArrayRechunkShardID, NDIndex, "np.ndarray"]):
         return self.worker_for[id]
 
 
-class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
+class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     """State for a single active shuffle execution
 
     This object is responsible for splitting, sending, receiving and combining
@@ -501,25 +509,25 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, list[bytes]]:
+    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, bytes]:
         table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {(k,): [serialize_table(v)] for k, v in groups.items()}
+        return {(k,): serialize_table(v) for k, v in groups.items()}
 
     async def add_partition(self, data: pd.DataFrame, partition_id: int) -> int:
         self.raise_if_closed()
         if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to shuffle {self}")
+            raise RuntimeError(f"Cannot add more partitions to {self}")
 
-        def _() -> dict[str, list[tuple[int, bytes]]]:
+        def _() -> dict[str, tuple[int, bytes]]:
             out = split_by_worker(
                 data,
                 self.column,
                 self.worker_for,
             )
-            out = {k: [(partition_id, serialize_table(t))] for k, t in out.items()}
+            out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
             return out
 
         out = await self.offload(_)
@@ -551,7 +559,7 @@ class DataFrameShuffleRun(ShuffleRun[int, int, "pd.DataFrame"]):
         return self.worker_for[id]
 
 
-class ShuffleWorkerExtension:
+class ShuffleWorkerPlugin(WorkerPlugin):
     """Interface between a Worker and a Shuffle.
 
     This extension is responsible for
@@ -566,11 +574,12 @@ class ShuffleWorkerExtension:
     worker: Worker
     shuffles: dict[ShuffleId, ShuffleRun]
     _runs: set[ShuffleRun]
+    _runs_cleanup_condition: asyncio.Condition
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
 
-    def __init__(self, worker: Worker) -> None:
+    def setup(self, worker: Worker) -> None:
         # Attach to worker
         worker.handlers["shuffle_receive"] = self.shuffle_receive
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
@@ -581,10 +590,17 @@ class ShuffleWorkerExtension:
         self.worker = worker
         self.shuffles = {}
         self._runs = set()
+        self._runs_cleanup_condition = asyncio.Condition()
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False
         self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
+
+    def __str__(self) -> str:
+        return f"ShuffleWorkerPlugin on {self.worker.address}"
+
+    def __repr__(self) -> str:
+        return f"<ShuffleWorkerPlugin, worker={self.worker.address_safe!r}, closed={self.closed}>"
 
     # Handlers
     ##########
@@ -615,6 +631,12 @@ class ShuffleWorkerExtension:
             shuffle = await self._get_shuffle_run(shuffle_id, run_id)
             await shuffle.inputs_done()
 
+    async def _close_shuffle_run(self, shuffle: ShuffleRun) -> None:
+        await shuffle.close()
+        async with self._runs_cleanup_condition:
+            self._runs.remove(shuffle)
+            self._runs_cleanup_condition.notify_all()
+
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
         """Fails the shuffle run with the message as exception and triggers cleanup.
 
@@ -631,11 +653,9 @@ class ShuffleWorkerExtension:
         exception = RuntimeError(message)
         shuffle.fail(exception)
 
-        async def _(extension: ShuffleWorkerExtension, shuffle: ShuffleRun) -> None:
-            await shuffle.close()
-            extension._runs.remove(shuffle)
-
-        self.worker._ongoing_background_tasks.call_soon(_, self, shuffle)
+        self.worker._ongoing_background_tasks.call_soon(
+            self._close_shuffle_run, shuffle
+        )
 
     def add_partition(
         self,
@@ -695,11 +715,11 @@ class ShuffleWorkerExtension:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
             )
-        if run_id < shuffle.run_id:
-            raise RuntimeError("Stale shuffle")
-        elif run_id > shuffle.run_id:
-            # This should never happen
-            raise RuntimeError("Invalid shuffle state")
+
+        if shuffle.run_id > run_id:
+            raise RuntimeError(f"{run_id=} stale, got {shuffle}")
+        elif shuffle.run_id < run_id:
+            raise RuntimeError(f"{run_id=} invalid, got {shuffle}")
 
         if shuffle._exception:
             raise shuffle._exception
@@ -709,6 +729,7 @@ class ShuffleWorkerExtension:
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType,
+        key: str,
         **kwargs: Any,
     ) -> ShuffleRun:
         """Get or create a shuffle matching the ID and data spec.
@@ -719,19 +740,20 @@ class ShuffleWorkerExtension:
             Unique identifier of the shuffle
         type:
             Type of the shuffle operation
+        key:
+            Task key triggering the function
         """
         shuffle = self.shuffles.get(shuffle_id, None)
         if shuffle is None:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
                 type=type,
+                key=key,
                 kwargs=kwargs,
             )
 
         if self.closed:
-            raise ShuffleClosedError(
-                f"{self.__class__.__name__} already closed on {self.worker.address}"
-            )
+            raise ShuffleClosedError(f"{self} has already been closed")
         if shuffle._exception:
             raise shuffle._exception
         return shuffle
@@ -748,6 +770,7 @@ class ShuffleWorkerExtension:
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType,
+        key: str,
         kwargs: dict,
     ) -> ShuffleRun:
         ...
@@ -756,8 +779,10 @@ class ShuffleWorkerExtension:
         self,
         shuffle_id: ShuffleId,
         type: ShuffleType | None = None,
+        key: str | None = None,
         kwargs: dict | None = None,
     ) -> ShuffleRun:
+        result: dict[str, Any]
         if type is None:
             result = await self.worker.scheduler.shuffle_get(
                 id=shuffle_id,
@@ -767,6 +792,7 @@ class ShuffleWorkerExtension:
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
+                key=key,
                 type=type,
                 spec={
                     "npartitions": kwargs["npartitions"],
@@ -779,6 +805,7 @@ class ShuffleWorkerExtension:
             assert kwargs is not None
             result = await self.worker.scheduler.shuffle_get_or_create(
                 id=shuffle_id,
+                key=key,
                 type=type,
                 spec=kwargs,
                 worker=self.worker.address,
@@ -790,76 +817,101 @@ class ShuffleWorkerExtension:
         assert result["status"] == "OK"
 
         if self.closed:
-            raise ShuffleClosedError(
-                f"{self.__class__.__name__} already closed on {self.worker.address}"
-            )
+            raise ShuffleClosedError(f"{self} has already been closed")
         if shuffle_id in self.shuffles:
             existing = self.shuffles[shuffle_id]
             if existing.run_id >= result["run_id"]:
                 return existing
             else:
                 self.shuffles.pop(shuffle_id)
-                existing.fail(RuntimeError("Stale Shuffle"))
+                existing.fail(
+                    RuntimeError("{existing!r} stale, expected run_id=={run_id}")
+                )
 
                 async def _(
-                    extension: ShuffleWorkerExtension, shuffle: ShuffleRun
+                    extension: ShuffleWorkerPlugin, shuffle: ShuffleRun
                 ) -> None:
                     await shuffle.close()
-                    extension._runs.remove(shuffle)
+                    async with extension._runs_cleanup_condition:
+                        extension._runs.remove(shuffle)
+                        extension._runs_cleanup_condition.notify_all()
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
-        shuffle: ShuffleRun
-        if result["type"] == ShuffleType.DATAFRAME:
-            shuffle = DataFrameShuffleRun(
-                column=result["column"],
-                worker_for=result["worker_for"],
-                output_workers=result["output_workers"],
-                id=shuffle_id,
-                run_id=result["run_id"],
-                directory=os.path.join(
-                    self.worker.local_directory,
-                    f"shuffle-{shuffle_id}-{result['run_id']}",
-                ),
-                executor=self._executor,
-                local_address=self.worker.address,
-                rpc=self.worker.rpc,
-                scheduler=self.worker.scheduler,
-                memory_limiter_disk=self.memory_limiter_disk,
-                memory_limiter_comms=self.memory_limiter_comms,
-            )
-        elif result["type"] == ShuffleType.ARRAY_RECHUNK:
-            shuffle = ArrayRechunkRun(
-                worker_for=result["worker_for"],
-                output_workers=result["output_workers"],
-                old=result["old"],
-                new=result["new"],
-                id=shuffle_id,
-                run_id=result["run_id"],
-                directory=os.path.join(
-                    self.worker.local_directory,
-                    f"shuffle-{shuffle_id}-{result['run_id']}",
-                ),
-                executor=self._executor,
-                local_address=self.worker.address,
-                rpc=self.worker.rpc,
-                scheduler=self.worker.scheduler,
-                memory_limiter_disk=self.memory_limiter_disk,
-                memory_limiter_comms=self.memory_limiter_comms,
-            )
-        else:  # pragma: no cover
-            raise TypeError(result["type"])
+
+        shuffle = self._create_shuffle_run(shuffle_id, result)
         self.shuffles[shuffle_id] = shuffle
         self._runs.add(shuffle)
         return shuffle
 
-    async def close(self) -> None:
+    def _create_shuffle_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> ShuffleRun:
+        shuffle: ShuffleRun
+        if result["type"] == ShuffleType.DATAFRAME:
+            shuffle = self._create_dataframe_shuffle_run(shuffle_id, result)
+        elif result["type"] == ShuffleType.ARRAY_RECHUNK:
+            shuffle = self._create_array_rechunk_run(shuffle_id, result)
+        else:  # pragma: no cover
+            raise TypeError(result["type"])
+        return shuffle
+
+    def _create_dataframe_shuffle_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> DataFrameShuffleRun:
+        return DataFrameShuffleRun(
+            column=result["column"],
+            worker_for=result["worker_for"],
+            output_workers=result["output_workers"],
+            id=shuffle_id,
+            run_id=result["run_id"],
+            directory=os.path.join(
+                self.worker.local_directory,
+                f"shuffle-{shuffle_id}-{result['run_id']}",
+            ),
+            executor=self._executor,
+            local_address=self.worker.address,
+            rpc=self.worker.rpc,
+            scheduler=self.worker.scheduler,
+            memory_limiter_disk=self.memory_limiter_disk,
+            memory_limiter_comms=self.memory_limiter_comms,
+        )
+
+    def _create_array_rechunk_run(
+        self, shuffle_id: ShuffleId, result: dict[str, Any]
+    ) -> ArrayRechunkRun:
+        return ArrayRechunkRun(
+            worker_for=result["worker_for"],
+            output_workers=result["output_workers"],
+            old=result["old"],
+            new=result["new"],
+            id=shuffle_id,
+            run_id=result["run_id"],
+            directory=os.path.join(
+                self.worker.local_directory,
+                f"shuffle-{shuffle_id}-{result['run_id']}",
+            ),
+            executor=self._executor,
+            local_address=self.worker.address,
+            rpc=self.worker.rpc,
+            scheduler=self.worker.scheduler,
+            memory_limiter_disk=self.memory_limiter_disk,
+            memory_limiter_comms=self.memory_limiter_comms,
+        )
+
+    async def teardown(self, worker: Worker) -> None:
         assert not self.closed
 
         self.closed = True
+
         while self.shuffles:
             _, shuffle = self.shuffles.popitem()
-            await shuffle.close()
-            self._runs.remove(shuffle)
+            self.worker._ongoing_background_tasks.call_soon(
+                self._close_shuffle_run, shuffle
+            )
+
+        async with self._runs_cleanup_condition:
+            await self._runs_cleanup_condition.wait_for(lambda: not self._runs)
+
         try:
             self._executor.shutdown(cancel_futures=True)
         except Exception:  # pragma: no cover
@@ -891,11 +943,13 @@ class ShuffleWorkerExtension:
         type: ShuffleType,
         **kwargs: Any,
     ) -> ShuffleRun:
+        key = thread_state.key
         return sync(
             self.worker.loop,
             self._get_or_create_shuffle,
             shuffle_id,
             type,
+            key,
             **kwargs,
         )
 
@@ -907,7 +961,7 @@ class ShuffleWorkerExtension:
         meta: pd.DataFrame | None = None,
     ) -> Any:
         """
-        Task: Retrieve a shuffled output partition from the ShuffleExtension.
+        Task: Retrieve a shuffled output partition from the ShuffleWorkerPlugin.
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
@@ -947,7 +1001,7 @@ def split_by_worker(
     # bytestream such that it cannot be deserialized anymore
     t = pa.Table.from_pandas(df, preserve_index=True)
     t = t.sort_by("_worker")
-    codes = np.asarray(t.select(["_worker"]))[0]
+    codes = np.asarray(t["_worker"])
     t = t.drop(["_worker"])
     del df
 
@@ -979,7 +1033,7 @@ def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
     partitions.sort()
     t = t.sort_by(column)
 
-    partition = np.asarray(t.select([column]))[0]
+    partition = np.asarray(t[column])
     splits = np.where(partition[1:] != partition[:-1])[0] + 1
     splits = np.concatenate([[0], splits])
 
@@ -1001,8 +1055,8 @@ def convert_chunk(data: bytes) -> np.ndarray:
     shards: dict[NDIndex, np.ndarray] = {}
 
     while file.tell() < len(data):
-        index, shard = pickle.load(file)
-        shards[index] = shard
+        for index, shard in pickle.load(file):
+            shards[index] = shard
 
     subshape = [max(dim) + 1 for dim in zip(*shards.keys())]
     assert len(shards) == np.prod(subshape)

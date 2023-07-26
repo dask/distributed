@@ -52,6 +52,9 @@ import click
 import psutil
 import tblib.pickling_support
 
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
+
 try:
     import resource
 except ImportError:
@@ -569,7 +572,7 @@ class LoopRunner:
         def run_loop() -> None:
             nonlocal start_exc
             try:
-                asyncio.run(amain())
+                asyncio_run(amain(), loop_factory=get_loop_factory())
             except BaseException as e:
                 if start_evt.is_set():
                     raise
@@ -1961,3 +1964,38 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
             return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
+
+
+class TupleComparable:
+    """Wrap object so that we can compare tuple, int or None
+
+    When comparing two objects of different types Python fails
+
+    >>> (1, 2) < 1
+    Traceback (most recent call last):
+        ...
+    TypeError: '<' not supported between instances of 'tuple' and 'int'
+
+    This class replaces None with 0, and wraps ints with tuples
+
+    >>> TupleComparable((1, 2)) < TupleComparable(1)
+    False
+    """
+
+    __slots__ = ("obj",)
+
+    def __init__(self, obj):
+        if obj is None:
+            self.obj = (0,)
+        elif isinstance(obj, tuple):
+            self.obj = obj
+        elif isinstance(obj, (int, float)):
+            self.obj = (obj,)
+        else:
+            raise ValueError(f"Object must be tuple, int, float or None, got {obj}")
+
+    def __eq__(self, other):
+        return self.obj == other.obj
+
+    def __lt__(self, other):
+        return self.obj < other.obj

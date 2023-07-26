@@ -1,6 +1,75 @@
 Changelog
 =========
 
+.. _v2023.7.1:
+
+2023.7.1
+--------
+
+Released on July 20, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- ``gather_dep`` should handle ``CancelledError`` (:pr:`8013`) `crusaderky`_
+- Pass ``stimulus_id`` to ``SchedulerPlugin.remove_worker`` and ``SchedulerPlugin.transition`` (:pr:`7974`) `Hendrik Makait`_
+- Log ``stimulus_id`` in ``retire_worker`` (:pr:`8003`) `crusaderky`_
+- Use ``BufferOutputStream`` in P2P (:pr:`7991`) `Florian Jetter`_
+- Add Coiled to ignored modules for code sniffing (:pr:`7986`) `Matthew Rocklin`_
+- Progress bar can group tasks by span (:pr:`7952`) `Irina Truong`_
+- Improved error messages for P2P shuffling (:pr:`7979`) `Hendrik Makait`_
+- Reduce removing comms log to debug level (:pr:`7972`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix for ``TypeError: '<' not supported`` in graph dashboard (:pr:`8017`) `Irina Truong`_
+- Fix shuffle code to work with ``pyarrow`` 13 (:pr:`8009`) `Joris Van den Bossche`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add some top-level exposition to the p2p rechunking code (:pr:`7978`) `Lawrence Mitchell`_
+
+Maintenance
+^^^^^^^^^^^
+- Add test when not ``repartitioning`` for ``p2p`` in ``set_index`` (:pr:`8016`) `Patrick Hoefler`_
+- Bump ``JamesIves/github-pages-deploy-action`` from 4.4.2 to 4.4.3 (:pr:`8008`)
+- Configure asyncio loop using ``loop_factory`` kwarg rather than using the ``set_event_loop_policy`` (:pr:`7969`) `Thomas Grainger`_
+- Fix P2P worker cleanup (:pr:`7981`) `Hendrik Makait`_
+- Skip ``click`` v8.1.4 in mypy ``pre-commit`` hook (:pr:`7989`) `Thomas Grainger`_
+- Remove accidental duplicated conversion of ``pyarrow`` ``Table`` to pandas (:pr:`7983`) `Joris Van den Bossche`_
+
+
+.. _v2023.7.0:
+
+2023.7.0
+--------
+
+Released on July 7, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Propagate spans to tasks (:pr:`7898`) `crusaderky`_
+- Make Fine Performance Metrics bar graph horizontal (:pr:`7966`) `crusaderky`_
+- Don't pile up ``context_meter`` callbacks (:pr:`7961`) `crusaderky`_
+- Polish Fine Performance Metrics plot (:pr:`7963`) `crusaderky`_
+- Sign ``task-erred`` with ``run_id`` and reject outdated responses (:pr:`7933`) `Hendrik Makait`_
+- Set ``Client.as_current`` when entering ctx (:pr:`6527`) `Florian Jetter`_
+- Re-run erred task on ``ComputeTaskEvent`` (:pr:`7967`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix crash in spans when ``time()`` is not monotonic (:pr:`7960`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Documentation for Fine Performance Metrics and Spans (:pr:`7945`) `crusaderky`_
+- Update ``client.py`` to be consistent with the docstring (:pr:`7705`) `Sultan Orazbayev`_
+
+Maintenance
+^^^^^^^^^^^
+- Use ``distributed.wait_for`` in ``test_close_async_task_handles_cancellation`` (:pr:`7955`) `Thomas Grainger`_
+- Fix flaky UCX tests (:pr:`7950`) `Peter Andreas Entschev`_
+
+
 .. _v2023.6.1:
 
 2023.6.1
@@ -5074,3 +5143,4 @@ significantly without many new features.
 .. _`ypogorelova`: https://github.com/ypogorelova
 .. _`Patrick Hoefler`: https://github.com/phofl
 .. _`Irina Truong`: https://github.com/j-bennet
+.. _`Joris Van den Bossche`: https://github.com/jorisvandenbossche

@@ -1658,7 +1658,7 @@ class ConnectionPool:
         """
         Remove all Comms to a given address.
         """
-        logger.info("Removing comms to %s", addr)
+        logger.debug("Removing comms to %s", addr)
         if addr in self.available:
             comms = self.available.pop(addr)
             for comm in comms:
