@@ -1506,7 +1506,7 @@ class Client(SyncMethodMixin):
                 _current_client.reset(self._previous_as_current)
             except ValueError as e:
                 if not e.args[0].endswith(" was created in a different Context"):
-                    raise
+                    raise  # pragma: nocover
                 warnings.warn(
                     "It is deprecated to enter and exit the Client context "
                     "manager from different tasks",
@@ -1526,7 +1526,7 @@ class Client(SyncMethodMixin):
                 _current_client.reset(self._previous_as_current)
             except ValueError as e:
                 if not e.args[0].endswith(" was created in a different Context"):
-                    raise
+                    raise  # pragma: nocover
                 warnings.warn(
                     "It is deprecated to enter and exit the Client context "
                     "manager from different threads",
