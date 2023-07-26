@@ -49,7 +49,6 @@ def test_submit_after_failed_worker_sync(loop):
             assert total.result() == sum(map(inc, range(10)))
 
 
-@pytest.mark.repeat(20)  # TEMP DO NOT MERGE
 @pytest.mark.parametrize("when", ["closing", "closed"])
 @pytest.mark.parametrize("y_on_failed", [False, True])
 @pytest.mark.parametrize("x_on_failed", [False, True])
