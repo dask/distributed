@@ -99,3 +99,14 @@ async def test_unique_positions(c, s, a, b):
 
     y_positions = [(gl.x[k], gl.y[k]) for k in gl.x]
     assert len(y_positions) == len(set(y_positions))
+
+
+@gen_cluster(client=True)
+async def test_layout_scatter(c, s, a, b):
+    gl = GraphLayout(s)
+    s.add_plugin(gl)
+
+    data = await c.scatter([1, 2, 3], broadcast=True)
+    futures = [c.submit(sum, data) for _ in range(5)]
+    await wait(futures)
+    assert len(gl.state_updates) > 0

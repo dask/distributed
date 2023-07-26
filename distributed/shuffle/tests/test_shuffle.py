@@ -9,7 +9,6 @@ import shutil
 from collections import defaultdict
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AsyncExitStack
 from itertools import count
 from typing import Any
 from unittest import mock
@@ -24,8 +23,7 @@ from dask.distributed import Event, Nanny, Worker
 from dask.utils import stringify
 
 from distributed.client import Client
-from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.scheduler import Scheduler
+from distributed.scheduler import KilledWorker, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import serialize_table
 from distributed.shuffle._limiter import ResourceLimiter
@@ -49,6 +47,7 @@ from distributed.shuffle.tests.utils import (
 )
 from distributed.utils import Deadline
 from distributed.utils_test import (
+    async_poll_for,
     cluster,
     gen_cluster,
     gen_test,
@@ -72,7 +71,7 @@ async def check_worker_cleanup(
     worker: Worker,
     closed: bool = False,
     interval: float = 0.01,
-    timeout: int | None = None,
+    timeout: int | None = 5,
 ) -> None:
     """Assert that the worker has no shuffle state"""
     deadline = Deadline.after(timeout)
@@ -91,15 +90,17 @@ async def check_worker_cleanup(
 
 
 async def check_scheduler_cleanup(
-    scheduler: Scheduler, interval: float = 0.01, timeout: int | None = None
+    scheduler: Scheduler, interval: float = 0.01, timeout: int | None = 5
 ) -> None:
     """Assert that the scheduler has no shuffle state"""
     deadline = Deadline.after(timeout)
     plugin = scheduler.plugins["shuffle"]
     assert isinstance(plugin, ShuffleSchedulerPlugin)
-    while plugin.states and not deadline.expired:
+    while plugin._shuffles and not deadline.expired:
         await asyncio.sleep(interval)
-    assert not plugin.states
+    assert not plugin.active_shuffles
+    assert not plugin._shuffles, scheduler.tasks
+    assert not plugin._archived_by_stimulus
     assert not plugin.heartbeats
 
 
@@ -300,16 +301,96 @@ async def test_closed_worker_during_transfer(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    x, y = c.compute([df.x.size, out.x.size])
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(RuntimeError):
-        out = await c.compute(out)
+    x = await x
+    y = await y
+    assert x == y
 
     await c.close()
     await check_worker_cleanup(a)
     await check_worker_cleanup(b, closed=True)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out.x.size)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
+    await b.close()
+
+    with pytest.raises(KilledWorker):
+        await out
+
+    await c.close()
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b, closed=True)
+    await check_scheduler_cleanup(s)
+
+
+class BlockedGetOrCreateWorkerPlugin(ShuffleWorkerPlugin):
+    def setup(self, worker: Worker) -> None:
+        super().setup(worker)
+        self.in_get_or_create = asyncio.Event()
+        self.block_get_or_create = asyncio.Event()
+
+    async def _get_or_create_shuffle(self, *args, **kwargs):
+        self.in_get_or_create.set()
+        await self.block_get_or_create.wait()
+        return await super()._get_or_create_shuffle(*args, **kwargs)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_get_or_create_from_dangling_transfer(c, s, a, b):
+    await c.register_worker_plugin(BlockedGetOrCreateWorkerPlugin(), name="shuffle")
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out.x.size)
+
+    shuffle_extA = a.plugins["shuffle"]
+    shuffle_extB = b.plugins["shuffle"]
+    shuffle_extB.block_get_or_create.set()
+
+    await shuffle_extA.in_get_or_create.wait()
+    await b.close()
+    await async_poll_for(
+        lambda: not any(ws.processing for ws in s.workers.values()), timeout=5
+    )
+
+    with pytest.raises(KilledWorker):
+        await out
+
+    await async_poll_for(lambda: not s.plugins["shuffle"].active_shuffles, timeout=5)
+    assert a.state.tasks
+    shuffle_extA.block_get_or_create.set()
+    await async_poll_for(lambda: not a.state.tasks, timeout=10)
+
+    assert not s.plugins["shuffle"].active_shuffles
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b, closed=True)
+    await c.close()
     await check_scheduler_cleanup(s)
 
 
@@ -325,21 +406,21 @@ async def test_crashed_worker_during_transfer(c, s, a):
             freq="10 s",
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        x, y = c.compute([df.x.size, out.x.size])
         await wait_until_worker_has_tasks(
             "shuffle-transfer", killed_worker_address, 1, s
         )
         await n.process.process.kill()
 
-        with pytest.raises(RuntimeError):
-            out = await c.compute(out)
+        x = await x
+        y = await y
+        assert x == y
 
         await c.close()
         await check_worker_cleanup(a)
         await check_scheduler_cleanup(s)
 
 
-# TODO: Deduplicate instead of failing: distributed#7324
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_input_only_worker_during_transfer(c, s, a, b):
     def mock_get_worker_for_range_sharding(
@@ -358,12 +439,13 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
             freq="10 s",
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        x, y = c.compute([df.x.size, out.x.size])
         await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b, 0.001)
         await b.close()
 
-        with pytest.raises(RuntimeError):
-            out = await c.compute(out)
+        x = await x
+        y = await y
+        assert x == y
 
         await c.close()
         await check_worker_cleanup(a)
@@ -371,7 +453,6 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         await check_scheduler_cleanup(s)
 
 
-# TODO: Deduplicate instead of failing: distributed#7324
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], clean_kwargs={"processes": False})
 async def test_crashed_input_only_worker_during_transfer(c, s, a):
@@ -393,14 +474,15 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
                 freq="10 s",
             )
             out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-            out = out.persist()
+            x, y = c.compute([df.x.size, out.x.size])
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", n.worker_address, 1, s
             )
             await n.process.process.kill()
 
-            with pytest.raises(RuntimeError):
-                out = await c.compute(out)
+            x = await x
+            y = await y
+            assert x == y
 
             await c.close()
             await check_worker_cleanup(a)
@@ -457,7 +539,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    x, y = c.compute([df.x.size, out.x.size])
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
@@ -478,9 +560,72 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     await close_worker.close()
 
     alive_shuffle.block_inputs_done.set()
+    alive_shuffles = alive_worker.extensions["shuffle"].shuffles
 
-    with pytest.raises(RuntimeError):
-        out = await c.compute(out)
+    def shuffle_restarted():
+        try:
+            return alive_shuffles[shuffle_id].run_id > alive_shuffle.run_id
+        except KeyError:
+            return False
+
+    await async_poll_for(
+        shuffle_restarted,
+        timeout=5,
+    )
+    restarted_shuffle = alive_shuffles[shuffle_id]
+    restarted_shuffle.block_inputs_done.set()
+
+    x = await x
+    y = await y
+    assert x == y
+
+    await c.close()
+    await check_worker_cleanup(close_worker, closed=True)
+    await check_worker_cleanup(alive_worker)
+    await check_scheduler_cleanup(s)
+
+
+@mock.patch(
+    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    BlockedInputsDoneShuffle,
+)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out.x.size)
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s)
+    shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
+    shuffleB = get_shuffle_run_from_worker(shuffle_id, b)
+    await shuffleA.in_inputs_done.wait()
+    await shuffleB.in_inputs_done.wait()
+
+    ts = s.tasks[key]
+    processing_worker = a if ts.processing_on.address == a.address else b
+    if processing_worker == a:
+        close_worker, alive_worker = a, b
+        alive_shuffle = shuffleB
+
+    else:
+        close_worker, alive_worker = b, a
+        alive_shuffle = shuffleA
+    await close_worker.close()
+
+    with pytest.raises(KilledWorker):
+        await out
+
+    alive_shuffle.block_inputs_done.set()
 
     await c.close()
     await check_worker_cleanup(close_worker, closed=True)
@@ -501,7 +646,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    x, y = c.compute([df.x.size, out.x.size])
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
 
     key = barrier_key(shuffle_id)
@@ -524,9 +669,24 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     await close_worker.close()
 
     alive_shuffle.block_inputs_done.set()
+    alive_shuffles = alive_worker.extensions["shuffle"].shuffles
 
-    with pytest.raises(RuntimeError, match="shuffle_barrier failed"):
-        out = await c.compute(out)
+    def shuffle_restarted():
+        try:
+            return alive_shuffles[shuffle_id].run_id > alive_shuffle.run_id
+        except KeyError:
+            return False
+
+    await async_poll_for(
+        shuffle_restarted,
+        timeout=5,
+    )
+    restarted_shuffle = alive_shuffles[shuffle_id]
+    restarted_shuffle.block_inputs_done.set()
+
+    x = await x
+    y = await y
+    assert x == y
 
     await c.close()
     await check_worker_cleanup(close_worker, closed=True)
@@ -549,20 +709,34 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
             freq="10 s",
         )
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        x, y = c.compute([df.x.size, out.x.size])
         shuffle_id = await wait_until_new_shuffle_is_initialized(s)
         key = barrier_key(shuffle_id)
         # Ensure that barrier is not executed on the nanny
         s.set_restrictions({key: {a.address}})
         await wait_for_state(key, "processing", s, interval=0)
-
+        shuffles = a.extensions["shuffle"].shuffles
         shuffle = get_shuffle_run_from_worker(shuffle_id, a)
         await shuffle.in_inputs_done.wait()
         await n.process.process.kill()
         shuffle.block_inputs_done.set()
 
-        with pytest.raises(RuntimeError, match="shuffle"):
-            out = await c.compute(out)
+        def shuffle_restarted():
+            try:
+                return shuffles[shuffle_id].run_id > shuffle.run_id
+            except KeyError:
+                return False
+
+        await async_poll_for(
+            shuffle_restarted,
+            timeout=5,
+        )
+        restarted_shuffle = get_shuffle_run_from_worker(shuffle_id, a)
+        restarted_shuffle.block_inputs_done.set()
+
+        x = await x
+        y = await y
+        assert x == y
 
         await c.close()
         await check_worker_cleanup(a)
@@ -578,12 +752,39 @@ async def test_closed_worker_during_unpack(c, s, a, b):
         freq="10 s",
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    x, y = c.compute([df.x.size, out.x.size])
     await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
     await b.close()
 
-    with pytest.raises(RuntimeError):
-        out = await c.compute(out)
+    x = await x
+    y = await y
+    assert x == y
+
+    await c.close()
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b, closed=True)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out.x.size)
+    await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
+    await b.close()
+
+    with pytest.raises(KilledWorker):
+        await out
 
     await c.close()
     await check_worker_cleanup(a)
@@ -602,14 +803,15 @@ async def test_crashed_worker_during_unpack(c, s, a):
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
+        x = await c.compute(df.x.size)
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        y = c.compute(out.x.size)
+
         await wait_until_worker_has_tasks("shuffle-p2p", killed_worker_address, 1, s)
         await n.process.process.kill()
-        with pytest.raises(
-            RuntimeError,
-        ):
-            out = await c.compute(out)
+
+        y = await y
+        assert x == y
 
         await c.close()
         await check_worker_cleanup(a)
@@ -857,9 +1059,9 @@ async def test_clean_after_forgotten_early(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     del out
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -910,9 +1112,9 @@ async def test_repeat_shuffle_instance(c, s, a, b, wait_until_forgotten):
 
     await c.compute(out)
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
@@ -939,9 +1141,9 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
 
     await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -1056,7 +1258,7 @@ async def test_new_worker(c, s, a, b):
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     persisted = shuffled.persist()
-    while not s.plugins["shuffle"].states:
+    while not s.plugins["shuffle"].active_shuffles:
         await asyncio.sleep(0.001)
 
     async with Worker(s.address) as w:
@@ -1131,12 +1333,12 @@ async def test_delete_some_results(c, s, a, b):
     while not s.tasks or not any(ts.state == "memory" for ts in s.tasks.values()):
         await asyncio.sleep(0.01)
 
-    x = x.partitions[: x.npartitions // 2].persist()
+    x = x.partitions[: x.npartitions // 2]
+    x = await c.compute(x.size)
 
-    await c.compute(x.size)
-    del x
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
+    del x
     await check_scheduler_cleanup(s)
 
 
@@ -1515,9 +1717,9 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
     y = await c.compute(df.x.size)
     assert x == y
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 class BlockedBarrierShuffleWorkerPlugin(ShuffleWorkerPlugin):
@@ -1571,9 +1773,9 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
     y = await y
     assert x == y
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_worker_cleanup(b, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -1643,9 +1845,29 @@ async def test_shuffle_run_consistency(c, s, a):
     worker_plugin.block_barrier.set()
     await out
     del out
+    while s.tasks:
+        await asyncio.sleep(0)
+    worker_plugin.block_barrier.clear()
 
-    await check_worker_cleanup(a, timeout=2)
-    await check_scheduler_cleanup(s, timeout=2)
+    out = dd.shuffle.shuffle(df, "y", shuffle="p2p")
+    out = out.persist()
+    independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    assert shuffle_id != independent_shuffle_id
+
+    independent_shuffle_dict = scheduler_ext.get(
+        independent_shuffle_id, a.worker_address
+    )
+
+    # Check invariant that the new run ID is larger than the previous
+    # for independent shuffles
+    assert new_shuffle_dict["run_id"] < independent_shuffle_dict["run_id"]
+
+    worker_plugin.block_barrier.set()
+    await out
+    del out
+
+    await check_worker_cleanup(a)
+    await check_scheduler_cleanup(s)
 
 
 class BlockedShuffleAccessAndFailWorkerPlugin(ShuffleWorkerPlugin):
@@ -1748,94 +1970,6 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
-class BlockedRemoveWorkerSchedulerPlugin(SchedulerPlugin):
-    def __init__(self, scheduler: Scheduler, *args: Any, **kwargs: Any):
-        self.scheduler = scheduler
-        super().__init__(*args, **kwargs)
-        self.in_remove_worker = asyncio.Event()
-        self.block_remove_worker = asyncio.Event()
-        self.scheduler.add_plugin(self, name="blocking")
-
-    async def remove_worker(self, *args: Any, **kwargs: Any) -> None:
-        self.in_remove_worker.set()
-        await self.block_remove_worker.wait()
-
-
-class BlockedBarrierSchedulerPlugin(ShuffleSchedulerPlugin):
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
-        self.in_barrier = asyncio.Event()
-        self.block_barrier = asyncio.Event()
-
-    async def barrier(self, *args: Any, **kwargs: Any) -> None:
-        self.in_barrier.set()
-        await self.block_barrier.wait()
-        await super().barrier(*args, **kwargs)
-
-
-@gen_cluster(
-    client=True,
-    nthreads=[],
-    scheduler_kwargs={
-        "extensions": {
-            "blocking": BlockedRemoveWorkerSchedulerPlugin,
-            "shuffle": BlockedBarrierSchedulerPlugin,
-        }
-    },
-)
-async def test_closed_worker_returns_before_barrier(c, s):
-    async with AsyncExitStack() as stack:
-        workers = [await stack.enter_async_context(Worker(s.address)) for _ in range(2)]
-
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-01-10",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
-        shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-        key = barrier_key(shuffle_id)
-        await wait_for_state(key, "processing", s)
-        scheduler_plugin = s.plugins["shuffle"]
-        await scheduler_plugin.in_barrier.wait()
-
-        flushes = [
-            get_shuffle_run_from_worker(shuffle_id, w)._flush_comm() for w in workers
-        ]
-        await asyncio.gather(*flushes)
-
-        ts = s.tasks[key]
-        to_close = None
-        for worker in workers:
-            if ts.processing_on.address != worker.address:
-                to_close = worker
-                break
-        assert to_close
-        closed_port = to_close.port
-        await to_close.close()
-
-        blocking_plugin = s.plugins["blocking"]
-        assert blocking_plugin.in_remove_worker.is_set()
-
-        workers.append(
-            await stack.enter_async_context(Worker(s.address, port=closed_port))
-        )
-
-        scheduler_plugin.block_barrier.set()
-
-        with pytest.raises(
-            RuntimeError, match=f"shuffle_barrier failed .* {shuffle_id}"
-        ):
-            await c.compute(out.x.size)
-
-        blocking_plugin.block_remove_worker.set()
-        await c.close()
-        await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
-        await check_scheduler_cleanup(s)
-
-
 @gen_cluster(client=True)
 async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
     data = [
@@ -1849,6 +1983,20 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
     ddf = ddf.shuffle(on="id", shuffle="p2p", ignore_index=True)
     result = await c.compute(ddf)
     dd.assert_eq(result, df)
+
+    await c.close()
+    await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_set_index_p2p(c, s, *workers):
+    df = pd.DataFrame({"a": [1, 2, 3, 4, 5, 6, 7, 8], "b": 1})
+    ddf = dd.from_pandas(df, npartitions=3)
+    ddf = ddf.set_index("a", shuffle="p2p", divisions=(1, 3, 8))
+    assert ddf.npartitions == 2
+    result = await c.compute(ddf)
+    dd.assert_eq(result, df.set_index("a"))
 
     await c.close()
     await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
