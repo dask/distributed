@@ -19,7 +19,7 @@ from distributed import (
 )
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
-from distributed.utils_test import async_poll_for, gen_test, slowinc
+from distributed.utils_test import async_poll_for, gen_cluster, gen_test, slowinc
 
 
 def test_adaptive_local_cluster(loop):
@@ -196,6 +196,7 @@ async def test_adapt_quickly():
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
+        threads_per_worker=1,
     ) as cluster, Client(cluster, asynchronous=True) as client:
         adapt = cluster.adapt(interval="20 ms", wait_count=5, maximum=10)
         future = client.submit(slowinc, 1, delay=0.100)
@@ -484,3 +485,22 @@ async def test_adaptive_stopped():
         pc = instance.periodic_callback
 
     await async_poll_for(lambda: not pc.is_running(), timeout=5)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 5)],
+    config={"distributed.scheduler.default-task-durations": {"slowinc": 1000}},
+)
+async def test_respect_average_nthreads(c, s, w):
+    futures = c.map(slowinc, range(10))
+    while not s.tasks:
+        await asyncio.sleep(0.001)
+
+    assert s.adaptive_target() == 2
+
+    more_futures = c.map(slowinc, range(200))
+    while len(s.tasks) != 200:
+        await asyncio.sleep(0.001)
+
+    assert s.adaptive_target() == 40

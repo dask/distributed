@@ -8064,9 +8064,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO consider any user-specified default task durations for queued tasks
         queued_occupancy = len(self.queued) * self.UNKNOWN_TASK_DURATION
-        cpu = math.ceil(
-            (self.total_occupancy + queued_occupancy) / target_duration
-        )  # TODO: threads per worker
+        cpu = math.ceil((self.total_occupancy + queued_occupancy) / target_duration)
 
         # Avoid a few long tasks from asking for many cores
         tasks_ready = len(self.queued)
@@ -8077,6 +8075,11 @@ class Scheduler(SchedulerState, ServerNode):
                 break
         else:
             cpu = min(tasks_ready, cpu)
+
+        # Divide by average nthreads per worker
+        if self.workers:
+            nthreads = sum(ws.nthreads for ws in self.workers.values())
+            cpu = cpu / nthreads * len(self.workers)
 
         if (self.unrunnable or self.queued) and not self.workers:
             cpu = max(1, cpu)
