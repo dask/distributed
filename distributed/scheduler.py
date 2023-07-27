@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, over
 import psutil
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
+    concat,
     first,
     groupby,
     merge,
@@ -45,6 +46,7 @@ from tlz import (
     partition,
     pluck,
     second,
+    take,
     valmap,
 )
 from tornado.ioloop import IOLoop
@@ -8062,32 +8064,28 @@ class Scheduler(SchedulerState, ServerNode):
 
         # CPU
 
-        if len(self.queued) < 100:
+        if len(self.queued) + len(self.unrunnable) < 100:
             queued_occupancy = 0
-            for ts in self.queued:
+            for ts in concat([self.queued, self.unrunnable]):
                 if ts.prefix.duration_average == -1:
                     queued_occupancy += self.UNKNOWN_TASK_DURATION
                 else:
                     queued_occupancy += ts.prefix.duration_average
         else:
             queued_occupancy = 0
-            queued = random.sample(self.queued._heap, 100)
-            queued = [wr() for _, _, wr in queued]
-            for ts in random.sample(queued, 100):
-                if ts is None:
-                    continue
+            for ts in take(100, concat([self.queued, self.unrunnable])):
                 if ts.prefix.duration_average == -1:
                     queued_occupancy += self.UNKNOWN_TASK_DURATION
                 else:
                     queued_occupancy += ts.prefix.duration_average
-            queued_occupancy *= len(self.queued) / 100
+            queued_occupancy *= (len(self.queued) + len(self.unrunnable)) / 100
 
         cpu = math.ceil(
             (self.total_occupancy + queued_occupancy) / target_duration
         )  # TODO: threads per worker
 
         # Avoid a few long tasks from asking for many cores
-        tasks_ready = len(self.queued)
+        tasks_ready = len(self.queued) + len(self.unrunnable)
         for ws in self.workers.values():
             tasks_ready += len(ws.processing)
 
