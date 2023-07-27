@@ -84,7 +84,7 @@ forgotten
     dereferenced from the scheduler.
 
 .. note::
-    When the ``distributed.scheduler.worker_saturation`` config value is set to ``inf``
+    When the ``distributed.scheduler.worker_saturation`` config value is set to ``1.1``
     (default), there's no intermediate state between ``waiting`` / ``no-worker`` and
     ``processing``: as soon as a task has all of its dependencies in memory somewhere on
     the cluster, it is immediately assigned to a worker. This can lead to very long task
