@@ -8074,6 +8074,8 @@ class Scheduler(SchedulerState, ServerNode):
             queued = random.sample(self.queued._heap, 100)
             queued = [wr() for _, _, wr in queued]
             for ts in random.sample(queued, 100):
+                if ts is None:
+                    continue
                 if ts.prefix.duration_average == -1:
                     queued_occupancy += self.UNKNOWN_TASK_DURATION
                 else:
