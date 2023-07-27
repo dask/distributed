@@ -1755,6 +1755,12 @@ async def test_close_worker(s, a, b):
 
     await asyncio.sleep(0.2)
     assert len(s.workers) == 1
+    events = s.get_events(a.address)
+    assert any(
+        "reason" in msg
+        for _, msg in events
+        if "closing-worker" in msg.get("action", "")
+    )
 
 
 @pytest.mark.slow
@@ -4477,3 +4483,16 @@ async def test_scatter_creates_ts(c, s, a, b):
         await a.close()
         assert await x2 == 2
     assert s.tasks["x"].run_spec is not None
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.scheduler.default-task-durations": {"slowinc": 1000}},
+)
+async def test_scale_up_large_tasks(c, s):
+    futures = c.map(slowinc, range(10))
+    while not s.tasks:
+        await asyncio.sleep(0.001)
+
+    assert s.adaptive_target() == 10
