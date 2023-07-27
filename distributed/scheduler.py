@@ -8064,9 +8064,20 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO consider any user-specified default task durations for queued tasks
         queued_occupancy = len(self.queued) * self.UNKNOWN_TASK_DURATION
+
+
+        # if all of our workers have the same number of threads,
+        # assume that's how many future workers will have
+        # (if not, assume 1 thread, which is silly, but consistent with prior behavior)
+        nthreads_set = {w.nthreads for w in self.workers.values()}
+        if len(nthreads_set) == 1:
+            [nthreads] = nthreads_set
+        else:
+            nthreads = 1
+
         cpu = math.ceil(
-            (self.total_occupancy + queued_occupancy) / target_duration
-        )  # TODO: threads per worker
+            ((self.total_occupancy + queued_occupancy) / target_duration) / nthreads
+        )
 
         # Avoid a few long tasks from asking for many cores
         tasks_ready = len(self.queued)
