@@ -8063,21 +8063,15 @@ class Scheduler(SchedulerState, ServerNode):
         target_duration = parse_timedelta(target_duration)
 
         # CPU
+        queued = take(100, concat([self.queued, self.unrunnable]))
+        queued_occupancy = 0
+        for ts in queued:
+            if ts.prefix.duration_average == -1:
+                queued_occupancy += self.UNKNOWN_TASK_DURATION
+            else:
+                queued_occupancy += ts.prefix.duration_average
 
-        if len(self.queued) + len(self.unrunnable) < 100:
-            queued_occupancy = 0
-            for ts in concat([self.queued, self.unrunnable]):
-                if ts.prefix.duration_average == -1:
-                    queued_occupancy += self.UNKNOWN_TASK_DURATION
-                else:
-                    queued_occupancy += ts.prefix.duration_average
-        else:
-            queued_occupancy = 0
-            for ts in take(100, concat([self.queued, self.unrunnable])):
-                if ts.prefix.duration_average == -1:
-                    queued_occupancy += self.UNKNOWN_TASK_DURATION
-                else:
-                    queued_occupancy += ts.prefix.duration_average
+        if len(self.queued) + len(self.unrunnable) > 100:
             queued_occupancy *= (len(self.queued) + len(self.unrunnable)) / 100
 
         cpu = math.ceil(
