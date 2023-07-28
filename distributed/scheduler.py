@@ -4746,17 +4746,19 @@ class Scheduler(SchedulerState, ServerNode):
     def materialize_graph(hlg: HighLevelGraph) -> tuple[dict, dict, dict]:
         from distributed.worker import dumps_task
 
-        layer_annotations_by_type = {}
         dsk = dask.utils.ensure_dict(hlg)
 
+        layer_annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
         for layer in hlg.layers.values():
             if layer.annotations:
                 annot = layer.annotations
                 for annot_type, value in annot.items():
-                    layer_annotations_by_type[annot_type] = {
-                        stringify(k): (value(k) if callable(value) else value)
-                        for k in layer
-                    }
+                    layer_annotations_by_type[annot_type].update(
+                        {
+                            stringify(k): (value(k) if callable(value) else value)
+                            for k in layer
+                        }
+                    )
 
         dependencies, _ = get_deps(dsk)
 
@@ -4797,7 +4799,7 @@ class Scheduler(SchedulerState, ServerNode):
             if dsk[k] is k:
                 del dsk[k]
         dsk = valmap(dumps_task, dsk)
-        return dsk, dependencies, layer_annotations_by_type
+        return dsk, dependencies, dict(layer_annotations_by_type)
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened spots on worker threadpools
