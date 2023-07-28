@@ -1093,7 +1093,6 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
         b.kill_proceed.set()
 
 
-
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_restart_not_all_workers_return(c, s, a, b):
     with pytest.raises(TimeoutError, match="Waited for 2 worker"):
