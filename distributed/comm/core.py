@@ -384,6 +384,7 @@ async def connect(
     comm.handshake_options = comm.handshake_configuration(
         comm.local_info, comm.remote_info
     )
+    logger.debug("Connection to %s established", loc)
     return comm
 
 
