@@ -4373,8 +4373,8 @@ class Scheduler(SchedulerState, ServerNode):
         (
             dsk,
             dependencies,
-            layer_annotations_by_type,
-        ) = self.materialize_graph(graph)
+            annotations_by_type,
+        ) = self.materialize_graph(graph, annotations)
 
         if internal_priority is None:
             # Removing all non-local keys before calling order()
@@ -4417,6 +4417,8 @@ class Scheduler(SchedulerState, ServerNode):
         if code:  # add new code blocks
             computation.code.add(code)
         if annotations:
+            # FIXME: This is kind of inconsistent since it only includes global
+            # annotations.
             computation.annotations.update(annotations)
 
         runnable, touched_tasks, new_tasks = self._generate_taskstates(
@@ -4428,8 +4430,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
-            annotations=annotations,
-            layer_annotations_by_type=layer_annotations_by_type,
+            annotations_by_type=annotations_by_type,
         )
 
         self._set_priorities(
@@ -4560,8 +4561,7 @@ class Scheduler(SchedulerState, ServerNode):
     def _apply_annotations(
         self,
         tasks: Iterable[TaskState],
-        annotations: dict,
-        layer_annotations_by_type: dict[str, dict],
+        annotations_by_type: dict[str, dict],
     ) -> set[str]:
         """Apply the provided annotations to the provided `TaskState` objects.
 
@@ -4581,14 +4581,14 @@ class Scheduler(SchedulerState, ServerNode):
         keys_with_annotations
         """
         keys_with_annotations: set[str] = set()
-        if not annotations and not layer_annotations_by_type:
+        if not annotations_by_type:
             return keys_with_annotations
 
         for ts in tasks:
             key = ts.key
 
-            ts_annotations = annotations.copy()
-            for annot, key_value in layer_annotations_by_type.items():
+            ts_annotations = {}
+            for annot, key_value in annotations_by_type.items():
                 if value := key_value.get(key):
                     ts_annotations[annot] = value
             if not ts_annotations:
@@ -4731,22 +4731,28 @@ class Scheduler(SchedulerState, ServerNode):
         return done
 
     @staticmethod
-    def materialize_graph(hlg: HighLevelGraph) -> tuple[dict, dict, dict]:
+    def materialize_graph(
+        hlg: HighLevelGraph, global_annotations: dict
+    ) -> tuple[dict, dict, dict]:
         from distributed.worker import dumps_task
 
         dsk = dask.utils.ensure_dict(hlg)
 
-        layer_annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
         for layer in hlg.layers.values():
             if layer.annotations:
                 annot = layer.annotations
                 for annot_type, value in annot.items():
-                    layer_annotations_by_type[annot_type].update(
+                    annotations_by_type[annot_type].update(
                         {
                             stringify(k): (value(k) if callable(value) else value)
                             for k in layer
                         }
                     )
+        for type_, value in global_annotations.items():
+            annotations_by_type[type_].update(
+                {stringify(k): (value(k) if callable(value) else value) for k in dsk}
+            )
 
         dependencies, _ = get_deps(dsk)
 
@@ -4787,7 +4793,7 @@ class Scheduler(SchedulerState, ServerNode):
             if dsk[k] is k:
                 del dsk[k]
         dsk = valmap(dumps_task, dsk)
-        return dsk, dependencies, dict(layer_annotations_by_type)
+        return dsk, dependencies, dict(annotations_by_type)
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened spots on worker threadpools
