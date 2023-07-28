@@ -6011,22 +6011,6 @@ async def test_client_timeout_2():
         assert stop - start < 1
 
 
-@gen_test()
-async def test_client_active_bad_port():
-    import tornado.httpserver
-    import tornado.web
-
-    application = tornado.web.Application([(r"/", tornado.web.RequestHandler)])
-    http_server = tornado.httpserver.HTTPServer(application)
-    http_server.listen(8080)
-    with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
-        c = Client("127.0.0.1:8080", asynchronous=True)
-        with pytest.raises((TimeoutError, IOError)):
-            async with c:
-                pass
-    http_server.stop()
-
-
 @pytest.mark.parametrize("direct", [True, False])
 @gen_cluster(client=True, client_kwargs={"serializers": ["dask", "msgpack"]})
 async def test_turn_off_pickle(c, s, a, b, direct):

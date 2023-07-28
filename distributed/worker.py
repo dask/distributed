@@ -1536,6 +1536,8 @@ class Worker(BaseWorker, ServerNode):
         for pc in self.periodic_callbacks.values():
             pc.stop()
 
+        self.stop()
+
         # Cancel async instructions
         await BaseWorker.close(self, timeout=timeout)
 
@@ -1638,7 +1640,6 @@ class Worker(BaseWorker, ServerNode):
                         executor=executor, wait=executor_wait
                     )  # Just run it directly
 
-        self.stop()
         await self.rpc.close()
 
         self.status = Status.closed
