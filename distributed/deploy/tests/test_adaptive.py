@@ -315,19 +315,26 @@ def test_target_duration(target_duration):
                 adapt = cluster.adapt(
                     interval="20ms", minimum=2, target_duration=target_duration
                 )
+                # FIXME: LocalCluster is starting workers with CPU_COUNT threads
+                # each
+                # The default target duration is set to 1s
+                max_scaleup = 5
+                n_tasks = target_duration * dask.system.CPU_COUNT * max_scaleup
 
                 async with Client(cluster, asynchronous=True) as client:
                     await client.wait_for_workers(2)
-                    futures = client.map(slowinc, range(100), delay=0.3)
+                    futures = client.map(slowinc, range(n_tasks), delay=0.3)
                     await wait(futures)
-                # FIXME: LocalCluster is starting workers with CPU_COUNT threads
-                # each
-                max_expected = math.ceil(100 / target_duration / dask.system.CPU_COUNT)
-                _max_scaleup = max(msg[1].get("n", -1) for msg in adapt.log)
-                _min_scaleup = min(msg[1].get("n", math.inf) for msg in adapt.log)
-                assert _max_scaleup <= max_expected
-                assert _max_scaleup > 2
-                assert _min_scaleup >= 2
+                scaleup_recommendations = [
+                    msg[1]["n"] for msg in adapt.log if msg[1].get("status") == "up"
+                ]
+
+                assert (
+                    2
+                    <= min(scaleup_recommendations)
+                    < max(scaleup_recommendations)
+                    <= max_scaleup
+                )
 
     _test()
 
