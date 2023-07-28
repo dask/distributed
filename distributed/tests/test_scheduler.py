@@ -4483,16 +4483,3 @@ async def test_scatter_creates_ts(c, s, a, b):
         await a.close()
         assert await x2 == 2
     assert s.tasks["x"].run_spec is not None
-
-
-@gen_cluster(
-    client=True,
-    nthreads=[],
-    config={"distributed.scheduler.default-task-durations": {"slowinc": 1000}},
-)
-async def test_scale_up_large_tasks(c, s):
-    futures = c.map(slowinc, range(10))
-    while not s.tasks:
-        await asyncio.sleep(0.001)
-
-    assert s.adaptive_target() == 10
