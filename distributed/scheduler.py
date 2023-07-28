@@ -4382,9 +4382,16 @@ class Scheduler(SchedulerState, ServerNode):
             self.log_event(
                 ["all", client], {"action": "update_graph", "count": len(dsk)}
             )
-        self._pop_known_tasks(dsk, dependencies)
+        self._pop_known_tasks(
+            known_tasks=self.tasks, dsk=dsk, dependencies=dependencies
+        )
 
-        if lost_keys := self._pop_lost_tasks(dsk, dependencies, requested_keys):
+        if lost_keys := self._pop_lost_tasks(
+            dsk=dsk,
+            known_tasks=self.tasks,
+            dependencies=dependencies,
+            keys=requested_keys,
+        ):
             self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
             self.client_releases_keys(
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
@@ -4678,8 +4685,9 @@ class Scheduler(SchedulerState, ServerNode):
                     isinstance(el, (int, float)) for el in ts.priority
                 )
 
+    @staticmethod
     def _pop_lost_tasks(
-        self, dsk: dict, dependencies: dict, keys: set[str]
+        dsk: dict, keys: set[str], known_tasks: dict[str, TaskState], dependencies: dict
     ) -> set[str]:
         n = 0
         out = set()
@@ -4687,7 +4695,7 @@ class Scheduler(SchedulerState, ServerNode):
             n = len(dsk)
             for k, deps in list(dependencies.items()):
                 if any(
-                    dep not in self.tasks and dep not in dsk for dep in deps
+                    dep not in known_tasks and dep not in dsk for dep in deps
                 ):  # bad key
                     out.add(k)
                     logger.info("User asked for computation on lost data, %s", k)
@@ -4697,12 +4705,15 @@ class Scheduler(SchedulerState, ServerNode):
                         keys.remove(k)
         return out
 
-    def _pop_known_tasks(self, dsk: dict, dependencies: dict) -> set[str]:
+    @staticmethod
+    def _pop_known_tasks(
+        known_tasks: dict[str, TaskState], dsk: dict, dependencies: dict
+    ) -> set[str]:
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
         for k, v in dependencies.items():
-            if v and k in self.tasks:
-                ts = self.tasks[k]
+            if v and k in known_tasks:
+                ts = known_tasks[k]
                 if ts.state in ("memory", "erred"):
                     already_in_memory.add(k)
 
@@ -4715,16 +4726,16 @@ class Scheduler(SchedulerState, ServerNode):
                 try:
                     deps = dependencies[key]
                 except KeyError:
-                    deps = self.tasks[key].dependencies
+                    deps = known_tasks[key].dependencies
                 for dep in deps:
                     if dep in dependents:
                         child_deps = dependents[dep]
-                    elif dep in self.tasks:
-                        child_deps = self.tasks[dep].dependencies
+                    elif dep in known_tasks:
+                        child_deps = known_tasks[dep].dependencies
                     else:
                         child_deps = set()
                     if all(d in done for d in child_deps):
-                        if dep in self.tasks and dep not in done:
+                        if dep in known_tasks and dep not in done:
                             done.add(dep)
                             stack.append(dep)
         for anc in done:
