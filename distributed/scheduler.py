@@ -4376,6 +4376,16 @@ class Scheduler(SchedulerState, ServerNode):
             layer_annotations_by_type,
         ) = self.materialize_graph(graph)
 
+        if internal_priority is None:
+            # Removing all non-local keys before calling order()
+            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
+            stripped_deps = {
+                k: v.intersection(dsk_keys)
+                for k, v in dependencies.items()
+                if k in dsk_keys
+            }
+            internal_priority = dask.order.order(dsk, dependencies=stripped_deps)
+
         requested_keys = set(keys)
         del keys
         if len(dsk) > 1:
@@ -4428,9 +4438,7 @@ class Scheduler(SchedulerState, ServerNode):
             user_priority=user_priority,
             fifo_timeout=fifo_timeout,
             start=start,
-            dsk=dsk,
             tasks=runnable,
-            dependencies=dependencies,
         )
 
         self.client_desires_keys(keys=requested_keys, client=client)
@@ -4620,14 +4628,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _set_priorities(
         self,
-        internal_priority: dict[str, int] | None,
+        internal_priority: dict[str, int],
         submitting_task: str | None,
         user_priority: int | dict[str, int],
         fifo_timeout: int | float | str,
         start: float,
-        dsk: dict,
         tasks: list[TaskState],
-        dependencies: dict,
     ) -> None:
         fifo_timeout = parse_timedelta(fifo_timeout)
         if submitting_task:  # sub-tasks get better priority than parent tasks
@@ -4644,26 +4650,15 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             generation = self.generation
 
-        if internal_priority is None:
-            # Removing all non-local keys before calling order()
-            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
-            stripped_deps = {
-                k: v.intersection(dsk_keys)
-                for k, v in dependencies.items()
-                if k in dsk_keys
-            }
-            internal_priority = dask.order.order(dsk, dependencies=stripped_deps)
-
         for ts in tasks:
-            # Note: Under which circumstances would a task not have a
-            # prioritiy assigned by now? Are these scattered tasks
-            # exclusively or something else?
-            task_user_prio = user_priority
             if isinstance(user_priority, dict):
                 task_user_prio = user_priority.get(ts.key, 0)
-            annotated_prio = ts.annotations.get("priority", {})
-            if not annotated_prio:
-                annotated_prio = task_user_prio
+            else:
+                task_user_prio = user_priority
+            # Annotations that are already assigned to the TaskState object
+            # originate from a Layer annotation which takes precedence over the
+            # global annotation.
+            annotated_prio = ts.annotations.get("priority", task_user_prio)
 
             if not ts.priority and ts.key in internal_priority:
                 ts.priority = (
