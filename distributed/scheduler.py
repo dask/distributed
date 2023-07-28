@@ -8074,9 +8074,7 @@ class Scheduler(SchedulerState, ServerNode):
         if len(self.queued) + len(self.unrunnable) > 100:
             queued_occupancy *= (len(self.queued) + len(self.unrunnable)) / 100
 
-        cpu = math.ceil(
-            (self.total_occupancy + queued_occupancy) / target_duration
-        )  # TODO: threads per worker
+        cpu = math.ceil((self.total_occupancy + queued_occupancy) / target_duration)
 
         # Avoid a few long tasks from asking for many cores
         tasks_ready = len(self.queued) + len(self.unrunnable)
@@ -8087,6 +8085,11 @@ class Scheduler(SchedulerState, ServerNode):
                 break
         else:
             cpu = min(tasks_ready, cpu)
+
+        # Divide by average nthreads per worker
+        if self.workers:
+            nthreads = sum(ws.nthreads for ws in self.workers.values())
+            cpu = math.ceil(cpu / nthreads * len(self.workers))
 
         if (self.unrunnable or self.queued) and not self.workers:
             cpu = max(1, cpu)
