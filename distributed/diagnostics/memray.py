@@ -7,7 +7,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 from toolz.itertoolz import partition
 
@@ -27,7 +27,8 @@ class DaskMemray:
         self,
         directory: str = "memray-profiles",
         workers: int | None | list[str] = None,
-        report_args: Sequence[str] = ("flamegraph", "--temporal", "--leaks"),
+        report_args: Sequence[str]
+        | Literal[False] = ("flamegraph", "--temporal", "--leaks"),
         fetch_reports_parallel: bool | int = True,
         **memray_kwargs: Any,
     ) -> None:
@@ -42,11 +43,17 @@ class DaskMemray:
             If None, all workers will be used.
             If list[str], the workers with the given addresses will be used.
         report_args : tuple[str]
-            Particularly for native_traces=True, the reports have to be generated
-            on the same host using the same python interpeter as the profile was generated. Otherwise, native traces will yield unusable results. Therefore, we're generating the reports on the workers and download them afterwards.
-            You can modify the report generation by providing additional arguments and we will generate the reports as::
+            Particularly for native_traces=True, the reports have to be
+            generated on the same host using the same python interpeter as the
+            profile was generated. Otherwise, native traces will yield unusable
+            results. Therefore, we're generating the reports on the workers and
+            download them afterwards. You can modify the report generation by
+            providing additional arguments and we will generate the reports as::
 
                 memray *report_args -f <filename> -o <filename>.html
+
+            If ther raw data should be fetched instad of the report, set this to
+            False.
 
         fetch_reports_parallel : bool | int
             Fetching results is sometimes slow and it's sometimes not desired to
@@ -134,12 +141,16 @@ def _run_memray(dask_worker: Worker, filename: str, **kwargs: Any) -> bool:
 
 
 def _fetch_profile(
-    dask_worker: Worker, filename: str, report_args: Sequence[str]
+    dask_worker: Worker, filename: str, report_args: Sequence[str] | Literal[False]
 ) -> bytes:
     if not hasattr(dask_worker, "_memray"):
         return b""
     dask_worker._memray.close()
     del dask_worker._memray
+
+    if not report_args:
+        with open(filename, "rb") as fd:
+            return fd.read()
 
     report_filename = filename + ".html"
     if not report_args[0] == "memray":
