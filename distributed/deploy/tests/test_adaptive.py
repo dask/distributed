@@ -496,6 +496,29 @@ async def test_adaptive_stopped():
     await async_poll_for(lambda: not pc.is_running(), timeout=5)
 
 
+@pytest.mark.parametrize("saturation", [1, float("inf")])
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={
+        "distributed.scheduler.default-task-durations": {"slowinc": 1000},
+    },
+)
+async def test_scale_up_large_tasks(c, s, saturation):
+    s.WORKER_SATURATION = saturation
+    futures = c.map(slowinc, range(10))
+    while not s.tasks:
+        await asyncio.sleep(0.001)
+
+    assert s.adaptive_target() == 10
+
+    more_futures = c.map(slowinc, range(200))
+    while len(s.tasks) != 200:
+        await asyncio.sleep(0.001)
+
+    assert s.adaptive_target() == 200
+
+
 @gen_cluster(
     client=True,
     nthreads=[("", 5)],
