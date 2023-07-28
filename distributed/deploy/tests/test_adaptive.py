@@ -17,7 +17,6 @@ from distributed import (
     Worker,
     wait,
 )
-from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils_test import async_poll_for, gen_cluster, gen_test, slowinc
 
@@ -295,32 +294,42 @@ def test_basic_no_loop(cleanup):
         assert loop is None or not loop.asyncio_loop.is_running()
 
 
-@pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
-@pytest.mark.xfail(condition=MACOS or WINDOWS, reason="extremely flaky")
-@gen_test()
-async def test_target_duration():
-    with dask.config.set(
-        {
-            "distributed.scheduler.default-task-durations": {"slowinc": 1},
-            # adaptive target for queued tasks doesn't yet consider default or learned task durations
-            "distributed.scheduler.worker-saturation": float("inf"),
-        }
-    ):
-        async with LocalCluster(
-            n_workers=0,
-            asynchronous=True,
-            processes=False,
-            silence_logs=False,
-            dashboard_address=":0",
-        ) as cluster:
-            adapt = cluster.adapt(interval="20ms", minimum=2, target_duration="5s")
-            async with Client(cluster, asynchronous=True) as client:
-                await client.wait_for_workers(2)
-                futures = client.map(slowinc, range(100), delay=0.3)
-                await wait(futures)
+@pytest.mark.parametrize("target_duration", [5, 1])
+def test_target_duration(target_duration):
+    @gen_test()
+    async def _test():
+        with dask.config.set(
+            {
+                "distributed.scheduler.default-task-durations": {"slowinc": 1},
+                # adaptive target for queued tasks doesn't yet consider default or learned task durations
+                "distributed.scheduler.worker-saturation": float("inf"),
+            }
+        ):
+            async with LocalCluster(
+                n_workers=0,
+                asynchronous=True,
+                processes=False,
+                silence_logs=False,
+                dashboard_address=":0",
+            ) as cluster:
+                adapt = cluster.adapt(
+                    interval="20ms", minimum=2, target_duration=target_duration
+                )
 
-            assert adapt.log[0][1] == {"status": "up", "n": 2}
-            assert adapt.log[1][1] == {"status": "up", "n": 20}
+                async with Client(cluster, asynchronous=True) as client:
+                    await client.wait_for_workers(2)
+                    futures = client.map(slowinc, range(100), delay=0.3)
+                    await wait(futures)
+                # FIXME: LocalCluster is starting workers with CPU_COUNT threads
+                # each
+                max_expected = math.ceil(100 / target_duration / dask.system.CPU_COUNT)
+                _max_scaleup = max(msg[1].get("n", -1) for msg in adapt.log)
+                _min_scaleup = min(msg[1].get("n", math.inf) for msg in adapt.log)
+                assert _max_scaleup <= max_expected
+                assert _max_scaleup > 2
+                assert _min_scaleup >= 2
+
+    _test()
 
 
 @gen_test()

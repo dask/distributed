@@ -8079,7 +8079,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Divide by average nthreads per worker
         if self.workers:
             nthreads = sum(ws.nthreads for ws in self.workers.values())
-            cpu = cpu / nthreads * len(self.workers)
+            cpu = math.ceil(cpu / nthreads * len(self.workers))
 
         if (self.unrunnable or self.queued) and not self.workers:
             cpu = max(1, cpu)
