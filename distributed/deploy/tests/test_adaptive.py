@@ -325,16 +325,11 @@ def test_target_duration(target_duration):
                     await client.wait_for_workers(2)
                     futures = client.map(slowinc, range(n_tasks), delay=0.3)
                     await wait(futures)
-                scaleup_recommendations = [
+                scaleup_recs = [
                     msg[1]["n"] for msg in adapt.log if msg[1].get("status") == "up"
                 ]
 
-                assert (
-                    2
-                    <= min(scaleup_recommendations)
-                    < max(scaleup_recommendations)
-                    <= max_scaleup
-                )
+                assert 2 <= min(scaleup_recs) < max(scaleup_recs) <= max_scaleup
 
     _test()
 
