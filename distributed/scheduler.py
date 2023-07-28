@@ -4368,12 +4368,12 @@ class Scheduler(SchedulerState, ServerNode):
         if isinstance(annotations, ToPickle):  # type: ignore
             # FIXME: what the heck?
             annotations = annotations.data  # type: ignore
+
         stimulus_id = stimulus_id or f"update-graph-{time()}"
         (
             dsk,
             dependencies,
-            layer_annotations,
-            pre_stringified_keys,
+            layer_annotations_by_type,
         ) = self.materialize_graph(graph)
 
         requested_keys = set(keys)
@@ -4421,8 +4421,7 @@ class Scheduler(SchedulerState, ServerNode):
         resolved_annotations = self._parse_and_apply_annotations(
             tasks=new_tasks,
             annotations=annotations,
-            layer_annotations=layer_annotations,
-            pre_stringified_keys=pre_stringified_keys,
+            layer_annotations_by_type=layer_annotations_by_type,
         )
 
         self._set_priorities(
@@ -4549,8 +4548,7 @@ class Scheduler(SchedulerState, ServerNode):
         self,
         tasks: Iterable[TaskState],
         annotations: dict,
-        layer_annotations: dict[str, dict],
-        pre_stringified_keys: dict[Hashable, str],
+        layer_annotations_by_type: dict[str, dict],
     ) -> dict[str, dict[str, Any]]:
         """Apply the provided annotations to the provided `TaskState` objects.
 
@@ -4563,8 +4561,6 @@ class Scheduler(SchedulerState, ServerNode):
         tasks : Iterable[TaskState]
             _description_
         annotations : dict
-            _description_
-        layer_annotations : dict[str, dict]
             _description_
 
         Returns
@@ -4581,17 +4577,20 @@ class Scheduler(SchedulerState, ServerNode):
                 }
         """
         resolved_annotations: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        if not annotations and not layer_annotations_by_type:
+            return resolved_annotations
+
         for ts in tasks:
             key = ts.key
-            # This could be a typed dict
-            if not annotations and key not in layer_annotations:
-                continue
+
             out = annotations.copy()
-            out.update(layer_annotations.get(key, {}))
+            for annot, key_value in layer_annotations_by_type.items():
+                if value := key_value.get(key):
+                    out[annot] = value
+            if not out:
+                continue
             for annot, value in out.items():
                 # Pop the key since names don't always match attributes
-                if callable(value):
-                    value = value(pre_stringified_keys[key])
                 out[annot] = value
                 resolved_annotations[annot][key] = value
 
@@ -4744,16 +4743,20 @@ class Scheduler(SchedulerState, ServerNode):
         return done
 
     @staticmethod
-    def materialize_graph(hlg: HighLevelGraph) -> tuple[dict, dict, dict, dict]:
+    def materialize_graph(hlg: HighLevelGraph) -> tuple[dict, dict, dict]:
         from distributed.worker import dumps_task
 
-        key_annotations = {}
+        layer_annotations_by_type = {}
         dsk = dask.utils.ensure_dict(hlg)
 
         for layer in hlg.layers.values():
             if layer.annotations:
                 annot = layer.annotations
-                key_annotations.update({stringify(k): annot for k in layer})
+                for annot_type, value in annot.items():
+                    layer_annotations_by_type[annot_type] = {
+                        stringify(k): (value(k) if callable(value) else value)
+                        for k in layer
+                    }
 
         dependencies, _ = get_deps(dsk)
 
@@ -4772,13 +4775,10 @@ class Scheduler(SchedulerState, ServerNode):
         new_dsk = {}
         # Annotation callables are evaluated on the non-stringified version of
         # the keys
-        pre_stringified_keys = {}
         exclusive = set(hlg)
         for k, v in dsk.items():
             new_k = stringify(k)
-            pre_stringified_keys[new_k] = k
             new_dsk[new_k] = stringify(v, exclusive=exclusive)
-        assert len(new_dsk) == len(pre_stringified_keys)
         dsk = new_dsk
         dependencies = {
             stringify(k): {stringify(dep) for dep in deps}
@@ -4797,7 +4797,7 @@ class Scheduler(SchedulerState, ServerNode):
             if dsk[k] is k:
                 del dsk[k]
         dsk = valmap(dumps_task, dsk)
-        return dsk, dependencies, key_annotations, pre_stringified_keys
+        return dsk, dependencies, layer_annotations_by_type
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened spots on worker threadpools
