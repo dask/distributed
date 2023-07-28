@@ -4415,10 +4415,8 @@ class Scheduler(SchedulerState, ServerNode):
             dependencies=dependencies,
             computation=computation,
         )
-        # FIXME: These "resolved_annotations" are a big duplication and are only
-        # required to satisfy the current plugin API. This should be
-        # reconsidered.
-        resolved_annotations = self._parse_and_apply_annotations(
+
+        keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
             annotations=annotations,
             layer_annotations_by_type=layer_annotations_by_type,
@@ -4465,6 +4463,12 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts.key] = "erred"
                     break
 
+        annotations_for_plugin: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        for key in keys_with_annotations:
+            ts = self.tasks[key]
+            for annot, value in ts.annotations.items():
+                annotations_for_plugin[annot][key] = value
+
         spans_ext: SpansSchedulerExtension | None = self.extensions.get("spans")
         if spans_ext:
             # new_tasks does not necessarily contain all runnable tasks;
@@ -4473,10 +4477,11 @@ class Scheduler(SchedulerState, ServerNode):
             # and only later gained a run_spec.
             span_annotations = spans_ext.observe_tasks(runnable, code=code)
             # In case of TaskGroup collision, spans may have changed
+            # FIXME: Is this used anywhere besides tests?
             if span_annotations:
-                resolved_annotations["span"] = span_annotations
+                annotations_for_plugin["span"] = span_annotations
             else:
-                resolved_annotations.pop("span", None)
+                annotations_for_plugin.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
@@ -4486,7 +4491,7 @@ class Scheduler(SchedulerState, ServerNode):
                     tasks=[ts.key for ts in touched_tasks],
                     keys=requested_keys,
                     dependencies=dependencies,
-                    annotations=resolved_annotations,
+                    annotations=dict(annotations_for_plugin),
                     priority=priority,
                 )
             except Exception as e:
@@ -4544,12 +4549,12 @@ class Scheduler(SchedulerState, ServerNode):
             )
         return runnable, touched_tasks, new_tasks
 
-    def _parse_and_apply_annotations(
+    def _apply_annotations(
         self,
         tasks: Iterable[TaskState],
         annotations: dict,
         layer_annotations_by_type: dict[str, dict],
-    ) -> dict[str, dict[str, Any]]:
+    ) -> set[str]:
         """Apply the provided annotations to the provided `TaskState` objects.
 
         The raw annotations will be stored in the `annotations` attribute.
@@ -4565,35 +4570,24 @@ class Scheduler(SchedulerState, ServerNode):
 
         Returns
         -------
-        resolved_annotations: dict
-            A mapping of all resolved annotations in the format::
-
-                {
-                    "annotation": {
-                        "key": value,
-                        ...
-                    },
-                    ...
-                }
+        keys_with_annotations
         """
-        resolved_annotations: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        keys_with_annotations: set[str] = set()
         if not annotations and not layer_annotations_by_type:
-            return resolved_annotations
+            return keys_with_annotations
 
         for ts in tasks:
             key = ts.key
 
-            out = annotations.copy()
+            ts_annotations = annotations.copy()
             for annot, key_value in layer_annotations_by_type.items():
                 if value := key_value.get(key):
-                    out[annot] = value
-            if not out:
+                    ts_annotations[annot] = value
+            if not ts_annotations:
                 continue
-            for annot, value in out.items():
-                # Pop the key since names don't always match attributes
-                out[annot] = value
-                resolved_annotations[annot][key] = value
-
+            keys_with_annotations.add(key)
+            ts.annotations = ts_annotations
+            for annot, value in ts_annotations.items():
                 if annot in ("restrictions", "workers"):
                     if not isinstance(value, (list, tuple, set)):
                         value = [value]
@@ -4622,8 +4616,7 @@ class Scheduler(SchedulerState, ServerNode):
                 elif annot == "retries":
                     assert isinstance(value, int)
                     ts.retries = value
-            ts.annotations = out
-        return dict(resolved_annotations)
+        return keys_with_annotations
 
     def _set_priorities(
         self,
