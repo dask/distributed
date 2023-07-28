@@ -1063,30 +1063,34 @@ class SlowKillNanny(Nanny):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
-    f = c.submit(div, 1, 0)
-    fr = c.submit(inc, 1, resources={"FOO": 1})
-    await wait(f)
-    assert s.erred_tasks
-    assert s.computations
-    assert s.unrunnable
-    assert s.tasks
+    try:
+        f = c.submit(div, 1, 0)
+        fr = c.submit(inc, 1, resources={"FOO": 1})
+        await wait(f)
+        assert s.erred_tasks
+        assert s.computations
+        assert s.unrunnable
+        assert s.tasks
 
-    with pytest.raises(
-        TimeoutError, match=r"2/2 nanny worker\(s\) did not shut down within 1s"
-    ):
-        await c.restart(timeout="1s")
-    assert a.kill_called.is_set()
-    assert b.kill_called.is_set()
+        with pytest.raises(
+            TimeoutError, match=r"2/2 nanny worker\(s\) did not shut down within 1s"
+        ):
+            await c.restart(timeout="1s")
+        assert a.kill_called.is_set()
+        assert b.kill_called.is_set()
 
-    assert not s.workers
-    assert not s.erred_tasks
-    assert not s.computations
-    assert not s.unrunnable
-    assert not s.tasks
+        assert not s.workers
+        assert not s.erred_tasks
+        assert not s.computations
+        assert not s.unrunnable
+        assert not s.tasks
 
-    assert not c.futures
-    assert f.status == "cancelled"
-    assert fr.status == "cancelled"
+        assert not c.futures
+        assert f.status == "cancelled"
+        assert fr.status == "cancelled"
+    finally:
+        a.kill_proceed.set()
+        b.kill_proceed.set()
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)

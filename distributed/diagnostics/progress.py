@@ -104,7 +104,9 @@ class Progress(SchedulerPlugin):
         logger.debug("Set up Progress keys")
 
         for k in errors:
-            self.transition(k, None, "erred", exception=True)
+            self.transition(
+                k, None, "erred", stimulus_id="progress-setup", exception=True
+            )
 
     def transition(self, key, start, finish, *args, **kwargs):
         if key in self.keys and start == "processing" and finish == "memory":
@@ -240,7 +242,9 @@ class MultiProgress(Progress):
                 self.keys[k] = set()
 
         for k in errors:
-            self.transition(k, None, "erred", exception=True)
+            self.transition(
+                k, None, "erred", stimulus_id="multiprogress-setup", exception=True
+            )
         logger.debug("Set up Progress keys")
 
     def transition(self, key, start, finish, *args, **kwargs):

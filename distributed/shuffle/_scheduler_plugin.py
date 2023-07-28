@@ -6,7 +6,7 @@ import itertools
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from itertools import product
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(eq=False)
 class ShuffleState(abc.ABC):
     _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
 
@@ -42,6 +42,7 @@ class ShuffleState(abc.ABC):
     run_id: int
     output_workers: set[str]
     participating_workers: set[str]
+    _archived_by: str | None = field(default=None, init=False)
 
     @abc.abstractmethod
     def to_msg(self) -> dict[str, Any]:
@@ -50,8 +51,11 @@ class ShuffleState(abc.ABC):
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 
+    def __hash__(self) -> int:
+        return hash(self.run_id)
 
-@dataclass
+
+@dataclass(eq=False)
 class DataFrameShuffleState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
     worker_for: dict[int, str]
@@ -68,7 +72,7 @@ class DataFrameShuffleState(ShuffleState):
         }
 
 
-@dataclass
+@dataclass(eq=False)
 class ArrayRechunkState(ShuffleState):
     type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
     worker_for: dict[NDIndex, str]
@@ -90,19 +94,18 @@ class ArrayRechunkState(ShuffleState):
 class ShuffleSchedulerPlugin(SchedulerPlugin):
     """
     Shuffle plugin for the scheduler
-
     This coordinates the individual worker plugins to ensure correctness
     and collects heartbeat messages for the dashboard.
-
     See Also
     --------
     ShuffleWorkerPlugin
     """
 
     scheduler: Scheduler
-    states: dict[ShuffleId, ShuffleState]
+    active_shuffles: dict[ShuffleId, ShuffleState]
     heartbeats: defaultdict[ShuffleId, dict]
-    erred_shuffles: dict[ShuffleId, Exception]
+    _shuffles: defaultdict[ShuffleId, set[ShuffleState]]
+    _archived_by_stimulus: defaultdict[str, set[ShuffleState]]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -115,9 +118,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             }
         )
         self.heartbeats = defaultdict(lambda: defaultdict(dict))
-        self.states = {}
-        self.erred_shuffles = {}
+        self.active_shuffles = {}
         self.scheduler.add_plugin(self, name="shuffle")
+        self._shuffles = defaultdict(set)
+        self._archived_by_stimulus = defaultdict(set)
 
     async def start(self, scheduler: Scheduler) -> None:
         worker_plugin = ShuffleWorkerPlugin()
@@ -126,18 +130,19 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         )
 
     def shuffle_ids(self) -> set[ShuffleId]:
-        return set(self.states)
+        return set(self.active_shuffles)
 
     async def barrier(self, id: ShuffleId, run_id: int) -> None:
-        shuffle = self.states[id]
+        shuffle = self.active_shuffles[id]
         assert shuffle.run_id == run_id, f"{run_id=} does not match {shuffle}"
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
         await self.scheduler.broadcast(
-            msg=msg, workers=list(shuffle.participating_workers)
+            msg=msg,
+            workers=list(shuffle.participating_workers),
         )
 
     def restrict_task(self, id: ShuffleId, run_id: int, key: str, worker: str) -> dict:
-        shuffle = self.states[id]
+        shuffle = self.active_shuffles[id]
         if shuffle.run_id > run_id:
             return {
                 "status": "error",
@@ -158,15 +163,19 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 self.heartbeats[shuffle_id][ws.address].update(d)
 
     def get(self, id: ShuffleId, worker: str) -> dict[str, Any]:
-        if exception := self.erred_shuffles.get(id):
-            return {"status": "error", "message": str(exception)}
-        state = self.states[id]
+        if worker not in self.scheduler.workers:
+            # This should never happen
+            raise RuntimeError(
+                f"Scheduler is unaware of this worker {worker!r}"
+            )  # pragma: nocover
+        state = self.active_shuffles[id]
         state.participating_workers.add(worker)
         return state.to_msg()
 
     def get_or_create(
         self,
         id: ShuffleId,
+        key: str,
         type: str,
         worker: str,
         spec: dict[str, Any],
@@ -178,6 +187,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             # known by its name. If the name has been mangled, we cannot guarantee
             # that the shuffle works as intended and should fail instead.
             self._raise_if_barrier_unknown(id)
+            self._raise_if_task_not_processing(key)
 
             state: ShuffleState
             if type == ShuffleType.DATAFRAME:
@@ -186,7 +196,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 state = self._create_array_rechunk_state(id, spec)
             else:  # pragma: no cover
                 raise TypeError(type)
-            self.states[id] = state
+            self.active_shuffles[id] = state
+            self._shuffles[id].add(state)
             state.participating_workers.add(worker)
             return state.to_msg()
 
@@ -200,6 +211,11 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 "task fusion during graph generation. Please let us know that you ran "
                 "into this by leaving a comment at distributed#7816."
             )
+
+    def _raise_if_task_not_processing(self, key: str) -> None:
+        task = self.scheduler.tasks[key]
+        if task.state != "processing":
+            raise RuntimeError(f"Expected {task} to be processing, is {task.state}.")
 
     def _create_dataframe_shuffle_state(
         self, id: ShuffleId, spec: dict[str, Any]
@@ -309,32 +325,67 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         original_restrictions = ts.annotations.pop("shuffle_original_restrictions")
         self.scheduler.set_restrictions({ts.key: original_restrictions})
 
-    def remove_worker(self, scheduler: Scheduler, worker: str) -> None:
-        from time import time
-
-        stimulus_id = f"shuffle-failed-worker-left-{time()}"
-
+    def _restart_recommendations(self, id: ShuffleId) -> Recs:
+        barrier_task = self.scheduler.tasks[barrier_key(id)]
         recs: Recs = {}
-        for shuffle_id, shuffle in self.states.items():
+
+        for dt in barrier_task.dependents:
+            if dt.state == "erred":
+                return {}
+            recs.update({dt.key: "released"})
+
+        if barrier_task.state == "erred":
+            # This should never happen, a dependent of the barrier should already
+            # be `erred`
+            raise RuntimeError(
+                f"Expected dependents of {barrier_task=} to be 'erred' if "
+                "the barrier is."
+            )  # pragma: no cover
+        recs.update({barrier_task.key: "released"})
+
+        for dt in barrier_task.dependencies:
+            if dt.state == "erred":
+                # This should never happen, a dependent of the barrier should already
+                # be `erred`
+                raise RuntimeError(
+                    f"Expected barrier and its dependents to be "
+                    f"'erred' if the barrier's dependency {dt} is."
+                )  # pragma: no cover
+            recs.update({dt.key: "released"})
+        return recs
+
+    def _restart_shuffle(
+        self, id: ShuffleId, scheduler: Scheduler, *, stimulus_id: str
+    ) -> None:
+        recs = self._restart_recommendations(id)
+        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+        self.scheduler.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+
+    def remove_worker(
+        self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
+    ) -> None:
+        """Restart all active shuffles when a participating worker leaves the cluster.
+
+        .. note::
+            Due to the order of operations in :meth:`~Scheduler.remove_worker`, the
+            shuffle may have already been archived by
+            :meth:`~ShuffleSchedulerPlugin.transition`. In this case, the
+            ``stimulus_id`` is used as a transaction identifier and all archived shuffles
+            with a matching `stimulus_id` are restarted.
+        """
+
+        # If processing the transactions causes a task to get released, this
+        # removes the shuffle from self.active_shuffles. Therefore, we must iterate
+        # over a copy.
+        for shuffle_id, shuffle in self.active_shuffles.copy().items():
             if worker not in shuffle.participating_workers:
                 continue
             exception = RuntimeError(f"Worker {worker} left during active {shuffle}")
-            self.erred_shuffles[shuffle_id] = exception
             self._fail_on_workers(shuffle, str(exception))
+            self._clean_on_scheduler(shuffle_id, stimulus_id)
 
-            barrier_task = self.scheduler.tasks[barrier_key(shuffle_id)]
-            if barrier_task.state == "memory":
-                for dt in barrier_task.dependents:
-                    if worker not in dt.worker_restrictions:
-                        continue
-                    self._unset_restriction(dt)
-                    recs.update({dt.key: "waiting"})
-                # TODO: Do we need to handle other states?
-
-        # If processing the transactions causes a task to get released, this
-        # removes the shuffle from self.states. Therefore, we must process them
-        # outside of the loop.
-        self.scheduler.transitions(recs, stimulus_id=stimulus_id)
+        for shuffle in self._archived_by_stimulus.get(stimulus_id, set()):
+            self._restart_shuffle(shuffle.id, scheduler, stimulus_id=stimulus_id)
 
     def transition(
         self,
@@ -342,19 +393,28 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         start: TaskStateState,
         finish: TaskStateState,
         *args: Any,
+        stimulus_id: str,
         **kwargs: Any,
     ) -> None:
+        """Clean up scheduler and worker state once a shuffle becomes inactive."""
         if finish not in ("released", "forgotten"):
             return
         if not key.startswith("shuffle-barrier-"):
             return
         shuffle_id = id_from_key(key)
-        try:
-            shuffle = self.states[shuffle_id]
-        except KeyError:
-            return
-        self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
-        self._clean_on_scheduler(shuffle_id)
+
+        if shuffle := self.active_shuffles.get(shuffle_id):
+            self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
+            self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
+
+        if finish == "forgotten":
+            shuffles = self._shuffles.pop(shuffle_id, set())
+            for shuffle in shuffles:
+                if shuffle._archived_by:
+                    archived = self._archived_by_stimulus[shuffle._archived_by]
+                    archived.remove(shuffle)
+                    if not archived:
+                        del self._archived_by_stimulus[shuffle._archived_by]
 
     def _fail_on_workers(self, shuffle: ShuffleState, message: str) -> None:
         worker_msgs = {
@@ -370,9 +430,12 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         }
         self.scheduler.send_all({}, worker_msgs)
 
-    def _clean_on_scheduler(self, id: ShuffleId) -> None:
-        del self.states[id]
-        self.erred_shuffles.pop(id, None)
+    def _clean_on_scheduler(self, id: ShuffleId, stimulus_id: str | None) -> None:
+        shuffle = self.active_shuffles.pop(id)
+        if not shuffle._archived_by and stimulus_id:
+            shuffle._archived_by = stimulus_id
+            self._archived_by_stimulus[stimulus_id].add(shuffle)
+
         with contextlib.suppress(KeyError):
             del self.heartbeats[id]
 
@@ -381,9 +444,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._unset_restriction(dt)
 
     def restart(self, scheduler: Scheduler) -> None:
-        self.states.clear()
+        self.active_shuffles.clear()
         self.heartbeats.clear()
-        self.erred_shuffles.clear()
+        self._shuffles.clear()
+        self._archived_by_stimulus.clear()
 
 
 def get_worker_for_range_sharding(
