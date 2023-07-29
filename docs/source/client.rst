@@ -69,7 +69,7 @@ the machine where the futures are stored and run on the result once it has compl
 .. code-block:: python
 
    >>> y = client.submit(inc, x)      # Submit on x, a Future
-   >>> total = client.submit(sum, L)  # Map on L, a list of Futures
+   >>> total = client.submit(sum, L)  # Submit on L, a list of Futures
    >>> y.result()
    12
 
