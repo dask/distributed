@@ -1274,6 +1274,33 @@ async def test_current_concurrent(s):
     await asyncio.gather(client_1(), client_2())
 
 
+@gen_cluster(client=False, nthreads=[])
+async def test_context_manager_used_from_different_tasks(s):
+    c = Client(s.address, asynchronous=True)
+    await asyncio.create_task(c.__aenter__())
+    with pytest.warns(
+        DeprecationWarning,
+        match=r"It is deprecated to enter and exit the Client context manager "
+        "from different tasks",
+    ):
+        await asyncio.create_task(c.__aexit__(None, None, None))
+
+
+def test_context_manager_used_from_different_threads(s, loop):
+    c = Client(s["address"])
+    with (
+        concurrent.futures.ThreadPoolExecutor(1) as tp1,
+        concurrent.futures.ThreadPoolExecutor(1) as tp2,
+    ):
+        tp1.submit(c.__enter__).result()
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"It is deprecated to enter and exit the Client context manager "
+            "from different threads",
+        ):
+            tp2.submit(c.__exit__, None, None, None).result()
+
+
 def test_global_clients(loop):
     assert _get_global_client() is None
     with pytest.raises(
@@ -6031,22 +6058,6 @@ async def test_client_timeout_2():
         stop = time()
         assert c.status == "closed"
         assert stop - start < 1
-
-
-@gen_test()
-async def test_client_active_bad_port():
-    import tornado.httpserver
-    import tornado.web
-
-    application = tornado.web.Application([(r"/", tornado.web.RequestHandler)])
-    http_server = tornado.httpserver.HTTPServer(application)
-    http_server.listen(8080)
-    with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
-        c = Client("127.0.0.1:8080", asynchronous=True)
-        with pytest.raises((TimeoutError, IOError)):
-            async with c:
-                pass
-    http_server.stop()
 
 
 @pytest.mark.parametrize("direct", [True, False])

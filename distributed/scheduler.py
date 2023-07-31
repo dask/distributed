@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, over
 import psutil
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
+    concat,
     first,
     groupby,
     merge,
@@ -45,6 +46,7 @@ from tlz import (
     partition,
     pluck,
     second,
+    take,
     valmap,
 )
 from tornado.ioloop import IOLoop
@@ -8096,15 +8098,21 @@ class Scheduler(SchedulerState, ServerNode):
         target_duration = parse_timedelta(target_duration)
 
         # CPU
+        queued = take(100, concat([self.queued, self.unrunnable]))
+        queued_occupancy = 0
+        for ts in queued:
+            if ts.prefix.duration_average == -1:
+                queued_occupancy += self.UNKNOWN_TASK_DURATION
+            else:
+                queued_occupancy += ts.prefix.duration_average
 
-        # TODO consider any user-specified default task durations for queued tasks
-        queued_occupancy = len(self.queued) * self.UNKNOWN_TASK_DURATION
-        cpu = math.ceil(
-            (self.total_occupancy + queued_occupancy) / target_duration
-        )  # TODO: threads per worker
+        if len(self.queued) + len(self.unrunnable) > 100:
+            queued_occupancy *= (len(self.queued) + len(self.unrunnable)) / 100
+
+        cpu = math.ceil((self.total_occupancy + queued_occupancy) / target_duration)
 
         # Avoid a few long tasks from asking for many cores
-        tasks_ready = len(self.queued)
+        tasks_ready = len(self.queued) + len(self.unrunnable)
         for ws in self.workers.values():
             tasks_ready += len(ws.processing)
 
@@ -8112,6 +8120,11 @@ class Scheduler(SchedulerState, ServerNode):
                 break
         else:
             cpu = min(tasks_ready, cpu)
+
+        # Divide by average nthreads per worker
+        if self.workers:
+            nthreads = sum(ws.nthreads for ws in self.workers.values())
+            cpu = math.ceil(cpu / nthreads * len(self.workers))
 
         if (self.unrunnable or self.queued) and not self.workers:
             cpu = max(1, cpu)

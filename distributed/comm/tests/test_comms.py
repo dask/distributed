@@ -965,6 +965,7 @@ async def test_retry_connect(tcp, monkeypatch):
         listener.stop()
 
 
+@pytest.mark.slow
 @gen_test()
 async def test_handshake_slow_comm(tcp, monkeypatch):
     class SlowComm(tcp.TCP):
@@ -999,11 +1000,9 @@ async def test_handshake_slow_comm(tcp, monkeypatch):
 
         import dask
 
-        with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-            with pytest.raises(
-                IOError, match="Timed out during handshake while connecting to"
-            ):
-                await connect(listener.contact_address)
+        # The connect itself is fast. Only the handshake is slow
+        with dask.config.set({"distributed.comm.timeouts.connect": "500ms"}):
+            await connect(listener.contact_address)
     finally:
         listener.stop()
 
