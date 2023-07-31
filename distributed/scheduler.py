@@ -4009,10 +4009,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         self.status = Status.closing
-        if reason:
-            logger.info("Scheduler closing due to %s...", reason)
-        else:
-            logger.info("Scheduler closing...")
+        logger.info("Scheduler closing due to %s...", reason or "unknown reason")
         setproctitle("dask scheduler [closing]")
 
         for preload in self.preloads:
