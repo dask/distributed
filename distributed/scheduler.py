@@ -8079,9 +8079,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Avoid a few long tasks from asking for many cores
         for ws in self.workers.values():
-            tasks_ready += len(ws.processing)
             if tasks_ready > cpu:
                 break
+            tasks_ready += len(ws.processing)
         else:
             cpu = min(tasks_ready, cpu)
 
