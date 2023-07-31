@@ -875,7 +875,7 @@ def gen_cluster(
     active_rpc_timeout: float = 1,
     config: dict[str, Any] | None = None,
     clean_kwargs: dict[str, Any] | None = None,
-    allow_unclosed: bool = False,
+    allow_unclosed: bool = True,
     cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
