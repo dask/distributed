@@ -40,6 +40,9 @@ def main(args: list, spec: str, spec_file: str) -> None:
             await asyncio.gather(*(w.finished() for w in servers.values()))
         except KeyboardInterrupt:
             await asyncio.gather(*(w.close() for w in servers.values()))
+        for w in servers.values():
+            if hasattr(w, "exit_code"):
+                sys.exit(w.exit_code)
 
     asyncio_run(run(), loop_factory=get_loop_factory())
 

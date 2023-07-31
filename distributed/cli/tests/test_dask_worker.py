@@ -676,13 +676,12 @@ async def test_signal_handling(c, s, nanny, sig):
         stderr=subprocess.STDOUT,
     ) as worker:
         await c.wait_for_workers(1)
-
         worker.send_signal(sig)
         stdout, stderr = worker.communicate()
         logs = stdout.decode().lower()
-        assert stderr is None
+        assert stderr is None, stderr
         assert sig.name.lower() in logs
-        assert worker.returncode == 0
+        assert worker.returncode == 0, logs
         if nanny == "--nanny":
             assert "closing nanny" in logs
             assert "stopping worker" in logs

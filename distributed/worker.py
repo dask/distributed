@@ -1301,7 +1301,9 @@ class Worker(BaseWorker, ServerNode):
         try:
             await self.handle_stream(comm)
         finally:
-            await self.close(reason="worker-handle-scheduler-connection-broken")
+            await self.close(
+                reason="worker-handle-scheduler-connection-broken", exit_code=30
+            )
 
     def keys(self) -> list[str]:
         return list(self.data)
@@ -1473,6 +1475,7 @@ class Worker(BaseWorker, ServerNode):
         executor_wait: bool = True,
         nanny: bool = True,
         reason: str = "worker-close",
+        exit_code: int = 0,
     ) -> str | None:
         """Close the worker
 
@@ -1561,7 +1564,7 @@ class Worker(BaseWorker, ServerNode):
 
         if nanny and self.nanny:
             with self.rpc(self.nanny) as r:
-                await r.close_gracefully(reason=reason)
+                await r.close_gracefully(reason=reason, exit_code=exit_code)
 
         setproctitle("dask worker [closing]")
 
