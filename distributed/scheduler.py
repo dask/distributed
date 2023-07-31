@@ -3982,7 +3982,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None, reason=None):
+    async def close(self, fast=None, close_workers=None, reason=""):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
