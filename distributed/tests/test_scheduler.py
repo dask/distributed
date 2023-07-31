@@ -751,7 +751,7 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
     )
 
 
-@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
+@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "500 ms"})
 async def test_clear_events_worker_removal(s, a, b):
     assert a.address in s.events
     assert a.address in s.workers
