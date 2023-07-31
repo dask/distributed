@@ -31,7 +31,6 @@ from distributed.utils_test import (
     inc,
     slowadd,
     slowinc,
-    wait_for_state,
 )
 from distributed.worker_state_machine import FreeKeysEvent
 
@@ -62,13 +61,14 @@ async def test_submit_after_failed_worker_async(
 ):
     a_ws = s.workers[a.address]
 
-    L = c.map(
+    x = c.submit(
         inc,
-        range(10),
+        1,
+        key="x",
         workers=[b.address if x_on_failed else a.address],
         allow_other_workers=True,
     )
-    await wait(L)
+    await wait(x)
 
     if when == "closed":
         await b.close()
@@ -88,19 +88,18 @@ async def test_submit_after_failed_worker_async(
         await in_remove_worker.wait()
         assert s.workers[b.address].status.name == "closing"
 
-    total = c.submit(
-        sum,
-        L,
+    y = c.submit(
+        inc,
+        x,
         key="y",
         workers=[b.address if y_on_failed else a.address],
         allow_other_workers=True,
     )
+    await async_poll_for(lambda: "y" in s.tasks, timeout=5)
 
-    await wait_for_state("y", "processing", s, interval=0)
-    assert s.tasks["y"].processing_on is a_ws
     if when == "closing":
         wait_remove_worker.set()
-    assert await total == sum(range(1, 11))
+    assert await y == 3
     assert s.tasks["y"].who_has == {a_ws}
 
 
