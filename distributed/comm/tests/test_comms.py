@@ -27,6 +27,7 @@ from distributed.comm import (
 from distributed.comm.registry import backends, get_backend
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
+from distributed.core import Comm, ConnectionPool, Server
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6, get_mp_context, wait_for
@@ -1369,3 +1370,40 @@ def test_register_backend_entrypoint(tmp_path):
     with get_mp_context().Pool(1) as pool:
         assert pool.apply(_get_backend_on_path, args=(tmp_path,)) == 1
     pool.join()
+
+
+@gen_test()
+async def test_comms_stresstest():
+    def pingpong():
+        return "pong"
+
+    assert not Comm._instances
+    server = await Server({"ping": pingpong})
+    try:
+        await server.listen()
+
+        async def do_harm():
+            # Deliberately use a new instance every time to stress test the
+            # server
+            pool = await ConnectionPool()
+            try:
+                await pool(server.address).ping()
+            finally:
+                await pool.close()
+
+        kill_the_server = [asyncio.create_task(do_harm()) for _ in range(1000)]
+        await do_harm()
+        while len(Comm._instances) < 20:
+            await asyncio.sleep(0.1)
+
+        # Now stop the server and see what happens
+        server.stop()
+        try:
+            await asyncio.gather(*kill_the_server)
+        except Exception:
+            pass
+    finally:
+        await server.close()
+
+    assert not [c for c in Comm._instances if not c.closed()]
+    assert not Comm._instances, len(Comm._instances)
