@@ -725,6 +725,22 @@ async def test_retire_workers_empty(s):
     await s.retire_workers(workers=[])
 
 
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
+async def test_retire_workers_concurrently(c, s, *workers):
+    futs = c.map(inc, range(100))
+    await wait(futs)
+    before = s.transition_counter
+    await asyncio.gather(
+        *(
+            s.replicate(keys=[fut.key for fut in futs], n=2),
+            s.rebalance(),
+            *(s.retire_workers(workers=[w.address]) for w in workers[::2]),
+        )
+    )
+    await c.gather(futs)
+    assert s.transition_counter == before
+
+
 @gen_cluster()
 async def test_server_listens_to_other_ops(s, a, b):
     async with rpc(s.address) as r:
