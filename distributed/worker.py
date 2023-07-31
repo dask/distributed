@@ -1522,6 +1522,12 @@ class Worker(BaseWorker, ServerNode):
         disable_gc_diagnosis()
 
         try:
+            self.log_event(self.address, {"action": "closing-worker", "reason": reason})
+        except Exception:
+            # This can happen when the Server is not up yet
+            logger.exception("Failed to log closing event")
+
+        try:
             logger.info("Stopping worker at %s. Reason: %s", self.address, reason)
         except ValueError:  # address not available if already closed
             logger.info("Stopping worker. Reason: %s", reason)
