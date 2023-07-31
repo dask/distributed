@@ -8071,18 +8071,17 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 queued_occupancy += ts.prefix.duration_average
 
-        if len(self.queued) + len(self.unrunnable) > 100:
-            queued_occupancy *= (len(self.queued) + len(self.unrunnable)) / 100
+        tasks_ready = len(self.queued) + len(self.unrunnable)
+        if tasks_ready > 100:
+            queued_occupancy *= tasks_ready / 100
 
         cpu = math.ceil((self.total_occupancy + queued_occupancy) / target_duration)
 
         # Avoid a few long tasks from asking for many cores
-        tasks_ready = len(self.queued) + len(self.unrunnable)
         for ws in self.workers.values():
-            tasks_ready += len(ws.processing)
-
             if tasks_ready > cpu:
                 break
+            tasks_ready += len(ws.processing)
         else:
             cpu = min(tasks_ready, cpu)
 
