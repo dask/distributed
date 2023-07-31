@@ -4739,6 +4739,10 @@ class Scheduler(SchedulerState, ServerNode):
         dsk = dask.utils.ensure_dict(hlg)
 
         annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        for type_, value in global_annotations.items():
+            annotations_by_type[type_].update(
+                {stringify(k): (value(k) if callable(value) else value) for k in dsk}
+            )
         for layer in hlg.layers.values():
             if layer.annotations:
                 annot = layer.annotations
@@ -4749,10 +4753,6 @@ class Scheduler(SchedulerState, ServerNode):
                             for k in layer
                         }
                     )
-        for type_, value in global_annotations.items():
-            annotations_by_type[type_].update(
-                {stringify(k): (value(k) if callable(value) else value) for k in dsk}
-            )
 
         dependencies, _ = get_deps(dsk)
 
