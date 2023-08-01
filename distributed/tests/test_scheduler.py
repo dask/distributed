@@ -751,7 +751,7 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
     )
 
 
-@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
+@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "500 ms"})
 async def test_clear_events_worker_removal(s, a, b):
     assert a.address in s.events
     assert a.address in s.workers
@@ -1755,6 +1755,12 @@ async def test_close_worker(s, a, b):
 
     await asyncio.sleep(0.2)
     assert len(s.workers) == 1
+    events = s.get_events(a.address)
+    assert any(
+        "reason" in msg
+        for _, msg in events
+        if "closing-worker" in msg.get("action", "")
+    )
 
 
 @pytest.mark.slow
