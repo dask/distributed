@@ -113,7 +113,7 @@ from distributed.utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
-from distributed.worker import get_client, get_worker, secede
+from distributed.worker import _deserialize, get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
@@ -555,10 +555,10 @@ class FutureState:
         "type",
         "exception",
         "traceback",
-        "key",
         "erred_on",
         "func_args",
         "func_kwargs",
+        "failing_key",
     )
 
     def __init__(self):
@@ -604,7 +604,7 @@ class FutureState:
         self.status = "pending"
         self._get_event().clear()
 
-    def set_error(self, exception, traceback, erred_on, key, run_spec):
+    def set_error(self, exception, traceback, **kwargs):
         """Sets the error data
 
         Sets the status to 'error'. Sets the exception, the traceback,
@@ -618,23 +618,23 @@ class FutureState:
             The traceback
         erred_on: set
             Workers where it errored
-        key: Hashable
-            Task key
+        failing_key: Hashable
+            Key of the task that originally caused the error
         run_spec: dict[str, Any]
             dict with args, kwargs, function
         """
         _, exception, traceback = clean_exception(exception, traceback)
 
-        self.key = key
-        self.erred_on = erred_on
+        self.failing_key = kwargs.get("failing_key")
+        self.erred_on = kwargs.get("erred_on")
         self.status = "error"
         self.exception = exception
         self.traceback = traceback
+        run_spec = kwargs.get("run_spec")
         if run_spec:
-            func_args = run_spec.get("args")
-            func_kwargs = run_spec.get("kwargs")
-            self.func_args = pickle.loads(func_args) if func_args else ()
-            self.func_kwargs = pickle.loads(func_kwargs) if func_kwargs else {}
+            _, self.func_args, self.func_kwargs = _deserialize(
+                args=run_spec.get("args"), kwargs=run_spec.get("kwargs")
+            )
         else:
             self.func_args = ()
             self.func_kwargs = {}
@@ -648,13 +648,13 @@ class FutureState:
         func_name = frame.tb_frame.f_code.co_name if frame else "<unknown>"
         return textwrap.dedent(
             f"""\
-Compute Failed
-Key:       {self.key}
-Function:  {func_name}
-args:      {self.func_args}
-kwargs:    {self.func_kwargs}
-Exception: {self.exception!r}
-Worker:    {self.erred_on}"""
+            Compute Failed
+            Key:       {self.failing_key}
+            Function:  {func_name}
+            args:      {self.func_args}
+            kwargs:    {self.func_kwargs}
+            Exception: {self.exception!r}
+            Worker:    {self.erred_on}"""
         )
 
     def done(self):
@@ -1696,12 +1696,10 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.retry()
 
-    def _handle_task_erred(
-        self, key=None, exception=None, traceback=None, erred_on=None, run_spec=None
-    ):
+    def _handle_task_erred(self, key=None, exception=None, traceback=None, **kwargs):
         state = self.futures.get(key)
         if state is not None:
-            state.set_error(exception, traceback, erred_on, key, run_spec)
+            state.set_error(exception, traceback, **kwargs)
 
     def _handle_restart(self):
         logger.info("Receive restart signal from scheduler")
@@ -3326,9 +3324,6 @@ class Client(SyncMethodMixin):
                     should_rejoin = False
             try:
                 results = self.gather(packed, asynchronous=asynchronous, direct=direct)
-            except Exception:
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                raise exc_value.with_traceback(exc_traceback)
             finally:
                 for f in futures.values():
                     f.release()

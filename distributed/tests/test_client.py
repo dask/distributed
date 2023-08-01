@@ -413,6 +413,14 @@ async def test_Future_exception(c, s, a, b):
             _ = await x.result()
     assert "Worker: " in logger.getvalue()
 
+    with captured_logger("distributed.client") as logger:
+        x = c.submit(div, 1, 0, key="x")
+        y = c.submit(inc, x, key="y")
+        with pytest.raises(ZeroDivisionError):
+            _ = await y.result()
+    assert "Worker: " in logger.getvalue()
+    assert re.search("Key:\\s+x", logger.getvalue()) is not None
+
     x = c.submit(div, 1, 1)
     result = await x.exception()
     assert result is None
@@ -429,6 +437,14 @@ def test_Future_exception_sync(c):
         with pytest.raises(ZeroDivisionError):
             _ = x.result()
     assert "Worker: " in logger.getvalue()
+
+    with captured_logger("distributed.client") as logger:
+        x = c.submit(div, 1, 0, key="x")
+        y = c.submit(inc, x, key="y")
+        with pytest.raises(ZeroDivisionError):
+            _ = y.result()
+    assert "Worker: " in logger.getvalue()
+    assert re.search("Key:\\s+x", logger.getvalue()) is not None
 
     x = c.submit(div, 1, 1)
     assert x.exception() is None
