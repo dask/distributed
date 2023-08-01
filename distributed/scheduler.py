@@ -4589,7 +4589,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             ts_annotations = {}
             for annot, key_value in annotations_by_type.items():
-                if value := key_value.get(key):
+                if (value := key_value.get(key)) is not None:
                     ts_annotations[annot] = value
             if not ts_annotations:
                 continue
