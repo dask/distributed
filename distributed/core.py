@@ -1006,10 +1006,7 @@ class Server:
                             break
                         handler = self.stream_handlers[op]
                         if iscoroutinefunction(handler):
-                            self._ongoing_background_tasks.call_soon(
-                                handler, **merge(extra, msg)
-                            )
-                            await asyncio.sleep(0)
+                            await handler(**merge(extra, msg))
                         else:
                             handler(**merge(extra, msg))
                     else:
