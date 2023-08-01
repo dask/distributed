@@ -1548,7 +1548,17 @@ class Client(SyncMethodMixin):
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         if self._previous_as_current:
-            _current_client.reset(self._previous_as_current)
+            try:
+                _current_client.reset(self._previous_as_current)
+            except ValueError as e:
+                if not e.args[0].endswith(" was created in a different Context"):
+                    raise  # pragma: nocover
+                warnings.warn(
+                    "It is deprecated to enter and exit the Client context "
+                    "manager from different tasks",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         await self._close(
             # if we're handling an exception, we assume that it's more
             # important to deliver that exception than shutdown gracefully.
@@ -1558,7 +1568,17 @@ class Client(SyncMethodMixin):
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._previous_as_current:
-            _current_client.reset(self._previous_as_current)
+            try:
+                _current_client.reset(self._previous_as_current)
+            except ValueError as e:
+                if not e.args[0].endswith(" was created in a different Context"):
+                    raise  # pragma: nocover
+                warnings.warn(
+                    "It is deprecated to enter and exit the Client context "
+                    "manager from different threads",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         self.close()
 
     def __del__(self):
@@ -4891,6 +4911,44 @@ class Client(SyncMethodMixin):
             name=name,
             idempotent=idempotent,
         )
+
+    async def _unregister_scheduler_plugin(self, name):
+        return await self.scheduler.unregister_scheduler_plugin(name=name)
+
+    def unregister_scheduler_plugin(self, name):
+        """Unregisters a scheduler plugin
+
+        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
+
+        Parameters
+        ----------
+        name : str
+            Name of the plugin to unregister. See the :meth:`Client.register_scheduler_plugin`
+            docstring for more information.
+
+        Examples
+        --------
+        >>> class MyPlugin(SchedulerPlugin):
+        ...     def __init__(self, *args, **kwargs):
+        ...         pass  # the constructor is up to you
+        ...     async def start(self, scheduler: Scheduler) -> None:
+        ...         pass
+        ...     async def before_close(self) -> None:
+        ...         pass
+        ...     async def close(self) -> None:
+        ...         pass
+        ...     def restart(self, scheduler: Scheduler) -> None:
+        ...         pass
+
+        >>> plugin = MyPlugin(1, 2, 3)
+        >>> client.register_scheduler_plugin(plugin, name='foo')
+        >>> client.unregister_scheduler_plugin(name='foo')
+
+        See Also
+        --------
+        register_scheduler_plugin
+        """
+        return self.sync(self._unregister_scheduler_plugin, name=name)
 
     def register_worker_callbacks(self, setup=None):
         """

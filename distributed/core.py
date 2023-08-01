@@ -618,7 +618,7 @@ class Server:
             timeout = getattr(self, "death_timeout", None)
 
             async def _close_on_failure(exc: Exception) -> None:
-                await self.close()
+                await self.close(reason=f"failure-to-start-{str(type(exc))}")
                 self.status = Status.failed
                 self.__startup_exc = exc
 
@@ -1025,7 +1025,7 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    async def close(self, timeout=None):
+    async def close(self, timeout=None, reason=""):
         try:
             for pc in self.periodic_callbacks.values():
                 pc.stop()

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, over
 import psutil
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
+    concat,
     first,
     groupby,
     merge,
@@ -45,6 +46,7 @@ from tlz import (
     partition,
     pluck,
     second,
+    take,
     valmap,
 )
 from tornado.ioloop import IOLoop
@@ -3706,6 +3708,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_task_stream": self.get_task_stream,
             "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
+            "unregister_scheduler_plugin": self.unregister_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
             "register_nanny_plugin": self.register_nanny_plugin,
@@ -3985,7 +3988,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None):
+    async def close(self, fast=None, close_workers=None, reason=""):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4012,8 +4015,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         self.status = Status.closing
-
-        logger.info("Scheduler closing...")
+        logger.info("Scheduler closing due to %s...", reason or "unknown reason")
         setproctitle("dask scheduler [closing]")
 
         for preload in self.preloads:
@@ -5059,7 +5061,7 @@ class Scheduler(SchedulerState, ServerNode):
                         "Task %s marked as failed because %d workers died"
                         " while trying to run it",
                         ts.key,
-                        self.allowed_failures,
+                        ts.suspicious,
                     )
 
         for ts in list(ws.has_what):
@@ -5753,11 +5755,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.plugins[name] = plugin
 
-    def remove_plugin(
-        self,
-        name: str | None = None,
-        plugin: SchedulerPlugin | None = None,
-    ) -> None:
+    def remove_plugin(self, name: str | None = None) -> None:
         """Remove external plugin from scheduler
 
         Parameters
@@ -5804,6 +5802,10 @@ class Scheduler(SchedulerState, ServerNode):
                 await result
 
         self.add_plugin(plugin, name=name, idempotent=idempotent)
+
+    async def unregister_scheduler_plugin(self, name: str) -> None:
+        """Unregister a plugin on the scheduler."""
+        self.remove_plugin(name)
 
     def worker_send(self, worker: str, msg: dict[str, Any]) -> None:
         """Send message to worker
@@ -8064,22 +8066,32 @@ class Scheduler(SchedulerState, ServerNode):
         target_duration = parse_timedelta(target_duration)
 
         # CPU
+        queued = take(100, concat([self.queued, self.unrunnable]))
+        queued_occupancy = 0
+        for ts in queued:
+            if ts.prefix.duration_average == -1:
+                queued_occupancy += self.UNKNOWN_TASK_DURATION
+            else:
+                queued_occupancy += ts.prefix.duration_average
 
-        # TODO consider any user-specified default task durations for queued tasks
-        queued_occupancy = len(self.queued) * self.UNKNOWN_TASK_DURATION
-        cpu = math.ceil(
-            (self.total_occupancy + queued_occupancy) / target_duration
-        )  # TODO: threads per worker
+        tasks_ready = len(self.queued) + len(self.unrunnable)
+        if tasks_ready > 100:
+            queued_occupancy *= tasks_ready / 100
+
+        cpu = math.ceil((self.total_occupancy + queued_occupancy) / target_duration)
 
         # Avoid a few long tasks from asking for many cores
-        tasks_ready = len(self.queued)
         for ws in self.workers.values():
-            tasks_ready += len(ws.processing)
-
             if tasks_ready > cpu:
                 break
+            tasks_ready += len(ws.processing)
         else:
             cpu = min(tasks_ready, cpu)
+
+        # Divide by average nthreads per worker
+        if self.workers:
+            nthreads = sum(ws.nthreads for ws in self.workers.values())
+            cpu = math.ceil(cpu / nthreads * len(self.workers))
 
         if (self.unrunnable or self.queued) and not self.workers:
             cpu = max(1, cpu)
