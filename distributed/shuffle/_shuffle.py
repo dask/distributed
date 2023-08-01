@@ -11,6 +11,7 @@ from dask.layers import Layer
 
 from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import check_dtype_support, check_minimal_arrow_version
+from distributed.shuffle._exceptions import ShuffleClosedError
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
@@ -69,6 +70,8 @@ def shuffle_transfer(
             column=column,
             parts_out=parts_out,
         )
+    except ShuffleClosedError:
+        raise Reschedule()
     except Exception as e:
         raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
 
@@ -82,6 +85,8 @@ def shuffle_unpack(
         )
     except Reschedule as e:
         raise e
+    except ShuffleClosedError:
+        raise Reschedule()
     except Exception as e:
         raise RuntimeError(f"shuffle_unpack failed during shuffle {id}") from e
 

@@ -166,14 +166,14 @@ class ShardsBuffer(Generic[ShardType]):
                 self._shards_available.notify_all()
             await self.process(part_id, shards, size)
 
-    async def write(self, data: dict[str, list[ShardType]]) -> None:
+    async def write(self, data: dict[str, ShardType]) -> None:
         """
-        Writes many objects into the local buffers, blocks until ready for more
+        Writes objects into the local buffers, blocks until ready for more
 
         Parameters
         ----------
         data: dict
-            A dictionary mapping destinations to lists of objects that should
+            A dictionary mapping destinations to the object that should
             be written to that destination
 
         Notes
@@ -193,13 +193,7 @@ class ShardsBuffer(Generic[ShardType]):
         if not data:
             return
 
-        shards = None
-        size = 0
-
-        sizes = {}
-        for id_, shards in data.items():
-            size = sum(map(sizeof, shards))
-            sizes[id_] = size
+        sizes = {worker: sizeof(shard) for worker, shard in data.items()}
         total_batch_size = sum(sizes.values())
         self.bytes_memory += total_batch_size
         self.bytes_total += total_batch_size
@@ -207,14 +201,14 @@ class ShardsBuffer(Generic[ShardType]):
         if self.memory_limiter:
             self.memory_limiter.increase(total_batch_size)
         async with self._shards_available:
-            for id_, shards in data.items():
-                self.shards[id_].extend(shards)
-                self.sizes[id_] += sizes[id_]
+            for worker, shard in data.items():
+                self.shards[worker].append(shard)
+                self.sizes[worker] += sizes[worker]
             self._shards_available.notify()
         if self.memory_limiter:
             await self.memory_limiter.wait_for_available()
-        del data, shards
-        assert size
+        del data
+        assert total_batch_size
 
     def raise_on_exception(self) -> None:
         """Raises an exception if something went wrong during writing"""
