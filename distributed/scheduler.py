@@ -3984,7 +3984,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None):
+    async def close(self, fast=None, close_workers=None, reason=""):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4011,8 +4011,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         self.status = Status.closing
-
-        logger.info("Scheduler closing...")
+        logger.info("Scheduler closing due to %s...", reason or "unknown reason")
         setproctitle("dask scheduler [closing]")
 
         for preload in self.preloads:
