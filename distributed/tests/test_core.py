@@ -1388,7 +1388,7 @@ async def test_messages_are_ordered_bsend():
     ledger = []
 
     async def async_handler(val):
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.01)
         ledger.append(val)
 
     def sync_handler(val):
