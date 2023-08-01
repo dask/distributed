@@ -1518,6 +1518,14 @@ class ConnectionPool:
 
         return _().__await__()
 
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+        return
+
     async def start(self) -> None:
         # Invariant: semaphore._value == limit - open - _n_connecting
         self.semaphore = asyncio.Semaphore(self.limit)
