@@ -1122,11 +1122,11 @@ class WorkerState:
     #: :class:`~distributed.worker_memory.WorkerMemoryManager`, and this class.
     data: MutableMapping[str, object]
 
-    #: ``{name: worker plugin}``. This collection is shared by reference between
+    #: ``{name: worker plugin}``. This mapping is shared by reference between
     #: :class:`~distributed.worker.Worker` and this class. The Worker managed adding and
     #: removing plugins, while the WorkerState invokes the ``WorkerPlugin.transition``
-    #: method, is available.
-    plugins: dict[str, WorkerPlugin]
+    #: method, if available.
+    plugins: Mapping[str, WorkerPlugin]
 
     #: Priority heap of tasks that are ready to run and have no resource constrains.
     #: Mutually exclusive with :attr:`constrained`.
@@ -1294,7 +1294,7 @@ class WorkerState:
         address: str | None = None,
         data: MutableMapping[str, object] | None = None,
         threads: dict[str, int] | None = None,
-        plugins: dict[str, WorkerPlugin] | None = None,
+        plugins: Mapping[str, WorkerPlugin] | None = None,
         resources: Mapping[str, float] | None = None,
         transfer_incoming_count_limit: int = 9999,
         validate: bool = True,
