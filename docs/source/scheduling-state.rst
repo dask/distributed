@@ -84,17 +84,17 @@ forgotten
     dereferenced from the scheduler.
 
 .. note::
-    When the ``distributed.scheduler.worker_saturation`` config value is set to ``1.1``
-    (default), there's no intermediate state between ``waiting`` / ``no-worker`` and
+    Setting ``distributed.scheduler.worker_saturation`` config value to ``1.0``
+    (default) will queue excess root tasks on the scheduler in the ``queued`` state. 
+    These tasks are only assigned to workers when they have capacity for them, reducing 
+    the length of task queues on the workers.
+
+    When the ``distributed.scheduler.worker_saturation`` config value is set to ``inf``, 
+    there's no intermediate state between ``waiting`` / ``no-worker`` and
     ``processing``: as soon as a task has all of its dependencies in memory somewhere on
     the cluster, it is immediately assigned to a worker. This can lead to very long task
     queues on the workers, which are then rebalanced dynamically through
-    :doc:`work-stealing`.
-
-    Setting ``distributed.scheduler.worker_saturation`` to ``1.0`` (or any finite value)
-    will instead queue excess root tasks on the scheduler in the ``queued`` state. These
-    tasks are only assigned to workers when they have capacity for them, reducing the
-    length of task queues on the workers.
+    :doc:`work-stealing`. 
 
 In addition to the literal state, though, other information needs to be
 kept and updated about each task.  Individual task state is stored in an
