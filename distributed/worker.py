@@ -26,8 +26,6 @@ from collections.abc import (
     MutableMapping,
 )
 from concurrent.futures import Executor
-from contextlib import suppress
-from datetime import timedelta
 from functools import wraps
 from inspect import isawaitable
 from typing import (
@@ -1608,8 +1606,6 @@ class Worker(BaseWorker, ServerNode):
         # trying to send closing message.
         if self._protocol == "ucx":  # pragma: no cover
             await asyncio.sleep(0.2)
-
- 
 
         for executor in self.executors.values():
             if executor is utils._offload_executor:
