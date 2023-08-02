@@ -4369,13 +4369,23 @@ class Scheduler(SchedulerState, ServerNode):
         if isinstance(annotations, ToPickle):  # type: ignore
             # FIXME: what the heck?
             annotations = annotations.data  # type: ignore
+
         stimulus_id = stimulus_id or f"update-graph-{time()}"
         (
             dsk,
             dependencies,
-            layer_annotations,
-            pre_stringified_keys,
-        ) = self.materialize_graph(graph)
+            annotations_by_type,
+        ) = self.materialize_graph(graph, annotations)
+
+        if internal_priority is None:
+            # Removing all non-local keys before calling order()
+            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
+            stripped_deps = {
+                k: v.intersection(dsk_keys)
+                for k, v in dependencies.items()
+                if k in dsk_keys
+            }
+            internal_priority = dask.order.order(dsk, dependencies=stripped_deps)
 
         requested_keys = set(keys)
         del keys
@@ -4383,9 +4393,16 @@ class Scheduler(SchedulerState, ServerNode):
             self.log_event(
                 ["all", client], {"action": "update_graph", "count": len(dsk)}
             )
-        self._pop_known_tasks(dsk, dependencies)
+        self._pop_known_tasks(
+            known_tasks=self.tasks, dsk=dsk, dependencies=dependencies
+        )
 
-        if lost_keys := self._pop_lost_tasks(dsk, dependencies, requested_keys):
+        if lost_keys := self._pop_lost_tasks(
+            dsk=dsk,
+            known_tasks=self.tasks,
+            dependencies=dependencies,
+            keys=requested_keys,
+        ):
             self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
             self.client_releases_keys(
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
@@ -4401,6 +4418,8 @@ class Scheduler(SchedulerState, ServerNode):
         if code:  # add new code blocks
             computation.code.add(code)
         if annotations:
+            # FIXME: This is kind of inconsistent since it only includes global
+            # annotations.
             computation.annotations.update(annotations)
 
         runnable, touched_tasks, new_tasks = self._generate_taskstates(
@@ -4409,14 +4428,10 @@ class Scheduler(SchedulerState, ServerNode):
             dependencies=dependencies,
             computation=computation,
         )
-        # FIXME: These "resolved_annotations" are a big duplication and are only
-        # required to satisfy the current plugin API. This should be
-        # reconsidered.
-        resolved_annotations = self._parse_and_apply_annotations(
+
+        keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
-            annotations=annotations,
-            layer_annotations=layer_annotations,
-            pre_stringified_keys=pre_stringified_keys,
+            annotations_by_type=annotations_by_type,
         )
 
         self._set_priorities(
@@ -4425,9 +4440,7 @@ class Scheduler(SchedulerState, ServerNode):
             user_priority=user_priority,
             fifo_timeout=fifo_timeout,
             start=start,
-            dsk=dsk,
             tasks=runnable,
-            dependencies=dependencies,
         )
 
         self.client_desires_keys(keys=requested_keys, client=client)
@@ -4460,6 +4473,12 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts.key] = "erred"
                     break
 
+        annotations_for_plugin: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        for key in keys_with_annotations:
+            ts = self.tasks[key]
+            for annot, value in ts.annotations.items():
+                annotations_for_plugin[annot][key] = value
+
         spans_ext: SpansSchedulerExtension | None = self.extensions.get("spans")
         if spans_ext:
             # new_tasks does not necessarily contain all runnable tasks;
@@ -4468,10 +4487,11 @@ class Scheduler(SchedulerState, ServerNode):
             # and only later gained a run_spec.
             span_annotations = spans_ext.observe_tasks(runnable, code=code)
             # In case of TaskGroup collision, spans may have changed
+            # FIXME: Is this used anywhere besides tests?
             if span_annotations:
-                resolved_annotations["span"] = span_annotations
+                annotations_for_plugin["span"] = span_annotations
             else:
-                resolved_annotations.pop("span", None)
+                annotations_for_plugin.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
@@ -4481,7 +4501,7 @@ class Scheduler(SchedulerState, ServerNode):
                     tasks=[ts.key for ts in touched_tasks],
                     keys=requested_keys,
                     dependencies=dependencies,
-                    annotations=resolved_annotations,
+                    annotations=dict(annotations_for_plugin),
                     priority=priority,
                 )
             except Exception as e:
@@ -4539,13 +4559,11 @@ class Scheduler(SchedulerState, ServerNode):
             )
         return runnable, touched_tasks, new_tasks
 
-    def _parse_and_apply_annotations(
+    def _apply_annotations(
         self,
         tasks: Iterable[TaskState],
-        annotations: dict,
-        layer_annotations: dict[str, dict],
-        pre_stringified_keys: dict[Hashable, str],
-    ) -> dict[str, dict[str, Any]]:
+        annotations_by_type: dict[str, dict],
+    ) -> set[str]:
         """Apply the provided annotations to the provided `TaskState` objects.
 
         The raw annotations will be stored in the `annotations` attribute.
@@ -4558,37 +4576,27 @@ class Scheduler(SchedulerState, ServerNode):
             _description_
         annotations : dict
             _description_
-        layer_annotations : dict[str, dict]
-            _description_
 
         Returns
         -------
-        resolved_annotations: dict
-            A mapping of all resolved annotations in the format::
-
-                {
-                    "annotation": {
-                        "key": value,
-                        ...
-                    },
-                    ...
-                }
+        keys_with_annotations
         """
-        resolved_annotations: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        keys_with_annotations: set[str] = set()
+        if not annotations_by_type:
+            return keys_with_annotations
+
         for ts in tasks:
             key = ts.key
-            # This could be a typed dict
-            if not annotations and key not in layer_annotations:
-                continue
-            out = annotations.copy()
-            out.update(layer_annotations.get(key, {}))
-            for annot, value in out.items():
-                # Pop the key since names don't always match attributes
-                if callable(value):
-                    value = value(pre_stringified_keys[key])
-                out[annot] = value
-                resolved_annotations[annot][key] = value
 
+            ts_annotations = {}
+            for annot, key_value in annotations_by_type.items():
+                if (value := key_value.get(key)) is not None:
+                    ts_annotations[annot] = value
+            if not ts_annotations:
+                continue
+            keys_with_annotations.add(key)
+            ts.annotations = ts_annotations
+            for annot, value in ts_annotations.items():
                 if annot in ("restrictions", "workers"):
                     if not isinstance(value, (list, tuple, set)):
                         value = [value]
@@ -4617,19 +4625,16 @@ class Scheduler(SchedulerState, ServerNode):
                 elif annot == "retries":
                     assert isinstance(value, int)
                     ts.retries = value
-            ts.annotations = out
-        return dict(resolved_annotations)
+        return keys_with_annotations
 
     def _set_priorities(
         self,
-        internal_priority: dict[str, int] | None,
+        internal_priority: dict[str, int],
         submitting_task: str | None,
         user_priority: int | dict[str, int],
         fifo_timeout: int | float | str,
         start: float,
-        dsk: dict,
         tasks: list[TaskState],
-        dependencies: dict,
     ) -> None:
         fifo_timeout = parse_timedelta(fifo_timeout)
         if submitting_task:  # sub-tasks get better priority than parent tasks
@@ -4646,26 +4651,15 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             generation = self.generation
 
-        if internal_priority is None:
-            # Removing all non-local keys before calling order()
-            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
-            stripped_deps = {
-                k: v.intersection(dsk_keys)
-                for k, v in dependencies.items()
-                if k in dsk_keys
-            }
-            internal_priority = dask.order.order(dsk, dependencies=stripped_deps)
-
         for ts in tasks:
-            # Note: Under which circumstances would a task not have a
-            # prioritiy assigned by now? Are these scattered tasks
-            # exclusively or something else?
-            task_user_prio = user_priority
             if isinstance(user_priority, dict):
                 task_user_prio = user_priority.get(ts.key, 0)
-            annotated_prio = ts.annotations.get("priority", {})
-            if not annotated_prio:
-                annotated_prio = task_user_prio
+            else:
+                task_user_prio = user_priority
+            # Annotations that are already assigned to the TaskState object
+            # originate from a Layer annotation which takes precedence over the
+            # global annotation.
+            annotated_prio = ts.annotations.get("priority", task_user_prio)
 
             if not ts.priority and ts.key in internal_priority:
                 ts.priority = (
@@ -4679,8 +4673,9 @@ class Scheduler(SchedulerState, ServerNode):
                     isinstance(el, (int, float)) for el in ts.priority
                 )
 
+    @staticmethod
     def _pop_lost_tasks(
-        self, dsk: dict, dependencies: dict, keys: set[str]
+        dsk: dict, keys: set[str], known_tasks: dict[str, TaskState], dependencies: dict
     ) -> set[str]:
         n = 0
         out = set()
@@ -4688,7 +4683,7 @@ class Scheduler(SchedulerState, ServerNode):
             n = len(dsk)
             for k, deps in list(dependencies.items()):
                 if any(
-                    dep not in self.tasks and dep not in dsk for dep in deps
+                    dep not in known_tasks and dep not in dsk for dep in deps
                 ):  # bad key
                     out.add(k)
                     logger.info("User asked for computation on lost data, %s", k)
@@ -4698,12 +4693,15 @@ class Scheduler(SchedulerState, ServerNode):
                         keys.remove(k)
         return out
 
-    def _pop_known_tasks(self, dsk: dict, dependencies: dict) -> set[str]:
+    @staticmethod
+    def _pop_known_tasks(
+        known_tasks: dict[str, TaskState], dsk: dict, dependencies: dict
+    ) -> set[str]:
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
         for k, v in dependencies.items():
-            if v and k in self.tasks:
-                ts = self.tasks[k]
+            if v and k in known_tasks:
+                ts = known_tasks[k]
                 if ts.state in ("memory", "erred"):
                     already_in_memory.add(k)
 
@@ -4716,16 +4714,16 @@ class Scheduler(SchedulerState, ServerNode):
                 try:
                     deps = dependencies[key]
                 except KeyError:
-                    deps = self.tasks[key].dependencies
+                    deps = known_tasks[key].dependencies
                 for dep in deps:
                     if dep in dependents:
                         child_deps = dependents[dep]
-                    elif dep in self.tasks:
-                        child_deps = self.tasks[dep].dependencies
+                    elif dep in known_tasks:
+                        child_deps = known_tasks[dep].dependencies
                     else:
                         child_deps = set()
                     if all(d in done for d in child_deps):
-                        if dep in self.tasks and dep not in done:
+                        if dep in known_tasks and dep not in done:
                             done.add(dep)
                             stack.append(dep)
         for anc in done:
@@ -4734,16 +4732,28 @@ class Scheduler(SchedulerState, ServerNode):
         return done
 
     @staticmethod
-    def materialize_graph(hlg: HighLevelGraph) -> tuple[dict, dict, dict, dict]:
+    def materialize_graph(
+        hlg: HighLevelGraph, global_annotations: dict
+    ) -> tuple[dict, dict, dict]:
         from distributed.worker import dumps_task
 
-        key_annotations = {}
         dsk = dask.utils.ensure_dict(hlg)
 
+        annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        for type_, value in global_annotations.items():
+            annotations_by_type[type_].update(
+                {stringify(k): (value(k) if callable(value) else value) for k in dsk}
+            )
         for layer in hlg.layers.values():
             if layer.annotations:
                 annot = layer.annotations
-                key_annotations.update({stringify(k): annot for k in layer})
+                for annot_type, value in annot.items():
+                    annotations_by_type[annot_type].update(
+                        {
+                            stringify(k): (value(k) if callable(value) else value)
+                            for k in layer
+                        }
+                    )
 
         dependencies, _ = get_deps(dsk)
 
@@ -4760,15 +4770,10 @@ class Scheduler(SchedulerState, ServerNode):
         for k, futures in fut_deps.items():
             dependencies[k].update(f.key for f in futures)
         new_dsk = {}
-        # Annotation callables are evaluated on the non-stringified version of
-        # the keys
-        pre_stringified_keys = {}
         exclusive = set(hlg)
         for k, v in dsk.items():
             new_k = stringify(k)
-            pre_stringified_keys[new_k] = k
             new_dsk[new_k] = stringify(v, exclusive=exclusive)
-        assert len(new_dsk) == len(pre_stringified_keys)
         dsk = new_dsk
         dependencies = {
             stringify(k): {stringify(dep) for dep in deps}
@@ -4787,7 +4792,7 @@ class Scheduler(SchedulerState, ServerNode):
             if dsk[k] is k:
                 del dsk[k]
         dsk = valmap(dumps_task, dsk)
-        return dsk, dependencies, key_annotations, pre_stringified_keys
+        return dsk, dependencies, dict(annotations_by_type)
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened spots on worker threadpools
