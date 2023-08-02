@@ -16,14 +16,14 @@ from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
 from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
 
 import dask
 from dask.system import CPU_COUNT
-from dask.utils import parse_timedelta
+from dask.utils import funcname, parse_timedelta
 
 from distributed import preloading
 from distributed.comm import get_address_host
@@ -44,19 +44,23 @@ from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
 from distributed.proctitle import enable_proctitle_on_children
-from distributed.protocol import pickle
+from distributed.protocol import pickle, to_serialize
 from distributed.protocol.serialize import _is_dumpable
 from distributed.security import Security
 from distributed.utils import (
+    convert_args_to_str,
+    convert_kwargs_to_str,
     get_ip,
     get_mp_context,
+    has_arg,
+    iscoroutinefunction,
     json_load_robust,
     log_errors,
     parse_ports,
     silence_logging_cmgr,
     wait_for,
 )
-from distributed.worker import Worker, run
+from distributed.worker import Worker
 from distributed.worker_memory import (
     DeprecatedMemoryManagerAttribute,
     DeprecatedMemoryMonitor,
@@ -502,8 +506,46 @@ class Nanny(ServerNode):
     def is_alive(self):
         return self.process is not None and self.process.is_alive()
 
-    def run(self, comm, *args, **kwargs):
-        return run(self, comm, *args, **kwargs)
+    async def run(
+        self,
+        function: bytes,
+        args: bytes,
+        kwargs: bytes,
+        wait: bool = True,
+    ) -> Any:
+        function_loaded = pickle.loads(function)
+        is_coro = iscoroutinefunction(function_loaded)
+        assert wait or is_coro, "Combination not supported"
+        args_loaded = pickle.loads(args)
+        kwargs_loaded = pickle.loads(kwargs)
+        if has_arg(function_loaded, "dask_worker"):
+            kwargs_loaded["dask_worker"] = self
+
+        logger.info("Run out-of-band function %r", funcname(function_loaded))
+
+        try:
+            if not is_coro:
+                result = function_loaded(*args_loaded, **kwargs_loaded)
+            else:
+                if wait:
+                    result = await function_loaded(*args_loaded, **kwargs_loaded)
+                else:
+                    self._ongoing_background_tasks.call_soon(
+                        function_loaded, *args_loaded, **kwargs_loaded
+                    )
+                    result = None
+
+        except Exception as e:
+            logger.warning(
+                "Run Failed\nFunction: %s\nargs:     %s\nkwargs:   %s\n",
+                str(funcname(function))[:1000],
+                convert_args_to_str(args_loaded, max_len=1000),
+                convert_kwargs_to_str(kwargs_loaded, max_len=1000),
+                exc_info=True,
+            )
+
+            return error_message(e)
+        return {"status": "OK", "result": to_serialize(result)}
 
     def _on_worker_exit_sync(self, exitcode):
         try:

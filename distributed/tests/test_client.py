@@ -2710,29 +2710,78 @@ def test_run_coroutine_sync(c, s, a, b):
     assert t2 - t1 <= 1.0
 
 
-@gen_cluster(client=True)
-async def test_run_exception(c, s, a, b):
+@pytest.mark.parametrize(
+    "Worker,nanny,address_attr,log_name",
+    [
+        (Worker, False, "address", "worker"),
+        (Nanny, True, "worker_address", "nanny"),
+    ],
+)
+@gen_cluster(client=True, nthreads=[])
+async def test_run_exception(c, s, Worker, nanny, address_attr, log_name):
     class MyError(Exception):
         pass
 
-    def raise_exception(dask_worker, addr):
+    def raise_exception(*, addr, dask_worker):
         if addr == dask_worker.address:
             raise MyError("informative message")
         return 123
 
-    with pytest.raises(MyError, match="informative message"):
-        await c.run(raise_exception, addr=a.address)
-    with pytest.raises(MyError, match="informative message"):
-        await c.run(raise_exception, addr=a.address, on_error="raise")
-    with pytest.raises(ValueError, match="on_error must be"):
-        await c.run(raise_exception, addr=a.address, on_error="invalid")
+    # for testing log truncation of args and kwargs
+    def raise_exception_padding(padding_arg, *, padding_kwarg):
+        raise MyError("informative message")
 
-    out = await c.run(raise_exception, addr=a.address, on_error="return")
-    assert isinstance(out[a.address], MyError)
-    assert out[b.address] == 123
+    def get_address(worker):
+        return getattr(worker, address_attr)
 
-    out = await c.run(raise_exception, addr=a.address, on_error="ignore")
-    assert out == {b.address: 123}
+    async with Worker(s.address) as a, Worker(s.address) as b:
+        with pytest.raises(MyError, match="informative message"):
+            await c.run(raise_exception, addr=a.address, nanny=nanny)
+        with pytest.raises(MyError, match="informative message"):
+            await c.run(raise_exception, addr=a.address, on_error="raise", nanny=nanny)
+        with pytest.raises(ValueError, match="on_error must be"):
+            await c.run(
+                raise_exception, addr=a.address, on_error="invalid", nanny=nanny
+            )
+
+        out = await c.run(
+            raise_exception, addr=a.address, on_error="return", nanny=nanny
+        )
+        assert isinstance(out[get_address(a)], MyError)
+        assert out[get_address(b)] == 123
+
+        out = await c.run(
+            raise_exception, addr=a.address, on_error="ignore", nanny=nanny
+        )
+        assert out == {get_address(b): 123}
+
+        with (
+            captured_logger(f"distributed.{log_name}") as caplog,
+            pytest.raises(MyError, match="informative message"),
+        ):
+            await c.run(
+                raise_exception_padding,
+                "x" * 1000,
+                padding_kwarg="y" * 1000,
+                nanny=nanny,
+                workers=[get_address(a)],
+            )
+
+        assert (
+            f"args:     ('{'x' * 998}\nkwargs:   {{'padding_kwarg': '{'y' * 981}\n"
+        ) in caplog.getvalue()
+
+
+@gen_cluster(client=True)
+async def test_run_on_scheduler_exception(c, s, a, b):
+    class MyError(Exception):
+        pass
+
+    def raise_exception():
+        raise MyError
+
+    with pytest.raises(MyError):
+        await c.run_on_scheduler(raise_exception)
 
 
 @gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "200ms"})
@@ -6685,17 +6734,23 @@ async def test_run_on_scheduler_async_def(c, s, a, b):
 
     assert s.foo == "bar"
 
-    async def f(dask_worker):
-        await asyncio.sleep(0.01)
-        dask_worker.foo = "bar"
 
-    await c.run(f)
-    assert a.foo == "bar"
-    assert b.foo == "bar"
+@pytest.mark.parametrize("Worker,nanny", [(Worker, False), (Nanny, True)])
+@gen_cluster(client=True, nthreads=[])
+async def test_run_async_def(c, s, Worker, nanny):
+    async with Worker(s.address) as a, Worker(s.address) as b:
+
+        async def f(dask_worker):
+            await asyncio.sleep(0.01)
+            dask_worker.foo = "bar"
+
+        await c.run(f, nanny=nanny)
+        assert a.foo == "bar"
+        assert b.foo == "bar"
 
 
 @gen_cluster(client=True)
-async def test_run_on_scheduler_async_def_wait(c, s, a, b):
+async def test_run_on_scheduler_async_def_no_wait(c, s, a, b):
     async def f(dask_scheduler):
         await asyncio.sleep(0.01)
         dask_scheduler.foo = "bar"
@@ -6706,9 +6761,53 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
         await asyncio.sleep(0.01)
     assert s.foo == "bar"
 
-    async def f(dask_worker):
+
+@pytest.mark.parametrize("Worker,nanny", [(Worker, False), (Nanny, True)])
+@gen_cluster(client=True, nthreads=[])
+async def test_run_async_def_no_wait(c, s, Worker, nanny):
+    async with Worker(s.address) as a, Worker(s.address) as b:
+
+        async def f(dask_worker):
+            await asyncio.sleep(0.01)
+            dask_worker.foo = "bar"
+
+        await c.run(f, wait=False, nanny=nanny)
+
+        while not hasattr(a, "foo") or not hasattr(b, "foo"):
+            await asyncio.sleep(0.01)
+
+        assert a.foo == "bar"
+        assert b.foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_run_get_worker(c, s, a, b):
+    def f():
+        get_worker().foo = "bar"
+
+    await c.run(f)
+
+    assert a.foo == "bar"
+    assert b.foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_run_get_worker_async_def(c, s, a, b):
+    async def f():
         await asyncio.sleep(0.01)
-        dask_worker.foo = "bar"
+        get_worker().foo = "bar"
+
+    await c.run(f)
+
+    assert a.foo == "bar"
+    assert b.foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_run_get_worker_async_def_wait(c, s, a, b):
+    async def f():
+        await asyncio.sleep(0.01)
+        get_worker().foo = "bar"
 
     await c.run(f, wait=False)
 
@@ -6761,7 +6860,7 @@ async def test_performance_report(c, s, a, b, local):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
-    assert "No logs to report" in data
+    assert "INFO - Run out-of-band function" in data
     assert dask.__version__ in data
 
     # stacklevel=2 captures code two frames back -- which in this case
