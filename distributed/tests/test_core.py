@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import random
 import socket
 import sys
 import threading
@@ -1388,7 +1389,7 @@ async def test_messages_are_ordered_bsend():
     ledger = []
 
     async def async_handler(val):
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.01 * random.random())
         ledger.append(val)
 
     def sync_handler(val):
@@ -1428,7 +1429,7 @@ async def test_messages_are_ordered_raw():
     ledger = []
 
     async def async_handler(val):
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.01 * random.random())
         ledger.append(val)
 
     def sync_handler(val):
