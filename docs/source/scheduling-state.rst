@@ -84,8 +84,8 @@ forgotten
     dereferenced from the scheduler.
 
 .. note::
-    Setting ``distributed.scheduler.worker_saturation`` config value to ``1.0``
-    (default) will queue excess root tasks on the scheduler in the ``queued`` state. 
+    Setting ``distributed.scheduler.worker_saturation`` config value to ``1.1``
+    (default) or any other finite value will queue excess root tasks on the scheduler in the ``queued`` state. 
     These tasks are only assigned to workers when they have capacity for them, reducing 
     the length of task queues on the workers.
 
