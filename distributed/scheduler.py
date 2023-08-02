@@ -5655,12 +5655,12 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_task_count.discard(ws)
             self.saturated.discard(ws)
 
-    async def handle_request_refresh_who_has(
+    def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
     ) -> None:
-        """Asynchronous request (through bulk comms) from a Worker to refresh the
-        who_has for some keys. Not to be confused with scheduler.who_has, which is a
-        synchronous RPC request from a Client.
+        """Request from a Worker to refresh the
+        who_has for some keys. Not to be confused with scheduler.who_has, which
+        is a dedicated comm RPC request from a Client.
         """
         who_has = {}
         free_keys = []
