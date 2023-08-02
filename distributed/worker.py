@@ -1536,6 +1536,7 @@ class Worker(BaseWorker, ServerNode):
         if not executor_wait:
             logger.info("Not waiting on executor to close")
         self.status = Status.closing
+        self.batched_send({"op": "close-stream"})
 
         # Stop callbacks before giving up control in any `await`.
         # We don't want to heartbeat while closing.
@@ -1606,8 +1607,7 @@ class Worker(BaseWorker, ServerNode):
         if self._protocol == "ucx":  # pragma: no cover
             await asyncio.sleep(0.2)
 
-        self.batched_send({"op": "close-stream"})
-
+ 
         if self.batched_stream:
             with suppress(TimeoutError):
                 await self.batched_stream.close(timedelta(seconds=timeout))
