@@ -13,6 +13,8 @@ from dask.dataframe._compat import PANDAS_GE_200, tm
 from dask.dataframe.utils import assert_eq
 from dask.utils_test import hlg_layer_topological
 
+pytestmark = pytest.mark.ci1
+
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
 def lose_annotations(request):
