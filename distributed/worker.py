@@ -1537,6 +1537,8 @@ class Worker(BaseWorker, ServerNode):
             logger.info("Not waiting on executor to close")
         self.status = Status.closing
         self.batched_send({"op": "close-stream"})
+        if self.batched_stream:
+            await self.batched_stream.close()
 
         # Stop callbacks before giving up control in any `await`.
         # We don't want to heartbeat while closing.
@@ -1608,9 +1610,6 @@ class Worker(BaseWorker, ServerNode):
             await asyncio.sleep(0.2)
 
  
-        if self.batched_stream:
-            with suppress(TimeoutError):
-                await self.batched_stream.close(timedelta(seconds=timeout))
 
         for executor in self.executors.values():
             if executor is utils._offload_executor:
