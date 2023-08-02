@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "distributed"
 description = "Distributed scheduler for Dask"
 maintainers = [{name = "Matthew Rocklin", email = "mrocklin@gmail.com"}]
-license = {text = "BSD"}
+license = {text = "BSD-3-Clause"}
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
