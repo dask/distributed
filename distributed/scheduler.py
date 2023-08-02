@@ -4769,8 +4769,6 @@ class Scheduler(SchedulerState, ServerNode):
         for k, futures in fut_deps.items():
             dependencies[k].update(f.key for f in futures)
         new_dsk = {}
-        # Annotation callables are evaluated on the non-stringified version of
-        # the keys
         exclusive = set(hlg)
         for k, v in dsk.items():
             new_k = stringify(k)
