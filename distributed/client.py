@@ -2331,23 +2331,23 @@ class Client(SyncMethodMixin):
             self._gather_keys = None  # clear state, these keys are being sent off
             self._gather_future = None
 
-            if not direct and not local_worker:
-                # ask scheduler to gather data for us
-                return await retry_operation(self.scheduler.gather, keys=keys)
-
-            # gather directly from workers
-            who_has = await retry_operation(self.scheduler.who_has, keys=keys)
-            data, missing_keys, failed_keys, _ = await gather_from_workers(
-                who_has, rpc=self.rpc
-            )
-            response: dict[str, Any] = {"status": "OK", "data": data}
-            if missing_keys or failed_keys:
-                response = await retry_operation(
-                    self.scheduler.gather, keys=missing_keys + failed_keys
+            if direct or local_worker:  # gather directly from workers
+                who_has = await retry_operation(self.scheduler.who_has, keys=keys)
+                data, missing_keys, failed_keys, _ = await gather_from_workers(
+                    who_has, rpc=self.rpc
                 )
-                if response["status"] == "OK":
-                    response["data"].update(data)
-            return response
+                response: dict[str, Any] = {"status": "OK", "data": data}
+                if missing_keys or failed_keys:
+                    response = await retry_operation(
+                        self.scheduler.gather, keys=missing_keys + failed_keys
+                    )
+                    if response["status"] == "OK":
+                        response["data"].update(data)
+
+            else:  # ask scheduler to gather data for us
+                response = await retry_operation(self.scheduler.gather, keys=keys)
+
+        return response
 
     def gather(self, futures, errors="raise", direct=None, asynchronous=None):
         """Gather futures from distributed memory
