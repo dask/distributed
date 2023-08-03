@@ -108,7 +108,6 @@ async def gather_from_workers(
                 for key in d[address]:
                     failed_keys.append(key)
                     del to_gather[key]
-                missing_workers.add(address)
             else:
                 if r["status"] == "busy":
                     busy_workers.add(address)

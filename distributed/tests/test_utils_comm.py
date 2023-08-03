@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import random
 from unittest import mock
 
 import pytest
 
 from dask.optimization import SubgraphCallable
 
+from distributed import wait
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
-from distributed.core import ConnectionPool
+from distributed.core import ConnectionPool, Status
 from distributed.utils_comm import (
     WrappedKey,
     gather_from_workers,
@@ -17,7 +20,7 @@ from distributed.utils_comm import (
     subs_multiple,
     unpack_remotedata,
 )
-from distributed.utils_test import BrokenComm, gen_cluster
+from distributed.utils_test import BarrierGetData, BrokenComm, gen_cluster, inc
 
 
 def test_pack_data():
@@ -41,31 +44,119 @@ def test_subs_multiple():
     assert subs_multiple(dsk, data) == {"a": (sum, [1, 2])}
 
 
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
+async def test_gather_from_workers_missing_replicas(c, s, *workers):
+    """When a key is replicated on multiple workers, but the who_has is slightly
+    obsolete, gather_from_workers, retries fetching from all known holders of a replica
+    until it finds the key
+    """
+    a = random.choice(workers)
+    x = await c.scatter({"x": 1}, workers=a.address)
+    assert len(s.workers) == 10
+    assert len(s.tasks["x"].who_has) == 1
+
+    rpc = await ConnectionPool()
+    data, missing, failed, bad_workers = await gather_from_workers(
+        {"x": [w.address for w in workers]}, rpc=rpc
+    )
+
+    assert data == {"x": 1}
+    assert missing == []
+    assert failed == []
+    assert bad_workers == []
+
+
 @gen_cluster(client=True)
 async def test_gather_from_workers_permissive(c, s, a, b):
+    """gather_from_workers fetches multiple keys, of which some are missing.
+    Test that the available data is returned with a note for missing data.
+    """
     rpc = await ConnectionPool()
     x = await c.scatter({"x": 1}, workers=a.address)
 
-    data, missing = await gather_from_workers(["x", "y"], s.get_who_has, rpc=rpc)
+    data, missing, failed, bad_workers = await gather_from_workers(
+        {"x": [a.address], "y": [b.address]}, rpc=rpc
+    )
 
     assert data == {"x": 1}
-    assert missing == {"y"}
+    assert missing == ["y"]
+    assert failed == []
+    assert bad_workers == []
 
 
 class BrokenConnectionPool(ConnectionPool):
-    async def connect(self, *args, **kwargs):
+    async def connect(self, address, *args, **kwargs):
         return BrokenComm()
 
 
 @gen_cluster(client=True)
 async def test_gather_from_workers_permissive_flaky(c, s, a, b):
+    """gather_from_workers fails to connect to a worker"""
     x = await c.scatter({"x": 1}, workers=a.address)
 
     rpc = await BrokenConnectionPool()
-    data, missing = await gather_from_workers(["x"], s.get_who_has, rpc=rpc)
+    data, missing, failed, bad_workers = await gather_from_workers(
+        {"x": [a.address]}, rpc=rpc
+    )
 
     assert data == {}
-    assert missing == {"x"}
+    assert missing == ["x"]
+    assert failed == []
+    assert bad_workers == [a.address]
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.worker.memory.pause": False},
+)
+async def test_gather_from_workers_busy(c, s):
+    """gather_from_workers receives a 'busy' response from a worker"""
+    async with BarrierGetData(s.address, barrier_count=2) as w:
+        x = await c.scatter({"x": 1}, workers=[w.address])
+        await wait(x)
+        # Throttle to 1 simultaneous connection
+        w.status = Status.paused
+
+        rpc1 = await ConnectionPool()
+        rpc2 = await ConnectionPool()
+        out1, out2 = await asyncio.gather(
+            gather_from_workers({"x": [w.address]}, rpc=rpc1),
+            gather_from_workers({"x": [w.address]}, rpc=rpc2),
+        )
+        assert w.barrier_count == -1  # w.get_data() has been hit 3 times
+        assert out1 == out2 == ({"x": 1}, [], [], [])
+
+
+@pytest.mark.parametrize("when", ["pickle", "unpickle"])
+@gen_cluster(client=True)
+async def test_gather_from_workers_serialization_error(c, s, a, b, when):
+    """A task fails to (de)serialize. Tasks from other workers are fetched
+    successfully.
+    """
+
+    class BadReduce:
+        def __reduce__(self):
+            if when == "pickle":
+                1 / 0
+            else:
+                return lambda: 1 / 0, ()
+
+    rpc = await ConnectionPool()
+    x = c.submit(BadReduce, key="x", workers=[a.address])
+    y = c.submit(inc, 1, key="y", workers=[a.address])
+    z = c.submit(inc, 2, key="z", workers=[b.address])
+    await wait([x, y, z])
+    data, missing, failed, bad_workers = await gather_from_workers(
+        {"x": [a.address], "y": [a.address], "z": [b.address]}, rpc=rpc
+    )
+
+    assert data == {"z": 3}
+    assert missing == []
+    # x and y were serialized together with a single call to pickle; can't tell which
+    # raised
+    assert failed == ["x", "y"]
+    assert bad_workers == []
 
 
 def test_retry_no_exception(cleanup):
