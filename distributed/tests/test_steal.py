@@ -641,10 +641,11 @@ async def test_steal_when_more_tasks(c, s, a, *rest):
             "slowidentity": 0.2,
             "slow2": 1,
         },
-        "distributed.scheduler.work-stealing-interval": "20ms",
     },
 )
 async def test_steal_more_attractive_tasks(c, s, a, *rest):
+    ext = s.extensions["stealing"]
+
     def slow2(x):
         sleep(1)
         return x
@@ -652,9 +653,17 @@ async def test_steal_more_attractive_tasks(c, s, a, *rest):
     x = c.submit(mul, b"0", 100000000, workers=a.address)  # 100 MB
     await wait(x)
 
+    # We have to stop the extension entirely since otherwise a tick might
+    # already allow a stealing request may sneak in before all tasks are on the
+    # scheduler
+    await ext.stop()
     futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for i in range(10)]
     future = c.submit(slow2, x, priority=-1)
 
+    while future.key not in s.tasks:
+        await asyncio.sleep(0.01)
+    # Now call it once explicitly to move the heavy task
+    ext.balance()
     while not any(w.state.tasks for w in rest):
         await asyncio.sleep(0.01)
 
