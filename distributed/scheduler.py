@@ -5922,6 +5922,7 @@ class Scheduler(SchedulerState, ServerNode):
         self, keys: Collection[str], serializers: list[str] | None = None
     ) -> dict[str, Any]:
         """Collect data from workers to the scheduler"""
+        stimulus_id = f"gather-{time()}"
         data = {}
         missing_keys = list(keys)
         failed_keys: list[str] = []
@@ -5958,6 +5959,20 @@ class Scheduler(SchedulerState, ServerNode):
             for key in failed_keys
         }
         logger.error("Couldn't gather keys: %s", failed_states)
+
+        if missing_workers:
+            with log_errors():
+                # Remove suspicious workers from the scheduler and shut them down.
+                await asyncio.gather(
+                    *(
+                        self.remove_worker(
+                            address=worker, close=True, stimulus_id=stimulus_id
+                        )
+                        for worker in missing_workers
+                    )
+                )
+                logger.error("Shut down unresponsive workers:: %s", missing_workers)
+
         return {"status": "error", "keys": list(failed_keys)}
 
     @log_errors

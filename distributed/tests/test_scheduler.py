@@ -74,7 +74,7 @@ from distributed.utils_test import (
     varying,
     wait_for_state,
 )
-from distributed.worker import dumps_function, dumps_task, secede
+from distributed.worker import dumps_function, dumps_task, get_worker, secede
 
 pytestmark = pytest.mark.ci1
 
@@ -2865,31 +2865,56 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    # This behaviour is independent of retries.
-    # Disable it to reduce complexity of this test.
-    config={"distributed.comm.retry.count": 0},
-)
-async def test_gather_bad_worker(c, s, a):
-    """Upon connection failure, the scheduler tries again indefinitely and
-    transparently, for as long as the batched comms channel is active, to fulfil
-    `client.gather`.
+@gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
+async def test_gather_bad_worker_removed(c, s, a, b):
     """
-    x = c.submit(inc, 1, key="x")
-    s.rpc = await FlakyConnectionPool(failing_connections=3)
+    Upon connection failure or missing expected keys during gather, a worker is
+    shut down. The tasks should be rescheduled onto different workers, transparently
+    to `client.gather`.
+    """
+    x = c.submit(slowinc, 1, workers=[a.address], allow_other_workers=True)
 
-    with captured_logger("distributed.scheduler") as sched_logger:
-        with captured_logger("distributed.client") as client_logger:
-            assert await c.gather(x, direct=False) == 2
+    def finalizer(*args):
+        return get_worker().address
 
-    assert sched_logger.getvalue() == "Couldn't gather keys: {'x': 'memory'}\n" * 3
-    assert "Couldn't gather 1 keys, rescheduling" in client_logger.getvalue()
+    fin = c.submit(
+        finalizer, x, key="final", workers=[a.address], allow_other_workers=True
+    )
+
+    s.rpc = await FlakyConnectionPool(failing_connections=1)
+
+    # This behaviour is independent of retries. Remove them to reduce complexity
+    # of this setup
+    with dask.config.set({"distributed.comm.retry.count": 0}):
+        with captured_logger(
+            logging.getLogger("distributed.scheduler")
+        ) as sched_logger, captured_logger(
+            logging.getLogger("distributed.client")
+        ) as client_logger:
+            # Gather using the client (as an ordinary user would)
+            # Upon a missing key, the client will remove the bad worker and
+            # reschedule the computations
+
+            # Both tasks are rescheduled onto `b`, since `a` was removed.
+            assert await fin == b.address
+
+            await a.finished()
+            assert list(s.workers) == [b.address]
+
+            sched_logger = sched_logger.getvalue()
+            client_logger = client_logger.getvalue()
+            assert "Shut down unresponsive workers" in sched_logger
+
+            assert "Couldn't gather 1 keys, rescheduling" in client_logger
+
+            assert s.tasks[fin.key].who_has == {s.workers[b.address]}
+            assert a.state.executed_count == 2
+            assert b.state.executed_count >= 1
+            # ^ leave room for a future switch from `remove_worker` to `retire_workers`
 
     # Ensure that the communication was done via the scheduler, i.e. we actually hit a
     # bad connection
-    assert s.rpc.cnn_count == 4
+    assert s.rpc.cnn_count > 0
 
 
 @gen_cluster(client=True)
