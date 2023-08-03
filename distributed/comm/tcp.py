@@ -119,14 +119,13 @@ def get_stream_address(comm):
     """
     Get a stream's local address.
     """
+    # raise OSError in case the comm is closed, s.t.
+    # retry code can handle it appropriately; see also
+    # https://github.com/dask/distributed/issues/7953
     if comm.closed():
-        return "<closed>"
+        raise CommClosedError()
 
-    try:
-        return unparse_host_port(*comm.socket.getsockname()[:2])
-    except OSError:
-        # Probably EBADF
-        return "<closed>"
+    return unparse_host_port(*comm.socket.getsockname()[:2])
 
 
 def convert_stream_closed_error(obj, exc):

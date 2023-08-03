@@ -618,7 +618,7 @@ class Server:
             timeout = getattr(self, "death_timeout", None)
 
             async def _close_on_failure(exc: Exception) -> None:
-                await self.close()
+                await self.close(reason=f"failure-to-start-{str(type(exc))}")
                 self.status = Status.failed
                 self.__startup_exc = exc
 
@@ -1006,10 +1006,7 @@ class Server:
                             break
                         handler = self.stream_handlers[op]
                         if iscoroutinefunction(handler):
-                            self._ongoing_background_tasks.call_soon(
-                                handler, **merge(extra, msg)
-                            )
-                            await asyncio.sleep(0)
+                            await handler(**merge(extra, msg))
                         else:
                             handler(**merge(extra, msg))
                     else:
@@ -1025,7 +1022,7 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    async def close(self, timeout=None):
+    async def close(self, timeout=None, reason=""):
         try:
             for pc in self.periodic_callbacks.values():
                 pc.stop()
@@ -1520,6 +1517,14 @@ class ConnectionPool:
             return self
 
         return _().__await__()
+
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+        return
 
     async def start(self) -> None:
         # Invariant: semaphore._value == limit - open - _n_connecting
