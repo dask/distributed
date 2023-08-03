@@ -67,7 +67,8 @@ async def test_task_lifecycle(c, s, a, b):
     del x, y, z
     await async_poll_for(lambda: not a.state.tasks, timeout=5)  # For hygene only
 
-    expect = [
+    # Note: use set instead of list to account for rare, but harmless, race conditions
+    expect = {
         # a.gather_dep(worker=b.address, keys=["z"])
         ("gather-dep", "decompress", "seconds"),
         ("gather-dep", "deserialize", "seconds"),
@@ -112,8 +113,8 @@ async def test_task_lifecycle(c, s, a, b):
         ("get-data", "serialize", "seconds"),
         ("get-data", "compress", "seconds"),
         ("get-data", "network", "seconds"),
-    ]
-    assert list(get_digests(a)) == expect
+    }
+    assert set(get_digests(a)) == expect
 
     assert get_digests(a, allow="count") == {
         ("execute", span_id(s), "z", "disk-read", "count"): 2,
@@ -552,11 +553,13 @@ async def test_send_metrics_to_scheduler(c, s, a, b):
         ("execute", None, "x", "memory-read", "count"),
         ("execute", None, "x", "memory-read", "bytes"),
     ]
-    assert list(a_metrics) == list(b_metrics) == expect_worker
     expect_scheduler = [
         k[:1] + k[2:] if k[0] == "execute" else k for k in expect_worker
     ]
-    assert list(s_metrics) == expect_scheduler
+
+    # Note: use set instead of list to account for rare, but harmless, race conditions
+    assert set(a_metrics) == set(b_metrics) == set(expect_worker)
+    assert set(s_metrics) == set(expect_scheduler)
 
     for wk, sk in zip(expect_worker, expect_scheduler):
         if not WINDOWS:
