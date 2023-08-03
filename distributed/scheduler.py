@@ -2207,7 +2207,7 @@ class SchedulerState:
         restrictions.
 
         Out of eligible workers holding dependencies of ``ts``, selects the worker
-        where, considering worker backlong and data-transfer costs, the task is
+        where, considering worker backlog and data-transfer costs, the task is
         estimated to start running the soonest.
 
         Returns
@@ -2222,9 +2222,6 @@ class SchedulerState:
 
         valid_workers = self.valid_workers(ts)
         if valid_workers is None and len(self.running) < len(self.workers):
-            if not self.running:
-                return None
-
             # If there were no restrictions, `valid_workers()` didn't subset by
             # `running`.
             valid_workers = self.running
@@ -8197,7 +8194,7 @@ def _task_to_client_msgs(ts: TaskState) -> dict[str, list[dict[str, Any]]]:
 
 def decide_worker(
     ts: TaskState,
-    all_workers: Iterable[WorkerState],
+    all_workers: set[WorkerState],
     valid_workers: set[WorkerState] | None,
     objective: Callable[[WorkerState], Any],
 ) -> WorkerState | None:
@@ -8218,12 +8215,13 @@ def decide_worker(
     """
     assert all(dts.who_has for dts in ts.dependencies)
     if ts.actor:
-        candidates = set(all_workers)
+        candidates = all_workers.copy()
     else:
         candidates = {wws for dts in ts.dependencies for wws in dts.who_has}
+        candidates &= all_workers
     if valid_workers is None:
         if not candidates:
-            candidates = set(all_workers)
+            candidates = all_workers.copy()
     else:
         candidates &= valid_workers
         if not candidates:
