@@ -1306,31 +1306,44 @@ class Worker(BaseWorker, ServerNode):
         return list(self.data)
 
     async def gather(self, who_has: dict[str, list[str]]) -> dict[str, Any]:
-        """Endpoint used by Scheduler.replicate()"""
-        first = True
-        who_has = {
-            k: [coerce_to_address(addr) for addr in v]
-            for k, v in who_has.items()
-            if k not in self.data
-        }
+        """Endpoint used by Scheduler.rebalance() and Scheduler.replicate()"""
+        missing_keys = [k for k in who_has if k not in self.data]
+        failed_keys = []
+        missing_workers: set[str] = set()
+        stimulus_id = f"gather-{time()}"
 
-        async def get_who_has(keys: list[str]) -> Mapping[str, Collection[str]]:
-            nonlocal first
-            if first:
-                first = False
-                return who_has
-            return await retry_operation(self.scheduler.who_has, keys=keys)
+        while missing_keys:
+            to_gather = {}
+            for k in missing_keys:
+                workers = set(who_has[k]) - missing_workers
+                if workers:
+                    to_gather[k] = workers
+                else:
+                    failed_keys.append(k)
+            if not to_gather:
+                break
 
-        result, missing_keys = await gather_from_workers(
-            keys=who_has,
-            get_who_has=get_who_has,
-            rpc=self.rpc,
-            who=self.address,
-        )
-        self.update_data(data=result)
-        if missing_keys:
-            logger.error("Could not find data: %s", missing_keys)
-            return {"status": "partial-fail", "keys": list(missing_keys)}
+            (
+                data,
+                missing_keys,
+                new_failed_keys,
+                new_missing_workers,
+            ) = await gather_from_workers(
+                who_has=to_gather, rpc=self.rpc, who=self.address
+            )
+            self.update_data(data, stimulus_id=stimulus_id)
+            del data
+            failed_keys += new_failed_keys
+            missing_workers.update(new_missing_workers)
+
+            if missing_keys:
+                who_has = await retry_operation(
+                    self.scheduler.who_has, keys=missing_keys
+                )
+
+        if failed_keys:
+            logger.error("Could not find data: %s", failed_keys)
+            return {"status": "partial-fail", "keys": list(failed_keys)}
         else:
             return {"status": "OK"}
 
