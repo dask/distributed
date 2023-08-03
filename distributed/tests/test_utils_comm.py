@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from unittest import mock
 
 import pytest
@@ -18,7 +17,7 @@ from distributed.utils_comm import (
     subs_multiple,
     unpack_remotedata,
 )
-from distributed.utils_test import NO_AMM, BlockedGetData, BrokenComm, gen_cluster
+from distributed.utils_test import BrokenComm, gen_cluster
 
 
 def test_pack_data():
