@@ -1535,7 +1535,16 @@ class Worker(BaseWorker, ServerNode):
             logger.info("Closed worker has not yet started: %s", self.status)
         if not executor_wait:
             logger.info("Not waiting on executor to close")
+
+        # This also informs the scheduler about the status update
         self.status = Status.closing
+
+        if nanny and self.nanny:
+            with self.rpc(self.nanny) as r:
+                await r.close_gracefully(reason=reason)
+
+        # Cancel async instructions
+        await BaseWorker.close(self, timeout=timeout)
 
         # Stop callbacks before giving up control in any `await`.
         # We don't want to heartbeat while closing.
@@ -1543,9 +1552,6 @@ class Worker(BaseWorker, ServerNode):
             pc.stop()
 
         self.stop()
-
-        # Cancel async instructions
-        await BaseWorker.close(self, timeout=timeout)
 
         for preload in self.preloads:
             try:
@@ -1558,10 +1564,6 @@ class Worker(BaseWorker, ServerNode):
                 result = extension.close()
                 if isawaitable(result):
                     await result
-
-        if nanny and self.nanny:
-            with self.rpc(self.nanny) as r:
-                await r.close_gracefully(reason=reason)
 
         setproctitle("dask worker [closing]")
 
