@@ -3369,7 +3369,6 @@ async def test_gather_dep_cancelled_error(c, s, a):
     See Also
     --------
     test_get_data_cancelled_error
-    test_utils_comm.py::test_gather_from_workers_cancelled_error
     https://github.com/dask/distributed/issues/8006
     """
     async with BlockedGetData(s.address) as b:
@@ -3408,7 +3407,6 @@ async def test_get_data_cancelled_error(c, s, a):
     See Also
     --------
     test_gather_dep_cancelled_error
-    test_utils_comm.py::test_gather_from_workers_cancelled_error
     https://github.com/dask/distributed/issues/8006
     """
 
