@@ -197,16 +197,8 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest \
-            distributed/diagnostics/tests/test_task_stream.py::test_TaskStreamPlugin \
-            distributed/tests/test_client.py::test_file_descriptors_dont_leak \
-            distributed/tests/test_failed_workers.py \
-            distributed/tests/test_scheduler.py::test_tell_workers_when_peers_have_left \
-            distributed/tests/test_steal.py::test_dont_steal_fast_tasks_compute_time \
-            distributed/tests/test_stress.py::test_chaos_rechunk \
-            distributed/shuffle/tests/test_shuffle.py \
-            --count=10 \
-            --runslow \
+          pytest distributed \
+            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \
