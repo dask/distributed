@@ -653,9 +653,19 @@ async def test_steal_more_attractive_tasks(c, s, a, *rest):
     x = c.submit(mul, b"0", 100000000, workers=a.address)  # 100 MB
     await wait(x)
 
-    # We have to stop the extension entirely since otherwise a tick might
-    # already allow a stealing request may sneak in before all tasks are on the
-    # scheduler
+    # The submits below are all individual update_graph calls which are very
+    # likely submitted in the same batch.
+    # Prior to https://github.com/dask/distributed/pull/8049, the entire batch
+    # would be processed by the scheduler in the same event loop tick.
+    # Therefore, the first PC `stealing.balance` call would be guaranteed to see
+    # all the tasks and make the correct decision.
+    # After the PR, the batch is processed in multiple event loop ticks, so the
+    # first PC `stealing.balance` call would potentially only see the first
+    # tasks and would try to rebalance them instead of the slow and heavy one.
+    # To guarantee that the stealing extension sees all tasks, we're stopping
+    # the callback and are calling balance ourselves once we are certain the
+    # tasks are all on the scheduler.
+    # Related https://github.com/dask/distributed/pull/5443
     await ext.stop()
     futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for i in range(10)]
     future = c.submit(slow2, x, priority=-1)
