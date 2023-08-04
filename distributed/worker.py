@@ -1568,8 +1568,6 @@ class Worker(BaseWorker, ServerNode):
             except Exception:
                 logger.exception("Failed to tear down preload")
 
-        # Stop callbacks before giving up control in any `await`.
-        # We don't want to heartbeat while closing.
         for pc in self.periodic_callbacks.values():
             pc.stop()
 
