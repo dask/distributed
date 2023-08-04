@@ -3678,7 +3678,7 @@ async def test_gather_on_worker_bad_recipient(c, s, a, b):
     """The recipient is missing"""
     x = await c.scatter("x")
     await b.close()
-    assert s.workers.keys() == {a.address}
+    await async_poll_for(lambda: s.workers.keys() == {a.address}, timeout=5)
     out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == {x.key}
 
