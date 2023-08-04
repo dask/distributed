@@ -1535,23 +1535,24 @@ class Worker(BaseWorker, ServerNode):
             logger.info("Closed worker has not yet started: %s", self.status)
         if not executor_wait:
             logger.info("Not waiting on executor to close")
+
+        # This also informs the scheduler about the status update
         self.status = Status.closing
+        setproctitle("dask worker [closing]")
 
-        # Stop callbacks before giving up control in any `await`.
-        # We don't want to heartbeat while closing.
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-
-        self.stop()
+        if nanny and self.nanny:
+            with self.rpc(self.nanny) as r:
+                await r.close_gracefully(reason=reason)
 
         # Cancel async instructions
         await BaseWorker.close(self, timeout=timeout)
 
-        for preload in self.preloads:
-            try:
-                await preload.teardown()
-            except Exception:
-                logger.exception("Failed to tear down preload")
+        teardowns = [
+            plugin.teardown(self)
+            for plugin in self.plugins.values()
+            if hasattr(plugin, "teardown")
+        ]
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
@@ -1559,19 +1560,18 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     await result
 
-        if nanny and self.nanny:
-            with self.rpc(self.nanny) as r:
-                await r.close_gracefully(reason=reason)
+        self.stop_services()
 
-        setproctitle("dask worker [closing]")
+        for preload in self.preloads:
+            try:
+                await preload.teardown()
+            except Exception:
+                logger.exception("Failed to tear down preload")
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
 
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        self.stop()
 
         if self._client:
             # If this worker is the last one alive, clean up the worker
@@ -1596,8 +1596,6 @@ class Worker(BaseWorker, ServerNode):
                         c.close()
 
         await self.scheduler.close_rpc()
-
-        self.stop_services()
 
         # Give some time for a UCX scheduler to complete closing endpoints
         # before closing self.batched_stream, otherwise the local endpoint
@@ -1649,10 +1647,11 @@ class Worker(BaseWorker, ServerNode):
         await self.rpc.close()
 
         self.status = Status.closed
+        setproctitle("dask worker [closed]")
+
         await ServerNode.close(self)
 
         self.__exit_stack.__exit__(None, None, None)
-        setproctitle("dask worker [closed]")
         return "OK"
 
     async def close_gracefully(
