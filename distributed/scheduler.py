@@ -4338,7 +4338,7 @@ class Scheduler(SchedulerState, ServerNode):
                     del dependencies[k]
                     if k in keys:
                         keys.remove(k)
-        del deps
+                del deps
         # Avoid computation that is already finished
         done = set()  # tasks that are already done
         for k, v in dependencies.items():
