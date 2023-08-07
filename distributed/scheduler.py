@@ -3963,11 +3963,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             weakref.finalize(self, del_scheduler_file)
 
-        for preload in self.preloads:
-            try:
-                await preload.start()
-            except Exception:
-                logger.exception("Failed to start preload")
+        await self.preloads.start()
 
         if self.jupyter:
             # Allow insecure communications from local users
@@ -4014,11 +4010,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Scheduler closing due to %s...", reason or "unknown reason")
         setproctitle("dask scheduler [closing]")
 
-        for preload in self.preloads:
-            try:
-                await preload.teardown()
-            except Exception:
-                logger.exception("Failed to tear down preload")
+        await self.preloads.teardown()
 
         await asyncio.gather(
             *[log_errors(plugin.close) for plugin in list(self.plugins.values())]

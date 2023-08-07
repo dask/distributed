@@ -439,7 +439,7 @@ class Worker(BaseWorker, ServerNode):
     _client: Client | None
     bandwidth_workers: defaultdict[str, tuple[float, int]]
     bandwidth_types: defaultdict[type, tuple[float, int]]
-    preloads: list[preloading.Preload]
+    preloads: preloading.PreloadManager
     contact_address: str | None
     _start_port: int | str | Collection[int] | None = None
     _start_host: str | None
@@ -1409,11 +1409,7 @@ class Worker(BaseWorker, ServerNode):
         if self.name is None:
             self.name = self.address
 
-        for preload in self.preloads:
-            try:
-                await preload.start()
-            except Exception:
-                logger.exception("Failed to start preload")
+        await self.preloads.start()
 
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
@@ -1563,11 +1559,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.stop_services()
 
-        for preload in self.preloads:
-            try:
-                await preload.teardown()
-            except Exception:
-                logger.exception("Failed to tear down preload")
+        await self.preloads.teardown()
 
         for pc in self.periodic_callbacks.values():
             pc.stop()

@@ -222,13 +222,34 @@ class Preload:
                 await future
 
 
+class PreloadManager:
+    _preloads: list[Preload]
+
+    def __init__(self, preloads: list[Preload]):
+        self._preloads = preloads
+
+    async def start(self):
+        for preload in self._preloads:
+            try:
+                await preload.start()
+            except Exception:
+                logger.exception("Failed to start preload: %s", preload.name)
+
+    async def teardown(self):
+        for preload in self._preloads:
+            try:
+                await preload.teardown()
+            except Exception:
+                logger.exception("Failed to tear down preload: %s", preload.name)
+
+
 def process_preloads(
     dask_server: Server | Client,
     preload: str | list[str],
     preload_argv: list[str] | list[list[str]],
     *,
     file_dir: str | None = None,
-) -> list[Preload]:
+) -> PreloadManager:
     if isinstance(preload, str):
         preload = [preload]
     if preload_argv and isinstance(preload_argv[0], str):
@@ -241,7 +262,9 @@ def process_preloads(
             f"{len(preload)} != {len(preload_argv)}"
         )
 
-    return [
-        Preload(dask_server, p, argv, file_dir)
-        for p, argv in zip(preload, preload_argv)
-    ]
+    return PreloadManager(
+        [
+            Preload(dask_server, p, argv, file_dir)
+            for p, argv in zip(preload, preload_argv)
+        ]
+    )
