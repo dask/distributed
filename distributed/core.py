@@ -1006,10 +1006,7 @@ class Server:
                             break
                         handler = self.stream_handlers[op]
                         if iscoroutinefunction(handler):
-                            self._ongoing_background_tasks.call_soon(
-                                handler, **merge(extra, msg)
-                            )
-                            await asyncio.sleep(0)
+                            await handler(**merge(extra, msg))
                         else:
                             handler(**merge(extra, msg))
                     else:
@@ -1520,6 +1517,14 @@ class ConnectionPool:
             return self
 
         return _().__await__()
+
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+        return
 
     async def start(self) -> None:
         # Invariant: semaphore._value == limit - open - _n_connecting

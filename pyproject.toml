@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "distributed"
 description = "Distributed scheduler for Dask"
 maintainers = [{name = "Matthew Rocklin", email = "mrocklin@gmail.com"}]
-license = {text = "BSD"}
+license = {text = "BSD-3-Clause"}
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -27,7 +27,7 @@ requires-python = ">=3.9"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 1.5.0",
-    "dask == 2023.7.1",
+    "dask == 2023.8.0",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.0",

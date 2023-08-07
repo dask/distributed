@@ -303,6 +303,15 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         while a.state.executing_count != 1 or b.state.executing_count != 1:
             await asyncio.sleep(0.01)
 
+        # Rootish is a dynamic property as it is defined right now. Since the
+        # above submit calls are individual update_graph calls, waiting for
+        # tasks to be in executing state on the worker is not sufficient to
+        # guarantee that all the y tasks are already on the scheduler. Only
+        # after at least 5 have been registered, will the task be flagged as
+        # rootish
+        while "y-2" not in s.tasks or not s.is_rootish(s.tasks["y-2"]):
+            await asyncio.sleep(0.01)
+
         # - y-2 has no restrictions
         # - TaskGroup(y) has more than 4 tasks (total_nthreads * 2)
         # - TaskGroup(y) has less than 5 dependency groups
@@ -1358,7 +1367,7 @@ async def test_update_graph_culls(s, a, b):
     )
 
     header, frames = serialize(ToPickle(dsk), on_error="raise")
-    s.update_graph(
+    await s.update_graph(
         graph_header=header,
         graph_frames=frames,
         keys=["y"],
@@ -3678,7 +3687,7 @@ async def test_gather_on_worker_bad_recipient(c, s, a, b):
     """The recipient is missing"""
     x = await c.scatter("x")
     await b.close()
-    assert s.workers.keys() == {a.address}
+    await async_poll_for(lambda: s.workers.keys() == {a.address}, timeout=5)
     out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == {x.key}
 
