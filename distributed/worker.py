@@ -6,6 +6,7 @@ import builtins
 import contextlib
 import contextvars
 import errno
+import inspect
 import logging
 import math
 import os
@@ -1591,8 +1592,6 @@ class Worker(BaseWorker, ServerNode):
         for pc in self.periodic_callbacks.values():
             pc.stop()
 
-        self.stop()
-
         if self._client:
             # If this worker is the last one alive, clean up the worker
             # initialized clients
@@ -1615,7 +1614,27 @@ class Worker(BaseWorker, ServerNode):
                         # otherwise
                         c.close()
 
-        await self.scheduler.close_rpc()
+        # FIXME: Copy-paste from `Server.stop`. See dask/distributed#8077
+        _stops = set()
+        for listener in self.listeners:
+            future = listener.stop()
+            if inspect.isawaitable(future):
+                _stops.add(future)
+            try:
+                abort_handshaking_comms = listener.abort_handshaking_comms
+            except AttributeError:
+                pass
+            else:
+                abort_handshaking_comms()
+
+        if _stops:
+
+            async def background_stops():
+                await asyncio.gather(*_stops)
+
+        # end copy-paste
+
+        await self.rpc.close()
 
         # Give some time for a UCX scheduler to complete closing endpoints
         # before closing self.batched_stream, otherwise the local endpoint
@@ -1664,8 +1683,7 @@ class Worker(BaseWorker, ServerNode):
                         executor=executor, wait=executor_wait
                     )  # Just run it directly
 
-        await self.rpc.close()
-
+        self.stop()
         self.status = Status.closed
         setproctitle("dask worker [closed]")
 

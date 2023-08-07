@@ -1,6 +1,53 @@
 Changelog
 =========
 
+.. _v2023.8.0:
+
+2023.8.0
+--------
+
+Released on August 4, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Offload CPU intensive sections of update graph to unblock event loop (:pr:`8049`) `Florian Jetter`_
+- Log worker close reason in events (:pr:`8042`) `Florian Jetter`_
+- Exclude comm handshake from connect timeout (:pr:`7698`) `Florian Jetter`_
+- Automatically restart P2P shuffles when output worker leaves (:pr:`7970`) `Hendrik Makait`_
+- Add ``Client.unregister_scheduler_plugin`` method (:pr:`7968`) `Brian Phillips`_
+- Fix log message (:pr:`8029`) `Hendrik Makait`_
+- Send shards grouped by input chunk in P2P rechunking (:pr:`8010`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Close state machine and add-ins first in ``Worker.close`` (:pr:`8066`) `Hendrik Makait`_
+- Fix ``decide_worker`` picking a closing worker (:pr:`8032`) `crusaderky`_
+- Raise ``CommClosedError`` in ``get_stream_address`` (:pr:`8020`) `jochenott`_
+- Respect average ``nthreads`` in adaptive (:pr:`8041`) `Matthew Rocklin`_
+- Use queued tasks in adaptive target (:pr:`8037`) `Matthew Rocklin`_
+- Restore support for yield unsafe ``Client`` context managers and deprecate that support (:pr:`7987`) `Thomas Grainger`_
+
+Documentation
+^^^^^^^^^^^^^
+- Change ``worker_saturation`` default value to 1.1 in the documention (:pr:`8040`) `minhnguyenxuan60`_
+- Clarified ``concurrent.futures`` section in ``client.rst`` (:pr:`8048`) `mercyo12`_
+
+Maintenance
+^^^^^^^^^^^
+- Fix flaky ``test_worker_metrics`` (:pr:`8069`) `crusaderky`_
+- Use SPDX in ``license`` metadata (:pr:`8065`) `jakirkham`_
+- Rebalance ``ci1`` markers (:pr:`8061`) `Florian Jetter`_
+- Ensure stream messages are always ordered (:pr:`8059`) `Florian Jetter`_
+- Simplify update graph (:pr:`8047`) `Florian Jetter`_
+- Provide close reason when signal is caught (:pr:`8045`) `Florian Jetter`_
+- Allow unclosed comms in tests (:pr:`8057`) `Florian Jetter`_
+- Cosmetic tweak to ``adaptive_target`` (:pr:`8052`) `crusaderky`_
+- Fix linting (:pr:`8046`) `Florian Jetter`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.10`` (:pr:`8033`)
+- Test against more recent ``pyarrow`` versions (:pr:`8021`) `James Bourbeau`_
+- Add a test for ``GraphLayout`` with ``scatter`` (:pr:`8025`) `Irina Truong`_
+- Fix compatibility variable naming  (:pr:`8030`) `Hendrik Makait`_
+
 .. _v2023.7.1:
 
 2023.7.1
@@ -5144,3 +5191,7 @@ significantly without many new features.
 .. _`Patrick Hoefler`: https://github.com/phofl
 .. _`Irina Truong`: https://github.com/j-bennet
 .. _`Joris Van den Bossche`: https://github.com/jorisvandenbossche
+.. _`Brian Phillips`: https://github.com/bphillips-exos
+.. _`jochenott`: https://github.com/jochenott
+.. _`minhnguyenxuan60`: https://github.com/minhnguyenxuan60
+.. _`mercyo12`: https://github.com/mercyo12
