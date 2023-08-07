@@ -1594,7 +1594,7 @@ class Worker(BaseWorker, ServerNode):
                         # otherwise
                         c.close()
 
-        # FIXME: Copy-paste from `Server.stop`.
+        # FIXME: Copy-paste from `Server.stop`. See dask/distributed#8077
         _stops = set()
         for listener in self.listeners:
             future = listener.stop()
