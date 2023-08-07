@@ -662,11 +662,6 @@ class Server:
         if self.__stopped:
             return
 
-        if self._workdir is not None:
-            self._workdir.release()
-
-        self.monitor.close()
-
         self.__stopped = True
         _stops = set()
         for listener in self.listeners:
@@ -686,6 +681,11 @@ class Server:
                 await asyncio.gather(*_stops)
 
             self._ongoing_background_tasks.call_soon(background_stops)
+
+        self.monitor.close()
+
+        if self._workdir is not None:
+            self._workdir.release()
 
     @property
     def listener(self):
