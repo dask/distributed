@@ -281,6 +281,12 @@ class PluginManager(Mapping[str, WorkerPlugin]):
     def __len__(self) -> int:
         return len(self._plugins)
 
+    async def __aenter__(self) -> "PluginManager":
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        await self.close()
+
     @log_errors
     async def add(
         self,
