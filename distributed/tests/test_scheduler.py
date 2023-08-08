@@ -24,7 +24,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import delayed
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
-from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
+from dask.utils import parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
     CancelledError,
@@ -74,7 +74,7 @@ from distributed.utils_test import (
     varying,
     wait_for_state,
 )
-from distributed.worker import dumps_function, dumps_task, get_worker, secede
+from distributed.worker import dumps_function, get_worker, secede
 
 pytestmark = pytest.mark.ci1
 
@@ -953,24 +953,6 @@ def test_dumps_function():
     assert a != c
 
 
-def test_dumps_task():
-    d = dumps_task((inc, 1))
-    assert set(d) == {"function", "args"}
-
-    def f(x, y=2):
-        return x + y
-
-    d = dumps_task((apply, f, (1,), {"y": 10}))
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert cloudpickle.loads(d["kwargs"]) == {"y": 10}
-
-    d = dumps_task((apply, f, (1,)))
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert set(d) == {"function", "args"}
-
-
 @pytest.mark.parametrize("worker_saturation", [1.0, float("inf")])
 @gen_cluster(client=True)
 async def test_ready_remove_worker(c, s, a, b, worker_saturation):
@@ -1357,9 +1339,9 @@ async def test_update_graph_culls(s, a, b):
         layers={
             "foo": MaterializedLayer(
                 {
-                    "x": dumps_task((inc, 1)),
-                    "y": dumps_task((inc, "x")),
-                    "z": dumps_task((inc, 2)),
+                    "x": (inc, 1),
+                    "y": (inc, "x"),
+                    "z": (inc, 2),
                 }
             )
         },

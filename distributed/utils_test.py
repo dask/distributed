@@ -2303,13 +2303,6 @@ class BlockedExecute(Worker):
             self.in_execute_exit.set()
             await self.block_execute_exit.wait()
 
-    async def _maybe_deserialize_task(
-        self, ts: WorkerTaskState
-    ) -> tuple[Callable, tuple, dict[str, Any]]:
-        self.in_deserialize_task.set()
-        await self.block_deserialize_task.wait()
-        return await super()._maybe_deserialize_task(ts)
-
 
 @contextmanager
 def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[None]:

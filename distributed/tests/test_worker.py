@@ -95,7 +95,6 @@ from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     RemoveReplicasEvent,
-    SerializedTask,
     StealRequestEvent,
 )
 
@@ -2090,7 +2089,7 @@ async def test_stimulus_story(c, s, a):
 
     assert isinstance(story[0], ComputeTaskEvent)
     assert story[0].key == "f1"
-    assert story[0].run_spec == SerializedTask(task=None)  # Not logged
+    assert story[0].run_spec is None  # Not logged
 
     assert isinstance(story[1], ExecuteSuccessEvent)
     assert story[1].key == "f1"
@@ -2100,7 +2099,7 @@ async def test_stimulus_story(c, s, a):
     assert isinstance(story[2], ComputeTaskEvent)
     assert story[2].key == "f2"
     assert story[2].who_has == {"f1": (a.address,)}
-    assert story[2].run_spec == SerializedTask(task=None)  # Not logged
+    assert story[2].run_spec is None  # Not logged
     assert story[2].handled >= story[1].handled
 
     assert isinstance(story[3], ExecuteFailureEvent)
