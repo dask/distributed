@@ -272,21 +272,6 @@ class PluginManager(Mapping[str, WorkerPlugin]):
         self._plugins = {}
         self._closed = False
 
-    def __getitem__(self, key: str) -> WorkerPlugin:
-        return self._plugins[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._plugins)
-
-    def __len__(self) -> int:
-        return len(self._plugins)
-
-    async def __aenter__(self) -> "PluginManager":
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        await self.close()
-
     @log_errors
     async def add(
         self,
@@ -355,6 +340,21 @@ class PluginManager(Mapping[str, WorkerPlugin]):
         ]
 
         await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+
+    def __getitem__(self, key: str) -> WorkerPlugin:
+        return self._plugins[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._plugins)
+
+    def __len__(self) -> int:
+        return len(self._plugins)
+
+    async def __aenter__(self) -> "PluginManager":
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        await self.close()
 
 
 class Worker(BaseWorker, ServerNode):
