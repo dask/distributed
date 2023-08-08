@@ -3656,9 +3656,11 @@ class BaseWorker(abc.ABC):
             stim = task.result()
         except asyncio.CancelledError:
             # This should exclusively happen in Worker.close()
+            logger.warning(f"Async instruction for {task} ended with CancelledError")
             return
         except BaseException:  # pragma: nocover
-            logger.exception("async instruction handlers should never raise!")
+            # This should never happen
+            logger.exception(f"Unhandled exception in async instruction for {task}")
             raise
 
         # Capture metric events in _transition_to_memory()
