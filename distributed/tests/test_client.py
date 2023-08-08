@@ -74,7 +74,7 @@ from distributed.client import (
 )
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import Status, error_message
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
@@ -6383,6 +6383,7 @@ async def test_wait_for_workers(c, s, a, b):
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
+@pytest.mark.skipif(MACOS, reason="dask/distributed#8075")
 @pytest.mark.parametrize(
     "Worker", [Worker, pytest.param(Nanny, marks=[pytest.mark.slow])]
 )
