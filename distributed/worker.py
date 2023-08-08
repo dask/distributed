@@ -23,7 +23,6 @@ from collections.abc import (
     Container,
     Hashable,
     Iterable,
-    Iterator,
     Mapping,
     MutableMapping,
 )
@@ -82,7 +81,7 @@ from distributed.core import (
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
-from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diagnostics.plugin import WorkerPluginManager
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
 from distributed.http import get_handlers
@@ -262,106 +261,6 @@ async def _force_close(self, reason: str):
         # use `os._exit` instead of `sys.exit` because of uncertainty
         # around propagating `SystemExit` from asyncio callbacks
         os._exit(1)
-
-
-class PluginManager(Mapping[str, WorkerPlugin]):
-    _plugins: dict[str, WorkerPlugin]
-    _closed: bool
-    _closed_event: asyncio.Event
-
-    def __init__(self):
-        self._plugins = {}
-        self._closed = False
-        self._closed_event = asyncio.Event()
-
-    @log_errors
-    async def add(
-        self,
-        plugin: WorkerPlugin | bytes,
-        name: str | None = None,
-        catch_errors: bool = True,
-    ) -> dict[str, Any]:
-        if self._closed:
-            raise RuntimeError(
-                "Trying to add a plugin to an already closed plugin manager."
-            )
-
-        if isinstance(plugin, bytes):
-            # Note: historically we have accepted duck-typed classes that don't
-            # inherit from WorkerPlugin. Don't do `assert isinstance`.
-            plugin = cast("WorkerPlugin", pickle.loads(plugin))
-
-        if name is None:
-            name = _get_plugin_name(plugin)
-
-        assert name
-
-        if name in self._plugins:
-            await self.remove(name=name)
-
-        self._plugins[name] = plugin
-
-        logger.info("Starting Worker plugin %s" % name)
-        if hasattr(plugin, "setup"):
-            try:
-                result = plugin.setup(worker=self)
-                if isawaitable(result):
-                    result = await result
-            except Exception as e:
-                if not catch_errors:
-                    raise
-                msg = error_message(e)
-                return cast("dict[str, Any]", msg)
-
-        return {"status": "OK"}
-
-    @log_errors
-    async def remove(self, name: str) -> dict[str, Any]:
-        logger.info(f"Removing Worker plugin {name}")
-        if self._closed:
-            raise RuntimeError(
-                "Trying to add a plugin to an already closed plugin manager."
-            )
-        try:
-            plugin = self._plugins.pop(name)
-            if hasattr(plugin, "teardown"):
-                result = plugin.teardown(worker=self)
-                if isawaitable(result):
-                    result = await result
-        except Exception as e:
-            msg = error_message(e)
-            return cast("dict[str, Any]", msg)
-
-        return {"status": "OK"}
-
-    async def close(self) -> None:
-        if self._closed:
-            await self._closed_event.wait()
-            return
-
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self._plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
-        self._closed_event.set()
-
-    def __getitem__(self, key: str) -> WorkerPlugin:
-        return self._plugins[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._plugins)
-
-    def __len__(self) -> int:
-        return len(self._plugins)
-
-    async def __aenter__(self) -> "PluginManager":
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        await self.close()
 
 
 class Worker(BaseWorker, ServerNode):
@@ -570,7 +469,7 @@ class Worker(BaseWorker, ServerNode):
     low_level_profiler: bool
     scheduler: PooledRPCCall
     execution_state: dict[str, Any]
-    plugins: PluginManager
+    plugins: WorkerPluginManager
     _pending_plugins: tuple[WorkerPlugin, ...]
 
     def __init__(
@@ -760,7 +659,7 @@ class Worker(BaseWorker, ServerNode):
         self.scheduler_delay = 0
         self.stream_comms = {}
 
-        self.plugins = PluginManager()
+        self.plugins = WorkerPluginManager()
         self._pending_plugins = plugins
 
         self.services = {}
