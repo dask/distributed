@@ -267,10 +267,12 @@ async def _force_close(self, reason: str):
 class PluginManager(Mapping[str, WorkerPlugin]):
     _plugins: dict[str, WorkerPlugin]
     _closed: bool
+    _closed_event: asyncio.Event
 
     def __init__(self):
         self._plugins = {}
         self._closed = False
+        self._closed_event = asyncio.Event()
 
     @log_errors
     async def add(
@@ -332,7 +334,11 @@ class PluginManager(Mapping[str, WorkerPlugin]):
 
         return {"status": "OK"}
 
-    async def close(self):
+    async def close(self) -> None:
+        if self._closed:
+            await self._closed_event.wait()
+            return
+
         teardowns = [
             plugin.teardown(self)
             for plugin in self._plugins.values()
@@ -340,6 +346,7 @@ class PluginManager(Mapping[str, WorkerPlugin]):
         ]
 
         await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        self._closed_event.set()
 
     def __getitem__(self, key: str) -> WorkerPlugin:
         return self._plugins[key]
