@@ -137,14 +137,13 @@ def deserialize_numpy_ndarray(header, frames):
     elif not x.flags.writeable:
         # This should exclusively happen when the underlying buffer is read-only, e.g.
         # a read-only mmap.mmap or a bytes object.
-        # Specifically, these are the known use cases:
-        # 1. decompression with a library that does not support output to bytearray
-        #    (lz4 does; snappy, zlib, and zstd don't).
-        #    Note that this only applies to buffers whose uncompressed size was small
-        #    enough that they weren't sharded (distributed.comm.shard); for larger
-        #    buffers the decompressed output is deep-copied beforehand into a bytearray
-        #    in order to merge it.
-        # 2. unspill with zict <2.3.0 (https://github.com/dask/zict/pull/74)
+        # The only known case is:
+        #    decompression with a library that does not support output to
+        #    bytearray (lz4 does; snappy, zlib, and zstd don't). Note that this
+        #    only applies to buffers whose uncompressed size was small enough
+        #    that they weren't sharded (distributed.comm.shard); for larger
+        #    buffers the decompressed output is deep-copied beforehand into a
+        #    bytearray in order to merge it.
         x = np.require(x, requirements=["W"])
 
     return x

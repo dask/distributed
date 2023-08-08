@@ -363,10 +363,10 @@ async def test_mismatched_span(c, s, a, use_default):
     assert len(sbn[span_name][0].groups) == 1
     assert s.task_groups["x"].span_id == sbn[span_name][0].id
 
-    sts0 = s.tasks[str(x0.key)]
-    sts1 = s.tasks[str(x1.key)]
-    wts0 = a.state.tasks[str(x0.key)]
-    wts1 = a.state.tasks[str(x1.key)]
+    sts0 = s.tasks[x0.key]
+    sts1 = s.tasks[x1.key]
+    wts0 = a.state.tasks[x0.key]
+    wts1 = a.state.tasks[x1.key]
     assert sts0.group is sts1.group
     assert wts0.span_id == wts1.span_id
 
@@ -377,8 +377,8 @@ async def test_mismatched_span(c, s, a, use_default):
     else:
         expect = {"ids": (wts0.span_id,), "name": ("p1",)}
         assert s.plugins["my-plugin"].annotations == [
-            {"span": {"('x', 0)": expect}},
-            {"span": {"('x', 1)": expect}},
+            {"span": {("x", 0): expect}},
+            {"span": {("x", 1): expect}},
         ]
         for ts in (sts0, sts1, wts0, wts1):
             assert ts.annotations["span"] == expect

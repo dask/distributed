@@ -13,7 +13,7 @@ from tlz import concat, drop, groupby, merge
 
 import dask.config
 from dask.optimization import SubgraphCallable
-from dask.utils import is_namedtuple_instance, parse_timedelta, stringify
+from dask.utils import is_namedtuple_instance, parse_timedelta
 
 from distributed.core import ConnectionPool, rpc
 from distributed.utils import All
@@ -204,9 +204,9 @@ def _namedtuple_packing(o: Any, handler: Callable[..., Any]) -> Any:
 
 
 def _unpack_remotedata_inner(
-    o: Any, byte_keys: bool, found_keys: set[WrappedKey]
+    o: Any, byte_keys: bool, found_futures: set[WrappedKey]
 ) -> Any:
-    """Inner implementation of `unpack_remotedata` that adds found wrapped keys to `found_keys`"""
+    """Inner implementation of `unpack_remotedata` that adds found wrapped keys to `found_futures`"""
 
     typ = type(o)
     if typ is tuple:
@@ -216,7 +216,7 @@ def _unpack_remotedata_inner(
             # Unpack futures within the arguments of the subgraph callable
             futures: set[WrappedKey] = set()
             args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])
-            found_keys.update(futures)
+            found_futures.update(futures)
 
             # Unpack futures within the subgraph callable itself
             sc: SubgraphCallable = o[0]
@@ -227,9 +227,9 @@ def _unpack_remotedata_inner(
             }
             future_keys: tuple = ()
             if futures:  # If no futures is in the subgraph, we just use `sc` as-is
-                found_keys.update(futures)
+                found_futures.update(futures)
                 future_keys = (
-                    tuple(stringify(f.key) for f in futures)
+                    tuple(f.key for f in futures)
                     if byte_keys
                     else tuple(f.key for f in futures)
                 )
@@ -238,34 +238,34 @@ def _unpack_remotedata_inner(
             return (sc,) + args + future_keys
         else:
             return tuple(
-                _unpack_remotedata_inner(item, byte_keys, found_keys) for item in o
+                _unpack_remotedata_inner(item, byte_keys, found_futures) for item in o
             )
     elif is_namedtuple_instance(o):
         return _namedtuple_packing(
             o,
             partial(
-                _unpack_remotedata_inner, byte_keys=byte_keys, found_keys=found_keys
+                _unpack_remotedata_inner,
+                byte_keys=byte_keys,
+                found_futures=found_futures,
             ),
         )
 
     if typ in collection_types:
         if not o:
             return o
-        outs = [_unpack_remotedata_inner(item, byte_keys, found_keys) for item in o]
+        outs = [_unpack_remotedata_inner(item, byte_keys, found_futures) for item in o]
         return typ(outs)
     elif typ is dict:
         if o:
             return {
-                k: _unpack_remotedata_inner(v, byte_keys, found_keys)
+                k: _unpack_remotedata_inner(v, byte_keys, found_futures)
                 for k, v in o.items()
             }
         else:
             return o
     elif issubclass(typ, WrappedKey):  # TODO use type is Future
         k = o.key
-        if byte_keys:
-            k = stringify(k)
-        found_keys.add(o)
+        found_futures.add(o)
         return k
     else:
         return o
@@ -298,8 +298,8 @@ def unpack_remotedata(o: Any, byte_keys: bool = False) -> tuple[Any, set]:
     >>> unpack_remotedata(rd, byte_keys=True)
     ("('x', 1)", {WrappedKey('('x', 1)')})
     """
-    found_keys: set[Any] = set()
-    return _unpack_remotedata_inner(o, byte_keys, found_keys), found_keys
+    found_futures: set[WrappedKey] = set()
+    return _unpack_remotedata_inner(o, byte_keys, found_futures), found_futures
 
 
 def pack_data(o, d, key_types=object):
