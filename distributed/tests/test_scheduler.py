@@ -1332,7 +1332,10 @@ async def test_config_no_stealing(s):
     assert "stealing" not in s.extensions
 
 
-@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
+@pytest.mark.skipif(
+    WINDOWS or (MACOS and sys.version_info >= (3, 11)),
+    reason="num_fds not supported on windows | https://github.com/dask/distributed/issues/8075",
+)
 @gen_cluster(nthreads=[])
 async def test_file_descriptors_dont_leak(s):
     proc = psutil.Process()
