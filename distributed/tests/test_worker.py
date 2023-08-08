@@ -26,7 +26,7 @@ from tlz import first, pluck, sliding_window
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import delayed, istask
+from dask import delayed
 from dask.system import CPU_COUNT
 from dask.utils import tmpfile
 
@@ -95,7 +95,6 @@ from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     RemoveReplicasEvent,
-    StealRequestEvent,
 )
 
 pytestmark = pytest.mark.ci1
@@ -2052,7 +2051,7 @@ async def test_executor_offload(c, s, monkeypatch):
             self._thread_ident = threading.get_ident()
             return self
 
-    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
+    monkeypatch.setattr("distributed.comm.utils.OFFLOAD_THRESHOLD", 1)
 
     async with Worker(s.address, executor="offload") as w:
         from distributed.utils import _offload_executor
@@ -2786,39 +2785,6 @@ async def test_forget_dependents_after_release(c, s, a):
     while fut2.key in a.state.tasks:
         await asyncio.sleep(0.001)
     assert fut2.key not in {d.key for d in a.state.tasks[fut.key].dependents}
-
-
-@pytest.mark.filterwarnings("ignore:Sending large graph of size")
-@pytest.mark.filterwarnings("ignore:Large object of size")
-@gen_cluster(client=True)
-async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
-    stealing_ext = s.extensions["stealing"]
-    await stealing_ext.stop()
-
-    in_deserialize = asyncio.Event()
-    wait_in_deserialize = asyncio.Event()
-
-    async def custom_worker_offload(func, *args):
-        res = func(*args)
-        if not istask(args) and istask(res):
-            in_deserialize.set()
-            await wait_in_deserialize.wait()
-        return res
-
-    monkeypatch.setattr("distributed.worker.offload", custom_worker_offload)
-    obj = random.randbytes(OFFLOAD_THRESHOLD + 1)
-    fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
-
-    await in_deserialize.wait()
-    ts = s.tasks[fut.key]
-    a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
-    stealing_ext.scheduler.send_task_to_worker(b.address, ts)
-
-    fut2 = c.submit(inc, fut, workers=[a.address])
-    fut3 = c.submit(inc, fut2, workers=[a.address])
-    wait_in_deserialize.set()
-    assert await fut2 == 42
-    await fut3
 
 
 @gen_cluster(client=True, config=NO_AMM)

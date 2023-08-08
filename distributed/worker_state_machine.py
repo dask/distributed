@@ -775,6 +775,14 @@ class ComputeTaskEvent(StateMachineEvent):
     def _after_from_dict(self) -> None:
         self.run_spec = None
 
+    @classmethod
+    def _f(cls) -> None:
+        return
+
+    @classmethod
+    def dummy_runspec(cls) -> tuple[Callable, tuple, dict]:
+        return (cls._f, (), {})
+
     @staticmethod
     def dummy(
         key: str,
@@ -799,7 +807,7 @@ class ComputeTaskEvent(StateMachineEvent):
             nbytes=nbytes or {k: 1 for k in who_has or ()},
             priority=priority,
             duration=duration,
-            run_spec=None,
+            run_spec=ComputeTaskEvent.dummy_runspec(),
             resource_restrictions=resource_restrictions or {},
             actor=actor,
             annotations=annotations or {},

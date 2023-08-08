@@ -150,7 +150,6 @@ async def test_custom_executor(c, s, a):
             await c.submit(sleep, 0.1)
 
     assert list(get_digests(a, "execute")) == [
-        ("execute", span_id(s), "sleep", "deserialize", "seconds"),
         ("execute", span_id(s), "sleep", "executor", "seconds"),
         ("execute", span_id(s), "sleep", "other", "seconds"),
     ]
@@ -160,18 +159,10 @@ async def test_custom_executor(c, s, a):
     )
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_run_spec_deserialization(c, s, a):
-    """Test that deserialization of run_spec is metered"""
-    await c.submit(inc, 1, key="x")
-    assert 0 < a.digests_total["execute", span_id(s), "x", "deserialize", "seconds"] < 1
-
-
 @gen_cluster(client=True)
 async def test_offload(c, s, a, b, monkeypatch):
     """Test that functions wrapped by offload() are metered"""
     monkeypatch.setattr(distributed.comm.utils, "OFFLOAD_THRESHOLD", 1)
-    monkeypatch.setattr(distributed.worker, "OFFLOAD_THRESHOLD", 1)
 
     x = c.submit(inc, 1, key="x", workers=[a.address])
     y = c.submit(lambda x: None, x, key="y", workers=[b.address])
@@ -180,8 +171,6 @@ async def test_offload(c, s, a, b, monkeypatch):
     assert list(get_digests(b, {"offload", "serialize", "deserialize"})) == [
         ("gather-dep", "offload", "seconds"),
         ("gather-dep", "deserialize", "seconds"),
-        ("execute", span_id(s), "y", "offload", "seconds"),
-        ("execute", span_id(s), "y", "deserialize", "seconds"),
         ("get-data", "offload", "seconds"),
         ("get-data", "serialize", "seconds"),
     ]
@@ -364,7 +353,6 @@ async def test_user_metrics_sync(c, s, a):
     await wait(c.submit(f, key="x"))
 
     assert list(get_digests(a)) == [
-        ("execute", span_id(s), "x", "deserialize", "seconds"),
         ("execute", span_id(s), "x", "I/O", "seconds"),
         ("execute", span_id(s), "x", "thread-cpu", "seconds"),
         ("execute", span_id(s), "x", "thread-noncpu", "seconds"),
@@ -387,7 +375,6 @@ async def test_user_metrics_async(c, s, a):
     await wait(c.submit(f, key="x"))
 
     assert list(get_digests(a)) == [
-        ("execute", span_id(s), "x", "deserialize", "seconds"),
         ("execute", span_id(s), "x", "I/O", "seconds"),
         ("execute", span_id(s), "x", "thread-noncpu", "seconds"),
         ("execute", span_id(s), "x", "other", "seconds"),
@@ -431,7 +418,6 @@ async def test_user_metrics_weird(c, s, a):
     a_metrics = get_digests(a)
 
     assert list(s_metrics) == [
-        ("execute", "x", "deserialize", "seconds"),
         ("execute", "x", ("foo", 1), "seconds"),
         ("execute", "x", None, "custom"),
         ("execute", "x", "thread-cpu", "seconds"),
@@ -536,7 +522,6 @@ async def test_send_metrics_to_scheduler(c, s, a, b):
     s_metrics = get_digests(s)
 
     expect_worker = [
-        ("execute", None, "x", "deserialize", "seconds"),
         ("execute", None, "x", "thread-cpu", "seconds"),
         ("execute", None, "x", "thread-noncpu", "seconds"),
         ("execute", None, "x", "executor", "seconds"),
@@ -583,7 +568,6 @@ async def test_no_spans_extension(c, s, a):
     s_metrics = get_digests(s)
     expect_worker = [
         ("execute", None, "x", "failed", "seconds"),
-        ("execute", None, "y", "deserialize", "seconds"),
         ("execute", None, "y", "thread-cpu", "seconds"),
         ("execute", None, "y", "thread-noncpu", "seconds"),
         ("execute", None, "y", "executor", "seconds"),

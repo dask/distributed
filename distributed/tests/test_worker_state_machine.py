@@ -426,15 +426,12 @@ def test_computetask_dummy():
         nbytes={},
         priority=(0,),
         duration=1.0,
-        run_spec=None,
+        run_spec=ComputeTaskEvent.dummy_runspec(),
         resource_restrictions={},
         actor=False,
         annotations={},
         span_id=None,
         stimulus_id="s",
-        function=None,
-        args=None,
-        kwargs=None,
         run_id=0,
     )
 

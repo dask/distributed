@@ -345,7 +345,26 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         await wait(xs + ys)
 
 
-@pytest.mark.slow
+from distributed import WorkerPlugin
+
+
+class CountData(WorkerPlugin):
+    def __init__(self, keys):
+        self.keys = keys
+        self.worker = None
+        self.count = 0
+
+    def setup(self, worker):
+        self.worker = worker
+
+    def transition(self, start, finish, *args, **kwargs):
+        count = 0
+        for k in self.worker.data:
+            if k in self.keys:
+                count += 1
+        self.count = max(self.count, count)
+
+
 @gen_cluster(
     nthreads=[("", 2)] * 4,
     client=True,
@@ -359,33 +378,18 @@ async def test_graph_execution_width(c, s, *workers):
     The number of parallel work streams match the number of threads.
     """
 
-    class Refcount:
-        "Track how many instances of this class exist; logs the count at creation and deletion"
-
-        count = 0
-        lock = dask.utils.SerializableLock()
-        log = []
-
-        def __init__(self):
-            with self.lock:
-                type(self).count += 1
-                self.log.append(self.count)
-
-        def __del__(self):
-            with self.lock:
-                self.log.append(self.count)
-                type(self).count -= 1
-
-    roots = [delayed(Refcount)() for _ in range(32)]
+    roots = [delayed(inc)(ix) for ix in range(32)]
     passthrough1 = [delayed(slowidentity)(r, delay=0) for r in roots]
     passthrough2 = [delayed(slowidentity)(r, delay=0) for r in passthrough1]
     done = [delayed(lambda r: None)(r) for r in passthrough2]
-
+    await c.register_worker_plugin(
+        CountData(keys=[f.key for f in roots]), name="count-roots"
+    )
     fs = c.compute(done)
     await wait(fs)
-    # NOTE: the max should normally equal `total_nthreads`. But some macOS CI machines
-    # are slow enough that they aren't able to reach the full parallelism of 8 threads.
-    assert max(Refcount.log) <= s.total_nthreads
+
+    res = await c.run(lambda dask_worker: dask_worker.plugins["count-roots"].count)
+    assert all(0 < count <= 2 for count in res.values())
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
