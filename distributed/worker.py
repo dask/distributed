@@ -1642,12 +1642,7 @@ class Worker(BaseWorker, ServerNode):
         # Cancel async instructions
         await BaseWorker.close(self, timeout=timeout)
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        await self.plugins.close()
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
