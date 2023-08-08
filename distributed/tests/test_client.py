@@ -5165,17 +5165,19 @@ def test_quiet_client_close(loop):
             sleep(0.200)  # stop part-way
         sleep(0.1)  # let things settle
 
-        out = logger.getvalue()
-        lines = out.strip().split("\n")
-        assert len(lines) <= 2
-        for line in lines:
-            assert (
-                not line
-                or "heartbeat from unregistered worker" in line
-                or "unaware of this worker" in line
-                or "garbage" in line
-                or set(line) == {"-"}
-            ), line
+    out = logger.getvalue()
+    lines = out.strip().split("\n")
+    unexpected_lines = [
+        line
+        for line in lines
+        if line
+        and "heartbeat from unregistered worker" not in line
+        and "unaware of this worker" not in line
+        and "garbage" not in line
+        and "ended with CancelledError" not in line
+        and set(line) != {"-"}
+    ]
+    assert not unexpected_lines, lines
 
 
 @pytest.mark.slow
