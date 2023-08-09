@@ -15,6 +15,8 @@ from unittest import mock
 
 import pytest
 
+from distributed.worker import Status
+
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
@@ -419,6 +421,43 @@ async def test_crashed_worker_during_transfer(c, s, a):
         await c.close()
         await check_worker_cleanup(a)
         await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.worker.memory.monitor-interval": "60s"},
+)
+async def test_restart_deadlock(c, s):
+    async with Worker(s.address) as a:
+        async with Nanny(s.address) as b:
+            with dask.annotate(workers=[a.address]):
+                df = dask.datasets.timeseries(
+                    start="2000-01-01",
+                    end="2000-03-01",
+                    dtypes={"x": float, "y": float},
+                    freq="10 s",
+                )
+            out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+            fut = c.compute(out.x.size)
+            await wait_until_worker_has_tasks(
+                "shuffle-transfer", b.worker_address, 1, s
+            )
+            a.status = Status.paused
+            while len(s.running) > 1:
+                await asyncio.sleep(0.01)
+            b.close_gracefully()
+            await b.process.process.kill()
+
+            while s.running:
+                await asyncio.sleep(0.01)
+
+            a.status = Status.running
+
+            while not s.running:
+                await asyncio.sleep(0.01)
+            pass
+            await fut
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
