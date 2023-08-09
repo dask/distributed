@@ -2253,10 +2253,6 @@ class BlockedExecute(Worker):
     method and then does not proceed, thus leaving the task in executing state
     indefinitely, until the test sets `block_execute`.
 
-    After that, the worker sets `in_deserialize_task` to simulate the moment when a
-    large run_spec is being deserialized in a separate thread. The worker will block
-    again until the test sets `block_deserialize_task`.
-
     Finally, the worker sets `in_execute_exit` when execute() terminates, but before the
     worker state has processed its exit callback. The worker will block one last time
     until the test sets `block_execute_exit`.

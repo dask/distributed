@@ -3617,7 +3617,6 @@ async def test_execute_preamble_abort_retirement(c, s):
     """
     async with BlockedExecute(s.address) as a:
         await c.wait_for_workers(1)
-        a.block_deserialize_task.set()  # Uninteresting in this test
 
         x = await c.scatter({"x": 1}, workers=[a.address])
         y = c.submit(inc, 1, key="y", workers=[a.address])
