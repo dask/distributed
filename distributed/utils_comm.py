@@ -103,10 +103,11 @@ async def gather_from_workers(
                 missing_workers.add(address)
             elif isinstance(r, Exception):
                 # For example, deserialization error
-                logger.exception(
+                logger.error(
                     "Unexpected error while collecting tasks %s from %s",
                     d[address],
                     address,
+                    exc_info=r,
                 )
                 for key in d[address]:
                     failed_keys.append(key)
