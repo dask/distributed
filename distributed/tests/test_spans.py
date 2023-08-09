@@ -220,7 +220,7 @@ async def test_no_extension(c, s, a, b):
     Worker=NoSchedulerDelayWorker,
     config={"optimization.fuse.active": False},
 )
-async def test_task_groups(c, s, a, b, release):
+async def test_task_groups(c, s, a, b, release, no_time_resync):
     da = pytest.importorskip("dask.array")
     with span("wf"):
         with span("p1"):
@@ -289,7 +289,7 @@ async def test_task_groups(c, s, a, b, release):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=NoSchedulerDelayWorker)
-async def test_before_first_task_finished(c, s, a):
+async def test_before_first_task_finished(c, s, a, no_time_resync):
     t0 = time()
     ev = Event()
     x = c.submit(ev.wait, key="x")
@@ -694,7 +694,7 @@ async def test_active_cpu_seconds_trivial(c, s, a, b):
 
 @pytest.mark.parametrize("some_done", [False, True])
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
-async def test_active_cpu_seconds_not_done(c, s, a, some_done):
+async def test_active_cpu_seconds_not_done(c, s, a, some_done, no_time_resync):
     ev = Event()
     x0 = c.submit(ev.wait, key="x-0", workers=[a.address])
     if some_done:
@@ -722,7 +722,7 @@ async def test_active_cpu_seconds_not_done(c, s, a, some_done):
 
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker)
-async def test_active_cpu_seconds_change_nthreads(c, s, a, b):
+async def test_active_cpu_seconds_change_nthreads(c, s, a, b, no_time_resync):
     ev = Event()
     x = c.submit(ev.wait, key="x", workers=[a.address])
     await wait_for_state("x", "executing", a)
@@ -775,7 +775,7 @@ async def test_active_cpu_seconds_change_nthreads(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
-async def test_active_cpu_seconds_merged(c, s, a):
+async def test_active_cpu_seconds_merged(c, s, a, no_time_resync):
     """Overlapping input spans are not double-counted
     Empty gap between input spans is not counted
     """

@@ -2594,3 +2594,20 @@ class NoSchedulerDelayWorker(Worker):
     @scheduler_delay.setter
     def scheduler_delay(self, value):
         pass
+
+
+@pytest.fixture()
+def no_time_resync():
+    """Temporarily disable the automatic resync of distributed.metrics._WindowsTime
+    which, every 10 minutes, can cause time() to go backwards a few milliseconds.
+
+    On Linux and MacOSX, this fixture is a no-op.
+    """
+    if WINDOWS:
+        time()  # Initialize or refresh delta
+        bak = time.__self__.next_resync
+        time.__self__.next_resync = float("inf")
+        yield
+        time.__self__.next_resync = bak
+    else:
+        yield

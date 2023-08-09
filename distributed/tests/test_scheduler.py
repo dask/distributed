@@ -2580,7 +2580,7 @@ async def test_no_dangling_asyncio_tasks():
 
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
-async def test_task_groups(c, s, a, b):
+async def test_task_groups(c, s, a, b, no_time_resync):
     start = time()
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
@@ -2629,7 +2629,7 @@ async def test_task_groups(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
-async def test_task_groups_update_start_stop(c, s, a):
+async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     """TaskGroup.stop increases as the tasks in the group finish.
     TaskGroup.start can move backwards in the following use case:
 
