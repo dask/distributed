@@ -518,14 +518,12 @@ async def test_worker_metrics(c, s, a, b):
 
     # metrics for foo include self and its child bar
     assert list(foo_metrics) == [
-        ("execute", "x", "deserialize", "seconds"),
         ("execute", "x", "thread-cpu", "seconds"),
         ("execute", "x", "thread-noncpu", "seconds"),
         ("execute", "x", "executor", "seconds"),
         ("execute", "x", "other", "seconds"),
         ("execute", "x", "memory-read", "count"),
         ("execute", "x", "memory-read", "bytes"),
-        ("execute", "y", "deserialize", "seconds"),
         ("execute", "y", "thread-cpu", "seconds"),
         ("execute", "y", "thread-noncpu", "seconds"),
         ("execute", "y", "executor", "seconds"),
@@ -536,7 +534,6 @@ async def test_worker_metrics(c, s, a, b):
         list(bar0_metrics)
         == list(bar1_metrics)
         == [
-            ("execute", "y", "deserialize", "seconds"),
             ("execute", "y", "thread-cpu", "seconds"),
             ("execute", "y", "thread-noncpu", "seconds"),
             ("execute", "y", "executor", "seconds"),

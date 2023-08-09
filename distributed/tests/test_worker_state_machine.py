@@ -390,6 +390,7 @@ def test_computetask_to_dict():
         annotations={},
         span_id=None,
         stimulus_id="test",
+        run_id=5,
     )
     assert ev.run_spec is not None
     ev2 = ev.to_loggable(handled=11.22)
@@ -402,7 +403,7 @@ def test_computetask_to_dict():
         "who_has": {"y": ["w1"]},
         "nbytes": {"y": 123},
         "priority": [0],
-        "run_spec": [None, None, None],
+        "run_spec": None,
         "duration": 123.45,
         "resource_restrictions": {},
         "actor": False,

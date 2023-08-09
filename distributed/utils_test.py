@@ -2287,8 +2287,6 @@ class BlockedExecute(Worker):
     def __init__(self, *args, **kwargs):
         self.in_execute = asyncio.Event()
         self.block_execute = asyncio.Event()
-        self.in_deserialize_task = asyncio.Event()
-        self.block_deserialize_task = asyncio.Event()
         self.in_execute_exit = asyncio.Event()
         self.block_execute_exit = asyncio.Event()
 
