@@ -40,7 +40,6 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
-    overload,
 )
 
 from tlz import keymap, pluck
@@ -1308,23 +1307,44 @@ class Worker(BaseWorker, ServerNode):
         return list(self.data)
 
     async def gather(self, who_has: dict[str, list[str]]) -> dict[str, Any]:
-        who_has = {
-            k: [coerce_to_address(addr) for addr in v]
-            for k, v in who_has.items()
-            if k not in self.data
-        }
-        result, missing_keys, missing_workers = await gather_from_workers(
-            who_has=who_has, rpc=self.rpc, who=self.address
-        )
-        self.update_data(data=result)
-        if missing_keys:
-            logger.warning(
-                "Could not find data: %s on workers: %s (who_has: %s)",
+        """Endpoint used by Scheduler.rebalance() and Scheduler.replicate()"""
+        missing_keys = [k for k in who_has if k not in self.data]
+        failed_keys = []
+        missing_workers: set[str] = set()
+        stimulus_id = f"gather-{time()}"
+
+        while missing_keys:
+            to_gather = {}
+            for k in missing_keys:
+                workers = set(who_has[k]) - missing_workers
+                if workers:
+                    to_gather[k] = workers
+                else:
+                    failed_keys.append(k)
+            if not to_gather:
+                break
+
+            (
+                data,
                 missing_keys,
-                missing_workers,
-                who_has,
+                new_failed_keys,
+                new_missing_workers,
+            ) = await gather_from_workers(
+                who_has=to_gather, rpc=self.rpc, who=self.address
             )
-            return {"status": "partial-fail", "keys": missing_keys}
+            self.update_data(data, stimulus_id=stimulus_id)
+            del data
+            failed_keys += new_failed_keys
+            missing_workers.update(new_missing_workers)
+
+            if missing_keys:
+                who_has = await retry_operation(
+                    self.scheduler.who_has, keys=missing_keys
+                )
+
+        if failed_keys:
+            logger.error("Could not find data: %s", failed_keys)
+            return {"status": "partial-fail", "keys": list(failed_keys)}
         else:
             return {"status": "OK"}
 
@@ -1731,23 +1751,13 @@ class Worker(BaseWorker, ServerNode):
     async def get_data(
         self,
         comm: Comm,
-        keys: Collection[str] | None = None,
+        keys: Collection[str],
         who: str | None = None,
         serializers: list[str] | None = None,
-        max_connections: int | None = None,
     ) -> GetDataBusy | Literal[Status.dont_reply]:
-        if max_connections is None:
-            max_connections = self.transfer_outgoing_count_limit
-
-        if keys is None:
-            keys = set()
-
+        max_connections = self.transfer_outgoing_count_limit
         # Allow same-host connections more liberally
-        if (
-            max_connections
-            and comm
-            and get_address_host(comm.peer_address) == get_address_host(self.address)
-        ):
+        if get_address_host(comm.peer_address) == get_address_host(self.address):
             max_connections = max_connections * 2
 
         if self.status == Status.paused:
@@ -2869,41 +2879,12 @@ def secede():
     )
 
 
-@overload
 async def get_data_from_worker(
     rpc: ConnectionPool,
     keys: Collection[str],
     worker: str,
     *,
     who: str | None = None,
-    max_connections: Literal[False],
-    serializers: list[str] | None = None,
-    deserializers: list[str] | None = None,
-) -> GetDataSuccess:
-    ...
-
-
-@overload
-async def get_data_from_worker(
-    rpc: ConnectionPool,
-    keys: Collection[str],
-    worker: str,
-    *,
-    who: str | None = None,
-    max_connections: bool | int | None = None,
-    serializers: list[str] | None = None,
-    deserializers: list[str] | None = None,
-) -> GetDataBusy | GetDataSuccess:
-    ...
-
-
-async def get_data_from_worker(
-    rpc: ConnectionPool,
-    keys: Collection[str],
-    worker: str,
-    *,
-    who: str | None = None,
-    max_connections: bool | int | None = None,
     serializers: list[str] | None = None,
     deserializers: list[str] | None = None,
 ) -> GetDataBusy | GetDataSuccess:
@@ -2933,7 +2914,6 @@ async def get_data_from_worker(
             op="get_data",
             keys=keys,
             who=who,
-            max_connections=max_connections,
         )
         try:
             status = response["status"]

@@ -2212,6 +2212,7 @@ class BlockedGatherDep(Worker):
     See also
     --------
     BlockedGetData
+    BarrierGetData
     BlockedExecute
     """
 
@@ -2233,6 +2234,7 @@ class BlockedGetData(Worker):
 
     See also
     --------
+    BarrierGetData
     BlockedGatherDep
     BlockedExecute
     """
@@ -2282,6 +2284,7 @@ class BlockedExecute(Worker):
     --------
     BlockedGatherDep
     BlockedGetData
+    BarrierGetData
     """
 
     def __init__(self, *args, **kwargs):
@@ -2309,6 +2312,32 @@ class BlockedExecute(Worker):
         self.in_deserialize_task.set()
         await self.block_deserialize_task.wait()
         return await super()._maybe_deserialize_task(ts)
+
+
+class BarrierGetData(Worker):
+    """Block get_data RPC call until at least barrier_count connections are going on
+    in parallel at the same time
+
+    See also
+    --------
+    BlockedGatherDep
+    BlockedGetData
+    BlockedExecute
+    """
+
+    def __init__(self, *args, barrier_count, **kwargs):
+        # TODO just use asyncio.Barrier (needs Python >=3.11)
+        self.barrier_count = barrier_count
+        self.wait_get_data = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def get_data(self, comm, *args, **kwargs):
+        self.barrier_count -= 1
+        if self.barrier_count > 0:
+            await self.wait_get_data.wait()
+        else:
+            self.wait_get_data.set()
+        return await super().get_data(comm, *args, **kwargs)
 
 
 @contextmanager

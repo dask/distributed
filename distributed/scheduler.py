@@ -5889,35 +5889,49 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return keys
 
-    async def gather(self, keys, serializers=None):
+    async def gather(
+        self, keys: Collection[str], serializers: list[str] | None = None
+    ) -> dict[str, Any]:
         """Collect data from workers to the scheduler"""
         stimulus_id = f"gather-{time()}"
-        keys = list(keys)
-        who_has = {}
-        for key in keys:
-            ts: TaskState = self.tasks.get(key)
-            if ts is not None:
-                who_has[key] = [ws.address for ws in ts.who_has]
-            else:
-                who_has[key] = []
+        data = {}
+        missing_keys = list(keys)
+        failed_keys: list[str] = []
+        missing_workers: set[str] = set()
 
-        data, missing_keys, missing_workers = await gather_from_workers(
-            who_has, rpc=self.rpc, close=False, serializers=serializers
-        )
-        if not missing_keys:
-            result = {"status": "OK", "data": data}
-        else:
-            missing_states = [
-                (self.tasks[key].state if key in self.tasks else None)
-                for key in missing_keys
-            ]
-            logger.exception(
-                "Couldn't gather keys %s state: %s workers: %s",
+        while missing_keys:
+            who_has = {}
+            for key, workers in self.get_who_has(missing_keys).items():
+                valid_workers = set(workers) - missing_workers
+                if valid_workers:
+                    who_has[key] = valid_workers
+                else:
+                    failed_keys.append(key)
+
+            (
+                new_data,
                 missing_keys,
-                missing_states,
-                missing_workers,
+                new_failed_keys,
+                new_missing_workers,
+            ) = await gather_from_workers(
+                who_has, rpc=self.rpc, serializers=serializers
             )
-            result = {"status": "error", "keys": missing_keys}
+            data.update(new_data)
+            failed_keys += new_failed_keys
+            missing_workers.update(new_missing_workers)
+
+        self.log_event("all", {"action": "gather", "count": len(keys)})
+
+        if not failed_keys:
+            return {"status": "OK", "data": data}
+
+        failed_states = {
+            key: self.tasks[key].state if key in self.tasks else "forgotten"
+            for key in failed_keys
+        }
+        logger.error("Couldn't gather keys: %s", failed_states)
+
+        if missing_workers:
             with log_errors():
                 # Remove suspicious workers from the scheduler and shut them down.
                 await asyncio.gather(
@@ -5928,15 +5942,9 @@ class Scheduler(SchedulerState, ServerNode):
                         for worker in missing_workers
                     )
                 )
-                for key, workers in missing_keys.items():
-                    logger.exception(
-                        "Shut down workers that don't have promised key: %s, %s",
-                        str(workers),
-                        str(key),
-                    )
+                logger.error("Shut down unresponsive workers:: %s", missing_workers)
 
-        self.log_event("all", {"action": "gather", "count": len(keys)})
-        return result
+        return {"status": "error", "keys": list(failed_keys)}
 
     @log_errors
     async def restart(self, client=None, timeout=30, wait_for_workers=True):

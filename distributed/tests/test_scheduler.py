@@ -2912,7 +2912,7 @@ async def test_gather_bad_worker_removed(c, s, a, b):
 
             sched_logger = sched_logger.getvalue()
             client_logger = client_logger.getvalue()
-            assert "Shut down workers that don't have promised key" in sched_logger
+            assert "Shut down unresponsive workers" in sched_logger
 
             assert "Couldn't gather 1 keys, rescheduling" in client_logger
 

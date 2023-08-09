@@ -547,7 +547,7 @@ async def test_gather_missing_keys(c, s, a, b):
     async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], "y": [b.address]})
 
-    assert resp == {"status": "partial-fail", "keys": {"y": (b.address,)}}
+    assert resp == {"status": "partial-fail", "keys": ("y",)}
     assert a.data[x.key] == b.data[x.key] == "x"
 
 
@@ -563,21 +563,31 @@ async def test_gather_missing_workers(c, s, a, b):
     async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], "y": [bad_addr]})
 
-    assert resp == {"status": "partial-fail", "keys": {"y": (bad_addr,)}}
+    assert resp == {"status": "partial-fail", "keys": ("y",)}
     assert a.data[x.key] == b.data[x.key] == "x"
 
 
-@pytest.mark.parametrize("missing_first", [False, True])
-@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
-async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
+@pytest.mark.slow
+@pytest.mark.parametrize("know_real", [False, True, True, True, True])  # Read below
+@gen_cluster(client=True, worker_kwargs={"timeout": "1s"}, config=NO_AMM)
+async def test_gather_missing_workers_replicated(c, s, a, b, know_real):
     """A worker owning a redundant copy of a key is missing.
     The key is successfully gathered from other workers.
+
+    know_real=False
+        gather() will try to connect to the bad address, fail, and then query the
+        scheduler who will respond with the good address. Then gather will successfully
+        retrieve the key from the good address.
+    know_real=True
+        50% of the times, gather() will try to connect to the bad address, fail, and
+        immediately connect to the good address.
+        The other 50% of the times it will directly connect to the good address,
+        hence why this test is repeated.
     """
     assert b.address.startswith("tcp://127.0.0.1:")
     x = await c.scatter("x", workers=[b.address])
     bad_addr = "tcp://127.0.0.1:12345"
-    # Order matters! Test both
-    addrs = [bad_addr, b.address] if missing_first else [b.address, bad_addr]
+    addrs = [bad_addr, b.address] if know_real else [bad_addr]
     async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: addrs})
     assert resp == {"status": "OK"}

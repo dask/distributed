@@ -85,6 +85,7 @@ from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
+    BlockedGetData,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
     async_poll_for,
@@ -8444,3 +8445,28 @@ async def test_resolves_future_in_dict(c, s, a, b):
     outer_future = c.submit(identity, {"x": inner_future, "y": 2})
     result = await outer_future
     assert result == {"x": 1, "y": 2}
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
+async def test_gather_race_vs_AMM(c, s, a, direct):
+    """Test race condition:
+    Client.gather() tries to get a key from a worker, but in the meantime the
+    Active Memory Manager has moved it to another worker
+    """
+    async with BlockedGetData(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        fut = asyncio.create_task(c.gather(x, direct=direct))
+        await b.in_get_data.wait()
+
+        # Simulate AMM replicate from b to a, followed by AMM drop on b
+        # Can't use s.request_acquire_replicas as it would get stuck on b.block_get_data
+        a.update_data({"x": 3})
+        a.batched_send({"op": "add-keys", "keys": ["x"]})
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2, timeout=5)
+        s.request_remove_replicas(b.address, ["x"], stimulus_id="remove")
+        await async_poll_for(lambda: "x" not in b.data, timeout=5)
+
+        b.block_get_data.set()
+
+    assert await fut == 3  # It's from a; it would be 2 if it were from b

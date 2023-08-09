@@ -2319,7 +2319,7 @@ class Client(SyncMethodMixin):
         result = pack_data(unpacked, merge(data, bad_data))
         return result
 
-    async def _gather_remote(self, direct, local_worker):
+    async def _gather_remote(self, direct: bool, local_worker: bool) -> dict[str, Any]:
         """Perform gather with workers or scheduler
 
         This method exists to limit and batch many concurrent gathers into a
@@ -2333,15 +2333,16 @@ class Client(SyncMethodMixin):
 
             if direct or local_worker:  # gather directly from workers
                 who_has = await retry_operation(self.scheduler.who_has, keys=keys)
-                data2, missing_keys, missing_workers = await gather_from_workers(
-                    who_has, rpc=self.rpc, close=False
+                data, missing_keys, failed_keys, _ = await gather_from_workers(
+                    who_has, rpc=self.rpc
                 )
-                response = {"status": "OK", "data": data2}
-                if missing_keys:
-                    keys2 = [key for key in keys if key not in data2]
-                    response = await retry_operation(self.scheduler.gather, keys=keys2)
+                response: dict[str, Any] = {"status": "OK", "data": data}
+                if missing_keys or failed_keys:
+                    response = await retry_operation(
+                        self.scheduler.gather, keys=missing_keys + failed_keys
+                    )
                     if response["status"] == "OK":
-                        response["data"].update(data2)
+                        response["data"].update(data)
 
             else:  # ask scheduler to gather data for us
                 response = await retry_operation(self.scheduler.gather, keys=keys)
