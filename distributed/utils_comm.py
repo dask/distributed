@@ -96,7 +96,10 @@ async def gather_from_workers(
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for address, r in zip(d, results):
-            if isinstance(r, OSError):
+            # Note: CancelledError and asyncio.TimeoutError are rare conditions
+            # that can be raised by the network stack.
+            # See https://github.com/dask/distributed/issues/8006
+            if isinstance(r, (OSError, asyncio.CancelledError, asyncio.TimeoutError)):
                 missing_workers.add(address)
             elif isinstance(r, Exception):
                 # For example, deserialization error
