@@ -109,6 +109,9 @@ async def gather_from_workers(
                 for key in d[address]:
                     failed_keys.append(key)
                     del to_gather[key]
+            elif isinstance(r, BaseException):  # pragma: nocover
+                # for example, asyncio.CancelledError
+                raise r
             else:
                 assert isinstance(r, dict), r
                 if r["status"] == "busy":
