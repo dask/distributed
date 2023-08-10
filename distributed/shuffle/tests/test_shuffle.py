@@ -448,19 +448,15 @@ async def test_restarting_does_not_deadlock(c, s):
                 "shuffle-transfer", b.worker_address, 1, s
             )
             a.status = Status.paused
-            while len(s.running) > 1:
-                await asyncio.sleep(0.01)
+            await async_poll_for(lambda: len(s.running) == 1, timeout=5)
             b.close_gracefully()
             await b.process.process.kill()
 
-            while s.running:
-                await asyncio.sleep(0.01)
+            await async_poll_for(lambda: not s.running, timeout=5)
 
             a.status = Status.running
 
-            while not s.running:
-                await asyncio.sleep(0.01)
-            pass
+            await async_poll_for(lambda: s.running, timeout=5)
             await fut
 
 
