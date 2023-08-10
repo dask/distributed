@@ -619,6 +619,45 @@ class UploadFile(WorkerPlugin):
         assert len(self.data) == response["nbytes"]
 
 
+class UploadActor(WorkerPlugin):
+    """A WorkerPlugin to upload actors to workers.
+
+    Parameters
+    ----------
+    actor: an Actor class
+        A path to the file (.py, egg, or zip) to upload
+
+    Examples
+    --------
+    >>> from distributed.diagnostics.plugin import UploadActor
+
+    >>> client.register_worker_plugin(UploadActor(MyActor)  # doctest: +SKIP
+    """
+
+    name = "upload_file"
+
+    def __init__(self, actor: type, load: bool = True):
+        """
+        Initialize the plugin by reading in the data from the given file.
+        """
+        self.actor = actor
+
+    async def setup(self, worker):
+        if not hasattr(worker, "actor_futures"):
+            worker.actor_futures = {}
+        actor_future = worker.submit(
+            self.actor, actor=True
+        )
+        worker.actor_futures[self.actor.__name__] = actor_future
+
+
+def get_actor_future(worker, actor):
+    try:
+        return worker.actor_futures[actor.__name__]
+    except KeyError:
+        raise ValueError(f"Actor {actor.__name__} not found on worker {worker.address}")
+
+
 class ForwardLoggingPlugin(WorkerPlugin):
     """
     A ``WorkerPlugin`` to forward python logging records from worker to client.
