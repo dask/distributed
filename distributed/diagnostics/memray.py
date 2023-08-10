@@ -79,6 +79,20 @@ def memray_workers(
 ) -> Iterator[None]:
     """Generate a Memray profile on the workers and download the generated report.
 
+    Example::
+
+        with memray_workers():
+            client.submit(my_function).result()
+
+        # Or even while the computation is already running
+
+        fut = client.submit(my_function)
+
+        with memray_workers():
+            time.sleep(10)
+
+        fut.result()
+
     Parameters
     ----------
     directory : str
@@ -171,6 +185,20 @@ def memray_scheduler(
     **memray_kwargs: Any,
 ) -> Iterator[None]:
     """Generate a Memray profile on the Scheduler and download the generated report.
+
+    Example::
+
+        with memray_scheduler():
+            client.submit(my_function).result()
+
+        # Or even while the computation is already running
+
+        fut = client.submit(my_function)
+
+        with memray_scheduler():
+            time.sleep(10)
+
+        fut.result()
 
     Parameters
     ----------
