@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Union
+from functools import partial
+from typing import TYPE_CHECKING, Any, Union
 
 import toolz
 
@@ -24,15 +26,20 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._core import (
     NDIndex,
+    SchedulerShuffleState,
     ShuffleId,
     ShuffleRun,
-    ShuffleState,
-    ShuffleType,
+    ShuffleRunSpec,
+    ShuffleSpec,
     barrier_key,
     get_worker_plugin,
+    run_spec_to_worker_run,
+    scheduler_state_to_run_spec,
+    spec_to_scheduler_state,
 )
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
@@ -44,6 +51,9 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
     from dask.dataframe import DataFrame
+
+    # circular dependency
+    from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 
 
 def shuffle_transfer(
@@ -57,12 +67,10 @@ def shuffle_transfer(
     try:
         return get_worker_plugin().add_partition(
             input,
-            shuffle_id=id,
-            type=ShuffleType.DATAFRAME,
-            partition_id=input_partition,
-            npartitions=npartitions,
-            column=column,
-            parts_out=parts_out,
+            input_partition,
+            spec=DataFrameShuffleSpec(
+                id=id, npartitions=npartitions, column=column, parts_out=parts_out
+            ),
         )
     except ShuffleClosedError:
         raise Reschedule()
@@ -443,7 +451,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         del data
         return {(k,): serialize_table(v) for k, v in groups.items()}
 
-    async def add_partition(self, data: pd.DataFrame, partition_id: int) -> int:
+    async def add_partition(
+        self,
+        data: pd.DataFrame,
+        partition_id: int,
+        **kwargs: Any,
+    ) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
@@ -462,11 +475,17 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         return self.run_id
 
     async def get_output_partition(
-        self, partition_id: int, key: str, meta: pd.DataFrame | None = None
+        self,
+        partition_id: int,
+        key: str,
+        meta: pd.DataFrame | None = None,
+        **kwargs: Any,
     ) -> pd.DataFrame:
         self.raise_if_closed()
-        assert meta is not None
-        assert self.transferred, "`get_output_partition` called before barrier task"
+        if meta is None:
+            raise ValueError("Excepted meta keyword argument")
+        if not self.transferred:
+            raise RuntimeError("`get_output_partition` called before barrier task")
 
         await self._ensure_output_worker(partition_id, key)
 
@@ -474,10 +493,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         try:
             data = self._read_from_disk((partition_id,))
 
-            def _() -> pd.DataFrame:
-                return convert_partition(data, meta)  # type: ignore
-
-            out = await self.offload(_)
+            out = await self.offload(convert_partition, data, meta)
         except KeyError:
             out = meta.copy()
         return out
@@ -486,24 +502,78 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         return self.worker_for[id]
 
 
+@dataclass
+class DataFrameShuffleSpec(ShuffleSpec):
+    npartitions: int
+    column: str
+    parts_out: set[int]
+
+
+@dataclass
+class DataFrameShuffleRunSpec(ShuffleRunSpec):
+    column: str
+
+
 @dataclass(eq=False)
-class DataFrameShuffleState(ShuffleState):
-    type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
+class DataFrameShuffleState(SchedulerShuffleState):
     worker_for: dict[int, str]
     column: str
 
-    def to_msg(self) -> dict[str, Any]:
-        return {
-            "status": "OK",
-            "type": DataFrameShuffleState.type,
-            "run_id": self.run_id,
-            "worker_for": self.worker_for,
-            "column": self.column,
-            "output_workers": self.output_workers,
-        }
+
+@spec_to_scheduler_state.register(DataFrameShuffleSpec)  # type: ignore[misc]
+def _dataframe_spec_to_state(
+    spec: DataFrameShuffleSpec, plugin: ShuffleSchedulerPlugin
+) -> DataFrameShuffleState:
+    pick_worker = partial(_get_worker_for_range_sharding, spec.npartitions)
+
+    mapping = plugin._pin_output_workers(spec.id, spec.parts_out, pick_worker)
+    output_workers = set(mapping.values())
+
+    return DataFrameShuffleState(
+        id=spec.id,
+        run_id=next(SchedulerShuffleState._run_id_iterator),
+        worker_for=mapping,
+        column=spec.column,
+        output_workers=output_workers,
+        participating_workers=output_workers.copy(),
+    )
 
 
-def get_worker_for_range_sharding(
+@scheduler_state_to_run_spec.register(DataFrameShuffleState)  # type: ignore[misc]
+def _dataframe_state_to_run_spec(state: DataFrameShuffleState) -> ShuffleRunSpec:
+    return DataFrameShuffleRunSpec(
+        id=state.id,
+        run_id=state.run_id,
+        worker_for=state.worker_for,
+        output_workers=state.output_workers,
+        column=state.column,
+    )
+
+
+@run_spec_to_worker_run.register(DataFrameShuffleRunSpec)  # type: ignore[misc]
+def _dataframe_run_spec_to_run(
+    spec: DataFrameShuffleRunSpec, plugin: ShuffleWorkerPlugin
+) -> DataFrameShuffleRun:
+    return DataFrameShuffleRun(
+        column=spec.column,
+        worker_for=spec.worker_for,
+        output_workers=spec.output_workers,
+        id=spec.id,
+        run_id=spec.run_id,
+        directory=os.path.join(
+            plugin.worker.local_directory,
+            f"shuffle-{spec.id}-{spec.run_id}",
+        ),
+        executor=plugin._executor,
+        local_address=plugin.worker.address,
+        rpc=plugin.worker.rpc,
+        scheduler=plugin.worker.scheduler,
+        memory_limiter_disk=plugin.memory_limiter_disk,
+        memory_limiter_comms=plugin.memory_limiter_comms,
+    )
+
+
+def _get_worker_for_range_sharding(
     npartitions: int, output_partition: int, workers: Sequence[str]
 ) -> str:
     """Get address of target worker for this output partition using range sharding"""

@@ -37,7 +37,7 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
     DataFrameShuffleRun,
-    get_worker_for_range_sharding,
+    _get_worker_for_range_sharding,
     split_by_partition,
     split_by_worker,
 )
@@ -467,7 +467,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._scheduler_plugin.get_worker_for_range_sharding",
+        "distributed.shuffle._shuffle._get_worker_for_range_sharding",
         mock_get_worker_for_range_sharding,
     ):
         df = dask.datasets.timeseries(
@@ -500,7 +500,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._scheduler_plugin.get_worker_for_range_sharding",
+        "distributed.shuffle._shuffle._get_worker_for_range_sharding",
         mock_mock_get_worker_for_range_sharding,
     ):
         async with Nanny(s.address, nthreads=1) as n:
@@ -565,7 +565,7 @@ class BlockedInputsDoneShuffle(DataFrameShuffleRun):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -624,7 +624,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(
@@ -672,7 +672,7 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -734,7 +734,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
 @pytest.mark.slow
 @mock.patch(
-    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -1501,7 +1501,7 @@ async def test_basic_lowlevel_shuffle(
     worker_for_mapping = {}
 
     for part in range(npartitions):
-        worker_for_mapping[part] = get_worker_for_range_sharding(
+        worker_for_mapping[part] = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
     assert len(set(worker_for_mapping.values())) == min(n_workers, npartitions)
@@ -1575,7 +1575,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+        worker_for_mapping[part] = w = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
@@ -1626,7 +1626,7 @@ async def test_error_send(tmp_path, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+        worker_for_mapping[part] = w = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
@@ -1676,7 +1676,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+        worker_for_mapping[part] = w = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
@@ -1843,15 +1843,15 @@ async def test_shuffle_run_consistency(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    shuffle_dict = scheduler_ext.get(shuffle_id, a.worker_address)
+    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
 
     # Worker plugin can fetch the current run
-    assert await worker_plugin._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
+    assert await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id)
 
     # This should never occur, but fetching an ID larger than the ID available on
     # the scheduler should result in an error.
     with pytest.raises(RuntimeError, match="invalid"):
-        await worker_plugin._get_shuffle_run(shuffle_id, shuffle_dict["run_id"] + 1)
+        await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id + 1)
 
     # Finish first execution
     worker_plugin.block_barrier.set()
@@ -1868,17 +1868,17 @@ async def test_shuffle_run_consistency(c, s, a):
     new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id == new_shuffle_id
 
-    new_shuffle_dict = scheduler_ext.get(shuffle_id, a.worker_address)
+    new_spec = scheduler_ext.get(shuffle_id, a.worker_address).data
 
     # Check invariant that the new run ID is larger than the previous
-    assert shuffle_dict["run_id"] < new_shuffle_dict["run_id"]
+    assert spec.run_id < new_spec.run_id
 
     # Worker plugin can fetch the new shuffle run
-    assert await worker_plugin._get_shuffle_run(shuffle_id, new_shuffle_dict["run_id"])
+    assert await worker_plugin._get_shuffle_run(shuffle_id, new_spec.run_id)
 
     # Fetching a stale run from a worker aware of the new run raises an error
     with pytest.raises(RuntimeError, match="stale"):
-        await worker_plugin._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
+        await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id)
 
     worker_plugin.block_barrier.set()
     await out
@@ -1892,13 +1892,11 @@ async def test_shuffle_run_consistency(c, s, a):
     independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id != independent_shuffle_id
 
-    independent_shuffle_dict = scheduler_ext.get(
-        independent_shuffle_id, a.worker_address
-    )
+    independent_spec = scheduler_ext.get(independent_shuffle_id, a.worker_address).data
 
     # Check invariant that the new run ID is larger than the previous
     # for independent shuffles
-    assert new_shuffle_dict["run_id"] < independent_shuffle_dict["run_id"]
+    assert new_spec.run_id < independent_spec.run_id
 
     worker_plugin.block_barrier.set()
     await out

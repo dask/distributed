@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, NewType, TypeVar
 
+from dask.utils import Dispatch
+
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
@@ -21,19 +23,25 @@ from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 
 if TYPE_CHECKING:
-    import pandas as pd
+    # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
-    # avoid circular dependencies
+    # circular dependency
     from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
+
+
+ShuffleId = NewType("ShuffleId", str)
+NDIndex: TypeAlias = tuple[int, ...]
+
 
 _T_partition_id = TypeVar("_T_partition_id")
 _T_partition_type = TypeVar("_T_partition_type")
 _T = TypeVar("_T")
 
-NDIndex: TypeAlias = tuple[int, ...]
 
-ShuffleId = NewType("ShuffleId", str)
+spec_to_scheduler_state = Dispatch("spec_to_scheduler_state")
+scheduler_state_to_run_spec = Dispatch("scheduler_state_to_run_spec")
+run_spec_to_worker_run = Dispatch("run_spec_to_worker_run")
 
 
 class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
@@ -215,7 +223,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
     @abc.abstractmethod
     async def get_output_partition(
-        self, partition_id: _T_partition_id, key: str, meta: pd.DataFrame | None = None
+        self, partition_id: _T_partition_id, key: str, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
 
@@ -269,6 +277,36 @@ class ShuffleState(abc.ABC):
     @abc.abstractmethod
     def to_msg(self) -> dict[str, Any]:
         """Transform the shuffle state into a JSON-serializable message"""
+
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
+
+    def __hash__(self) -> int:
+        return hash(self.run_id)
+
+
+@dataclass
+class ShuffleSpec:
+    id: ShuffleId
+
+
+@dataclass
+class ShuffleRunSpec(Generic[_T_partition_id]):
+    id: ShuffleId
+    run_id: int
+    worker_for: dict[_T_partition_id, str]
+    output_workers: set[str]  # TODO: Is this necessary?
+
+
+@dataclass(eq=False)
+class SchedulerShuffleState:
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
+
+    id: ShuffleId
+    run_id: int
+    output_workers: set[str]
+    participating_workers: set[str]
+    _archived_by: str | None = field(default=None, init=False)
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
