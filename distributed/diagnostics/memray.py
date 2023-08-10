@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import pathlib
 import subprocess
 import time
@@ -30,8 +29,8 @@ def _start_memray(dask_worker: Worker, filename: str, **kwargs: Any) -> bool:
         dask_worker._memray.close()
 
     path = pathlib.Path(dask_worker.local_directory) / (filename + str(dask_worker.id))
-    if os.path.exists(path):
-        os.remove(path)
+    if path.exists():
+        path.rmdir()
 
     dask_worker._memray = contextlib.ExitStack()  # type: ignore[attr-defined]
     dask_worker._memray.enter_context(  # type: ignore[attr-defined]
@@ -146,7 +145,7 @@ def memray_workers(
     # a clear profiling signal when everything starts
     time.sleep(0.1)
     yield
-    os.makedirs(directory, exist_ok=True)
+    directory.mkdir(exist_ok=True)
 
     client = get_client()
     if fetch_reports_parallel is True:
@@ -228,7 +227,7 @@ def memray_scheduler(
     # a clear profiling signal when everything starts
     time.sleep(0.1)
     yield
-    os.makedirs(directory, exist_ok=True)
+    directory.mkdir(exist_ok=True)
 
     client = get_client()
 
