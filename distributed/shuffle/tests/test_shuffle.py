@@ -426,11 +426,15 @@ async def test_crashed_worker_during_transfer(c, s, a):
 @gen_cluster(
     client=True,
     nthreads=[],
+    # Effectively disable the memory monitor to be able to manually control
+    # the worker status
     config={"distributed.worker.memory.monitor-interval": "60s"},
 )
-async def test_restart_deadlock(c, s):
+async def test_restarting_does_not_deadlock(c, s):
+    """Regression test for https://github.com/dask/distributed/issues/8088"""
     async with Worker(s.address) as a:
         async with Nanny(s.address) as b:
+            # Ensure that a holds the input tasks to the shuffle
             with dask.annotate(workers=[a.address]):
                 df = dask.datasets.timeseries(
                     start="2000-01-01",
