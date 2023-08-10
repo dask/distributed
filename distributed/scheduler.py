@@ -2707,14 +2707,10 @@ class SchedulerState:
             assert not ts.waiting_on
 
         self.unrunnable.remove(ts)
-        ts.state = "released"
 
-        for dts in ts.dependencies:
-            dts.waiters.discard(ts)
-
-        ts.waiters.clear()
-
-        return {}, {}, {}
+        recommendations: Recs = {}
+        self._propagate_released(ts, recommendations)
+        return recommendations, {}, {}
 
     def transition_waiting_queued(self, key: str, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
