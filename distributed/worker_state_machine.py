@@ -777,7 +777,7 @@ class ComputeTaskEvent(StateMachineEvent):
 
     @classmethod
     def _f(cls) -> None:
-        return
+        return  # pragma: nocover
 
     @classmethod
     def dummy_runspec(cls) -> tuple[Callable, tuple, dict]:
