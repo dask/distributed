@@ -3,12 +3,14 @@ from __future__ import annotations
 import abc
 import asyncio
 import contextlib
+import itertools
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, NewType, TypeVar
 
 import pandas as pd
 
@@ -253,3 +255,24 @@ def id_from_key(key: str) -> ShuffleId:
 class ShuffleType(Enum):
     DATAFRAME = "DataFrameShuffle"
     ARRAY_RECHUNK = "ArrayRechunk"
+
+
+@dataclass(eq=False)
+class ShuffleState(abc.ABC):
+    _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
+
+    id: ShuffleId
+    run_id: int
+    output_workers: set[str]
+    participating_workers: set[str]
+    _archived_by: str | None = field(default=None, init=False)
+
+    @abc.abstractmethod
+    def to_msg(self) -> dict[str, Any]:
+        """Transform the shuffle state into a JSON-serializable message"""
+
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
+
+    def __hash__(self) -> int:
+        return hash(self.run_id)

@@ -26,13 +26,13 @@ from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
     ShuffleRun,
+    ShuffleState,
     ShuffleType,
     barrier_key,
     get_worker_plugin,
 )
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._scheduler_plugin import ShuffleState
 from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")

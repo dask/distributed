@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-import abc
 import contextlib
-import itertools
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
 from functools import partial
 from itertools import product
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol.pickle import dumps
-from distributed.shuffle._core import ShuffleId, ShuffleType, barrier_key, id_from_key
+from distributed.shuffle._core import (
+    ShuffleId,
+    ShuffleState,
+    ShuffleType,
+    barrier_key,
+    id_from_key,
+)
 from distributed.shuffle._rechunk import ArrayRechunkState, get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import (
     DataFrameShuffleState,
@@ -31,27 +34,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(eq=False)
-class ShuffleState(abc.ABC):
-    _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
-
-    id: ShuffleId
-    run_id: int
-    output_workers: set[str]
-    participating_workers: set[str]
-    _archived_by: str | None = field(default=None, init=False)
-
-    @abc.abstractmethod
-    def to_msg(self) -> dict[str, Any]:
-        """Transform the shuffle state into a JSON-serializable message"""
-
-    def __str__(self) -> str:
-        return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
-
-    def __hash__(self) -> int:
-        return hash(self.run_id)
 
 
 class ShuffleSchedulerPlugin(SchedulerPlugin):
