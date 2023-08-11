@@ -111,6 +111,7 @@ from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.shuffle._core import (
+    NDIndex,
     ShuffleId,
     ShuffleRun,
     ShuffleType,
@@ -132,7 +133,6 @@ if TYPE_CHECKING:
 
 ChunkedAxis: TypeAlias = tuple[float, ...]  # chunks must either be an int or NaN
 ChunkedAxes: TypeAlias = tuple[ChunkedAxis, ...]
-NDIndex: TypeAlias = tuple[int, ...]
 NDSlice: TypeAlias = tuple[slice, ...]
 
 

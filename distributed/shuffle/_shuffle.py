@@ -23,6 +23,7 @@ from distributed.shuffle._arrow import (
     serialize_table,
 )
 from distributed.shuffle._core import (
+    NDIndex,
     ShuffleId,
     ShuffleRun,
     ShuffleType,
@@ -31,7 +32,6 @@ from distributed.shuffle._core import (
 )
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import NDIndex
 from distributed.shuffle._scheduler_plugin import ShuffleState
 from distributed.sizeof import sizeof
 

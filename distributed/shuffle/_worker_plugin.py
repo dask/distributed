@@ -10,10 +10,10 @@ from dask.context import thread_state
 from dask.utils import parse_bytes
 
 from distributed.diagnostics.plugin import WorkerPlugin
-from distributed.shuffle._core import ShuffleId, ShuffleRun, ShuffleType
+from distributed.shuffle._core import NDIndex, ShuffleId, ShuffleRun, ShuffleType
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import ArrayRechunkRun, NDIndex
+from distributed.shuffle._rechunk import ArrayRechunkRun
 from distributed.shuffle._shuffle import DataFrameShuffleRun
 from distributed.utils import log_errors, sync
 

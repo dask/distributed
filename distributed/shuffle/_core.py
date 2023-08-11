@@ -8,7 +8,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
-from typing import Any, Generic, NewType, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
 import pandas as pd
 
@@ -19,12 +19,18 @@ from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import NDIndex
-from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
+
+    # avoid circular dependencies
+    from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
 _T_partition_id = TypeVar("_T_partition_id")
 _T_partition_type = TypeVar("_T_partition_type")
 _T = TypeVar("_T")
+
+NDIndex: TypeAlias = tuple[int, ...]
 
 ShuffleId = NewType("ShuffleId", str)
 
