@@ -17,11 +17,14 @@ from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
 
+from distributed.shuffle._core import ShuffleId
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import Split, split_axes
-from distributed.shuffle._scheduler_plugin import get_worker_for_hash_sharding
-from distributed.shuffle._shuffle import ShuffleId
-from distributed.shuffle._worker_plugin import ArrayRechunkRun
+from distributed.shuffle._rechunk import (
+    ArrayRechunkRun,
+    Split,
+    get_worker_for_hash_sharding,
+    split_axes,
+)
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
 

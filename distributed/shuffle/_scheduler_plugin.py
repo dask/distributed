@@ -13,12 +13,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol.pickle import dumps
-from distributed.shuffle._rechunk import ChunkedAxes, NDIndex
+from distributed.shuffle._core import ShuffleId, ShuffleType, barrier_key, id_from_key
+from distributed.shuffle._rechunk import ArrayRechunkState, get_worker_for_hash_sharding
 from distributed.shuffle._shuffle import (
-    ShuffleId,
-    ShuffleType,
-    barrier_key,
-    id_from_key,
+    DataFrameShuffleState,
+    get_worker_for_range_sharding,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
@@ -53,42 +52,6 @@ class ShuffleState(abc.ABC):
 
     def __hash__(self) -> int:
         return hash(self.run_id)
-
-
-@dataclass(eq=False)
-class DataFrameShuffleState(ShuffleState):
-    type: ClassVar[ShuffleType] = ShuffleType.DATAFRAME
-    worker_for: dict[int, str]
-    column: str
-
-    def to_msg(self) -> dict[str, Any]:
-        return {
-            "status": "OK",
-            "type": DataFrameShuffleState.type,
-            "run_id": self.run_id,
-            "worker_for": self.worker_for,
-            "column": self.column,
-            "output_workers": self.output_workers,
-        }
-
-
-@dataclass(eq=False)
-class ArrayRechunkState(ShuffleState):
-    type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
-    worker_for: dict[NDIndex, str]
-    old: ChunkedAxes
-    new: ChunkedAxes
-
-    def to_msg(self) -> dict[str, Any]:
-        return {
-            "status": "OK",
-            "type": ArrayRechunkState.type,
-            "run_id": self.run_id,
-            "worker_for": self.worker_for,
-            "old": self.old,
-            "new": self.new,
-            "output_workers": self.output_workers,
-        }
 
 
 class ShuffleSchedulerPlugin(SchedulerPlugin):
@@ -448,19 +411,3 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self.heartbeats.clear()
         self._shuffles.clear()
         self._archived_by_stimulus.clear()
-
-
-def get_worker_for_range_sharding(
-    npartitions: int, output_partition: int, workers: Sequence[str]
-) -> str:
-    """Get address of target worker for this output partition using range sharding"""
-    i = len(workers) * output_partition // npartitions
-    return workers[i]
-
-
-def get_worker_for_hash_sharding(
-    output_partition: NDIndex, workers: Sequence[str]
-) -> str:
-    """Get address of target worker for this output partition using hash sharding"""
-    i = hash(output_partition) % len(workers)
-    return workers[i]

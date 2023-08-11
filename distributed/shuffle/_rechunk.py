@@ -96,23 +96,35 @@ the same output brick.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+import pickle
+from collections import defaultdict
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from io import BytesIO
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
+from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
-from distributed.shuffle._shuffle import (
+from distributed.shuffle._core import (
     ShuffleId,
+    ShuffleRun,
     ShuffleType,
-    _get_worker_plugin,
     barrier_key,
-    shuffle_barrier,
+    get_worker_plugin,
 )
+from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._scheduler_plugin import ShuffleState
+from distributed.shuffle._shuffle import shuffle_barrier
+from distributed.sizeof import sizeof
 
 if TYPE_CHECKING:
     import numpy as np
+    import pandas as pd
     from typing_extensions import TypeAlias
 
     import dask.array as da
@@ -132,7 +144,7 @@ def rechunk_transfer(
     old: ChunkedAxes,
 ) -> int:
     try:
-        return _get_worker_plugin().add_partition(
+        return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
             shuffle_id=id,
@@ -148,7 +160,7 @@ def rechunk_unpack(
     id: ShuffleId, output_chunk: NDIndex, barrier_run_id: int
 ) -> np.ndarray:
     try:
-        return _get_worker_plugin().get_output_partition(
+        return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_chunk
         )
     except Reschedule as e:
@@ -252,3 +264,226 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
             old_chunk.sort(key=lambda split: split.slice.start)
         axes.append(old_axis)
     return axes
+
+
+def convert_chunk(data: bytes) -> np.ndarray:
+    import numpy as np
+
+    from dask.array.core import concatenate3
+
+    file = BytesIO(data)
+    shards: dict[NDIndex, np.ndarray] = {}
+
+    while file.tell() < len(data):
+        for index, shard in pickle.load(file):
+            shards[index] = shard
+
+    subshape = [max(dim) + 1 for dim in zip(*shards.keys())]
+    assert len(shards) == np.prod(subshape)
+
+    rec_cat_arg = np.empty(subshape, dtype="O")
+    for index, shard in shards.items():
+        rec_cat_arg[tuple(index)] = shard
+    del data
+    del file
+    arrs = rec_cat_arg.tolist()
+    return concatenate3(arrs)
+
+
+class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
+    """State for a single active rechunk execution
+
+    This object is responsible for splitting, sending, receiving and combining
+    data shards.
+
+    It is entirely agnostic to the distributed system and can perform a shuffle
+    with other `Shuffle` instances using `rpc` and `broadcast`.
+
+    The user of this needs to guarantee that only `Shuffle`s of the same unique
+    `ShuffleID` interact.
+
+    Parameters
+    ----------
+    worker_for:
+        A mapping partition_id -> worker_address.
+    output_workers:
+        A set of all participating worker (addresses).
+    old:
+        Existing chunking of the array per dimension.
+    new:
+        Desired chunking of the array per dimension.
+    id:
+        A unique `ShuffleID` this belongs to.
+    run_id:
+        A unique identifier of the specific execution of the shuffle this belongs to.
+    local_address:
+        The local address this Shuffle can be contacted by using `rpc`.
+    directory:
+        The scratch directory to buffer data in.
+    executor:
+        Thread pool to use for offloading compute.
+    loop:
+        The event loop.
+    rpc:
+        A callable returning a PooledRPCCall to contact other Shuffle instances.
+        Typically a ConnectionPool.
+    scheduler:
+        A PooledRPCCall to to contact the scheduler.
+    memory_limiter_disk:
+    memory_limiter_comm:
+        A ``ResourceLimiter`` limiting the total amount of memory used in either
+        buffer.
+    """
+
+    def __init__(
+        self,
+        worker_for: dict[NDIndex, str],
+        output_workers: set,
+        old: ChunkedAxes,
+        new: ChunkedAxes,
+        id: ShuffleId,
+        run_id: int,
+        local_address: str,
+        directory: str,
+        executor: ThreadPoolExecutor,
+        rpc: Callable[[str], PooledRPCCall],
+        scheduler: PooledRPCCall,
+        memory_limiter_disk: ResourceLimiter,
+        memory_limiter_comms: ResourceLimiter,
+    ):
+        super().__init__(
+            id=id,
+            run_id=run_id,
+            output_workers=output_workers,
+            local_address=local_address,
+            directory=directory,
+            executor=executor,
+            rpc=rpc,
+            scheduler=scheduler,
+            memory_limiter_comms=memory_limiter_comms,
+            memory_limiter_disk=memory_limiter_disk,
+        )
+        self.old = old
+        self.new = new
+        partitions_of = defaultdict(list)
+        for part, addr in worker_for.items():
+            partitions_of[addr].append(part)
+        self.partitions_of = dict(partitions_of)
+        self.worker_for = worker_for
+        self.split_axes = split_axes(old, new)
+
+    async def _receive(self, data: list[tuple[NDIndex, bytes]]) -> None:
+        self.raise_if_closed()
+
+        filtered = []
+        for d in data:
+            id, payload = d
+            if id in self.received:
+                continue
+            filtered.append(payload)
+            self.received.add(id)
+            self.total_recvd += sizeof(d)
+        del data
+        if not filtered:
+            return
+        try:
+            shards = await self.offload(self._repartition_shards, filtered)
+            del filtered
+            await self._write_to_disk(shards)
+        except Exception as e:
+            self._exception = e
+            raise
+
+    def _repartition_shards(self, data: list[bytes]) -> dict[NDIndex, bytes]:
+        repartitioned: defaultdict[
+            NDIndex, list[tuple[NDIndex, np.ndarray]]
+        ] = defaultdict(list)
+        for buffer in data:
+            for id, shard in pickle.loads(buffer):
+                repartitioned[id].append(shard)
+        return {k: pickle.dumps(v) for k, v in repartitioned.items()}
+
+    async def add_partition(self, data: np.ndarray, partition_id: NDIndex) -> int:
+        self.raise_if_closed()
+        if self.transferred:
+            raise RuntimeError(f"Cannot add more partitions to {self}")
+
+        def _() -> dict[str, tuple[NDIndex, bytes]]:
+            """Return a mapping of worker addresses to a tuple of input partition
+            IDs and shard data.
+
+
+            TODO: Overhaul!
+            As shard data, we serialize the payload together with the sub-index of the
+            slice within the new chunk. To assemble the new chunk from its shards, it
+            needs the sub-index to know where each shard belongs within the chunk.
+            Adding the sub-index into the serialized payload on the sender allows us to
+            write the serialized payload directly to disk on the receiver.
+            """
+            out: dict[
+                str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]
+            ] = defaultdict(list)
+            from itertools import product
+
+            ndsplits = product(
+                *(axis[i] for axis, i in zip(self.split_axes, partition_id))
+            )
+
+            for ndsplit in ndsplits:
+                chunk_index, shard_index, ndslice = zip(*ndsplit)
+                out[self.worker_for[chunk_index]].append(
+                    (chunk_index, (shard_index, data[ndslice]))
+                )
+            return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
+
+        out = await self.offload(_)
+        await self._write_to_comm(out)
+        return self.run_id
+
+    async def get_output_partition(
+        self, partition_id: NDIndex, key: str, meta: pd.DataFrame | None = None
+    ) -> np.ndarray:
+        self.raise_if_closed()
+        assert meta is None
+        assert self.transferred, "`get_output_partition` called before barrier task"
+
+        await self._ensure_output_worker(partition_id, key)
+
+        await self.flush_receive()
+
+        data = self._read_from_disk(partition_id)
+
+        def _() -> np.ndarray:
+            return convert_chunk(data)
+
+        return await self.offload(_)
+
+    def _get_assigned_worker(self, id: NDIndex) -> str:
+        return self.worker_for[id]
+
+
+@dataclass(eq=False)
+class ArrayRechunkState(ShuffleState):
+    type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
+    worker_for: dict[NDIndex, str]
+    old: ChunkedAxes
+    new: ChunkedAxes
+
+    def to_msg(self) -> dict[str, Any]:
+        return {
+            "status": "OK",
+            "type": ArrayRechunkState.type,
+            "run_id": self.run_id,
+            "worker_for": self.worker_for,
+            "old": self.old,
+            "new": self.new,
+            "output_workers": self.output_workers,
+        }
+
+
+def get_worker_for_hash_sharding(
+    output_partition: NDIndex, workers: Sequence[str]
+) -> str:
+    """Get address of target worker for this output partition using hash sharding"""
+    i = hash(output_partition) % len(workers)
+    return workers[i]
