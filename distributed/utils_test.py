@@ -2255,10 +2255,6 @@ class BlockedExecute(Worker):
     method and then does not proceed, thus leaving the task in executing state
     indefinitely, until the test sets `block_execute`.
 
-    After that, the worker sets `in_deserialize_task` to simulate the moment when a
-    large run_spec is being deserialized in a separate thread. The worker will block
-    again until the test sets `block_deserialize_task`.
-
     Finally, the worker sets `in_execute_exit` when execute() terminates, but before the
     worker state has processed its exit callback. The worker will block one last time
     until the test sets `block_execute_exit`.
@@ -2290,8 +2286,6 @@ class BlockedExecute(Worker):
     def __init__(self, *args, **kwargs):
         self.in_execute = asyncio.Event()
         self.block_execute = asyncio.Event()
-        self.in_deserialize_task = asyncio.Event()
-        self.block_deserialize_task = asyncio.Event()
         self.in_execute_exit = asyncio.Event()
         self.block_execute_exit = asyncio.Event()
 
@@ -2305,13 +2299,6 @@ class BlockedExecute(Worker):
         finally:
             self.in_execute_exit.set()
             await self.block_execute_exit.wait()
-
-    async def _maybe_deserialize_task(
-        self, ts: WorkerTaskState
-    ) -> tuple[Callable, tuple, dict[str, Any]]:
-        self.in_deserialize_task.set()
-        await self.block_deserialize_task.wait()
-        return await super()._maybe_deserialize_task(ts)
 
 
 class BarrierGetData(Worker):

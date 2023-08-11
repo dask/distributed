@@ -126,7 +126,7 @@ from distributed.utils_comm import (
 )
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
-from distributed.worker import dumps_task
+from distributed.worker import _normalize_task
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -155,6 +155,8 @@ Recs: TypeAlias = dict[str, TaskStateState]
 Msgs: TypeAlias = dict[str, list[dict[str, Any]]]
 # (recommendations, client messages, worker messages)
 RecsMsgs: TypeAlias = tuple[Recs, Msgs, Msgs]
+
+T_runspec: TypeAlias = tuple[Callable, tuple, dict[str, Any]]
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -1176,7 +1178,7 @@ class TaskState:
     #: "pure data" (such as, for example, a piece of data loaded in the scheduler using
     #: :meth:`Client.scatter`).  A "pure data" task cannot be computed again if its
     #: value is lost.
-    run_spec: object
+    run_spec: T_runspec | None
 
     #: The priority provides each task with a relative ranking which is used to break
     #: ties when many tasks are being considered for execution.
@@ -1375,7 +1377,7 @@ class TaskState:
     def __init__(
         self,
         key: str,
-        run_spec: object,
+        run_spec: T_runspec | None,
         state: TaskStateState,
     ):
         self.key = key
@@ -1787,7 +1789,7 @@ class SchedulerState:
     def new_task(
         self,
         key: str,
-        spec: object,
+        spec: T_runspec | None,
         state: TaskStateState,
         computation: Computation | None = None,
     ) -> TaskState:
@@ -3339,10 +3341,7 @@ class SchedulerState:
                 dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
             },
             "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
-            "run_spec": None,
-            "function": None,
-            "args": None,
-            "kwargs": None,
+            "run_spec": ToPickle(ts.run_spec),
             "resource_restrictions": ts.resource_restrictions,
             "actor": ts.actor,
             "annotations": ts.annotations,
@@ -3350,11 +3349,6 @@ class SchedulerState:
         }
         if self.validate:
             assert all(msg["who_has"].values())
-
-        if isinstance(ts.run_spec, dict):
-            msg.update(ts.run_spec)
-        else:
-            msg["run_spec"] = ts.run_spec
 
         return msg
 
@@ -4602,7 +4596,11 @@ class Scheduler(SchedulerState, ServerNode):
         self.digest_metric("update-graph-duration", end - start)
 
     def _generate_taskstates(
-        self, keys: set[str], dsk: dict, dependencies: dict, computation: Computation
+        self,
+        keys: set[str],
+        dsk: dict[str, T_runspec],
+        dependencies: dict[str, set[str]],
+        computation: Computation,
     ) -> tuple:
         # Get or create task states
         runnable = []
@@ -8483,8 +8481,8 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 
 def _materialize_graph(
-    graph: HighLevelGraph, global_annotations: dict
-) -> tuple[dict, dict, dict]:
+    graph: HighLevelGraph, global_annotations: dict[str, Any]
+) -> tuple[dict[str, T_runspec], dict[str, set[str]], dict[str, Any]]:
     dsk = dask.utils.ensure_dict(graph)
     annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
     for annotations_type, value in global_annotations.items():
@@ -8540,6 +8538,6 @@ def _materialize_graph(
     for k in list(dsk):
         if dsk[k] is k:
             del dsk[k]
-    dsk = valmap(dumps_task, dsk)
+    dsk = valmap(_normalize_task, dsk)
 
     return dsk, dependencies, annotations_by_type

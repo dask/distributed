@@ -1111,12 +1111,11 @@ def test_workerstate_resumed_waiting_to_flight(ws):
     assert ws.tasks["x"].state == "flight"
 
 
-@pytest.mark.parametrize("critical_section", ["execute", "deserialize_task"])
 @pytest.mark.parametrize("resume_inside_critical_section", [False, True])
 @pytest.mark.parametrize("resumed_status", ["executing", "resumed"])
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_execute_preamble_early_cancel(
-    c, s, b, critical_section, resume_inside_critical_section, resumed_status
+    c, s, b, resume_inside_critical_section, resumed_status
 ):
     """Test multiple race conditions in the preamble of Worker.execute(), which used to
     cause a task to remain permanently in resumed state or to crash the worker through
@@ -1129,15 +1128,8 @@ async def test_execute_preamble_early_cancel(
     test_worker.py::test_execute_preamble_abort_retirement
     """
     async with BlockedExecute(s.address) as a:
-        if critical_section == "execute":
-            in_ev = a.in_execute
-            block_ev = a.block_execute
-            a.block_deserialize_task.set()
-        else:
-            assert critical_section == "deserialize_task"
-            in_ev = a.in_deserialize_task
-            block_ev = a.block_deserialize_task
-            a.block_execute.set()
+        in_ev = a.in_execute
+        block_ev = a.block_execute
 
         async def resume():
             if resumed_status == "executing":
