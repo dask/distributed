@@ -8037,12 +8037,12 @@ class Scheduler(SchedulerState, ServerNode):
             if last_activity > self.idle_since:
                 self.idle_since = last_activity
                 return self.idle_since
-        
-        if not self.clients:
-            self.close_for_idle_timeout(self, self.idle_timeout_no_clients)
 
-        self.close_for_idle_timeout(self, self.idle_timeout)
-               
+        if not self.clients:
+            self.close_for_idle_timeout(self.idle_timeout_no_clients)
+
+        self.close_for_idle_timeout(self.idle_timeout)
+
         return self.idle_since
 
     def close_for_idle_timeout(self, timeout):
@@ -8054,8 +8054,6 @@ class Scheduler(SchedulerState, ServerNode):
                     format_time(timeout),
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
-
-    
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload

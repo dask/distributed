@@ -2278,6 +2278,7 @@ async def test_idle_timeout(c, s, a, b):
     assert s.idle_since > beginning
     pc.stop()
 
+
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_idle_timeout_no_clients(c, s, a, b):
@@ -2313,7 +2314,6 @@ async def test_idle_timeout_no_clients(c, s, a, b):
     assert "ms" in logs.getvalue()
     assert s.idle_since > beginning
     pc.stop()
-    
 
 
 @gen_cluster(
