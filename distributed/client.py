@@ -2210,8 +2210,8 @@ class Client(SyncMethodMixin):
         if mismatched_futures:
             raise ValueError(
                 "Cannot gather Futures created by another client. "
-                f"These are the {len(mismatched_futures)} (out of {len(futures)}) mismatched Futures and their client IDs "
-                f"(this client is {self.id}): "
+                f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
+                f"mismatched Futures and their client IDs (this client is {self.id}): "
                 f"{ {f: f.client.id for f in mismatched_futures} }"
             )
         keys = [stringify(future.key) for future in future_set]

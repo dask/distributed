@@ -74,7 +74,7 @@ from distributed.utils_test import (
     varying,
     wait_for_state,
 )
-from distributed.worker import dumps_function, get_worker, secede
+from distributed.worker import dumps_function, secede
 
 pytestmark = pytest.mark.ci1
 
@@ -2614,6 +2614,19 @@ async def test_task_groups(c, s, a, b, no_time_resync):
     assert "compute" in tg.all_durations
 
 
+async def padded_time(before=0.01, after=0.01):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
+    from disrupting monotonicity tests (t0 < t1 < t2 < ...).
+    This prevents frequent flakiness on Windows and, more rarely, in Linux and
+    MacOSX (NoSchedulerDelayWorker and no_time_resync help, but aren't sufficient
+    on their own to ensure stability).
+    """
+    await asyncio.sleep(before)
+    t = time()
+    await asyncio.sleep(after)
+    return t
+
+
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
 async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     """TaskGroup.stop increases as the tasks in the group finish.
@@ -2625,25 +2638,25 @@ async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     - task (x, 0) finishes
     """
     ev = Event()
-    t0 = time()
+    t0 = await padded_time(before=0)
     x0 = c.submit(ev.wait, key=("x", 0))
     await wait_for_state(str(x0.key), "executing", a)
     tg = s.task_groups["x"]
     assert tg.start == tg.stop == 0
-    t1 = time()
+    t1 = await padded_time()
     x1 = c.submit(inc, 1, key=("x", 1))
     await x1
-    t2 = time()
+    t2 = await padded_time()
     assert t0 < t1 < tg.start < tg.stop < t2
 
     await ev.set()
     await x0
-    t3 = time()
+    t3 = await padded_time()
     assert t0 < tg.start < t1 < t2 < tg.stop < t3
 
     x2 = c.submit(inc, 1, key=("x", 2))
     await x2
-    t4 = time()
+    t4 = await padded_time(after=0)
     assert t0 < tg.start < t1 < t2 < t3 < tg.stop < t4
 
 
@@ -2860,56 +2873,41 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
-async def test_gather_bad_worker_removed(c, s, a, b):
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    # This behaviour is independent of retries.
+    # Disable them to reduce the complexity of this test.
+    config={"distributed.comm.retry.count": 0},
+)
+async def test_gather_bad_worker(c, s, a, direct):
+    """Upon connection failure, gather() tries again indefinitely and transparently,
+    for as long as the batched comms channel is active.
     """
-    Upon connection failure or missing expected keys during gather, a worker is
-    shut down. The tasks should be rescheduled onto different workers, transparently
-    to `client.gather`.
-    """
-    x = c.submit(slowinc, 1, workers=[a.address], allow_other_workers=True)
-
-    def finalizer(*args):
-        return get_worker().address
-
-    fin = c.submit(
-        finalizer, x, key="final", workers=[a.address], allow_other_workers=True
-    )
-
+    x = c.submit(inc, 1, key="x")
+    c.rpc = await FlakyConnectionPool(failing_connections=3)
     s.rpc = await FlakyConnectionPool(failing_connections=1)
 
-    # This behaviour is independent of retries. Remove them to reduce complexity
-    # of this setup
-    with dask.config.set({"distributed.comm.retry.count": 0}):
-        with captured_logger(
-            logging.getLogger("distributed.scheduler")
-        ) as sched_logger, captured_logger(
-            logging.getLogger("distributed.client")
-        ) as client_logger:
-            # Gather using the client (as an ordinary user would)
-            # Upon a missing key, the client will remove the bad worker and
-            # reschedule the computations
+    with captured_logger("distributed.scheduler") as sched_logger:
+        with captured_logger("distributed.client") as client_logger:
+            assert await c.gather(x, direct=direct) == 2
 
-            # Both tasks are rescheduled onto `b`, since `a` was removed.
-            assert await fin == b.address
+    assert "Couldn't gather keys: {'x': 'memory'}" in sched_logger.getvalue()
+    assert "Couldn't gather 1 keys, rescheduling ('x',)" in client_logger.getvalue()
 
-            await a.finished()
-            assert list(s.workers) == [b.address]
-
-            sched_logger = sched_logger.getvalue()
-            client_logger = client_logger.getvalue()
-            assert "Shut down unresponsive workers" in sched_logger
-
-            assert "Couldn't gather 1 keys, rescheduling" in client_logger
-
-            assert s.tasks[fin.key].who_has == {s.workers[b.address]}
-            assert a.state.executed_count == 2
-            assert b.state.executed_count >= 1
-            # ^ leave room for a future switch from `remove_worker` to `retire_workers`
-
-    # Ensure that the communication was done via the scheduler, i.e. we actually hit a
-    # bad connection
-    assert s.rpc.cnn_count > 0
+    if direct:
+        # 1. try direct=True; fail
+        # 2. fall back to direct=False; fail
+        # 3. try direct=True again; fail
+        # 4. fall back to direct=False again; success
+        assert c.rpc.cnn_count == 2
+        assert s.rpc.cnn_count == 2
+    else:
+        # 1. try direct=False; fail
+        # 2. try again direct=False; success
+        assert c.rpc.cnn_count == 0
+        assert s.rpc.cnn_count == 2
 
 
 @gen_cluster(client=True)
