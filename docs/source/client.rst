@@ -46,6 +46,14 @@ many function calls with the ``client.map`` method
 
 These results live on distributed workers.
 
+We can submit tasks on futures.  The function will go to the machine where the
+futures are stored and run on the result once it has completed.
+
+.. code-block:: python
+
+   >>> y = client.submit(inc, x)      # Submit on x, a Future
+   >>> total = client.submit(sum, L)  # Map on L, a list of Futures
+
 We gather back the results using either the ``Future.result`` method for single
 futures or ``client.gather`` method for many futures at once.
 
@@ -62,16 +70,6 @@ process.  It's often best to leave data on the cluster and operate on it
 remotely with functions like ``submit``, ``map``, ``get`` and ``compute``.
 See :doc:`efficiency <efficiency>` for more information on efficient use of
 distributed.
-
-We can submit tasks on futures and use futures as inputs. The function will go to 
-the machine where the futures are stored and run on the result once it has completed.
-
-.. code-block:: python
-
-   >>> y = client.submit(inc, x)      # Submit on x, a Future
-   >>> total = client.submit(sum, L)  # Submit on L, a list of Futures
-   >>> y.result()
-   12
 
 
 Dask
