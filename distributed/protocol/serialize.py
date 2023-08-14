@@ -576,7 +576,7 @@ class ToPickle(Generic[T]):
 
     data: T
 
-    def __init__(self, data: T) -> None:
+    def __init__(self, data: T):
         self.data = data
 
     def __repr__(self) -> str:
