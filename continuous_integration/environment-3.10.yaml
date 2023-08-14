@@ -19,6 +19,7 @@ dependencies:
   - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
   - jinja2 >=2.10.3
   - locket >=1.0
+  - memray # Only tested here
   - msgpack-python
   - netcdf4
   - paramiko
