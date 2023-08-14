@@ -2614,6 +2614,16 @@ async def test_task_groups(c, s, a, b, no_time_resync):
     assert "compute" in tg.all_durations
 
 
+def assert_time_lt(*args):
+    """Assert args[0] < args[1] < args[2] < ...
+    On Windows, allow args[i] to be 0.01 less than args[i - 1].
+    This is needed to accommodate for imprecision in the Windows wall clock.
+    """
+    abs_tol = -0.01 if WINDOWS else 0
+    for i, j in zip(args, args[1:]):
+        assert j - i > abs_tol, " < ".join(str(x) for x in args)
+
+
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
 async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     """TaskGroup.stop increases as the tasks in the group finish.
@@ -2634,17 +2644,17 @@ async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     x1 = c.submit(inc, 1, key=("x", 1))
     await x1
     t2 = time()
-    assert t0 < t1 < tg.start < tg.stop < t2
+    assert_time_lt(t0, t1, tg.start, tg.stop, t2)
 
     await ev.set()
     await x0
     t3 = time()
-    assert t0 < tg.start < t1 < t2 < tg.stop < t3
+    assert_time_lt(t0, tg.start, t1, t2, tg.stop, t3)
 
     x2 = c.submit(inc, 1, key=("x", 2))
     await x2
     t4 = time()
-    assert t0 < tg.start < t1 < t2 < t3 < tg.stop < t4
+    assert_time_lt(t0, tg.start, t1, t2, t3, tg.stop, t4)
 
 
 @gen_cluster(client=True)
