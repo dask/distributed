@@ -2614,6 +2614,19 @@ async def test_task_groups(c, s, a, b, no_time_resync):
     assert "compute" in tg.all_durations
 
 
+async def padded_time(before=0.01, after=0.01):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
+    from disrupting monotonicity tests (t0 < t1 < t2 < ...).
+    This prevents frequent flakiness on Windows and, more rarely, in Linux and
+    MacOSX (NoSchedulerDelayWorker and no_time_resync help, but aren't sufficient
+    on their own to ensure stability).
+    """
+    await asyncio.sleep(before)
+    t = time()
+    await asyncio.sleep(after)
+    return t
+
+
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
 async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     """TaskGroup.stop increases as the tasks in the group finish.
@@ -2625,25 +2638,25 @@ async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     - task (x, 0) finishes
     """
     ev = Event()
-    t0 = time()
+    t0 = await padded_time(before=0)
     x0 = c.submit(ev.wait, key=("x", 0))
     await wait_for_state(str(x0.key), "executing", a)
     tg = s.task_groups["x"]
     assert tg.start == tg.stop == 0
-    t1 = time()
+    t1 = await padded_time()
     x1 = c.submit(inc, 1, key=("x", 1))
     await x1
-    t2 = time()
+    t2 = await padded_time()
     assert t0 < t1 < tg.start < tg.stop < t2
 
     await ev.set()
     await x0
-    t3 = time()
+    t3 = await padded_time()
     assert t0 < tg.start < t1 < t2 < tg.stop < t3
 
     x2 = c.submit(inc, 1, key=("x", 2))
     await x2
-    t4 = time()
+    t4 = await padded_time(after=0)
     assert t0 < tg.start < t1 < t2 < t3 < tg.stop < t4
 
 
