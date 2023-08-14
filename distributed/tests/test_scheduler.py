@@ -2278,6 +2278,43 @@ async def test_idle_timeout(c, s, a, b):
     assert s.idle_since > beginning
     pc.stop()
 
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_idle_timeout_no_clients(c, s, a, b):
+    beginning = time()
+    assert s.check_idle() is not None
+    assert s.check_idle() is not None  # Repeated calls should still not be None
+    s.clients = {}
+    s.idle_timeout_no_clients = 0.500
+    pc = PeriodicCallback(s.check_idle, 10)
+    future = c.submit(slowinc, 1)
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+    assert s.check_idle() is None
+    pc.start()
+    await future
+    assert s.idle_since is None or s.idle_since > beginning
+    _idle_since = s.check_idle()
+    assert _idle_since == s.idle_since
+
+    with captured_logger("distributed.scheduler") as logs:
+        start = time()
+        while s.status != Status.closed:
+            await asyncio.sleep(0.01)
+            assert time() < start + 3
+
+        start = time()
+        while not (a.status == Status.closed and b.status == Status.closed):
+            await asyncio.sleep(0.01)
+            assert time() < start + 1
+
+    assert "idle" in logs.getvalue()
+    assert "500" in logs.getvalue()
+    assert "ms" in logs.getvalue()
+    assert s.idle_since > beginning
+    pc.stop()
+    
+
 
 @gen_cluster(
     client=True,

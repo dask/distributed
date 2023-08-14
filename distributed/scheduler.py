@@ -3454,6 +3454,7 @@ class Scheduler(SchedulerState, ServerNode):
         security=None,
         worker_ttl=None,
         idle_timeout=None,
+        idle_timeout_no_clients=None,
         interface=None,
         host=None,
         port=0,
@@ -3506,6 +3507,13 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_timeout = parse_timedelta(idle_timeout)
         else:
             self.idle_timeout = None
+        idle_timeout_no_clients = idle_timeout_no_clients or dask.config.get(
+            "distributed.scheduler.idle-timeout-no-clients"
+        )
+        if idle_timeout_no_clients:
+            self.idle_timeout_no_clients = parse_timedelta(idle_timeout_no_clients)
+        else:
+            self.idle_timeout_no_clients = None
         self.idle_since = time()
         self.time_started = self.idle_since  # compatibility for dask-gateway
         self._lock = asyncio.Lock()
@@ -8029,16 +8037,25 @@ class Scheduler(SchedulerState, ServerNode):
             if last_activity > self.idle_since:
                 self.idle_since = last_activity
                 return self.idle_since
+        
+        if not self.clients:
+            self.close_for_idle_timeout(self, self.idle_timeout_no_clients)
 
-        if self.idle_timeout:
-            if time() > self.idle_since + self.idle_timeout:
+        self.close_for_idle_timeout(self, self.idle_timeout)
+               
+        return self.idle_since
+
+    def close_for_idle_timeout(self, timeout):
+        if timeout:
+            if time() > self.idle_since + timeout:
                 assert self.idle_since
                 logger.info(
                     "Scheduler closing after being idle for %s",
-                    format_time(self.idle_timeout),
+                    format_time(timeout),
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
-        return self.idle_since
+
+    
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
