@@ -22,7 +22,6 @@ dependencies:
   - jinja2 >=2.10.3
   - locket >=1.0
   - lz4 >=0.23.1  # Only tested here
-  - memray # Only tested here
   - msgpack-python
   - netcdf4
   - paramiko
