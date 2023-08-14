@@ -65,7 +65,6 @@ from distributed.collections import LRU
 from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
-from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
@@ -74,7 +73,6 @@ from distributed.core import (
     coerce_to_address,
     context_meter_to_server_digest,
     error_message,
-    loads_function,
     pingpong,
 )
 from distributed.core import rpc as RPCType
@@ -124,7 +122,6 @@ from distributed.worker_memory import (
     WorkerMemoryManager,
 )
 from distributed.worker_state_machine import (
-    NO_VALUE,
     AcquireReplicasEvent,
     BaseWorker,
     CancelComputeEvent,
@@ -161,6 +158,7 @@ if TYPE_CHECKING:
     from distributed.client import Client
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.nanny import Nanny
+    from distributed.scheduler import T_runspec
 
     P = ParamSpec("P")
     T = TypeVar("T")
@@ -2236,24 +2234,6 @@ class Worker(BaseWorker, ServerNode):
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
 
-    async def _maybe_deserialize_task(
-        self, ts: TaskState
-    ) -> tuple[Callable, tuple, dict[str, Any]]:
-        assert ts.run_spec is not None
-        start = time()
-        # Offload deserializing large tasks
-        if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
-        else:
-            function, args, kwargs = _deserialize(*ts.run_spec)
-        stop = time()
-
-        if stop - start > 0.010:
-            ts.startstops.append(
-                {"action": "deserialize", "start": start, "stop": stop}
-            )
-        return function, args, kwargs
-
     @fail_hard
     async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
@@ -2273,22 +2253,12 @@ class Worker(BaseWorker, ServerNode):
         run_id = ts.run_id
 
         try:
-            function, args, kwargs = await self._maybe_deserialize_task(ts)
-        except Exception as exc:
-            logger.error("Could not deserialize task %s", key, exc_info=True)
-            return ExecuteFailureEvent.from_exception(
-                exc,
-                key=key,
-                run_id=run_id,
-                stimulus_id=f"run-spec-deserialize-failed-{time()}",
-            )
-
-        try:
             if self.state.validate:
                 assert not ts.waiting_for_data
                 assert ts.state in ("executing", "cancelled", "resumed"), ts
-                assert ts.run_spec is not None
+            assert ts.run_spec is not None
 
+            function, args, kwargs = ts.run_spec
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
             assert ts.annotations is not None
@@ -2927,27 +2897,14 @@ async def get_data_from_worker(
         rpc.reuse(worker, comm)
 
 
-job_counter = [0]
+def _normalize_task(task: Any) -> T_runspec:
+    if istask(task):
+        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
+            return task[1], task[2], task[3] if len(task) == 4 else {}
+        elif not any(map(_maybe_complex, task[1:])):
+            return task[0], task[1:], {}
 
-
-@context_meter.meter("deserialize")
-def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
-    """Deserialize task inputs and regularize to func, args, kwargs"""
-    # Some objects require threadlocal state during deserialization, e.g. to
-    # detect the current worker
-    if function is not None:
-        function = loads_function(function)
-    if args and isinstance(args, bytes):
-        args = pickle.loads(args)
-    if kwargs and isinstance(kwargs, bytes):
-        kwargs = pickle.loads(kwargs)
-
-    if task is not NO_VALUE:
-        assert not function and not args and not kwargs
-        function = execute_task
-        args = (task,)
-
-    return function, args or (), kwargs or {}
+    return execute_task, (task,), {}
 
 
 def execute_task(task):
@@ -2986,62 +2943,6 @@ def dumps_function(func) -> bytes:
     except TypeError:  # Unhashable function
         result = pickle.dumps(func)
     return result
-
-
-def dumps_task(task):
-    """Serialize a dask task
-
-    Returns a dict of bytestrings that can each be loaded with ``loads``
-
-    Examples
-    --------
-    Either returns a task as a function, args, kwargs dict
-
-    >>> from operator import add
-    >>> dumps_task((add, 1))  # doctest: +SKIP
-    {'function': b'\x80\x04\x95\x00\x8c\t_operator\x94\x8c\x03add\x94\x93\x94.'
-     'args': b'\x80\x04\x95\x07\x00\x00\x00K\x01K\x02\x86\x94.'}
-
-    Or as a single task blob if it can't easily decompose the result.  This
-    happens either if the task is highly nested, or if it isn't a task at all
-
-    >>> dumps_task(1)  # doctest: +SKIP
-    {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
-    """
-    if istask(task):
-        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
-            if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
-            return d
-        elif not any(map(_maybe_complex, task[1:])):
-            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
-    return to_serialize(task)
-
-
-_warn_dumps_warned = [False]
-
-
-def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
-    """Dump an object to bytes, warn if those bytes are large"""
-    b = dumps(obj)
-    if not _warn_dumps_warned[0] and len(b) > limit:
-        _warn_dumps_warned[0] = True
-        s = str(obj)
-        if len(s) > 70:
-            s = s[:50] + " ... " + s[-15:]
-        warnings.warn(
-            "Large object of size %s detected in task graph: \n"
-            "  %s\n"
-            "Consider scattering large objects ahead of time\n"
-            "with client.scatter to reduce scheduler burden and \n"
-            "keep data on workers\n\n"
-            "    future = client.submit(func, big_data)    # bad\n\n"
-            "    big_future = client.scatter(big_data)     # good\n"
-            "    future = client.submit(func, big_future)  # good"
-            % (format_bytes(len(b)), s)
-        )
-    return b
 
 
 def apply_function(
