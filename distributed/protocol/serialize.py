@@ -585,9 +585,6 @@ class ToPickle(Generic[T]):
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and other.data == self.data
 
-    def __ne__(self, other: object) -> bool:
-        return not (self == other)
-
     def __hash__(self) -> int:
         return hash(self.data)
 
