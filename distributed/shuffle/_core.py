@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, NewType, TypeVar
 
-import pandas as pd
-
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
@@ -23,6 +21,7 @@ from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 
 if TYPE_CHECKING:
+    import pandas as pd
     from typing_extensions import TypeAlias
 
     # avoid circular dependencies
