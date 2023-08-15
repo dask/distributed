@@ -661,7 +661,6 @@ async def test_close_joins(s):
         assert not p.process
 
 
-# FIXME
 @gen_cluster(Worker=Nanny, nthreads=[("", 1)])
 async def test_scheduler_crash_doesnt_restart(s, a):
     # Simulate a scheduler crash by disconnecting it first
