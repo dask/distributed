@@ -2,8 +2,35 @@ from __future__ import annotations
 
 import asyncio
 import math
+from typing import Protocol
 
 from distributed.metrics import time
+
+
+class AbstractLimiter(Protocol):
+    @property
+    def _maxvalue(self) -> int | float:
+        ...
+
+    def available(self) -> int | float:
+        """How far can the value be increased before blocking"""
+        ...
+
+    def free(self) -> bool:
+        """Return True if nothing has been acquired / the limiter is in a neutral state"""
+        ...
+
+    async def wait_for_available(self) -> None:
+        """Block until the counter drops below maxvalue"""
+        ...
+
+    def increase(self, value: int) -> None:
+        """Increase the internal counter by value"""
+        ...
+
+    async def decrease(self, value: int) -> None:
+        """Decrease the internal counter by value"""
+        ...
 
 
 class ResourceLimiter:
@@ -86,7 +113,7 @@ class NoopLimiter:
         return True
 
     def available(self) -> float:
-        return math.inf
+        return self._maxvalue
 
     def increase(self, value: int) -> None:
         pass

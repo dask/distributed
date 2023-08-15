@@ -8,7 +8,7 @@ from collections.abc import Iterator, Sized
 from typing import Any, Generic, TypeVar
 
 from distributed.metrics import time
-from distributed.shuffle._limiter import NoopLimiter, ResourceLimiter
+from distributed.shuffle._limiter import AbstractLimiter, NoopLimiter, ResourceLimiter
 from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
@@ -46,7 +46,7 @@ class ShardsBuffer(Generic[ShardType]):
     shards: defaultdict[str, _List[ShardType]]
     sizes: defaultdict[str, int]
     concurrency_limit: int
-    memory_limiter: ResourceLimiter | NoopLimiter
+    memory_limiter: AbstractLimiter
     diagnostics: dict[str, float]
     max_message_size: int
 
