@@ -2112,11 +2112,7 @@ class Worker(BaseWorker, ServerNode):
                 data=response["data"],
                 stimulus_id=f"gather-dep-success-{time()}",
             )
-
-        # Note: CancelledError and asyncio.TimeoutError are rare conditions
-        # that can be raised by the network stack.
-        # See https://github.com/dask/distributed/issues/8006
-        except (OSError, asyncio.CancelledError, asyncio.TimeoutError):
+        except OSError:
             logger.exception("Worker stream died during communication: %s", worker)
             self.state.log.append(
                 ("gather-dep-failed", worker, to_gather, stimulus_id, time())
