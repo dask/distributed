@@ -12,11 +12,17 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, NewType, TypeVar
 
+from dask import config
+
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
-from distributed.shuffle._disk import DiskShardsBuffer
+from distributed.shuffle._disk import (
+    DiskShardsBuffer,
+    FileShardsBuffer,
+    MemoryShardsBuffer,
+)
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 
@@ -37,6 +43,8 @@ ShuffleId = NewType("ShuffleId", str)
 
 
 class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
+    _disk_buffer: FileShardsBuffer
+
     def __init__(
         self,
         id: ShuffleId,
@@ -59,10 +67,13 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.scheduler = scheduler
         self.closed = False
 
-        self._disk_buffer = DiskShardsBuffer(
-            directory=directory,
-            memory_limiter=memory_limiter_disk,
-        )
+        if config.get("distributed.shuffle.p2p.stage_in_memory", False):
+            self._disk_buffer = MemoryShardsBuffer()
+        else:
+            self._disk_buffer = DiskShardsBuffer(
+                directory=directory,
+                memory_limiter=memory_limiter_disk,
+            )
 
         self._comm_buffer = CommShardsBuffer(
             send=self.send, memory_limiter=memory_limiter_comms
