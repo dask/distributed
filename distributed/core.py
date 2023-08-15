@@ -1544,6 +1544,8 @@ class ConnectionPool:
                 self._connecting_count -= 1
         except asyncio.CancelledError:
             current_task = asyncio.current_task()
+            if sys.version_info >= (3, 11):
+                current_task.uncancel()
             assert current_task
             reason = self._reasons.pop(current_task, "ConnectionPool closing.")
             raise CommClosedError(reason)
