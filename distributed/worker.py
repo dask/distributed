@@ -6,6 +6,7 @@ import builtins
 import contextlib
 import contextvars
 import errno
+import inspect
 import logging
 import math
 import os
@@ -39,7 +40,6 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
-    overload,
 )
 
 from tlz import keymap, pluck
@@ -65,7 +65,6 @@ from distributed.collections import LRU
 from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
-from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
@@ -74,7 +73,6 @@ from distributed.core import (
     coerce_to_address,
     context_meter_to_server_digest,
     error_message,
-    loads_function,
     pingpong,
 )
 from distributed.core import rpc as RPCType
@@ -124,7 +122,6 @@ from distributed.worker_memory import (
     WorkerMemoryManager,
 )
 from distributed.worker_state_machine import (
-    NO_VALUE,
     AcquireReplicasEvent,
     BaseWorker,
     CancelComputeEvent,
@@ -161,6 +158,7 @@ if TYPE_CHECKING:
     from distributed.client import Client
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.nanny import Nanny
+    from distributed.scheduler import T_runspec
 
     P = ParamSpec("P")
     T = TypeVar("T")
@@ -1307,23 +1305,44 @@ class Worker(BaseWorker, ServerNode):
         return list(self.data)
 
     async def gather(self, who_has: dict[str, list[str]]) -> dict[str, Any]:
-        who_has = {
-            k: [coerce_to_address(addr) for addr in v]
-            for k, v in who_has.items()
-            if k not in self.data
-        }
-        result, missing_keys, missing_workers = await gather_from_workers(
-            who_has=who_has, rpc=self.rpc, who=self.address
-        )
-        self.update_data(data=result)
-        if missing_keys:
-            logger.warning(
-                "Could not find data: %s on workers: %s (who_has: %s)",
+        """Endpoint used by Scheduler.rebalance() and Scheduler.replicate()"""
+        missing_keys = [k for k in who_has if k not in self.data]
+        failed_keys = []
+        missing_workers: set[str] = set()
+        stimulus_id = f"gather-{time()}"
+
+        while missing_keys:
+            to_gather = {}
+            for k in missing_keys:
+                workers = set(who_has[k]) - missing_workers
+                if workers:
+                    to_gather[k] = workers
+                else:
+                    failed_keys.append(k)
+            if not to_gather:
+                break
+
+            (
+                data,
                 missing_keys,
-                missing_workers,
-                who_has,
+                new_failed_keys,
+                new_missing_workers,
+            ) = await gather_from_workers(
+                who_has=to_gather, rpc=self.rpc, who=self.address
             )
-            return {"status": "partial-fail", "keys": missing_keys}
+            self.update_data(data, stimulus_id=stimulus_id)
+            del data
+            failed_keys += new_failed_keys
+            missing_workers.update(new_missing_workers)
+
+            if missing_keys:
+                who_has = await retry_operation(
+                    self.scheduler.who_has, keys=missing_keys
+                )
+
+        if failed_keys:
+            logger.error("Could not find data: %s", failed_keys)
+            return {"status": "partial-fail", "keys": list(failed_keys)}
         else:
             return {"status": "OK"}
 
@@ -1522,6 +1541,12 @@ class Worker(BaseWorker, ServerNode):
         disable_gc_diagnosis()
 
         try:
+            self.log_event(self.address, {"action": "closing-worker", "reason": reason})
+        except Exception:
+            # This can happen when the Server is not up yet
+            logger.exception("Failed to log closing event")
+
+        try:
             logger.info("Stopping worker at %s. Reason: %s", self.address, reason)
         except ValueError:  # address not available if already closed
             logger.info("Stopping worker. Reason: %s", reason)
@@ -1529,23 +1554,24 @@ class Worker(BaseWorker, ServerNode):
             logger.info("Closed worker has not yet started: %s", self.status)
         if not executor_wait:
             logger.info("Not waiting on executor to close")
+
+        # This also informs the scheduler about the status update
         self.status = Status.closing
+        setproctitle("dask worker [closing]")
 
-        # Stop callbacks before giving up control in any `await`.
-        # We don't want to heartbeat while closing.
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-
-        self.stop()
+        if nanny and self.nanny:
+            with self.rpc(self.nanny) as r:
+                await r.close_gracefully(reason=reason)
 
         # Cancel async instructions
         await BaseWorker.close(self, timeout=timeout)
 
-        for preload in self.preloads:
-            try:
-                await preload.teardown()
-            except Exception:
-                logger.exception("Failed to tear down preload")
+        teardowns = [
+            plugin.teardown(self)
+            for plugin in self.plugins.values()
+            if hasattr(plugin, "teardown")
+        ]
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
@@ -1553,19 +1579,16 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     await result
 
-        if nanny and self.nanny:
-            with self.rpc(self.nanny) as r:
-                await r.close_gracefully(reason=reason)
+        self.stop_services()
 
-        setproctitle("dask worker [closing]")
+        for preload in self.preloads:
+            try:
+                await preload.teardown()
+            except Exception:
+                logger.exception("Failed to tear down preload")
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
 
         if self._client:
             # If this worker is the last one alive, clean up the worker
@@ -1589,9 +1612,27 @@ class Worker(BaseWorker, ServerNode):
                         # otherwise
                         c.close()
 
-        await self.scheduler.close_rpc()
+        # FIXME: Copy-paste from `Server.stop`. See dask/distributed#8077
+        _stops = set()
+        for listener in self.listeners:
+            future = listener.stop()
+            if inspect.isawaitable(future):
+                _stops.add(future)
+            try:
+                abort_handshaking_comms = listener.abort_handshaking_comms
+            except AttributeError:
+                pass
+            else:
+                abort_handshaking_comms()
 
-        self.stop_services()
+        if _stops:
+
+            async def background_stops():
+                await asyncio.gather(*_stops)
+
+        # end copy-paste
+
+        await self.rpc.close()
 
         # Give some time for a UCX scheduler to complete closing endpoints
         # before closing self.batched_stream, otherwise the local endpoint
@@ -1640,13 +1681,13 @@ class Worker(BaseWorker, ServerNode):
                         executor=executor, wait=executor_wait
                     )  # Just run it directly
 
-        await self.rpc.close()
-
+        self.stop()
         self.status = Status.closed
+        setproctitle("dask worker [closed]")
+
         await ServerNode.close(self)
 
         self.__exit_stack.__exit__(None, None, None)
-        setproctitle("dask worker [closed]")
         return "OK"
 
     async def close_gracefully(
@@ -1708,23 +1749,13 @@ class Worker(BaseWorker, ServerNode):
     async def get_data(
         self,
         comm: Comm,
-        keys: Collection[str] | None = None,
+        keys: Collection[str],
         who: str | None = None,
         serializers: list[str] | None = None,
-        max_connections: int | None = None,
     ) -> GetDataBusy | Literal[Status.dont_reply]:
-        if max_connections is None:
-            max_connections = self.transfer_outgoing_count_limit
-
-        if keys is None:
-            keys = set()
-
+        max_connections = self.transfer_outgoing_count_limit
         # Allow same-host connections more liberally
-        if (
-            max_connections
-            and comm
-            and get_address_host(comm.peer_address) == get_address_host(self.address)
-        ):
+        if get_address_host(comm.peer_address) == get_address_host(self.address):
             max_connections = max_connections * 2
 
         if self.status == Status.paused:
@@ -2203,24 +2234,6 @@ class Worker(BaseWorker, ServerNode):
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
 
-    async def _maybe_deserialize_task(
-        self, ts: TaskState
-    ) -> tuple[Callable, tuple, dict[str, Any]]:
-        assert ts.run_spec is not None
-        start = time()
-        # Offload deserializing large tasks
-        if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
-        else:
-            function, args, kwargs = _deserialize(*ts.run_spec)
-        stop = time()
-
-        if stop - start > 0.010:
-            ts.startstops.append(
-                {"action": "deserialize", "start": start, "stop": stop}
-            )
-        return function, args, kwargs
-
     @fail_hard
     async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
@@ -2240,22 +2253,12 @@ class Worker(BaseWorker, ServerNode):
         run_id = ts.run_id
 
         try:
-            function, args, kwargs = await self._maybe_deserialize_task(ts)
-        except Exception as exc:
-            logger.error("Could not deserialize task %s", key, exc_info=True)
-            return ExecuteFailureEvent.from_exception(
-                exc,
-                key=key,
-                run_id=run_id,
-                stimulus_id=f"run-spec-deserialize-failed-{time()}",
-            )
-
-        try:
             if self.state.validate:
                 assert not ts.waiting_for_data
                 assert ts.state in ("executing", "cancelled", "resumed"), ts
-                assert ts.run_spec is not None
+            assert ts.run_spec is not None
 
+            function, args, kwargs = ts.run_spec
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
             assert ts.annotations is not None
@@ -2846,41 +2849,12 @@ def secede():
     )
 
 
-@overload
 async def get_data_from_worker(
     rpc: ConnectionPool,
     keys: Collection[str],
     worker: str,
     *,
     who: str | None = None,
-    max_connections: Literal[False],
-    serializers: list[str] | None = None,
-    deserializers: list[str] | None = None,
-) -> GetDataSuccess:
-    ...
-
-
-@overload
-async def get_data_from_worker(
-    rpc: ConnectionPool,
-    keys: Collection[str],
-    worker: str,
-    *,
-    who: str | None = None,
-    max_connections: bool | int | None = None,
-    serializers: list[str] | None = None,
-    deserializers: list[str] | None = None,
-) -> GetDataBusy | GetDataSuccess:
-    ...
-
-
-async def get_data_from_worker(
-    rpc: ConnectionPool,
-    keys: Collection[str],
-    worker: str,
-    *,
-    who: str | None = None,
-    max_connections: bool | int | None = None,
     serializers: list[str] | None = None,
     deserializers: list[str] | None = None,
 ) -> GetDataBusy | GetDataSuccess:
@@ -2910,7 +2884,6 @@ async def get_data_from_worker(
             op="get_data",
             keys=keys,
             who=who,
-            max_connections=max_connections,
         )
         try:
             status = response["status"]
@@ -2924,27 +2897,14 @@ async def get_data_from_worker(
         rpc.reuse(worker, comm)
 
 
-job_counter = [0]
+def _normalize_task(task: Any) -> T_runspec:
+    if istask(task):
+        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
+            return task[1], task[2], task[3] if len(task) == 4 else {}
+        elif not any(map(_maybe_complex, task[1:])):
+            return task[0], task[1:], {}
 
-
-@context_meter.meter("deserialize")
-def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
-    """Deserialize task inputs and regularize to func, args, kwargs"""
-    # Some objects require threadlocal state during deserialization, e.g. to
-    # detect the current worker
-    if function is not None:
-        function = loads_function(function)
-    if args and isinstance(args, bytes):
-        args = pickle.loads(args)
-    if kwargs and isinstance(kwargs, bytes):
-        kwargs = pickle.loads(kwargs)
-
-    if task is not NO_VALUE:
-        assert not function and not args and not kwargs
-        function = execute_task
-        args = (task,)
-
-    return function, args or (), kwargs or {}
+    return execute_task, (task,), {}
 
 
 def execute_task(task):
@@ -2983,62 +2943,6 @@ def dumps_function(func) -> bytes:
     except TypeError:  # Unhashable function
         result = pickle.dumps(func)
     return result
-
-
-def dumps_task(task):
-    """Serialize a dask task
-
-    Returns a dict of bytestrings that can each be loaded with ``loads``
-
-    Examples
-    --------
-    Either returns a task as a function, args, kwargs dict
-
-    >>> from operator import add
-    >>> dumps_task((add, 1))  # doctest: +SKIP
-    {'function': b'\x80\x04\x95\x00\x8c\t_operator\x94\x8c\x03add\x94\x93\x94.'
-     'args': b'\x80\x04\x95\x07\x00\x00\x00K\x01K\x02\x86\x94.'}
-
-    Or as a single task blob if it can't easily decompose the result.  This
-    happens either if the task is highly nested, or if it isn't a task at all
-
-    >>> dumps_task(1)  # doctest: +SKIP
-    {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
-    """
-    if istask(task):
-        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
-            if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
-            return d
-        elif not any(map(_maybe_complex, task[1:])):
-            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
-    return to_serialize(task)
-
-
-_warn_dumps_warned = [False]
-
-
-def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
-    """Dump an object to bytes, warn if those bytes are large"""
-    b = dumps(obj)
-    if not _warn_dumps_warned[0] and len(b) > limit:
-        _warn_dumps_warned[0] = True
-        s = str(obj)
-        if len(s) > 70:
-            s = s[:50] + " ... " + s[-15:]
-        warnings.warn(
-            "Large object of size %s detected in task graph: \n"
-            "  %s\n"
-            "Consider scattering large objects ahead of time\n"
-            "with client.scatter to reduce scheduler burden and \n"
-            "keep data on workers\n\n"
-            "    future = client.submit(func, big_data)    # bad\n\n"
-            "    big_future = client.scatter(big_data)     # good\n"
-            "    future = client.submit(func, big_future)  # good"
-            % (format_bytes(len(b)), s)
-        )
-    return b
 
 
 def apply_function(

@@ -48,21 +48,59 @@ def test_submit_after_failed_worker_sync(loop):
             assert total.result() == sum(map(inc, range(10)))
 
 
-@pytest.mark.slow()
-@pytest.mark.parametrize("compute_on_failed", [False, True])
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
-async def test_submit_after_failed_worker_async(c, s, a, b, compute_on_failed):
-    async with Nanny(s.address, nthreads=2) as n:
-        await c.wait_for_workers(3)
+@pytest.mark.parametrize("when", ["closing", "closed"])
+@pytest.mark.parametrize("y_on_failed", [False, True])
+@pytest.mark.parametrize("x_on_failed", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.comm.timeouts.connect": "1s"},
+)
+async def test_submit_after_failed_worker_async(
+    c, s, a, b, x_on_failed, y_on_failed, when, monkeypatch
+):
+    a_ws = s.workers[a.address]
 
-        L = c.map(inc, range(10))
-        await wait(L)
+    x = c.submit(
+        inc,
+        1,
+        key="x",
+        workers=[b.address if x_on_failed else a.address],
+        allow_other_workers=True,
+    )
+    await wait(x)
 
-        kill_task = asyncio.create_task(n.kill())
-        compute_addr = n.worker_address if compute_on_failed else a.address
-        total = c.submit(sum, L, workers=[compute_addr], allow_other_workers=True)
-        assert await total == sum(range(1, 11))
-        await kill_task
+    if when == "closed":
+        await b.close()
+        await async_poll_for(lambda: b.address not in s.workers, timeout=5)
+    elif when == "closing":
+        orig_remove_worker = s.remove_worker
+        in_remove_worker = asyncio.Event()
+        wait_remove_worker = asyncio.Event()
+
+        async def remove_worker(*args, **kwargs):
+            in_remove_worker.set()
+            await wait_remove_worker.wait()
+            return await orig_remove_worker(*args, **kwargs)
+
+        monkeypatch.setattr(s, "remove_worker", remove_worker)
+        await b.close()
+        await in_remove_worker.wait()
+        assert s.workers[b.address].status.name == "closing"
+
+    y = c.submit(
+        inc,
+        x,
+        key="y",
+        workers=[b.address if y_on_failed else a.address],
+        allow_other_workers=True,
+    )
+    await async_poll_for(lambda: "y" in s.tasks, timeout=5)
+
+    if when == "closing":
+        wait_remove_worker.set()
+    assert await y == 3
+    assert s.tasks["y"].who_has == {a_ws}
 
 
 @gen_cluster(client=True, timeout=60)

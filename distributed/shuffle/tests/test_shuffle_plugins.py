@@ -4,18 +4,17 @@ from asyncio import iscoroutinefunction
 
 import pytest
 
-pd = pytest.importorskip("pandas")
-dd = pytest.importorskip("dask.dataframe")
-
-from distributed.shuffle._scheduler_plugin import (
-    ShuffleSchedulerPlugin,
+from distributed.shuffle._shuffle import (
     get_worker_for_range_sharding,
-)
-from distributed.shuffle._worker_plugin import (
-    ShuffleWorkerPlugin,
     split_by_partition,
     split_by_worker,
 )
+
+pd = pytest.importorskip("pandas")
+dd = pytest.importorskip("dask.dataframe")
+
+from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.utils_test import gen_cluster
 
 

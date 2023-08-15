@@ -74,7 +74,7 @@ from distributed.client import (
 )
 from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import Status, error_message
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.metrics import time
@@ -85,6 +85,7 @@ from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
+    BlockedGetData,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
     async_poll_for,
@@ -5165,17 +5166,19 @@ def test_quiet_client_close(loop):
             sleep(0.200)  # stop part-way
         sleep(0.1)  # let things settle
 
-        out = logger.getvalue()
-        lines = out.strip().split("\n")
-        assert len(lines) <= 2
-        for line in lines:
-            assert (
-                not line
-                or "heartbeat from unregistered worker" in line
-                or "unaware of this worker" in line
-                or "garbage" in line
-                or set(line) == {"-"}
-            ), line
+    out = logger.getvalue()
+    lines = out.strip().split("\n")
+    unexpected_lines = [
+        line
+        for line in lines
+        if line
+        and "heartbeat from unregistered worker" not in line
+        and "unaware of this worker" not in line
+        and "garbage" not in line
+        and "ended with CancelledError" not in line
+        and set(line) != {"-"}
+    ]
+    assert not unexpected_lines, lines
 
 
 @pytest.mark.slow
@@ -6383,6 +6386,7 @@ async def test_wait_for_workers(c, s, a, b):
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
+@pytest.mark.skipif(MACOS, reason="dask/distributed#8075")
 @pytest.mark.parametrize(
     "Worker", [Worker, pytest.param(Nanny, marks=[pytest.mark.slow])]
 )
@@ -8441,3 +8445,28 @@ async def test_resolves_future_in_dict(c, s, a, b):
     outer_future = c.submit(identity, {"x": inner_future, "y": 2})
     result = await outer_future
     assert result == {"x": 1, "y": 2}
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
+async def test_gather_race_vs_AMM(c, s, a, direct):
+    """Test race condition:
+    Client.gather() tries to get a key from a worker, but in the meantime the
+    Active Memory Manager has moved it to another worker
+    """
+    async with BlockedGetData(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        fut = asyncio.create_task(c.gather(x, direct=direct))
+        await b.in_get_data.wait()
+
+        # Simulate AMM replicate from b to a, followed by AMM drop on b
+        # Can't use s.request_acquire_replicas as it would get stuck on b.block_get_data
+        a.update_data({"x": 3})
+        a.batched_send({"op": "add-keys", "keys": ["x"]})
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2, timeout=5)
+        s.request_remove_replicas(b.address, ["x"], stimulus_id="remove")
+        await async_poll_for(lambda: "x" not in b.data, timeout=5)
+
+        b.block_get_data.set()
+
+    assert await fut == 3  # It's from a; it would be 2 if it were from b
