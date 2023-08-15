@@ -239,12 +239,11 @@ def get_worker_plugin() -> ShuffleWorkerPlugin:
             "please confirm that you've created a distributed Client and are submitting this computation through it."
         ) from e
     try:
-        plugin: ShuffleWorkerPlugin = worker.plugins["shuffle"]  # type: ignore
+        return worker.plugins["shuffle"]  # type: ignore
     except KeyError as e:
         raise RuntimeError(
             f"The worker {worker.address} does not have a P2P shuffle plugin."
         ) from e
-    return plugin
 
 
 _BARRIER_PREFIX = "shuffle-barrier-"
