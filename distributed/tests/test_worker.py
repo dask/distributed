@@ -3333,7 +3333,6 @@ async def test_get_data_cancelled_error(c, s, a):
 
     See Also
     --------
-    test_gather_dep_cancelled_error
     https://github.com/dask/distributed/issues/8006
     """
 
