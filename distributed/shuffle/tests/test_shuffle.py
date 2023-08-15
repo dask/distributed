@@ -15,6 +15,7 @@ from unittest import mock
 
 import pytest
 
+from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.worker import Status
 
 pd = pytest.importorskip("pandas")
@@ -27,22 +28,20 @@ from dask.utils import stringify
 from distributed.client import Client
 from distributed.scheduler import KilledWorker, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
-from distributed.shuffle._arrow import serialize_table
-from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._scheduler_plugin import (
-    ShuffleSchedulerPlugin,
-    get_worker_for_range_sharding,
-)
-from distributed.shuffle._shuffle import ShuffleId, barrier_key
-from distributed.shuffle._worker_plugin import (
-    DataFrameShuffleRun,
-    ShuffleRun,
-    ShuffleWorkerPlugin,
+from distributed.shuffle._arrow import (
     convert_partition,
     list_of_buffers_to_table,
+    serialize_table,
+)
+from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
+from distributed.shuffle._shuffle import (
+    DataFrameShuffleRun,
+    get_worker_for_range_sharding,
     split_by_partition,
     split_by_worker,
 )
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.shuffle.tests.utils import (
     AbstractShuffleTestPool,
     invoke_annotation_chaos,
