@@ -8,6 +8,7 @@ import os
 import random
 import sys
 import warnings
+import weakref
 from contextlib import suppress
 from unittest import mock
 
@@ -23,7 +24,7 @@ from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, error_message
 from distributed.diagnostics import SchedulerPlugin
-from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.diagnostics.plugin import NannyPlugin, WorkerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
@@ -660,6 +661,7 @@ async def test_close_joins(s):
         assert not p.process
 
 
+# FIXME
 @gen_cluster(Worker=Nanny, nthreads=[("", 1)])
 async def test_scheduler_crash_doesnt_restart(s, a):
     # Simulate a scheduler crash by disconnecting it first
@@ -781,3 +783,92 @@ async def test_log_event(c, s):
             "traceback_text": "",
         },
     ] == [msg[1] for msg in s.get_events("test-topic4")]
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_nanny_plugin_simple(c, s, a):
+    """A plugin should be registered to already existing workers but also to new ones."""
+    plugin = DummyNannyPlugin("foo")
+    await c.register_worker_plugin(plugin)
+    assert a._plugin_registered
+    async with Nanny(s.address) as n:
+        assert n._plugin_registered
+
+
+class DummyNannyPlugin(NannyPlugin):
+    def __init__(self, name, restart=False):
+        self.restart = restart
+        self.name = name
+        self.nanny = None
+
+    def setup(self, nanny):
+        print(f"Setup on {nanny}")
+        self.nanny = weakref.ref(nanny)
+        nanny._plugin_registered = True
+
+    def teardown(self, nanny):
+        nanny._plugin_registered = False
+
+
+class SlowNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = asyncio.Event()
+        self.wait_instantiate = asyncio.Event()
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        await self.wait_instantiate.wait()
+        return await super().instantiate()
+
+
+@pytest.mark.parametrize("restart", [True, False])
+@gen_cluster(client=True, nthreads=[])
+async def test_nanny_plugin_register_during_start_success(c, s, restart):
+    plugin = DummyNannyPlugin("foo", restart=restart)
+    n = SlowNanny(s.address)
+    assert not hasattr(n, "_plugin_registered")
+    start = asyncio.create_task(n.start())
+    try:
+        await n.in_instantiate.wait()
+
+        register = asyncio.create_task(c.register_worker_plugin(plugin))
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(register), timeout=0.1)
+        n.wait_instantiate.set()
+        assert await register
+        await start
+        assert n._plugin_registered
+    finally:
+        start.cancel()
+        await n.close()
+
+
+class SlowBrokenNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = asyncio.Event()
+        self.wait_instantiate = asyncio.Event()
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        await self.wait_instantiate.wait()
+        raise RuntimeError("Nope")
+
+
+@pytest.mark.parametrize("restart", [True, False])
+@gen_cluster(client=True, nthreads=[])
+async def test_nanny_plugin_register_during_start_failure(c, s, restart):
+    plugin = DummyNannyPlugin("foo", restart=restart)
+    n = SlowBrokenNanny(s.address)
+    assert not hasattr(n, "_plugin_registered")
+    start = asyncio.create_task(n.start())
+    await n.in_instantiate.wait()
+
+    register = asyncio.create_task(c.register_worker_plugin(plugin))
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(asyncio.shield(register), timeout=0.1)
+    n.wait_instantiate.set()
+    with pytest.raises(RuntimeError):
+        await start
+    assert not await register
