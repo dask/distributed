@@ -236,7 +236,7 @@ class PreloadManager:
                 logger.exception("Failed to start preload: %s", preload.name)
 
     async def teardown(self):
-        for preload in self._preloads:
+        for preload in reversed(self._preloads):
             try:
                 await preload.teardown()
             except Exception:
