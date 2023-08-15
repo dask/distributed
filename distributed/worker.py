@@ -2783,6 +2783,17 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
     if timeout is None:
         timeout = dask.config.get("distributed.comm.timeouts.connect")
 
+    from distributed.client import Client
+    
+    try:
+        client = Client.current()  # TODO: assumes the same scheduler
+    except ValueError:
+        client = None
+    if client and (not address or client.scheduler.address == address):
+        return client
+    elif address:
+        return Client(address, timeout=timeout)
+
     timeout = parse_timedelta(timeout, "s")
 
     if address and resolve_address:
@@ -2795,18 +2806,9 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
         if not address or worker.scheduler.address == address:
             return worker._get_client(timeout=timeout)
 
-    from distributed.client import Client
 
-    try:
-        client = Client.current()  # TODO: assumes the same scheduler
-    except ValueError:
-        client = None
-    if client and (not address or client.scheduler.address == address):
-        return client
-    elif address:
-        return Client(address, timeout=timeout)
-    else:
-        raise ValueError("No global client found and no address provided")
+    
+    raise ValueError("No global client found and no address provided")
 
 
 def secede():
