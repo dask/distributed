@@ -238,12 +238,12 @@ def get_worker_plugin() -> ShuffleWorkerPlugin:
             "`shuffle='p2p'` requires Dask's distributed scheduler. This task is not running on a Worker; "
             "please confirm that you've created a distributed Client and are submitting this computation through it."
         ) from e
-    plugin: ShuffleWorkerPlugin | None = worker.plugins.get("shuffle")  # type: ignore
-    if plugin is None:
+    try:
+        plugin: ShuffleWorkerPlugin = worker.plugins["shuffle"]  # type: ignore
+    except KeyError as e:
         raise RuntimeError(
-            f"The worker {worker.address} does not have a ShuffleExtension. "
-            "Is pandas installed on the worker?"
-        )
+            f"The worker {worker.address} does not have a P2P shuffle plugin."
+        ) from e
     return plugin
 
 
