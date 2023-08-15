@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, over
 import psutil
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
+    concat,
     first,
     groupby,
     merge,
@@ -45,6 +46,7 @@ from tlz import (
     partition,
     pluck,
     second,
+    take,
     valmap,
 )
 from tornado.ioloop import IOLoop
@@ -90,6 +92,7 @@ from distributed.metrics import monotonic, time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
+from distributed.protocol import deserialize
 from distributed.protocol.pickle import dumps, loads
 from distributed.protocol.serialize import Serialized, ToPickle, serialize
 from distributed.publish import PublishExtension
@@ -110,6 +113,7 @@ from distributed.utils import (
     key_split_group,
     log_errors,
     no_default,
+    offload,
     recursive_to_dict,
     validate_key,
     wait_for,
@@ -122,6 +126,7 @@ from distributed.utils_comm import (
 )
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
+from distributed.worker import _normalize_task
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -150,6 +155,8 @@ Recs: TypeAlias = dict[str, TaskStateState]
 Msgs: TypeAlias = dict[str, list[dict[str, Any]]]
 # (recommendations, client messages, worker messages)
 RecsMsgs: TypeAlias = tuple[Recs, Msgs, Msgs]
+
+T_runspec: TypeAlias = tuple[Callable, tuple, dict[str, Any]]
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -1171,7 +1178,7 @@ class TaskState:
     #: "pure data" (such as, for example, a piece of data loaded in the scheduler using
     #: :meth:`Client.scatter`).  A "pure data" task cannot be computed again if its
     #: value is lost.
-    run_spec: object
+    run_spec: T_runspec | None
 
     #: The priority provides each task with a relative ranking which is used to break
     #: ties when many tasks are being considered for execution.
@@ -1370,7 +1377,7 @@ class TaskState:
     def __init__(
         self,
         key: str,
-        run_spec: object,
+        run_spec: T_runspec | None,
         state: TaskStateState,
     ):
         self.key = key
@@ -1782,7 +1789,7 @@ class SchedulerState:
     def new_task(
         self,
         key: str,
-        spec: object,
+        spec: T_runspec | None,
         state: TaskStateState,
         computation: Computation | None = None,
     ) -> TaskState:
@@ -2205,7 +2212,7 @@ class SchedulerState:
         restrictions.
 
         Out of eligible workers holding dependencies of ``ts``, selects the worker
-        where, considering worker backlong and data-transfer costs, the task is
+        where, considering worker backlog and data-transfer costs, the task is
         estimated to start running the soonest.
 
         Returns
@@ -2220,9 +2227,6 @@ class SchedulerState:
 
         valid_workers = self.valid_workers(ts)
         if valid_workers is None and len(self.running) < len(self.workers):
-            if not self.running:
-                return None
-
             # If there were no restrictions, `valid_workers()` didn't subset by
             # `running`.
             valid_workers = self.running
@@ -2705,14 +2709,10 @@ class SchedulerState:
             assert not ts.waiting_on
 
         self.unrunnable.remove(ts)
-        ts.state = "released"
 
-        for dts in ts.dependencies:
-            dts.waiters.discard(ts)
-
-        ts.waiters.clear()
-
-        return {}, {}, {}
+        recommendations: Recs = {}
+        self._propagate_released(ts, recommendations)
+        return recommendations, {}, {}
 
     def transition_waiting_queued(self, key: str, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
@@ -3341,10 +3341,7 @@ class SchedulerState:
                 dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
             },
             "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
-            "run_spec": None,
-            "function": None,
-            "args": None,
-            "kwargs": None,
+            "run_spec": ToPickle(ts.run_spec),
             "resource_restrictions": ts.resource_restrictions,
             "actor": ts.actor,
             "annotations": ts.annotations,
@@ -3352,11 +3349,6 @@ class SchedulerState:
         }
         if self.validate:
             assert all(msg["who_has"].values())
-
-        if isinstance(ts.run_spec, dict):
-            msg.update(ts.run_spec)
-        else:
-            msg["run_spec"] = ts.run_spec
 
         return msg
 
@@ -3982,7 +3974,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None):
+    async def close(self, fast=None, close_workers=None, reason=""):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4009,8 +4001,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         self.status = Status.closing
-
-        logger.info("Scheduler closing...")
+        logger.info("Scheduler closing due to %s...", reason or "unknown reason")
         setproctitle("dask scheduler [closing]")
 
         for preload in self.preloads:
@@ -4320,71 +4311,94 @@ class Scheduler(SchedulerState, ServerNode):
         }
         return msg
 
-    def update_graph(
+    def _match_graph_with_tasks(
+        self, dsk: dict[str, Any], dependencies: dict[str, set[str]], keys: set[str]
+    ) -> set[str]:
+        n = 0
+        lost_keys = set()
+        while len(dsk) != n:  # walk through new tasks, cancel any bad deps
+            n = len(dsk)
+            for k, deps in list(dependencies.items()):
+                if any(
+                    dep not in self.tasks and dep not in dsk for dep in deps
+                ):  # bad key
+                    lost_keys.add(k)
+                    logger.info("User asked for computation on lost data, %s", k)
+                    del dsk[k]
+                    del dependencies[k]
+                    if k in keys:
+                        keys.remove(k)
+                del deps
+        # Avoid computation that is already finished
+        done = set()  # tasks that are already done
+        for k, v in dependencies.items():
+            if v and k in self.tasks:
+                ts = self.tasks[k]
+                if ts.state in ("memory", "erred"):
+                    done.add(k)
+
+        if done:
+            dependents = dask.core.reverse_dict(dependencies)
+            stack = list(done)
+            while stack:  # remove unnecessary dependencies
+                key = stack.pop()
+                try:
+                    deps = dependencies[key]
+                except KeyError:
+                    deps = {ts.key for ts in self.tasks[key].dependencies}
+                for dep in deps:
+                    if dep in dependents:
+                        child_deps = dependents[dep]
+                    elif dep in self.tasks:
+                        child_deps = {ts.key for ts in self.tasks[key].dependencies}
+                    else:
+                        child_deps = set()
+                    if all(d in done for d in child_deps):
+                        if dep in self.tasks and dep not in done:
+                            done.add(dep)
+                            stack.append(dep)
+        for anc in done:
+            dsk.pop(anc, None)
+            dependencies.pop(anc, None)
+        return lost_keys
+
+    def _create_taskstate_from_graph(
         self,
+        *,
+        start: float,
+        dsk: dict,
+        dependencies: dict,
+        keys: set[str],
+        ordered: dict[str, int],
         client: str,
-        graph_header: dict,
-        graph_frames: list[bytes],
-        keys: list[str],
-        internal_priority: dict[str, int] | None,
+        annotations_by_type: dict,
+        global_annotations: dict | None,
+        stimulus_id: str,
         submitting_task: str | None,
         user_priority: int | dict[str, int] = 0,
         actors: bool | list[str] | None = None,
         fifo_timeout: float = 0.0,
         code: tuple[SourceCode, ...] = (),
-        annotations: dict | None = None,
-        stimulus_id: str | None = None,
     ) -> None:
-        start = time()
-        try:
-            # TODO: deserialization + materialization should be offloaded to a
-            # thread since this is non-trivial compute time that blocks the
-            # event loop. This likely requires us to use a lock since we need to
-            # guarantee ordering of update_graph calls (as long as there is just
-            # a single offload thread, this is not a problem)
-            from distributed.protocol import deserialize
+        """
+        Take a low level graph and create the necessary scheduler state to
+        compute it.
 
-            graph = deserialize(graph_header, graph_frames).data
-        except Exception as e:
-            msg = """\
-                Error during deserialization of the task graph. This frequently occurs if the Scheduler and Client have different environments. For more information, see https://docs.dask.org/en/stable/deployment-considerations.html#consistent-software-environments
-            """
-            try:
-                raise RuntimeError(textwrap.dedent(msg)) from e
-            except RuntimeError as e:
-                err = error_message(e)
-                for key in keys:
-                    self.report(
-                        {
-                            "op": "task-erred",
-                            "key": key,
-                            "exception": err["exception"],
-                            "traceback": err["traceback"],
-                        }
-                    )
+        WARNING
+        -------
+        This method must not be made async since nothing here is concurrency
+        safe. All interactions with TaskState objects here should be happening
+        in the same event loop tick.
+        """
 
-            return
-        annotations = annotations or {}
-        if isinstance(annotations, ToPickle):  # type: ignore
-            # FIXME: what the heck?
-            annotations = annotations.data  # type: ignore
-        stimulus_id = stimulus_id or f"update-graph-{time()}"
-        (
-            dsk,
-            dependencies,
-            layer_annotations,
-            pre_stringified_keys,
-        ) = self.materialize_graph(graph)
+        lost_keys = self._match_graph_with_tasks(dsk, dependencies, keys)
 
-        requested_keys = set(keys)
-        del keys
         if len(dsk) > 1:
             self.log_event(
                 ["all", client], {"action": "update_graph", "count": len(dsk)}
             )
-        self._pop_known_tasks(dsk, dependencies)
 
-        if lost_keys := self._pop_lost_tasks(dsk, dependencies, requested_keys):
+        if lost_keys:
             self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
             self.client_releases_keys(
                 keys=lost_keys, client=client, stimulus_id=stimulus_id
@@ -4399,41 +4413,38 @@ class Scheduler(SchedulerState, ServerNode):
 
         if code:  # add new code blocks
             computation.code.add(code)
-        if annotations:
-            computation.annotations.update(annotations)
+        if global_annotations:
+            # FIXME: This is kind of inconsistent since it only includes global
+            # annotations.
+            computation.annotations.update(global_annotations)
+        del global_annotations
 
         runnable, touched_tasks, new_tasks = self._generate_taskstates(
-            keys=requested_keys,
+            keys=keys,
             dsk=dsk,
             dependencies=dependencies,
             computation=computation,
         )
-        # FIXME: These "resolved_annotations" are a big duplication and are only
-        # required to satisfy the current plugin API. This should be
-        # reconsidered.
-        resolved_annotations = self._parse_and_apply_annotations(
+
+        keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
-            annotations=annotations,
-            layer_annotations=layer_annotations,
-            pre_stringified_keys=pre_stringified_keys,
+            annotations_by_type=annotations_by_type,
         )
 
         self._set_priorities(
-            internal_priority=internal_priority,
+            internal_priority=ordered,
             submitting_task=submitting_task,
             user_priority=user_priority,
             fifo_timeout=fifo_timeout,
             start=start,
-            dsk=dsk,
             tasks=runnable,
-            dependencies=dependencies,
         )
 
-        self.client_desires_keys(keys=requested_keys, client=client)
+        self.client_desires_keys(keys=keys, client=client)
 
         # Add actors
         if actors is True:
-            actors = list(requested_keys)
+            actors = list(keys)
         for actor in actors or []:
             ts = self.tasks[actor]
             ts.actor = True
@@ -4459,6 +4470,12 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts.key] = "erred"
                     break
 
+        annotations_for_plugin: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        for key in keys_with_annotations:
+            ts = self.tasks[key]
+            for annot, value in ts.annotations.items():
+                annotations_for_plugin[annot][key] = value
+
         spans_ext: SpansSchedulerExtension | None = self.extensions.get("spans")
         if spans_ext:
             # new_tasks does not necessarily contain all runnable tasks;
@@ -4467,10 +4484,11 @@ class Scheduler(SchedulerState, ServerNode):
             # and only later gained a run_spec.
             span_annotations = spans_ext.observe_tasks(runnable, code=code)
             # In case of TaskGroup collision, spans may have changed
+            # FIXME: Is this used anywhere besides tests?
             if span_annotations:
-                resolved_annotations["span"] = span_annotations
+                annotations_for_plugin["span"] = span_annotations
             else:
-                resolved_annotations.pop("span", None)
+                annotations_for_plugin.pop("span", None)
 
         for plugin in list(self.plugins.values()):
             try:
@@ -4478,9 +4496,9 @@ class Scheduler(SchedulerState, ServerNode):
                     self,
                     client=client,
                     tasks=[ts.key for ts in touched_tasks],
-                    keys=requested_keys,
+                    keys=keys,
                     dependencies=dependencies,
-                    annotations=resolved_annotations,
+                    annotations=dict(annotations_for_plugin),
                     priority=priority,
                 )
             except Exception as e:
@@ -4492,11 +4510,97 @@ class Scheduler(SchedulerState, ServerNode):
             if ts.state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
+    @log_errors
+    async def update_graph(
+        self,
+        client: str,
+        graph_header: dict,
+        graph_frames: list[bytes],
+        keys: set[str],
+        internal_priority: dict[str, int] | None,
+        submitting_task: str | None,
+        user_priority: int | dict[str, int] = 0,
+        actors: bool | list[str] | None = None,
+        fifo_timeout: float = 0.0,
+        code: tuple[SourceCode, ...] = (),
+        annotations: dict | None = None,
+        stimulus_id: str | None = None,
+    ) -> None:
+        # FIXME: Apparently empty dicts arrive as a ToPickle object
+        if isinstance(annotations, ToPickle):
+            annotations = annotations.data  # type: ignore[unreachable]
+        start = time()
+        try:
+            try:
+                graph = deserialize(graph_header, graph_frames).data
+                del graph_header, graph_frames
+            except Exception as e:
+                msg = """\
+                    Error during deserialization of the task graph. This frequently occurs if the Scheduler and Client have different environments. For more information, see https://docs.dask.org/en/stable/deployment-considerations.html#consistent-software-environments
+                """
+                raise RuntimeError(textwrap.dedent(msg)) from e
+            (
+                dsk,
+                dependencies,
+                annotations_by_type,
+            ) = await offload(
+                _materialize_graph,
+                graph=graph,
+                global_annotations=annotations or {},
+            )
+            del graph
+            if not internal_priority:
+                # Removing all non-local keys before calling order()
+                dsk_keys = set(
+                    dsk
+                )  # intersection() of sets is much faster than dict_keys
+                stripped_deps = {
+                    k: v.intersection(dsk_keys)
+                    for k, v in dependencies.items()
+                    if k in dsk_keys
+                }
+                internal_priority = await offload(
+                    dask.order.order, dsk=dsk, dependencies=stripped_deps
+                )
+
+            self._create_taskstate_from_graph(
+                dsk=dsk,
+                client=client,
+                dependencies=dependencies,
+                keys=set(keys),
+                ordered=internal_priority or {},
+                submitting_task=submitting_task,
+                user_priority=user_priority,
+                actors=actors,
+                fifo_timeout=fifo_timeout,
+                code=code,
+                annotations_by_type=annotations_by_type,
+                # FIXME: This is just used to attach to Computation
+                # objects. This should be removed
+                global_annotations=annotations,
+                start=start,
+                stimulus_id=stimulus_id or f"update-graph-{start}",
+            )
+        except RuntimeError as e:
+            err = error_message(e)
+            for key in keys:
+                self.report(
+                    {
+                        "op": "task-erred",
+                        "key": key,
+                        "exception": err["exception"],
+                        "traceback": err["traceback"],
+                    }
+                )
         end = time()
         self.digest_metric("update-graph-duration", end - start)
 
     def _generate_taskstates(
-        self, keys: set[str], dsk: dict, dependencies: dict, computation: Computation
+        self,
+        keys: set[str],
+        dsk: dict[str, T_runspec],
+        dependencies: dict[str, set[str]],
+        computation: Computation,
     ) -> tuple:
         # Get or create task states
         runnable = []
@@ -4538,13 +4642,11 @@ class Scheduler(SchedulerState, ServerNode):
             )
         return runnable, touched_tasks, new_tasks
 
-    def _parse_and_apply_annotations(
+    def _apply_annotations(
         self,
         tasks: Iterable[TaskState],
-        annotations: dict,
-        layer_annotations: dict[str, dict],
-        pre_stringified_keys: dict[Hashable, str],
-    ) -> dict[str, dict[str, Any]]:
+        annotations_by_type: dict[str, dict],
+    ) -> set[str]:
         """Apply the provided annotations to the provided `TaskState` objects.
 
         The raw annotations will be stored in the `annotations` attribute.
@@ -4557,37 +4659,27 @@ class Scheduler(SchedulerState, ServerNode):
             _description_
         annotations : dict
             _description_
-        layer_annotations : dict[str, dict]
-            _description_
 
         Returns
         -------
-        resolved_annotations: dict
-            A mapping of all resolved annotations in the format::
-
-                {
-                    "annotation": {
-                        "key": value,
-                        ...
-                    },
-                    ...
-                }
+        keys_with_annotations
         """
-        resolved_annotations: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+        keys_with_annotations: set[str] = set()
+        if not annotations_by_type:
+            return keys_with_annotations
+
         for ts in tasks:
             key = ts.key
-            # This could be a typed dict
-            if not annotations and key not in layer_annotations:
-                continue
-            out = annotations.copy()
-            out.update(layer_annotations.get(key, {}))
-            for annot, value in out.items():
-                # Pop the key since names don't always match attributes
-                if callable(value):
-                    value = value(pre_stringified_keys[key])
-                out[annot] = value
-                resolved_annotations[annot][key] = value
 
+            ts_annotations = {}
+            for annot, key_value in annotations_by_type.items():
+                if (value := key_value.get(key)) is not None:
+                    ts_annotations[annot] = value
+            if not ts_annotations:
+                continue
+            keys_with_annotations.add(key)
+            ts.annotations = ts_annotations
+            for annot, value in ts_annotations.items():
                 if annot in ("restrictions", "workers"):
                     if not isinstance(value, (list, tuple, set)):
                         value = [value]
@@ -4616,19 +4708,16 @@ class Scheduler(SchedulerState, ServerNode):
                 elif annot == "retries":
                     assert isinstance(value, int)
                     ts.retries = value
-            ts.annotations = out
-        return dict(resolved_annotations)
+        return keys_with_annotations
 
     def _set_priorities(
         self,
-        internal_priority: dict[str, int] | None,
+        internal_priority: dict[str, int],
         submitting_task: str | None,
         user_priority: int | dict[str, int],
         fifo_timeout: int | float | str,
         start: float,
-        dsk: dict,
         tasks: list[TaskState],
-        dependencies: dict,
     ) -> None:
         fifo_timeout = parse_timedelta(fifo_timeout)
         if submitting_task:  # sub-tasks get better priority than parent tasks
@@ -4645,26 +4734,15 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             generation = self.generation
 
-        if internal_priority is None:
-            # Removing all non-local keys before calling order()
-            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
-            stripped_deps = {
-                k: v.intersection(dsk_keys)
-                for k, v in dependencies.items()
-                if k in dsk_keys
-            }
-            internal_priority = dask.order.order(dsk, dependencies=stripped_deps)
-
         for ts in tasks:
-            # Note: Under which circumstances would a task not have a
-            # prioritiy assigned by now? Are these scattered tasks
-            # exclusively or something else?
-            task_user_prio = user_priority
             if isinstance(user_priority, dict):
                 task_user_prio = user_priority.get(ts.key, 0)
-            annotated_prio = ts.annotations.get("priority", {})
-            if not annotated_prio:
-                annotated_prio = task_user_prio
+            else:
+                task_user_prio = user_priority
+            # Annotations that are already assigned to the TaskState object
+            # originate from a Layer annotation which takes precedence over the
+            # global annotation.
+            annotated_prio = ts.annotations.get("priority", task_user_prio)
 
             if not ts.priority and ts.key in internal_priority:
                 ts.priority = (
@@ -4677,116 +4755,6 @@ class Scheduler(SchedulerState, ServerNode):
                 assert isinstance(ts.priority, tuple) and all(
                     isinstance(el, (int, float)) for el in ts.priority
                 )
-
-    def _pop_lost_tasks(
-        self, dsk: dict, dependencies: dict, keys: set[str]
-    ) -> set[str]:
-        n = 0
-        out = set()
-        while len(dsk) != n:  # walk through new tasks, cancel any bad deps
-            n = len(dsk)
-            for k, deps in list(dependencies.items()):
-                if any(
-                    dep not in self.tasks and dep not in dsk for dep in deps
-                ):  # bad key
-                    out.add(k)
-                    logger.info("User asked for computation on lost data, %s", k)
-                    del dsk[k]
-                    del dependencies[k]
-                    if k in keys:
-                        keys.remove(k)
-        return out
-
-    def _pop_known_tasks(self, dsk: dict, dependencies: dict) -> set[str]:
-        # Avoid computation that is already finished
-        already_in_memory = set()  # tasks that are already done
-        for k, v in dependencies.items():
-            if v and k in self.tasks:
-                ts = self.tasks[k]
-                if ts.state in ("memory", "erred"):
-                    already_in_memory.add(k)
-
-        done = set(already_in_memory)
-        if already_in_memory:
-            dependents = dask.core.reverse_dict(dependencies)
-            stack = list(already_in_memory)
-            while stack:  # remove unnecessary dependencies
-                key = stack.pop()
-                try:
-                    deps = dependencies[key]
-                except KeyError:
-                    deps = self.tasks[key].dependencies
-                for dep in deps:
-                    if dep in dependents:
-                        child_deps = dependents[dep]
-                    elif dep in self.tasks:
-                        child_deps = self.tasks[dep].dependencies
-                    else:
-                        child_deps = set()
-                    if all(d in done for d in child_deps):
-                        if dep in self.tasks and dep not in done:
-                            done.add(dep)
-                            stack.append(dep)
-        for anc in done:
-            dsk.pop(anc, None)
-            dependencies.pop(anc, None)
-        return done
-
-    @staticmethod
-    def materialize_graph(hlg: HighLevelGraph) -> tuple[dict, dict, dict, dict]:
-        from distributed.worker import dumps_task
-
-        key_annotations = {}
-        dsk = dask.utils.ensure_dict(hlg)
-
-        for layer in hlg.layers.values():
-            if layer.annotations:
-                annot = layer.annotations
-                key_annotations.update({stringify(k): annot for k in layer})
-
-        dependencies, _ = get_deps(dsk)
-
-        # Remove `Future` objects from graph and note any future dependencies
-        dsk2 = {}
-        fut_deps = {}
-        for k, v in dsk.items():
-            dsk2[k], futs = unpack_remotedata(v, byte_keys=True)
-            if futs:
-                fut_deps[k] = futs
-        dsk = dsk2
-
-        # - Add in deps for any tasks that depend on futures
-        for k, futures in fut_deps.items():
-            dependencies[k].update(f.key for f in futures)
-        new_dsk = {}
-        # Annotation callables are evaluated on the non-stringified version of
-        # the keys
-        pre_stringified_keys = {}
-        exclusive = set(hlg)
-        for k, v in dsk.items():
-            new_k = stringify(k)
-            pre_stringified_keys[new_k] = k
-            new_dsk[new_k] = stringify(v, exclusive=exclusive)
-        assert len(new_dsk) == len(pre_stringified_keys)
-        dsk = new_dsk
-        dependencies = {
-            stringify(k): {stringify(dep) for dep in deps}
-            for k, deps in dependencies.items()
-        }
-
-        # Remove any self-dependencies (happens on test_publish_bag() and others)
-        for k, v in dependencies.items():
-            deps = set(v)
-            if k in deps:
-                deps.remove(k)
-            dependencies[k] = deps
-
-        # Remove aliases
-        for k in list(dsk):
-            if dsk[k] is k:
-                del dsk[k]
-        dsk = valmap(dumps_task, dsk)
-        return dsk, dependencies, key_annotations, pre_stringified_keys
 
     def stimulus_queue_slots_maybe_opened(self, *, stimulus_id: str) -> None:
         """Respond to an event which may have opened spots on worker threadpools
@@ -4834,7 +4802,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts.state in ("released", "queued"):
+        if ts is None or ts.state in ("released", "queued", "no-worker"):
             logger.debug(
                 "Received already computed task, worker: %s, state: %s"
                 ", key: %s, who_has: %s",
@@ -5649,12 +5617,12 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_task_count.discard(ws)
             self.saturated.discard(ws)
 
-    async def handle_request_refresh_who_has(
+    def handle_request_refresh_who_has(
         self, keys: Iterable[str], worker: str, stimulus_id: str
     ) -> None:
-        """Asynchronous request (through bulk comms) from a Worker to refresh the
-        who_has for some keys. Not to be confused with scheduler.who_has, which is a
-        synchronous RPC request from a Client.
+        """Request from a Worker to refresh the
+        who_has for some keys. Not to be confused with scheduler.who_has, which
+        is a dedicated comm RPC request from a Client.
         """
         who_has = {}
         free_keys = []
@@ -5915,54 +5883,47 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return keys
 
-    async def gather(self, keys, serializers=None):
+    async def gather(
+        self, keys: Collection[str], serializers: list[str] | None = None
+    ) -> dict[str, Any]:
         """Collect data from workers to the scheduler"""
-        stimulus_id = f"gather-{time()}"
-        keys = list(keys)
-        who_has = {}
-        for key in keys:
-            ts: TaskState = self.tasks.get(key)
-            if ts is not None:
-                who_has[key] = [ws.address for ws in ts.who_has]
-            else:
-                who_has[key] = []
+        data = {}
+        missing_keys = list(keys)
+        failed_keys: list[str] = []
+        missing_workers: set[str] = set()
 
-        data, missing_keys, missing_workers = await gather_from_workers(
-            who_has, rpc=self.rpc, close=False, serializers=serializers
-        )
-        if not missing_keys:
-            result = {"status": "OK", "data": data}
-        else:
-            missing_states = [
-                (self.tasks[key].state if key in self.tasks else None)
-                for key in missing_keys
-            ]
-            logger.exception(
-                "Couldn't gather keys %s state: %s workers: %s",
+        while missing_keys:
+            who_has = {}
+            for key, workers in self.get_who_has(missing_keys).items():
+                valid_workers = set(workers) - missing_workers
+                if valid_workers:
+                    who_has[key] = valid_workers
+                else:
+                    failed_keys.append(key)
+
+            (
+                new_data,
                 missing_keys,
-                missing_states,
-                missing_workers,
+                new_failed_keys,
+                new_missing_workers,
+            ) = await gather_from_workers(
+                who_has, rpc=self.rpc, serializers=serializers
             )
-            result = {"status": "error", "keys": missing_keys}
-            with log_errors():
-                # Remove suspicious workers from the scheduler and shut them down.
-                await asyncio.gather(
-                    *(
-                        self.remove_worker(
-                            address=worker, close=True, stimulus_id=stimulus_id
-                        )
-                        for worker in missing_workers
-                    )
-                )
-                for key, workers in missing_keys.items():
-                    logger.exception(
-                        "Shut down workers that don't have promised key: %s, %s",
-                        str(workers),
-                        str(key),
-                    )
+            data.update(new_data)
+            failed_keys += new_failed_keys
+            missing_workers.update(new_missing_workers)
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
-        return result
+
+        if not failed_keys:
+            return {"status": "OK", "data": data}
+
+        failed_states = {
+            key: self.tasks[key].state if key in self.tasks else "forgotten"
+            for key in failed_keys
+        }
+        logger.error("Couldn't gather keys: %s", failed_states)
+        return {"status": "error", "keys": list(failed_keys)}
 
     @log_errors
     async def restart(self, client=None, timeout=30, wait_for_workers=True):
@@ -8061,22 +8022,32 @@ class Scheduler(SchedulerState, ServerNode):
         target_duration = parse_timedelta(target_duration)
 
         # CPU
+        queued = take(100, concat([self.queued, self.unrunnable]))
+        queued_occupancy = 0
+        for ts in queued:
+            if ts.prefix.duration_average == -1:
+                queued_occupancy += self.UNKNOWN_TASK_DURATION
+            else:
+                queued_occupancy += ts.prefix.duration_average
 
-        # TODO consider any user-specified default task durations for queued tasks
-        queued_occupancy = len(self.queued) * self.UNKNOWN_TASK_DURATION
-        cpu = math.ceil(
-            (self.total_occupancy + queued_occupancy) / target_duration
-        )  # TODO: threads per worker
+        tasks_ready = len(self.queued) + len(self.unrunnable)
+        if tasks_ready > 100:
+            queued_occupancy *= tasks_ready / 100
+
+        cpu = math.ceil((self.total_occupancy + queued_occupancy) / target_duration)
 
         # Avoid a few long tasks from asking for many cores
-        tasks_ready = len(self.queued)
         for ws in self.workers.values():
-            tasks_ready += len(ws.processing)
-
             if tasks_ready > cpu:
                 break
+            tasks_ready += len(ws.processing)
         else:
             cpu = min(tasks_ready, cpu)
+
+        # Divide by average nthreads per worker
+        if self.workers:
+            nthreads = sum(ws.nthreads for ws in self.workers.values())
+            cpu = math.ceil(cpu / nthreads * len(self.workers))
 
         if (self.unrunnable or self.queued) and not self.workers:
             cpu = max(1, cpu)
@@ -8181,7 +8152,7 @@ def _task_to_client_msgs(ts: TaskState) -> dict[str, list[dict[str, Any]]]:
 
 def decide_worker(
     ts: TaskState,
-    all_workers: Iterable[WorkerState],
+    all_workers: set[WorkerState],
     valid_workers: set[WorkerState] | None,
     objective: Callable[[WorkerState], Any],
 ) -> WorkerState | None:
@@ -8202,12 +8173,13 @@ def decide_worker(
     """
     assert all(dts.who_has for dts in ts.dependencies)
     if ts.actor:
-        candidates = set(all_workers)
+        candidates = all_workers.copy()
     else:
         candidates = {wws for dts in ts.dependencies for wws in dts.who_has}
+        candidates &= all_workers
     if valid_workers is None:
         if not candidates:
-            candidates = set(all_workers)
+            candidates = all_workers.copy()
     else:
         candidates &= valid_workers
         if not candidates:
@@ -8491,3 +8463,66 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
                 self.metadata[key] = ts.metadata
                 self.state[key] = finish
                 self.keys.discard(key)
+
+
+def _materialize_graph(
+    graph: HighLevelGraph, global_annotations: dict[str, Any]
+) -> tuple[dict[str, T_runspec], dict[str, set[str]], dict[str, Any]]:
+    dsk = dask.utils.ensure_dict(graph)
+    annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
+    for annotations_type, value in global_annotations.items():
+        annotations_by_type[annotations_type].update(
+            {stringify(k): (value(k) if callable(value) else value) for k in dsk}
+        )
+
+    for layer in graph.layers.values():
+        if layer.annotations:
+            annot = layer.annotations
+            for annot_type, value in annot.items():
+                annotations_by_type[annot_type].update(
+                    {
+                        stringify(k): (value(k) if callable(value) else value)
+                        for k in layer
+                    }
+                )
+    dependencies, _ = get_deps(dsk)
+
+    # Remove `Future` objects from graph and note any future dependencies
+    dsk2 = {}
+    fut_deps = {}
+    for k, v in dsk.items():
+        dsk2[k], futs = unpack_remotedata(v, byte_keys=True)
+        if futs:
+            fut_deps[k] = futs
+    dsk = dsk2
+
+    # - Add in deps for any tasks that depend on futures
+    for k, futures in fut_deps.items():
+        dependencies[k].update(f.key for f in futures)
+    new_dsk = {}
+    # Annotation callables are evaluated on the non-stringified version of
+    # the keys
+    exclusive = set(graph)
+    for k, v in dsk.items():
+        new_k = stringify(k)
+        new_dsk[new_k] = stringify(v, exclusive=exclusive)
+    dsk = new_dsk
+    dependencies = {
+        stringify(k): {stringify(dep) for dep in deps}
+        for k, deps in dependencies.items()
+    }
+
+    # Remove any self-dependencies (happens on test_publish_bag() and others)
+    for k, v in dependencies.items():
+        deps = set(v)
+        if k in deps:
+            deps.remove(k)
+        dependencies[k] = deps
+
+    # Remove aliases
+    for k in list(dsk):
+        if dsk[k] is k:
+            del dsk[k]
+    dsk = valmap(_normalize_task, dsk)
+
+    return dsk, dependencies, annotations_by_type

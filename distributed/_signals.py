@@ -8,7 +8,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-async def wait_for_signals() -> None:
+async def wait_for_signals() -> int:
     """Wait for sigint or sigterm by setting global signal handlers"""
     signals = (signal.SIGINT, signal.SIGTERM)
     loop = asyncio.get_running_loop()
@@ -36,6 +36,7 @@ async def wait_for_signals() -> None:
         logger.info(
             "Received signal %s (%d)", signal.Signals(caught_signal).name, caught_signal
         )
+        return caught_signal
     finally:
         for sig in signals:
             signal.signal(sig, old_handlers[sig])

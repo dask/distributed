@@ -1502,7 +1502,17 @@ class Client(SyncMethodMixin):
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         if self._previous_as_current:
-            _current_client.reset(self._previous_as_current)
+            try:
+                _current_client.reset(self._previous_as_current)
+            except ValueError as e:
+                if not e.args[0].endswith(" was created in a different Context"):
+                    raise  # pragma: nocover
+                warnings.warn(
+                    "It is deprecated to enter and exit the Client context "
+                    "manager from different tasks",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         await self._close(
             # if we're handling an exception, we assume that it's more
             # important to deliver that exception than shutdown gracefully.
@@ -1512,7 +1522,17 @@ class Client(SyncMethodMixin):
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._previous_as_current:
-            _current_client.reset(self._previous_as_current)
+            try:
+                _current_client.reset(self._previous_as_current)
+            except ValueError as e:
+                if not e.args[0].endswith(" was created in a different Context"):
+                    raise  # pragma: nocover
+                warnings.warn(
+                    "It is deprecated to enter and exit the Client context "
+                    "manager from different threads",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         self.close()
 
     def __del__(self):
@@ -2190,8 +2210,8 @@ class Client(SyncMethodMixin):
         if mismatched_futures:
             raise ValueError(
                 "Cannot gather Futures created by another client. "
-                f"These are the {len(mismatched_futures)} (out of {len(futures)}) mismatched Futures and their client IDs "
-                f"(this client is {self.id}): "
+                f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
+                f"mismatched Futures and their client IDs (this client is {self.id}): "
                 f"{ {f: f.client.id for f in mismatched_futures} }"
             )
         keys = [stringify(future.key) for future in future_set]
@@ -2299,7 +2319,7 @@ class Client(SyncMethodMixin):
         result = pack_data(unpacked, merge(data, bad_data))
         return result
 
-    async def _gather_remote(self, direct, local_worker):
+    async def _gather_remote(self, direct: bool, local_worker: bool) -> dict[str, Any]:
         """Perform gather with workers or scheduler
 
         This method exists to limit and batch many concurrent gathers into a
@@ -2313,15 +2333,16 @@ class Client(SyncMethodMixin):
 
             if direct or local_worker:  # gather directly from workers
                 who_has = await retry_operation(self.scheduler.who_has, keys=keys)
-                data2, missing_keys, missing_workers = await gather_from_workers(
-                    who_has, rpc=self.rpc, close=False
+                data, missing_keys, failed_keys, _ = await gather_from_workers(
+                    who_has, rpc=self.rpc
                 )
-                response = {"status": "OK", "data": data2}
-                if missing_keys:
-                    keys2 = [key for key in keys if key not in data2]
-                    response = await retry_operation(self.scheduler.gather, keys=keys2)
+                response: dict[str, Any] = {"status": "OK", "data": data}
+                if missing_keys or failed_keys:
+                    response = await retry_operation(
+                        self.scheduler.gather, keys=missing_keys + failed_keys
+                    )
                     if response["status"] == "OK":
-                        response["data"].update(data2)
+                        response["data"].update(data)
 
             else:  # ask scheduler to gather data for us
                 response = await retry_operation(self.scheduler.gather, keys=keys)

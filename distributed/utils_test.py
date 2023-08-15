@@ -875,7 +875,8 @@ def gen_cluster(
     active_rpc_timeout: float = 1,
     config: dict[str, Any] | None = None,
     clean_kwargs: dict[str, Any] | None = None,
-    allow_unclosed: bool = False,
+    # FIXME: distributed#8054
+    allow_unclosed: bool = True,
     cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
@@ -2211,6 +2212,7 @@ class BlockedGatherDep(Worker):
     See also
     --------
     BlockedGetData
+    BarrierGetData
     BlockedExecute
     """
 
@@ -2232,6 +2234,7 @@ class BlockedGetData(Worker):
 
     See also
     --------
+    BarrierGetData
     BlockedGatherDep
     BlockedExecute
     """
@@ -2251,10 +2254,6 @@ class BlockedExecute(Worker):
     """A Worker that sets event `in_execute` the first time it enters the execute
     method and then does not proceed, thus leaving the task in executing state
     indefinitely, until the test sets `block_execute`.
-
-    After that, the worker sets `in_deserialize_task` to simulate the moment when a
-    large run_spec is being deserialized in a separate thread. The worker will block
-    again until the test sets `block_deserialize_task`.
 
     Finally, the worker sets `in_execute_exit` when execute() terminates, but before the
     worker state has processed its exit callback. The worker will block one last time
@@ -2281,13 +2280,12 @@ class BlockedExecute(Worker):
     --------
     BlockedGatherDep
     BlockedGetData
+    BarrierGetData
     """
 
     def __init__(self, *args, **kwargs):
         self.in_execute = asyncio.Event()
         self.block_execute = asyncio.Event()
-        self.in_deserialize_task = asyncio.Event()
-        self.block_deserialize_task = asyncio.Event()
         self.in_execute_exit = asyncio.Event()
         self.block_execute_exit = asyncio.Event()
 
@@ -2302,12 +2300,31 @@ class BlockedExecute(Worker):
             self.in_execute_exit.set()
             await self.block_execute_exit.wait()
 
-    async def _maybe_deserialize_task(
-        self, ts: WorkerTaskState
-    ) -> tuple[Callable, tuple, dict[str, Any]]:
-        self.in_deserialize_task.set()
-        await self.block_deserialize_task.wait()
-        return await super()._maybe_deserialize_task(ts)
+
+class BarrierGetData(Worker):
+    """Block get_data RPC call until at least barrier_count connections are going on
+    in parallel at the same time
+
+    See also
+    --------
+    BlockedGatherDep
+    BlockedGetData
+    BlockedExecute
+    """
+
+    def __init__(self, *args, barrier_count, **kwargs):
+        # TODO just use asyncio.Barrier (needs Python >=3.11)
+        self.barrier_count = barrier_count
+        self.wait_get_data = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def get_data(self, comm, *args, **kwargs):
+        self.barrier_count -= 1
+        if self.barrier_count > 0:
+            await self.wait_get_data.wait()
+        else:
+            self.wait_get_data.set()
+        return await super().get_data(comm, *args, **kwargs)
 
 
 @contextmanager
@@ -2593,3 +2610,20 @@ class NoSchedulerDelayWorker(Worker):
     @scheduler_delay.setter
     def scheduler_delay(self, value):
         pass
+
+
+@pytest.fixture()
+def no_time_resync():
+    """Temporarily disable the automatic resync of distributed.metrics._WindowsTime
+    which, every 10 minutes, can cause time() to go backwards a few milliseconds.
+
+    On Linux and MacOSX, this fixture is a no-op.
+    """
+    if WINDOWS:
+        time()  # Initialize or refresh delta
+        bak = time.__self__.next_resync
+        time.__self__.next_resync = float("inf")
+        yield
+        time.__self__.next_resync = bak
+    else:
+        yield

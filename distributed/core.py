@@ -26,7 +26,6 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed import profile, protocol
-from distributed.collections import LRU
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -40,7 +39,6 @@ from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.metrics import context_meter, time
-from distributed.protocol import pickle
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
     NoOpAwaitable,
@@ -62,21 +60,6 @@ if TYPE_CHECKING:
     R = TypeVar("R")
     T = TypeVar("T")
     Coro = Coroutine[Any, Any, T]
-
-
-cache_loads: LRU[bytes, Callable[..., Any]] = LRU(maxsize=100)
-
-
-def loads_function(bytes_object):
-    """Load a function from bytes, cache bytes"""
-    if len(bytes_object) < 100000:
-        try:
-            result = cache_loads[bytes_object]
-        except KeyError:
-            result = pickle.loads(bytes_object)
-            cache_loads[bytes_object] = result
-        return result
-    return pickle.loads(bytes_object)
 
 
 class Status(Enum):
@@ -519,7 +502,6 @@ class Server:
         if load:
             try:
                 import_file(out_filename)
-                cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
                 raise e
@@ -618,7 +600,7 @@ class Server:
             timeout = getattr(self, "death_timeout", None)
 
             async def _close_on_failure(exc: Exception) -> None:
-                await self.close()
+                await self.close(reason=f"failure-to-start-{str(type(exc))}")
                 self.status = Status.failed
                 self.__startup_exc = exc
 
@@ -662,11 +644,6 @@ class Server:
         if self.__stopped:
             return
 
-        if self._workdir is not None:
-            self._workdir.release()
-
-        self.monitor.close()
-
         self.__stopped = True
         _stops = set()
         for listener in self.listeners:
@@ -686,6 +663,11 @@ class Server:
                 await asyncio.gather(*_stops)
 
             self._ongoing_background_tasks.call_soon(background_stops)
+
+        self.monitor.close()
+
+        if self._workdir is not None:
+            self._workdir.release()
 
     @property
     def listener(self):
@@ -1006,10 +988,7 @@ class Server:
                             break
                         handler = self.stream_handlers[op]
                         if iscoroutinefunction(handler):
-                            self._ongoing_background_tasks.call_soon(
-                                handler, **merge(extra, msg)
-                            )
-                            await asyncio.sleep(0)
+                            await handler(**merge(extra, msg))
                         else:
                             handler(**merge(extra, msg))
                     else:
@@ -1025,7 +1004,7 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    async def close(self, timeout=None):
+    async def close(self, timeout=None, reason=""):
         try:
             for pc in self.periodic_callbacks.values():
                 pc.stop()
@@ -1520,6 +1499,14 @@ class ConnectionPool:
             return self
 
         return _().__await__()
+
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+        return
 
     async def start(self) -> None:
         # Invariant: semaphore._value == limit - open - _n_connecting

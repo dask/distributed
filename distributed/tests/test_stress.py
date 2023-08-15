@@ -29,6 +29,8 @@ from distributed.utils_test import (
     slowsum,
 )
 
+pytestmark = pytest.mark.ci1
+
 # All tests here are slow in some way
 setup_module = nodebug_setup_module
 teardown_module = nodebug_teardown_module
