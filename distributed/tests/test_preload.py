@@ -61,6 +61,16 @@ def dask_setup(worker):
             assert w.foo == "setup"
 
 
+@gen_test()
+async def test_preload_manager_iterable():
+    text = """
+def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    async with Scheduler(dashboard_address=":0", preload=text) as s:
+        assert next(iter(s.preloads))
+
+
 @gen_cluster(nthreads=[])
 async def test_worker_preload_config(s):
     text = """
