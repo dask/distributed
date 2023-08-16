@@ -6,7 +6,7 @@ import logging
 import os
 import shutil
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Sequence
 from importlib import import_module
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
@@ -222,28 +222,31 @@ class Preload:
                 await future
 
 
-class PreloadManager(Iterable[Preload]):
+class PreloadManager(Sequence[Preload]):
     _preloads: list[Preload]
 
     def __init__(self, preloads: list[Preload]):
         self._preloads = preloads
 
-    async def start(self):
+    async def start(self) -> None:
         for preload in self._preloads:
             try:
                 await preload.start()
             except Exception:
                 logger.exception("Failed to start preload: %s", preload.name)
 
-    async def teardown(self):
+    async def teardown(self) -> None:
         for preload in reversed(self._preloads):
             try:
                 await preload.teardown()
             except Exception:
                 logger.exception("Failed to tear down preload: %s", preload.name)
 
-    def __iter__(self) -> Iterator[Preload]:
-        return iter(self._preloads)
+    def __getitem__(self, index):
+        return self._preloads[index]
+
+    def __len__(self) -> int:
+        return len(self._preloads)
 
 
 def process_preloads(

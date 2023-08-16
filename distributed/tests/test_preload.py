@@ -13,6 +13,7 @@ import pytest
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
+from distributed.preloading import Preload
 from distributed.utils import open_port
 from distributed.utils_test import captured_logger, cluster, gen_cluster, gen_test
 
@@ -62,13 +63,14 @@ def dask_setup(worker):
 
 
 @gen_test()
-async def test_preload_manager_iterable():
+async def test_preload_manager_sequence():
     text = """
 def dask_setup(worker):
     worker.foo = 'setup'
 """
     async with Scheduler(dashboard_address=":0", preload=text) as s:
-        assert next(iter(s.preloads))
+        assert len(s.preloads) == 1
+        assert isinstance(s.preloads[0], Preload)
 
 
 @gen_cluster(nthreads=[])
