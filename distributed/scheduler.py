@@ -3658,7 +3658,6 @@ class Scheduler(SchedulerState, ServerNode):
             "scatter": self.scatter,
             "register-worker": self.add_worker,
             "register_nanny": self.add_nanny,
-            "deregister_nanny": self.remove_nanny,
             "unregister": self.remove_worker,
             "gather": self.gather,
             "retry": self.stimulus_retry,
@@ -4209,11 +4208,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event(address, {"action": "add-worker"})
         self.log_event("all", {"action": "add-worker", "worker": address})
 
-        if nanny and nanny in self._starting_nannies:
-            async with self._starting_nannies_cond:
-                self._starting_nannies.remove(nanny)
-                self._starting_nannies_cond.notify_all()
-
         self.workers[address] = ws = WorkerState(
             address=address,
             status=Status.lookup[status],  # type: ignore
@@ -4304,19 +4298,20 @@ class Scheduler(SchedulerState, ServerNode):
         # This will keep running until the worker is removed
         await self.handle_worker(comm, address)
 
-    async def add_nanny(self, address: str) -> dict[str, Any]:
+    async def add_nanny(self, comm: Comm, address: str) -> None:
         async with self._starting_nannies_cond:
             self._starting_nannies.add(address)
+        try:
             msg = {
                 "status": "OK",
                 "nanny-plugins": self.nanny_plugins,
             }
-            return msg
-
-    async def remove_nanny(self, address: str) -> None:
-        async with self._starting_nannies_cond:
-            self._starting_nannies.discard(address)
-            self._starting_nannies_cond.notify_all()
+            await comm.write(msg)
+            await comm.read()
+        finally:
+            async with self._starting_nannies_cond:
+                self._starting_nannies.discard(address)
+                self._starting_nannies_cond.notify_all()
 
     def _match_graph_with_tasks(
         self, dsk: dict[str, Any], dependencies: dict[str, set[str]], keys: set[str]

@@ -871,3 +871,51 @@ async def test_nanny_plugin_register_during_start_failure(c, s, restart):
     with pytest.raises(RuntimeError):
         await start
     assert not await register
+
+
+class SlowDistNanny(Nanny):
+    def __init__(self, *args, in_instantiate, wait_instantiate, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = in_instantiate
+        self.wait_instantiate = wait_instantiate
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        self.wait_instantiate.wait()
+        return await super().instantiate()
+
+
+def run_nanny(scheduler_addr, in_instantiate, wait_instantiate):
+    async def _():
+        worker = await SlowDistNanny(
+            scheduler_addr,
+            wait_instantiate=wait_instantiate,
+            in_instantiate=in_instantiate,
+        )
+        await worker.finished()
+
+    asyncio.run(_())
+
+
+@pytest.mark.parametrize("restart", [True, False])
+@gen_cluster(client=True, nthreads=[])
+async def test_nanny_plugin_register_nanny_killed(c, s, restart):
+    in_instantiate = get_mp_context().Event()
+    wait_instantiate = get_mp_context().Event()
+    proc = get_mp_context().Process(
+        name="run_nanny",
+        target=run_nanny,
+        kwargs={
+            "in_instantiate": in_instantiate,
+            "wait_instantiate": wait_instantiate,
+        },
+        args=(s.address,),
+    )
+    proc.start()
+    try:
+        plugin = DummyNannyPlugin("foo", restart=restart)
+        await asyncio.to_thread(in_instantiate.wait)
+        register = asyncio.create_task(c.register_worker_plugin(plugin))
+    finally:
+        proc.kill()
+    assert await register == {}
