@@ -23,6 +23,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
+from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import parse_timedelta, tmpfile, typename
 
@@ -198,13 +199,17 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 
         if ndeps == 0:
             x = da.random.random((100, 100), chunks=(10, 10))
+            random_keys = set(flatten(x.__dask_keys__()))
+            trivial_deps = {}
         else:
 
             def random(**kwargs):
                 assert len(kwargs) == ndeps
                 return np.random.random((10, 10))
 
-            trivial_deps = {f"k{i}": delayed(object()) for i in range(ndeps)}
+            trivial_deps = {
+                f"k{i}": delayed(object(), name=f"object-{i}") for i in range(ndeps)
+            }
 
             # TODO is there a simpler (non-blockwise) way to make this sort of graph?
             x = da.blockwise(
@@ -214,6 +219,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
                 dtype=float,
                 **trivial_deps,
             )
+            random_keys = set(flatten(x.__dask_keys__()))
 
         xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
         await xsum
@@ -251,19 +257,19 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
             for log in worker.transfer_incoming_log:
                 keys = log["keys"]
                 # The root-ish tasks should never be transferred
-                assert not any(k[0].startswith("random") for k in keys), keys
+                assert not random_keys.intersection(keys)
                 # `object-` keys (the trivial deps of the root random tasks) should be
                 # transferred
-                if any(not k[0].startswith("object") for k in keys):
+                if any(
+                    (not isinstance(k, str) or not k.startswith("object")) for k in keys
+                ):
                     # But not many other things should be
                     unexpected_transfers.append(list(keys))
 
         # A transfer at the very end to move aggregated results is fine (necessary with
         # unbalanced workers in fact), but generally there should be very very few
         # transfers.
-        # FIXME: We see much more transfers. This suspect this is a timing issue
-        # but we have to investigate
-        # assert len(unexpected_transfers) <= 3, unexpected_transfers
+        assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
 
