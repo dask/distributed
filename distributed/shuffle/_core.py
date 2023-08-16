@@ -10,9 +10,8 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, NewType, TypeVar
-
-from dask.utils import Dispatch
+from functools import partial
+from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -26,9 +25,10 @@ if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
-    # circular dependency
-    from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
+    from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 
+    # circular dependencies
+    from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
 ShuffleId = NewType("ShuffleId", str)
 NDIndex: TypeAlias = tuple[int, ...]
@@ -37,11 +37,6 @@ NDIndex: TypeAlias = tuple[int, ...]
 _T_partition_id = TypeVar("_T_partition_id")
 _T_partition_type = TypeVar("_T_partition_type")
 _T = TypeVar("_T")
-
-
-spec_to_scheduler_state = Dispatch("spec_to_scheduler_state")
-scheduler_state_to_run_spec = Dispatch("scheduler_state_to_run_spec")
-run_spec_to_worker_run = Dispatch("run_spec_to_worker_run")
 
 
 class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
@@ -261,46 +256,60 @@ class ShuffleType(Enum):
     ARRAY_RECHUNK = "ArrayRechunk"
 
 
-@dataclass(eq=False)
-class ShuffleState(abc.ABC):
-    _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
-
-    id: ShuffleId
-    run_id: int
-    participating_workers: set[str]
-    _archived_by: str | None = field(default=None, init=False)
-
-    @abc.abstractmethod
-    def to_msg(self) -> dict[str, Any]:
-        """Transform the shuffle state into a JSON-serializable message"""
-
-    def __str__(self) -> str:
-        return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
-
-    def __hash__(self) -> int:
-        return hash(self.run_id)
-
-
-@dataclass
-class ShuffleSpec:
-    id: ShuffleId
-
-
-@dataclass
+@dataclass(frozen=True)
 class ShuffleRunSpec(Generic[_T_partition_id]):
-    id: ShuffleId
-    run_id: int
+    run_id: int = field(init=False, default_factory=partial(next, itertools.count(1)))  # type: ignore
+    spec: ShuffleSpec
     worker_for: dict[_T_partition_id, str]
 
+    @property
+    def id(self) -> ShuffleId:
+        return self.spec.id
+
+
+@dataclass(frozen=True)
+class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
+    id: ShuffleId
+
+    def create_new_run(
+        self,
+        plugin: ShuffleSchedulerPlugin,
+    ) -> SchedulerShuffleState:
+        worker_for = self._pin_output_workers(plugin)
+        return SchedulerShuffleState(
+            run_spec=ShuffleRunSpec(spec=self, worker_for=worker_for),
+            participating_workers=set(worker_for.values()),
+        )
+
+    @abc.abstractmethod
+    def _pin_output_workers(
+        self, plugin: ShuffleSchedulerPlugin
+    ) -> dict[_T_partition_id, str]:
+        """TODO"""
+
+    @abc.abstractmethod
+    def initialize_run_on_worker(
+        self,
+        run_id: int,
+        worker_for: dict[_T_partition_id, str],
+        plugin: ShuffleWorkerPlugin,
+    ) -> ShuffleRun:
+        """TODO"""
+
 
 @dataclass(eq=False)
-class SchedulerShuffleState:
-    _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
-
-    id: ShuffleId
-    run_id: int
+class SchedulerShuffleState(Generic[_T_partition_id]):
+    run_spec: ShuffleRunSpec
     participating_workers: set[str]
     _archived_by: str | None = field(default=None, init=False)
+
+    @property
+    def id(self) -> ShuffleId:
+        return self.run_spec.id
+
+    @property
+    def run_id(self) -> int:
+        return self.run_spec.run_id
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"

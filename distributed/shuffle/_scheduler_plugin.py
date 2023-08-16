@@ -16,8 +16,6 @@ from distributed.shuffle._core import (
     ShuffleSpec,
     barrier_key,
     id_from_key,
-    scheduler_state_to_run_spec,
-    spec_to_scheduler_state,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
@@ -113,7 +111,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             )  # pragma: nocover
         state = self.active_shuffles[id]
         state.participating_workers.add(worker)
-        return ToPickle(scheduler_state_to_run_spec(state))
+        return ToPickle(state.run_spec)
 
     def get_or_create(
         self,
@@ -129,11 +127,11 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             # that the shuffle works as intended and should fail instead.
             self._raise_if_barrier_unknown(spec.id)
             self._raise_if_task_not_processing(key)
-            state: SchedulerShuffleState = spec_to_scheduler_state(spec, self)
+            state = spec.create_new_run(self)
             self.active_shuffles[spec.id] = state
             self._shuffles[spec.id].add(state)
             state.participating_workers.add(worker)
-            return ToPickle(scheduler_state_to_run_spec(state))
+            return ToPickle(state.run_spec)
 
     def _raise_if_barrier_unknown(self, id: ShuffleId) -> None:
         key = barrier_key(id)

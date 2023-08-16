@@ -26,19 +26,15 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._core import (
     NDIndex,
-    SchedulerShuffleState,
     ShuffleId,
     ShuffleRun,
-    ShuffleRunSpec,
     ShuffleSpec,
     barrier_key,
     get_worker_plugin,
-    run_spec_to_worker_run,
-    scheduler_state_to_run_spec,
-    spec_to_scheduler_state,
 )
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
 
@@ -51,9 +47,6 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
     from dask.dataframe import DataFrame
-
-    # circular dependency
-    from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 
 
 def shuffle_transfer(
@@ -499,72 +492,35 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         return self.worker_for[id]
 
 
-@dataclass
-class DataFrameShuffleSpec(ShuffleSpec):
+@dataclass(frozen=True)
+class DataFrameShuffleSpec(ShuffleSpec[int]):
     npartitions: int
     column: str
     parts_out: set[int]
 
+    def _pin_output_workers(self, plugin: ShuffleSchedulerPlugin) -> dict[int, str]:
+        pick_worker = partial(_get_worker_for_range_sharding, self.npartitions)
+        return plugin._pin_output_workers(self.id, self.parts_out, pick_worker)
 
-@dataclass
-class DataFrameShuffleRunSpec(ShuffleRunSpec):
-    column: str
-
-
-@dataclass(eq=False)
-class DataFrameShuffleState(SchedulerShuffleState):
-    worker_for: dict[int, str]
-    column: str
-
-
-@spec_to_scheduler_state.register(DataFrameShuffleSpec)  # type: ignore[misc]
-def _dataframe_spec_to_state(
-    spec: DataFrameShuffleSpec, plugin: ShuffleSchedulerPlugin
-) -> DataFrameShuffleState:
-    pick_worker = partial(_get_worker_for_range_sharding, spec.npartitions)
-
-    mapping = plugin._pin_output_workers(spec.id, spec.parts_out, pick_worker)
-    output_workers = set(mapping.values())
-
-    return DataFrameShuffleState(
-        id=spec.id,
-        run_id=next(SchedulerShuffleState._run_id_iterator),
-        worker_for=mapping,
-        column=spec.column,
-        participating_workers=output_workers,
-    )
-
-
-@scheduler_state_to_run_spec.register(DataFrameShuffleState)  # type: ignore[misc]
-def _dataframe_state_to_run_spec(state: DataFrameShuffleState) -> ShuffleRunSpec:
-    return DataFrameShuffleRunSpec(
-        id=state.id,
-        run_id=state.run_id,
-        worker_for=state.worker_for,
-        column=state.column,
-    )
-
-
-@run_spec_to_worker_run.register(DataFrameShuffleRunSpec)  # type: ignore[misc]
-def _dataframe_run_spec_to_run(
-    spec: DataFrameShuffleRunSpec, plugin: ShuffleWorkerPlugin
-) -> DataFrameShuffleRun:
-    return DataFrameShuffleRun(
-        column=spec.column,
-        worker_for=spec.worker_for,
-        id=spec.id,
-        run_id=spec.run_id,
-        directory=os.path.join(
-            plugin.worker.local_directory,
-            f"shuffle-{spec.id}-{spec.run_id}",
-        ),
-        executor=plugin._executor,
-        local_address=plugin.worker.address,
-        rpc=plugin.worker.rpc,
-        scheduler=plugin.worker.scheduler,
-        memory_limiter_disk=plugin.memory_limiter_disk,
-        memory_limiter_comms=plugin.memory_limiter_comms,
-    )
+    def initialize_run_on_worker(
+        self, run_id: int, worker_for: dict[int, str], plugin: ShuffleWorkerPlugin
+    ) -> ShuffleRun:
+        return DataFrameShuffleRun(
+            column=self.column,
+            worker_for=worker_for,
+            id=self.id,
+            run_id=run_id,
+            directory=os.path.join(
+                plugin.worker.local_directory,
+                f"shuffle-{self.id}-{run_id}",
+            ),
+            executor=plugin._executor,
+            local_address=plugin.worker.address,
+            rpc=plugin.worker.rpc,
+            scheduler=plugin.worker.scheduler,
+            memory_limiter_disk=plugin.memory_limiter_disk,
+            memory_limiter_comms=plugin.memory_limiter_comms,
+        )
 
 
 def _get_worker_for_range_sharding(

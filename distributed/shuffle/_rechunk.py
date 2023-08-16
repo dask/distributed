@@ -114,17 +114,13 @@ from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.shuffle._core import (
     NDIndex,
-    SchedulerShuffleState,
     ShuffleId,
     ShuffleRun,
-    ShuffleRunSpec,
     ShuffleSpec,
     get_worker_plugin,
-    run_spec_to_worker_run,
-    scheduler_state_to_run_spec,
-    spec_to_scheduler_state,
 )
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -134,9 +130,6 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
     import dask.array as da
-
-    # circular dependency
-    from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 
 ChunkedAxis: TypeAlias = tuple[float, ...]  # chunks must either be an int or NaN
 ChunkedAxes: TypeAlias = tuple[ChunkedAxis, ...]
@@ -459,77 +452,40 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         return self.worker_for[id]
 
 
-@dataclass
-class ArrayRechunkSpec(ShuffleSpec):
+@dataclass(frozen=True)
+class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
     new: ChunkedAxes
     old: ChunkedAxes
 
+    def _pin_output_workers(self, plugin: ShuffleSchedulerPlugin) -> dict[NDIndex, str]:
+        parts_out = product(*(range(len(c)) for c in self.new))
+        return plugin._pin_output_workers(
+            self.id, parts_out, _get_worker_for_hash_sharding
+        )
 
-@dataclass
-class ArrayRechunkRunSpec(ShuffleRunSpec):
-    new: ChunkedAxes
-    old: ChunkedAxes
-
-
-@dataclass(eq=False)
-class ArrayRechunkState(SchedulerShuffleState):
-    worker_for: dict[NDIndex, str]
-    old: ChunkedAxes
-    new: ChunkedAxes
-
-
-@spec_to_scheduler_state.register(ArrayRechunkSpec)  # type: ignore[misc]
-def _array_rechunk_from_spec(
-    spec: ArrayRechunkSpec, plugin: ShuffleSchedulerPlugin
-) -> ArrayRechunkState:
-    parts_out = product(*(range(len(c)) for c in spec.new))
-    mapping = plugin._pin_output_workers(
-        spec.id, parts_out, _get_worker_for_hash_sharding
-    )
-    output_workers = set(mapping.values())
-
-    return ArrayRechunkState(
-        id=spec.id,
-        run_id=next(SchedulerShuffleState._run_id_iterator),
-        worker_for=mapping,
-        old=spec.old,
-        new=spec.new,
-        participating_workers=output_workers,
-    )
-
-
-@scheduler_state_to_run_spec.register(ArrayRechunkState)  # type: ignore[misc]
-def _array_state_to_run_spec(state: ArrayRechunkState) -> ArrayRechunkRunSpec:
-    return ArrayRechunkRunSpec(
-        id=state.id,
-        run_id=state.run_id,
-        worker_for=state.worker_for,
-        new=state.new,
-        old=state.old,
-    )
-
-
-@run_spec_to_worker_run.register(ArrayRechunkRunSpec)  # type: ignore[misc]
-def _array_run_spec_to_run(
-    spec: ArrayRechunkRunSpec, plugin: ShuffleWorkerPlugin
-) -> ShuffleRun:
-    return ArrayRechunkRun(
-        worker_for=spec.worker_for,
-        old=spec.old,
-        new=spec.new,
-        id=spec.id,
-        run_id=spec.run_id,
-        directory=os.path.join(
-            plugin.worker.local_directory,
-            f"shuffle-{spec.id}-{spec.run_id}",
-        ),
-        executor=plugin._executor,
-        local_address=plugin.worker.address,
-        rpc=plugin.worker.rpc,
-        scheduler=plugin.worker.scheduler,
-        memory_limiter_disk=plugin.memory_limiter_disk,
-        memory_limiter_comms=plugin.memory_limiter_comms,
-    )
+    def initialize_run_on_worker(
+        self,
+        run_id: int,
+        worker_for: dict[NDIndex, str],
+        plugin: ShuffleWorkerPlugin,
+    ) -> ShuffleRun:
+        return ArrayRechunkRun(
+            worker_for=worker_for,
+            old=self.old,
+            new=self.new,
+            id=self.id,
+            run_id=run_id,
+            directory=os.path.join(
+                plugin.worker.local_directory,
+                f"shuffle-{self.id}-{run_id}",
+            ),
+            executor=plugin._executor,
+            local_address=plugin.worker.address,
+            rpc=plugin.worker.rpc,
+            scheduler=plugin.worker.scheduler,
+            memory_limiter_disk=plugin.memory_limiter_disk,
+            memory_limiter_comms=plugin.memory_limiter_comms,
+        )
 
 
 def _get_worker_for_hash_sharding(

@@ -16,7 +16,6 @@ from distributed.shuffle._core import (
     ShuffleRun,
     ShuffleRunSpec,
     ShuffleSpec,
-    run_spec_to_worker_run,
 )
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
@@ -289,7 +288,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
 
-        shuffle: ShuffleRun = run_spec_to_worker_run(result, self)
+        shuffle: ShuffleRun = result.spec.initialize_run_on_worker(
+            result.run_id, result.worker_for, self
+        )
         self.shuffles[shuffle_id] = shuffle
         self._runs.add(shuffle)
         return shuffle
