@@ -49,6 +49,8 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     import pandas as pd
     import pyarrow as pa
 
+    from dask.dataframe.dispatch import from_pyarrow_table_dispatch
+
     file = BytesIO(data)
     end = len(data)
     shards = []
@@ -67,7 +69,9 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
             return pd.StringDtype("pyarrow")
         return None
 
-    df = table.to_pandas(self_destruct=True, types_mapper=default_types_mapper)
+    df = from_pyarrow_table_dispatch(
+        meta, table, self_destruct=True, types_mapper=default_types_mapper
+    )
     return df.astype(meta.dtypes, copy=False)
 
 

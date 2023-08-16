@@ -121,6 +121,40 @@ async def test_minimal_version(c, s, a, b):
         await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
+@pytest.mark.gpu
+@pytest.mark.filterwarnings(
+    "ignore:Ignoring the following arguments to `from_pyarrow_table_dispatch`."
+)
+@gen_cluster(client=True)
+async def test_basic_cudf_support(c, s, a, b):
+    cudf = pytest.importorskip("cudf")
+    pytest.importorskip("dask_cudf")
+
+    try:
+        from dask.dataframe.dispatch import to_pyarrow_table_dispatch
+
+        to_pyarrow_table_dispatch(cudf.DataFrame())
+    except TypeError:
+        pytest.skip(reason="Newer version of dask_cudf is required.")
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    ).to_backend("cudf")
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    assert out.npartitions == df.npartitions
+    x, y = c.compute([df.x.size, out.x.size])
+    x = await x
+    y = await y
+    assert x == y
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
 def get_shuffle_run_from_worker(shuffle_id: ShuffleId, worker: Worker) -> ShuffleRun:
     plugin = worker.plugins["shuffle"]
     assert isinstance(plugin, ShuffleWorkerPlugin)

@@ -97,7 +97,7 @@ def rearrange_by_column_p2p(
     column: str,
     npartitions: int | None = None,
 ) -> DataFrame:
-    from dask.dataframe import DataFrame
+    from dask.dataframe.core import new_dd_object
 
     meta = df._meta
     check_dtype_support(meta)
@@ -119,7 +119,7 @@ def rearrange_by_column_p2p(
         name_input=df._name,
         meta_input=meta,
     )
-    return DataFrame(
+    return new_dd_object(
         HighLevelGraph.from_collections(name, layer, [df]),
         name,
         meta,
@@ -273,8 +273,13 @@ def split_by_worker(
     Split data into many arrow batches, partitioned by destination worker
     """
     import numpy as np
-    import pyarrow as pa
 
+    from dask.dataframe.dispatch import to_pyarrow_table_dispatch
+
+    # (cudf support) Avoid pd.Series
+    constructor = df._constructor_sliced
+    assert isinstance(constructor, type)
+    worker_for = constructor(worker_for)
     df = df.merge(
         right=worker_for.cat.codes.rename("_worker"),
         left_on=column,
@@ -287,7 +292,7 @@ def split_by_worker(
     # assert len(df) == nrows  # Not true if some outputs aren't wanted
     # FIXME: If we do not preserve the index something is corrupting the
     # bytestream such that it cannot be deserialized anymore
-    t = pa.Table.from_pandas(df, preserve_index=True)
+    t = to_pyarrow_table_dispatch(df, preserve_index=True)
     t = t.sort_by("_worker")
     codes = np.asarray(t["_worker"])
     t = t.drop(["_worker"])
