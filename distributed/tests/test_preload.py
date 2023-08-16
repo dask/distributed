@@ -71,6 +71,8 @@ def dask_setup(worker):
     async with Scheduler(dashboard_address=":0", preload=text) as s:
         assert len(s.preloads) == 1
         assert isinstance(s.preloads[0], Preload)
+        # Make sure list comprehensions return the correct # of items
+        assert len([x for x in s.preloads]) == len(s.preloads)
 
 
 @gen_cluster(nthreads=[])
