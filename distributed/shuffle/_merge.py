@@ -9,13 +9,8 @@ from dask.base import is_dask_collection, tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 
-from distributed.shuffle._shuffle import (
-    ShuffleId,
-    _get_worker_plugin,
-    barrier_key,
-    shuffle_barrier,
-    shuffle_transfer,
-)
+from distributed.shuffle._core import ShuffleId, barrier_key, get_worker_plugin
+from distributed.shuffle._shuffle import shuffle_barrier, shuffle_transfer
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -167,7 +162,7 @@ def merge_unpack(
 ):
     from dask.dataframe.multi import merge_chunk
 
-    ext = _get_worker_plugin()
+    ext = get_worker_plugin()
     # If the partition is empty, it doesn't contain the hash column name
     left = ext.get_output_partition(
         shuffle_id_left, barrier_left, output_partition, meta=meta_left

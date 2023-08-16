@@ -27,16 +27,7 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod, wraps
 from itertools import chain
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    ClassVar,
-    Literal,
-    NamedTuple,
-    TypedDict,
-    Union,
-    cast,
-)
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, Union, cast
 
 from tlz import peekn
 
@@ -49,7 +40,7 @@ from distributed.comm import get_address_host
 from distributed.core import ErrorMessage, error_message
 from distributed.metrics import DelayedMetricsLedger, monotonic, time
 from distributed.protocol import pickle
-from distributed.protocol.serialize import Serialize
+from distributed.protocol.serialize import Serialize, ToPickle
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.utils import recursive_to_dict
 
@@ -64,6 +55,7 @@ if TYPE_CHECKING:
 
     # Circular imports
     from distributed.diagnostics.plugin import WorkerPlugin
+    from distributed.scheduler import T_runspec
     from distributed.worker import Worker
 
 # Not to be confused with distributed.scheduler.TaskStateState
@@ -110,19 +102,6 @@ WAITING_FOR_DATA: Set[TaskStateState] = {
 NO_VALUE = "--no-value-sentinel--"
 
 RUN_ID_SENTINEL = -1
-
-
-class SerializedTask(NamedTuple):
-    """Info from distributed.scheduler.TaskState.run_spec
-    Input to distributed.worker._deserialize
-
-    (function, args kwargs) and task are mutually exclusive
-    """
-
-    function: bytes | None = None
-    args: bytes | tuple | list | None = None
-    kwargs: bytes | dict[str, Any] | None = None
-    task: object = NO_VALUE
 
 
 class StartStop(TypedDict):
@@ -239,11 +218,11 @@ class TaskState:
     prefix: str = field(init=False)
     #: Task run ID.
     run_id: int = RUN_ID_SENTINEL
-    #: A named tuple containing the ``function``, ``args``, ``kwargs`` and ``task``
+    #: A tuple containing the ``function``, ``args``, ``kwargs`` and ``task``
     #: associated with this `TaskState` instance. This defaults to ``None`` and can
     #: remain empty if it is a dependency that this worker will receive from another
     #: worker.
-    run_spec: SerializedTask | None = None
+    run_spec: T_runspec | None = None
 
     #: The data needed by this key to run
     dependencies: set[TaskState] = field(default_factory=set)
@@ -763,10 +742,7 @@ class ComputeTaskEvent(StateMachineEvent):
     nbytes: dict[str, int]
     priority: tuple[int, ...]
     duration: float
-    run_spec: SerializedTask | None
-    function: bytes | None
-    args: bytes | tuple | list | None | None
-    kwargs: bytes | dict[str, Any] | None
+    run_spec: T_runspec | None
     resource_restrictions: dict[str, float]
     actor: bool
     annotations: dict
@@ -778,24 +754,17 @@ class ComputeTaskEvent(StateMachineEvent):
         # Fixes after msgpack decode
         if isinstance(self.priority, list):  # type: ignore[unreachable]
             self.priority = tuple(self.priority)  # type: ignore[unreachable]
-
-        if self.function is not None:
-            assert self.run_spec is None
-            self.run_spec = SerializedTask(
-                function=self.function, args=self.args, kwargs=self.kwargs
-            )
-        elif not isinstance(self.run_spec, SerializedTask):
-            self.run_spec = SerializedTask(task=self.run_spec)
+        if isinstance(self.run_spec, ToPickle):
+            # FIXME Sometimes the protocol is not unpacking this
+            # E.g. distributed/tests/test_client.py::test_async_with
+            self.run_spec = self.run_spec.data  # type: ignore[unreachable]
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         return StateMachineEvent._to_dict(self._clean(), exclude=exclude)
 
     def _clean(self) -> StateMachineEvent:
         out = copy(self)
-        out.function = None
-        out.kwargs = None
-        out.args = None
-        out.run_spec = SerializedTask(task=None, function=None, args=None, kwargs=None)
+        out.run_spec = None
         return out
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
@@ -804,7 +773,15 @@ class ComputeTaskEvent(StateMachineEvent):
         return out
 
     def _after_from_dict(self) -> None:
-        self.run_spec = SerializedTask(task=None, function=None, args=None, kwargs=None)
+        self.run_spec = None
+
+    @classmethod
+    def _f(cls) -> None:
+        return  # pragma: nocover
+
+    @classmethod
+    def dummy_runspec(cls) -> tuple[Callable, tuple, dict]:
+        return (cls._f, (), {})
 
     @staticmethod
     def dummy(
@@ -830,10 +807,7 @@ class ComputeTaskEvent(StateMachineEvent):
             nbytes=nbytes or {k: 1 for k in who_has or ()},
             priority=priority,
             duration=duration,
-            run_spec=None,
-            function=None,
-            args=None,
-            kwargs=None,
+            run_spec=ComputeTaskEvent.dummy_runspec(),
             resource_restrictions=resource_restrictions or {},
             actor=actor,
             annotations=annotations or {},
@@ -3656,9 +3630,11 @@ class BaseWorker(abc.ABC):
             stim = task.result()
         except asyncio.CancelledError:
             # This should exclusively happen in Worker.close()
+            logger.warning(f"Async instruction for {task} ended with CancelledError")
             return
         except BaseException:  # pragma: nocover
-            logger.exception("async instruction handlers should never raise!")
+            # This should never happen
+            logger.exception(f"Unhandled exception in async instruction for {task}")
             raise
 
         # Capture metric events in _transition_to_memory()

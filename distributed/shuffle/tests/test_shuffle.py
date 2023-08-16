@@ -15,6 +15,9 @@ from unittest import mock
 
 import pytest
 
+from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
+from distributed.worker import Status
+
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
@@ -25,22 +28,20 @@ from dask.utils import stringify
 from distributed.client import Client
 from distributed.scheduler import KilledWorker, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
-from distributed.shuffle._arrow import serialize_table
-from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._scheduler_plugin import (
-    ShuffleSchedulerPlugin,
-    get_worker_for_range_sharding,
-)
-from distributed.shuffle._shuffle import ShuffleId, barrier_key
-from distributed.shuffle._worker_plugin import (
-    DataFrameShuffleRun,
-    ShuffleRun,
-    ShuffleWorkerPlugin,
+from distributed.shuffle._arrow import (
     convert_partition,
     list_of_buffers_to_table,
+    serialize_table,
+)
+from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
+from distributed.shuffle._shuffle import (
+    DataFrameShuffleRun,
+    get_worker_for_range_sharding,
     split_by_partition,
     split_by_worker,
 )
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.shuffle.tests.utils import (
     AbstractShuffleTestPool,
     invoke_annotation_chaos,
@@ -453,6 +454,43 @@ async def test_crashed_worker_during_transfer(c, s, a):
         await c.close()
         await check_worker_cleanup(a)
         await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    # Effectively disable the memory monitor to be able to manually control
+    # the worker status
+    config={"distributed.worker.memory.monitor-interval": "60s"},
+)
+async def test_restarting_does_not_deadlock(c, s):
+    """Regression test for https://github.com/dask/distributed/issues/8088"""
+    async with Worker(s.address) as a:
+        async with Nanny(s.address) as b:
+            # Ensure that a holds the input tasks to the shuffle
+            with dask.annotate(workers=[a.address]):
+                df = dask.datasets.timeseries(
+                    start="2000-01-01",
+                    end="2000-03-01",
+                    dtypes={"x": float, "y": float},
+                    freq="10 s",
+                )
+            out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+            fut = c.compute(out.x.size)
+            await wait_until_worker_has_tasks(
+                "shuffle-transfer", b.worker_address, 1, s
+            )
+            a.status = Status.paused
+            await async_poll_for(lambda: len(s.running) == 1, timeout=5)
+            b.close_gracefully()
+            await b.process.process.kill()
+
+            await async_poll_for(lambda: not s.running, timeout=5)
+
+            a.status = Status.running
+
+            await async_poll_for(lambda: s.running, timeout=5)
+            await fut
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)

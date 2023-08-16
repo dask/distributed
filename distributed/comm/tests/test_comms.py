@@ -25,6 +25,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.registry import backends, get_backend
+from distributed.comm.tcp import get_stream_address
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.metrics import time
@@ -965,6 +966,7 @@ async def test_retry_connect(tcp, monkeypatch):
         listener.stop()
 
 
+@pytest.mark.slow
 @gen_test()
 async def test_handshake_slow_comm(tcp, monkeypatch):
     class SlowComm(tcp.TCP):
@@ -999,11 +1001,9 @@ async def test_handshake_slow_comm(tcp, monkeypatch):
 
         import dask
 
-        with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-            with pytest.raises(
-                IOError, match="Timed out during handshake while connecting to"
-            ):
-                await connect(listener.contact_address)
+        # The connect itself is fast. Only the handshake is slow
+        with dask.config.set({"distributed.comm.timeouts.connect": "500ms"}):
+            await connect(listener.contact_address)
     finally:
         listener.stop()
 
@@ -1341,6 +1341,15 @@ async def check_addresses(a, b):
 async def test_tcp_adresses(tcp):
     a, b = await get_tcp_comm_pair()
     await check_addresses(a, b)
+
+
+@gen_test()
+async def test_get_stream_address_raises_if_closed():
+    a, b = await get_tcp_comm_pair()
+    a.abort()
+    with pytest.raises(OSError):
+        get_stream_address(a)
+    b.abort()
 
 
 @gen_test()

@@ -24,7 +24,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import delayed
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
-from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
+from dask.utils import parse_timedelta, stringify, tmpfile, typename
 
 from distributed import (
     CancelledError,
@@ -74,7 +74,7 @@ from distributed.utils_test import (
     varying,
     wait_for_state,
 )
-from distributed.worker import dumps_function, dumps_task, get_worker, secede
+from distributed.worker import dumps_function, secede
 
 pytestmark = pytest.mark.ci1
 
@@ -303,6 +303,15 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         while a.state.executing_count != 1 or b.state.executing_count != 1:
             await asyncio.sleep(0.01)
 
+        # Rootish is a dynamic property as it is defined right now. Since the
+        # above submit calls are individual update_graph calls, waiting for
+        # tasks to be in executing state on the worker is not sufficient to
+        # guarantee that all the y tasks are already on the scheduler. Only
+        # after at least 5 have been registered, will the task be flagged as
+        # rootish
+        while "y-2" not in s.tasks or not s.is_rootish(s.tasks["y-2"]):
+            await asyncio.sleep(0.01)
+
         # - y-2 has no restrictions
         # - TaskGroup(y) has more than 4 tasks (total_nthreads * 2)
         # - TaskGroup(y) has less than 5 dependency groups
@@ -336,7 +345,26 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         await wait(xs + ys)
 
 
-@pytest.mark.slow
+from distributed import WorkerPlugin
+
+
+class CountData(WorkerPlugin):
+    def __init__(self, keys):
+        self.keys = keys
+        self.worker = None
+        self.count = 0
+
+    def setup(self, worker):
+        self.worker = worker
+
+    def transition(self, start, finish, *args, **kwargs):
+        count = 0
+        for k in self.worker.data:
+            if k in self.keys:
+                count += 1
+        self.count = max(self.count, count)
+
+
 @gen_cluster(
     nthreads=[("", 2)] * 4,
     client=True,
@@ -350,33 +378,18 @@ async def test_graph_execution_width(c, s, *workers):
     The number of parallel work streams match the number of threads.
     """
 
-    class Refcount:
-        "Track how many instances of this class exist; logs the count at creation and deletion"
-
-        count = 0
-        lock = dask.utils.SerializableLock()
-        log = []
-
-        def __init__(self):
-            with self.lock:
-                type(self).count += 1
-                self.log.append(self.count)
-
-        def __del__(self):
-            with self.lock:
-                self.log.append(self.count)
-                type(self).count -= 1
-
-    roots = [delayed(Refcount)() for _ in range(32)]
+    roots = [delayed(inc)(ix) for ix in range(32)]
     passthrough1 = [delayed(slowidentity)(r, delay=0) for r in roots]
     passthrough2 = [delayed(slowidentity)(r, delay=0) for r in passthrough1]
     done = [delayed(lambda r: None)(r) for r in passthrough2]
-
+    await c.register_worker_plugin(
+        CountData(keys=[f.key for f in roots]), name="count-roots"
+    )
     fs = c.compute(done)
     await wait(fs)
-    # NOTE: the max should normally equal `total_nthreads`. But some macOS CI machines
-    # are slow enough that they aren't able to reach the full parallelism of 8 threads.
-    assert max(Refcount.log) <= s.total_nthreads
+
+    res = await c.run(lambda dask_worker: dask_worker.plugins["count-roots"].count)
+    assert all(0 < count <= 2 for count in res.values())
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -751,7 +764,7 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
     )
 
 
-@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
+@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "500 ms"})
 async def test_clear_events_worker_removal(s, a, b):
     assert a.address in s.events
     assert a.address in s.workers
@@ -944,24 +957,6 @@ def test_dumps_function():
     assert a != c
 
 
-def test_dumps_task():
-    d = dumps_task((inc, 1))
-    assert set(d) == {"function", "args"}
-
-    def f(x, y=2):
-        return x + y
-
-    d = dumps_task((apply, f, (1,), {"y": 10}))
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert cloudpickle.loads(d["kwargs"]) == {"y": 10}
-
-    d = dumps_task((apply, f, (1,)))
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert set(d) == {"function", "args"}
-
-
 @pytest.mark.parametrize("worker_saturation", [1.0, float("inf")])
 @gen_cluster(client=True)
 async def test_ready_remove_worker(c, s, a, b, worker_saturation):
@@ -1063,30 +1058,34 @@ class SlowKillNanny(Nanny):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
-    f = c.submit(div, 1, 0)
-    fr = c.submit(inc, 1, resources={"FOO": 1})
-    await wait(f)
-    assert s.erred_tasks
-    assert s.computations
-    assert s.unrunnable
-    assert s.tasks
+    try:
+        f = c.submit(div, 1, 0)
+        fr = c.submit(inc, 1, resources={"FOO": 1})
+        await wait(f)
+        assert s.erred_tasks
+        assert s.computations
+        assert s.unrunnable
+        assert s.tasks
 
-    with pytest.raises(
-        TimeoutError, match=r"2/2 nanny worker\(s\) did not shut down within 1s"
-    ):
-        await c.restart(timeout="1s")
-    assert a.kill_called.is_set()
-    assert b.kill_called.is_set()
+        with pytest.raises(
+            TimeoutError, match=r"2/2 nanny worker\(s\) did not shut down within 1s"
+        ):
+            await c.restart(timeout="1s")
+        assert a.kill_called.is_set()
+        assert b.kill_called.is_set()
 
-    assert not s.workers
-    assert not s.erred_tasks
-    assert not s.computations
-    assert not s.unrunnable
-    assert not s.tasks
+        assert not s.workers
+        assert not s.erred_tasks
+        assert not s.computations
+        assert not s.unrunnable
+        assert not s.tasks
 
-    assert not c.futures
-    assert f.status == "cancelled"
-    assert fr.status == "cancelled"
+        assert not c.futures
+        assert f.status == "cancelled"
+        assert fr.status == "cancelled"
+    finally:
+        a.kill_proceed.set()
+        b.kill_proceed.set()
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -1344,9 +1343,9 @@ async def test_update_graph_culls(s, a, b):
         layers={
             "foo": MaterializedLayer(
                 {
-                    "x": dumps_task((inc, 1)),
-                    "y": dumps_task((inc, "x")),
-                    "z": dumps_task((inc, 2)),
+                    "x": (inc, 1),
+                    "y": (inc, "x"),
+                    "z": (inc, 2),
                 }
             )
         },
@@ -1354,7 +1353,7 @@ async def test_update_graph_culls(s, a, b):
     )
 
     header, frames = serialize(ToPickle(dsk), on_error="raise")
-    s.update_graph(
+    await s.update_graph(
         graph_header=header,
         graph_frames=frames,
         keys=["y"],
@@ -1751,6 +1750,12 @@ async def test_close_worker(s, a, b):
 
     await asyncio.sleep(0.2)
     assert len(s.workers) == 1
+    events = s.get_events(a.address)
+    assert any(
+        "reason" in msg
+        for _, msg in events
+        if "closing-worker" in msg.get("action", "")
+    )
 
 
 @pytest.mark.slow
@@ -2561,7 +2566,7 @@ async def test_no_dangling_asyncio_tasks():
 
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
-async def test_task_groups(c, s, a, b):
+async def test_task_groups(c, s, a, b, no_time_resync):
     start = time()
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
@@ -2609,8 +2614,21 @@ async def test_task_groups(c, s, a, b):
     assert "compute" in tg.all_durations
 
 
+async def padded_time(before=0.01, after=0.01):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
+    from disrupting monotonicity tests (t0 < t1 < t2 < ...).
+    This prevents frequent flakiness on Windows and, more rarely, in Linux and
+    MacOSX (NoSchedulerDelayWorker and no_time_resync help, but aren't sufficient
+    on their own to ensure stability).
+    """
+    await asyncio.sleep(before)
+    t = time()
+    await asyncio.sleep(after)
+    return t
+
+
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
-async def test_task_groups_update_start_stop(c, s, a):
+async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     """TaskGroup.stop increases as the tasks in the group finish.
     TaskGroup.start can move backwards in the following use case:
 
@@ -2620,25 +2638,25 @@ async def test_task_groups_update_start_stop(c, s, a):
     - task (x, 0) finishes
     """
     ev = Event()
-    t0 = time()
+    t0 = await padded_time(before=0)
     x0 = c.submit(ev.wait, key=("x", 0))
     await wait_for_state(str(x0.key), "executing", a)
     tg = s.task_groups["x"]
     assert tg.start == tg.stop == 0
-    t1 = time()
+    t1 = await padded_time()
     x1 = c.submit(inc, 1, key=("x", 1))
     await x1
-    t2 = time()
+    t2 = await padded_time()
     assert t0 < t1 < tg.start < tg.stop < t2
 
     await ev.set()
     await x0
-    t3 = time()
+    t3 = await padded_time()
     assert t0 < tg.start < t1 < t2 < tg.stop < t3
 
     x2 = c.submit(inc, 1, key=("x", 2))
     await x2
-    t4 = time()
+    t4 = await padded_time(after=0)
     assert t0 < tg.start < t1 < t2 < t3 < tg.stop < t4
 
 
@@ -2855,56 +2873,41 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
-async def test_gather_bad_worker_removed(c, s, a, b):
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    # This behaviour is independent of retries.
+    # Disable them to reduce the complexity of this test.
+    config={"distributed.comm.retry.count": 0},
+)
+async def test_gather_bad_worker(c, s, a, direct):
+    """Upon connection failure, gather() tries again indefinitely and transparently,
+    for as long as the batched comms channel is active.
     """
-    Upon connection failure or missing expected keys during gather, a worker is
-    shut down. The tasks should be rescheduled onto different workers, transparently
-    to `client.gather`.
-    """
-    x = c.submit(slowinc, 1, workers=[a.address], allow_other_workers=True)
-
-    def finalizer(*args):
-        return get_worker().address
-
-    fin = c.submit(
-        finalizer, x, key="final", workers=[a.address], allow_other_workers=True
-    )
-
+    x = c.submit(inc, 1, key="x")
+    c.rpc = await FlakyConnectionPool(failing_connections=3)
     s.rpc = await FlakyConnectionPool(failing_connections=1)
 
-    # This behaviour is independent of retries. Remove them to reduce complexity
-    # of this setup
-    with dask.config.set({"distributed.comm.retry.count": 0}):
-        with captured_logger(
-            logging.getLogger("distributed.scheduler")
-        ) as sched_logger, captured_logger(
-            logging.getLogger("distributed.client")
-        ) as client_logger:
-            # Gather using the client (as an ordinary user would)
-            # Upon a missing key, the client will remove the bad worker and
-            # reschedule the computations
+    with captured_logger("distributed.scheduler") as sched_logger:
+        with captured_logger("distributed.client") as client_logger:
+            assert await c.gather(x, direct=direct) == 2
 
-            # Both tasks are rescheduled onto `b`, since `a` was removed.
-            assert await fin == b.address
+    assert "Couldn't gather keys: {'x': 'memory'}" in sched_logger.getvalue()
+    assert "Couldn't gather 1 keys, rescheduling ('x',)" in client_logger.getvalue()
 
-            await a.finished()
-            assert list(s.workers) == [b.address]
-
-            sched_logger = sched_logger.getvalue()
-            client_logger = client_logger.getvalue()
-            assert "Shut down workers that don't have promised key" in sched_logger
-
-            assert "Couldn't gather 1 keys, rescheduling" in client_logger
-
-            assert s.tasks[fin.key].who_has == {s.workers[b.address]}
-            assert a.state.executed_count == 2
-            assert b.state.executed_count >= 1
-            # ^ leave room for a future switch from `remove_worker` to `retire_workers`
-
-    # Ensure that the communication was done via the scheduler, i.e. we actually hit a
-    # bad connection
-    assert s.rpc.cnn_count > 0
+    if direct:
+        # 1. try direct=True; fail
+        # 2. fall back to direct=False; fail
+        # 3. try direct=True again; fail
+        # 4. fall back to direct=False again; success
+        assert c.rpc.cnn_count == 2
+        assert s.rpc.cnn_count == 2
+    else:
+        # 1. try direct=False; fail
+        # 2. try again direct=False; success
+        assert c.rpc.cnn_count == 0
+        assert s.rpc.cnn_count == 2
 
 
 @gen_cluster(client=True)
@@ -3668,7 +3671,7 @@ async def test_gather_on_worker_bad_recipient(c, s, a, b):
     """The recipient is missing"""
     x = await c.scatter("x")
     await b.close()
-    assert s.workers.keys() == {a.address}
+    await async_poll_for(lambda: s.workers.keys() == {a.address}, timeout=5)
     out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == {x.key}
 
