@@ -6,7 +6,7 @@ import logging
 import os
 import shutil
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from importlib import import_module
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
@@ -222,7 +222,7 @@ class Preload:
                 await future
 
 
-class PreloadManager:
+class PreloadManager(Iterable[Preload]):
     _preloads: list[Preload]
 
     def __init__(self, preloads: list[Preload]):
@@ -241,6 +241,9 @@ class PreloadManager:
                 await preload.teardown()
             except Exception:
                 logger.exception("Failed to tear down preload: %s", preload.name)
+
+    def __iter__(self) -> Iterator[Preload]:
+        return iter(self._preloads)
 
 
 def process_preloads(
