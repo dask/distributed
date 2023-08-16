@@ -223,7 +223,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         secondary_worker_key_fractions = []
         for keys in x.__dask_keys__():
             # Iterate along rows of the array.
-            keys = {k for k in keys}
+            keys = set(keys)
 
             # No more than 2 workers should have any keys
             assert sum(any(k in w.data for k in keys) for w in workers) <= 2

@@ -4876,7 +4876,6 @@ async def test_recreate_task_futures(c, s, a, b):
     assert function(*args, **kwargs) == 2
 
 
-@pytest.mark.xfail(reason="This is actually using a Series for a key somewhere")
 @gen_cluster(client=True)
 async def test_recreate_task_collection(c, s, a, b):
     b = db.range(10, npartitions=4)
@@ -4913,7 +4912,7 @@ async def test_recreate_task_collection(c, s, a, b):
     # with persist
     df3 = c.persist(df2)
     # recreate_task_locally only works with futures
-    with pytest.raises(AttributeError):
+    with pytest.raises(TypeError, match="key"):
         function, args, kwargs = await c._get_components_from_future(df3)
 
     f = c.compute(df3)

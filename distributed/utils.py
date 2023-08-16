@@ -939,6 +939,15 @@ def truncate_exception(e, n=10000):
         return e
 
 
+def validate_key(k):
+    """Validate a key as received on a stream."""
+    typ = type(k)
+    if typ is not str and typ is not tuple:
+        raise TypeError(
+            f"Unexpected key type {typ} (value: {k!r}). Expected str or tuple."
+        )
+
+
 def _maybe_complex(task):
     """Possibly contains a nested task"""
     return (

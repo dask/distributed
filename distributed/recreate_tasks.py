@@ -4,7 +4,7 @@ import logging
 
 from distributed.client import futures_of, wait
 from distributed.protocol.serialize import ToPickle
-from distributed.utils import sync
+from distributed.utils import sync, validate_key
 from distributed.utils_comm import pack_data
 
 logger = logging.getLogger(__name__)
@@ -83,6 +83,7 @@ class ReplayTaskClient:
             await wait(future)
             key = future.key
         else:
+            validate_key(future)
             key = future
         spec = await self.scheduler.get_runspec(key=key)
         return (*spec["task"], spec["deps"])

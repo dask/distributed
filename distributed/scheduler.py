@@ -114,6 +114,7 @@ from distributed.utils import (
     no_default,
     offload,
     recursive_to_dict,
+    validate_key,
     wait_for,
 )
 from distributed.utils_comm import (
@@ -8459,6 +8460,8 @@ def _materialize_graph(
     graph: HighLevelGraph, global_annotations: dict[str, Any]
 ) -> tuple[dict[str, T_runspec], dict[str, set[str]], dict[str, Any]]:
     dsk = dask.utils.ensure_dict(graph)
+    for k in dsk:
+        validate_key(k)
     annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
     for annotations_type, value in global_annotations.items():
         annotations_by_type[annotations_type].update(
