@@ -27,6 +27,7 @@ from collections.abc import (
     Collection,
     Container,
     Generator,
+    Hashable,
     Iterator,
     KeysView,
     ValuesView,
@@ -941,11 +942,8 @@ def truncate_exception(e, n=10000):
 
 def validate_key(k):
     """Validate a key as received on a stream."""
-    typ = type(k)
-    if typ is not str and typ is not tuple:
-        raise TypeError(
-            f"Unexpected key type {typ} (value: {k!r}). Expected str or tuple."
-        )
+    if isinstance(k, Hashable):
+        raise TypeError(f"Unexpected key type {type(k)} (value: {k!r})")
 
 
 def _maybe_complex(task):
