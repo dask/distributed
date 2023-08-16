@@ -1456,8 +1456,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
         s = Shuffle(
             column="_partition",
             worker_for=worker_for_mapping,
-            # FIXME: Is output_workers redundant with worker_for?
-            output_workers=set(worker_for_mapping.values()),
             directory=directory / name,
             id=ShuffleId(name),
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),

@@ -49,7 +49,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self,
         id: ShuffleId,
         run_id: int,
-        output_workers: set[str],
         local_address: str,
         directory: str,
         executor: ThreadPoolExecutor,
@@ -60,7 +59,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     ):
         self.id = id
         self.run_id = run_id
-        self.output_workers = output_workers
         self.local_address = local_address
         self.executor = executor
         self.rpc = rpc
@@ -269,7 +267,6 @@ class ShuffleState(abc.ABC):
 
     id: ShuffleId
     run_id: int
-    output_workers: set[str]
     participating_workers: set[str]
     _archived_by: str | None = field(default=None, init=False)
 
@@ -294,7 +291,6 @@ class ShuffleRunSpec(Generic[_T_partition_id]):
     id: ShuffleId
     run_id: int
     worker_for: dict[_T_partition_id, str]
-    output_workers: set[str]  # TODO: Is this necessary?
 
 
 @dataclass(eq=False)
@@ -303,7 +299,6 @@ class SchedulerShuffleState:
 
     id: ShuffleId
     run_id: int
-    output_workers: set[str]
     participating_workers: set[str]
     _archived_by: str | None = field(default=None, init=False)
 

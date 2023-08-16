@@ -308,10 +308,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
 
     Parameters
     ----------
+    # FIXME
     worker_for:
         A mapping partition_id -> worker_address.
-    output_workers:
-        A set of all participating worker (addresses).
     old:
         Existing chunking of the array per dimension.
     new:
@@ -342,7 +341,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
     def __init__(
         self,
         worker_for: dict[NDIndex, str],
-        output_workers: set,
         old: ChunkedAxes,
         new: ChunkedAxes,
         id: ShuffleId,
@@ -358,7 +356,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         super().__init__(
             id=id,
             run_id=run_id,
-            output_workers=output_workers,
             local_address=local_address,
             directory=directory,
             executor=executor,
@@ -495,10 +492,9 @@ def _array_rechunk_from_spec(
         id=spec.id,
         run_id=next(SchedulerShuffleState._run_id_iterator),
         worker_for=mapping,
-        output_workers=output_workers,
         old=spec.old,
         new=spec.new,
-        participating_workers=output_workers.copy(),
+        participating_workers=output_workers,
     )
 
 
@@ -508,7 +504,6 @@ def _array_state_to_run_spec(state: ArrayRechunkState) -> ArrayRechunkRunSpec:
         id=state.id,
         run_id=state.run_id,
         worker_for=state.worker_for,
-        output_workers=state.output_workers,
         new=state.new,
         old=state.old,
     )
@@ -520,7 +515,6 @@ def _array_run_spec_to_run(
 ) -> ShuffleRun:
     return ArrayRechunkRun(
         worker_for=spec.worker_for,
-        output_workers=spec.output_workers,
         old=spec.old,
         new=spec.new,
         id=spec.id,

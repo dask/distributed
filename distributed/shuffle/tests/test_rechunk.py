@@ -55,8 +55,6 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
     ):
         s = Shuffle(
             worker_for=worker_for_mapping,
-            # FIXME: Is output_workers redundant with worker_for?
-            output_workers=set(worker_for_mapping.values()),
             old=old,
             new=new,
             directory=directory / name,

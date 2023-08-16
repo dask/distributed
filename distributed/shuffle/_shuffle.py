@@ -356,10 +356,9 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
     Parameters
     ----------
+    # FIXME
     worker_for:
         A mapping partition_id -> worker_address.
-    output_workers:
-        A set of all participating worker (addresses).
     column:
         The data column we split the input partition by.
     id:
@@ -388,7 +387,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def __init__(
         self,
         worker_for: dict[int, str],
-        output_workers: set,
         column: str,
         id: ShuffleId,
         run_id: int,
@@ -405,7 +403,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         super().__init__(
             id=id,
             run_id=run_id,
-            output_workers=output_workers,
             local_address=local_address,
             directory=directory,
             executor=executor,
@@ -534,8 +531,7 @@ def _dataframe_spec_to_state(
         run_id=next(SchedulerShuffleState._run_id_iterator),
         worker_for=mapping,
         column=spec.column,
-        output_workers=output_workers,
-        participating_workers=output_workers.copy(),
+        participating_workers=output_workers,
     )
 
 
@@ -545,7 +541,6 @@ def _dataframe_state_to_run_spec(state: DataFrameShuffleState) -> ShuffleRunSpec
         id=state.id,
         run_id=state.run_id,
         worker_for=state.worker_for,
-        output_workers=state.output_workers,
         column=state.column,
     )
 
@@ -557,7 +552,6 @@ def _dataframe_run_spec_to_run(
     return DataFrameShuffleRun(
         column=spec.column,
         worker_for=spec.worker_for,
-        output_workers=spec.output_workers,
         id=spec.id,
         run_id=spec.run_id,
         directory=os.path.join(
