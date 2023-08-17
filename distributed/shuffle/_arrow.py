@@ -46,7 +46,6 @@ def check_minimal_arrow_version() -> None:
 
 
 def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
-    import pandas as pd
     import pyarrow as pa
 
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
@@ -59,19 +58,7 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
         shards.append(sr.read_all())
     table = pa.concat_tables(shards, promote=True)
 
-    def default_types_mapper(pyarrow_dtype: pa.DataType) -> object:
-        # Avoid converting strings from `string[pyarrow]` to `string[python]`
-        # if we have *some* `string[pyarrow]`
-        if (
-            pyarrow_dtype in {pa.large_string(), pa.string()}
-            and pd.StringDtype("pyarrow") in meta.dtypes.values
-        ):
-            return pd.StringDtype("pyarrow")
-        return None
-
-    df = from_pyarrow_table_dispatch(
-        meta, table, self_destruct=True, types_mapper=default_types_mapper
-    )
+    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     return df.astype(meta.dtypes, copy=False)
 
 
