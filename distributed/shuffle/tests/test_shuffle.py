@@ -18,6 +18,7 @@ import pytest
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.worker import Status
 
+np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
@@ -2054,6 +2055,28 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
 
     await c.close()
     await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
+    def make_partition(i):
+        """Return null column for one partition"""
+        if i % 2 == 1:
+            return pd.DataFrame({"a": np.random.random(10), "b": [None] * 10})
+        return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
+
+    ddf = dd.from_map(make_partition, range(50))
+    out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
+    result, expected = c.compute([ddf, out])
+    del out
+    result = await result
+    expected = await expected
+    dd.assert_eq(result, expected)
+    del result
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
 
 
