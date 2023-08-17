@@ -96,13 +96,15 @@ the same output brick.
 
 from __future__ import annotations
 
+import os
 import pickle
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
+from itertools import product
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import dask
 from dask.base import tokenize
@@ -114,22 +116,20 @@ from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
     ShuffleRun,
-    ShuffleState,
-    ShuffleType,
-    barrier_key,
+    ShuffleSpec,
     get_worker_plugin,
 )
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._shuffle import shuffle_barrier
+from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
+from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
 
 if TYPE_CHECKING:
     import numpy as np
-    import pandas as pd
     from typing_extensions import TypeAlias
 
     import dask.array as da
-
 
 ChunkedAxis: TypeAlias = tuple[float, ...]  # chunks must either be an int or NaN
 ChunkedAxes: TypeAlias = tuple[ChunkedAxis, ...]
@@ -147,10 +147,7 @@ def rechunk_transfer(
         return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
-            shuffle_id=id,
-            type=ShuffleType.ARRAY_RECHUNK,
-            new=new,
-            old=old,
+            spec=ArrayRechunkSpec(id=id, new=new, old=old),
         )
     except Exception as e:
         raise RuntimeError(f"rechunk_transfer failed during shuffle {id}") from e
@@ -296,18 +293,16 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
     This object is responsible for splitting, sending, receiving and combining
     data shards.
 
-    It is entirely agnostic to the distributed system and can perform a shuffle
-    with other `Shuffle` instances using `rpc` and `broadcast`.
+    It is entirely agnostic to the distributed system and can perform a rechunk
+    with other run instances using `rpc``.
 
-    The user of this needs to guarantee that only `Shuffle`s of the same unique
-    `ShuffleID` interact.
+    The user of this needs to guarantee that only `ArrayRechunkRun`s of the same unique
+    `ShuffleID` and `run_id` interact.
 
     Parameters
     ----------
     worker_for:
         A mapping partition_id -> worker_address.
-    output_workers:
-        A set of all participating worker (addresses).
     old:
         Existing chunking of the array per dimension.
     new:
@@ -322,8 +317,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         The scratch directory to buffer data in.
     executor:
         Thread pool to use for offloading compute.
-    loop:
-        The event loop.
     rpc:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.
@@ -338,7 +331,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
     def __init__(
         self,
         worker_for: dict[NDIndex, str],
-        output_workers: set,
         old: ChunkedAxes,
         new: ChunkedAxes,
         id: ShuffleId,
@@ -354,7 +346,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         super().__init__(
             id=id,
             run_id=run_id,
-            output_workers=output_workers,
             local_address=local_address,
             directory=directory,
             executor=executor,
@@ -403,7 +394,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
                 repartitioned[id].append(shard)
         return {k: pickle.dumps(v) for k, v in repartitioned.items()}
 
-    async def add_partition(self, data: np.ndarray, partition_id: NDIndex) -> int:
+    async def add_partition(
+        self, data: np.ndarray, partition_id: NDIndex, **kwargs: Any
+    ) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
@@ -441,47 +434,58 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         return self.run_id
 
     async def get_output_partition(
-        self, partition_id: NDIndex, key: str, meta: pd.DataFrame | None = None
+        self, partition_id: NDIndex, key: str, **kwargs: Any
     ) -> np.ndarray:
         self.raise_if_closed()
-        assert meta is None
-        assert self.transferred, "`get_output_partition` called before barrier task"
+        if not self.transferred:
+            raise RuntimeError("`get_output_partition` called before barrier task")
 
         await self._ensure_output_worker(partition_id, key)
-
         await self.flush_receive()
-
         data = self._read_from_disk(partition_id)
-
-        def _() -> np.ndarray:
-            return convert_chunk(data)
-
-        return await self.offload(_)
+        return await self.offload(convert_chunk, data)
 
     def _get_assigned_worker(self, id: NDIndex) -> str:
         return self.worker_for[id]
 
 
-@dataclass(eq=False)
-class ArrayRechunkState(ShuffleState):
-    type: ClassVar[ShuffleType] = ShuffleType.ARRAY_RECHUNK
-    worker_for: dict[NDIndex, str]
-    old: ChunkedAxes
+@dataclass(frozen=True)
+class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
     new: ChunkedAxes
+    old: ChunkedAxes
 
-    def to_msg(self) -> dict[str, Any]:
-        return {
-            "status": "OK",
-            "type": ArrayRechunkState.type,
-            "run_id": self.run_id,
-            "worker_for": self.worker_for,
-            "old": self.old,
-            "new": self.new,
-            "output_workers": self.output_workers,
-        }
+    def _pin_output_workers(self, plugin: ShuffleSchedulerPlugin) -> dict[NDIndex, str]:
+        parts_out = product(*(range(len(c)) for c in self.new))
+        return plugin._pin_output_workers(
+            self.id, parts_out, _get_worker_for_hash_sharding
+        )
+
+    def create_run_on_worker(
+        self,
+        run_id: int,
+        worker_for: dict[NDIndex, str],
+        plugin: ShuffleWorkerPlugin,
+    ) -> ShuffleRun:
+        return ArrayRechunkRun(
+            worker_for=worker_for,
+            old=self.old,
+            new=self.new,
+            id=self.id,
+            run_id=run_id,
+            directory=os.path.join(
+                plugin.worker.local_directory,
+                f"shuffle-{self.id}-{run_id}",
+            ),
+            executor=plugin._executor,
+            local_address=plugin.worker.address,
+            rpc=plugin.worker.rpc,
+            scheduler=plugin.worker.scheduler,
+            memory_limiter_disk=plugin.memory_limiter_disk,
+            memory_limiter_comms=plugin.memory_limiter_comms,
+        )
 
 
-def get_worker_for_hash_sharding(
+def _get_worker_for_hash_sharding(
     output_partition: NDIndex, workers: Sequence[str]
 ) -> str:
     """Get address of target worker for this output partition using hash sharding"""

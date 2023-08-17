@@ -4,18 +4,17 @@ from asyncio import iscoroutinefunction
 
 import pytest
 
+from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
-    get_worker_for_range_sharding,
+    _get_worker_for_range_sharding,
     split_by_partition,
     split_by_worker,
 )
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
+from distributed.utils_test import gen_cluster
 
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
-
-from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
-from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
-from distributed.utils_test import gen_cluster
 
 
 @gen_cluster([("", 1)])
@@ -52,7 +51,7 @@ def test_split_by_worker():
     worker_for_mapping = {}
     npartitions = 3
     for part in range(npartitions):
-        worker_for_mapping[part] = get_worker_for_range_sharding(
+        worker_for_mapping[part] = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
     worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
@@ -90,15 +89,15 @@ def test_split_by_worker_many_workers():
     npartitions = 10
     worker_for_mapping = {}
     for part in range(npartitions):
-        worker_for_mapping[part] = get_worker_for_range_sharding(
+        worker_for_mapping[part] = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
     worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
     out = split_by_worker(df, "_partition", worker_for)
-    assert get_worker_for_range_sharding(npartitions, 5, workers) in out
-    assert get_worker_for_range_sharding(npartitions, 0, workers) in out
-    assert get_worker_for_range_sharding(npartitions, 7, workers) in out
-    assert get_worker_for_range_sharding(npartitions, 1, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 5, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 0, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 7, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 1, workers) in out
 
     assert sum(map(len, out.values())) == len(df)
 
