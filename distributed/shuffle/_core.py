@@ -285,16 +285,16 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
     def _pin_output_workers(
         self, plugin: ShuffleSchedulerPlugin
     ) -> dict[_T_partition_id, str]:
-        """TODO"""
+        """Pin output tasks to workers and return the mapping of partition ID to worker."""
 
     @abc.abstractmethod
-    def initialize_run_on_worker(
+    def create_run_on_worker(
         self,
         run_id: int,
         worker_for: dict[_T_partition_id, str],
         plugin: ShuffleWorkerPlugin,
     ) -> ShuffleRun:
-        """TODO"""
+        """Create the new shuffle run on the worker."""
 
 
 @dataclass(eq=False)

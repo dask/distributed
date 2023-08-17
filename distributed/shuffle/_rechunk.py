@@ -463,7 +463,7 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
             self.id, parts_out, _get_worker_for_hash_sharding
         )
 
-    def initialize_run_on_worker(
+    def create_run_on_worker(
         self,
         run_id: int,
         worker_for: dict[NDIndex, str],

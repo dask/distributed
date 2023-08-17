@@ -502,7 +502,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
         pick_worker = partial(_get_worker_for_range_sharding, self.npartitions)
         return plugin._pin_output_workers(self.id, self.parts_out, pick_worker)
 
-    def initialize_run_on_worker(
+    def create_run_on_worker(
         self, run_id: int, worker_for: dict[int, str], plugin: ShuffleWorkerPlugin
     ) -> ShuffleRun:
         return DataFrameShuffleRun(

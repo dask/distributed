@@ -288,7 +288,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
 
-        shuffle: ShuffleRun = result.spec.initialize_run_on_worker(
+        shuffle: ShuffleRun = result.spec.create_run_on_worker(
             result.run_id, result.worker_for, self
         )
         self.shuffles[shuffle_id] = shuffle
