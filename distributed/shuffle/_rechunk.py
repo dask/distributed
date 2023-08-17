@@ -293,15 +293,14 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
     This object is responsible for splitting, sending, receiving and combining
     data shards.
 
-    It is entirely agnostic to the distributed system and can perform a shuffle
-    with other `Shuffle` instances using `rpc` and `broadcast`.
+    It is entirely agnostic to the distributed system and can perform a rechunk
+    with other run instances using `rpc``.
 
-    The user of this needs to guarantee that only `Shuffle`s of the same unique
-    `ShuffleID` interact.
+    The user of this needs to guarantee that only `ArrayRechunkRun`s of the same unique
+    `ShuffleID` and `run_id` interact.
 
     Parameters
     ----------
-    # FIXME
     worker_for:
         A mapping partition_id -> worker_address.
     old:
@@ -318,8 +317,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         The scratch directory to buffer data in.
     executor:
         Thread pool to use for offloading compute.
-    loop:
-        The event loop.
     rpc:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.

@@ -342,14 +342,13 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     data shards.
 
     It is entirely agnostic to the distributed system and can perform a shuffle
-    with other `Shuffle` instances using `rpc` and `broadcast`.
+    with other run instances using `rpc`.
 
-    The user of this needs to guarantee that only `Shuffle`s of the same unique
-    `ShuffleID` interact.
+    The user of this needs to guarantee that only `DataFrameShuffleRun`s of the
+    same unique `ShuffleID` and `run_id` interact.
 
     Parameters
     ----------
-    # FIXME
     worker_for:
         A mapping partition_id -> worker_address.
     column:
@@ -364,8 +363,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         The scratch directory to buffer data in.
     executor:
         Thread pool to use for offloading compute.
-    loop:
-        The event loop.
     rpc:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.
