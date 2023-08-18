@@ -1618,9 +1618,7 @@ class Worker(BaseWorker, ServerNode):
                 abort_handshaking_comms()
 
         if _stops:
-
-            async def background_stops():
-                await asyncio.gather(*_stops)
+            await asyncio.gather(*_stops)
 
         # end copy-paste
 
