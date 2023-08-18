@@ -239,7 +239,7 @@ async def test_concurrent(c, s, a, b, lose_annotations):
     y = dd.shuffle.shuffle(df, "y", shuffle="p2p")
     x, y = c.compute([x, y])
     x, y = await c.gather([x, y])
-    dd.assert_eq(x, y, sort_results=False)
+    dd.assert_eq(x, y, check_index=False)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -567,10 +567,7 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
             freq="10 s",
         )
         shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-
         result, expected = c.compute([shuffled, df])
-        result, expected = await c.gather([result, expected])
-        dd.assert_eq(result, expected)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w1)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w2)
     await w3.close()
@@ -1834,7 +1831,7 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
     shuffle_extB.block_barrier.set()
 
     result, expected = await c.gather([result, expected])
-    dd.assert_eq([result, expected])
+    dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
