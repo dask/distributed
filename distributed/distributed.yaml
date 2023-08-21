@@ -274,6 +274,7 @@ distributed:
       max-history: 100
       nframes: 0
       ignore-modules:
+        - asyncio
         - distributed
         - dask
         - xarray
