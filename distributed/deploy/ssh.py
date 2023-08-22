@@ -134,7 +134,9 @@ class Worker(Process):
                     "Please install it using pip or conda."
                 )
 
-            self.connection = await asyncssh.connect(self.address, **self.connect_options)
+            self.connection = await asyncssh.connect(
+                self.address, **self.connect_options
+            )
         else:
             self.connection = connection
 
@@ -237,7 +239,9 @@ class Scheduler(Process):
 
             logger.debug("Created Scheduler Connection")
 
-            self.connection = await asyncssh.connect(self.address, **self.connect_options)
+            self.connection = await asyncssh.connect(
+                self.address, **self.connect_options
+            )
         else:
             self.connection = connection
 
