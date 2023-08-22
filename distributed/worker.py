@@ -2774,7 +2774,7 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
         timeout = dask.config.get("distributed.comm.timeouts.connect")
 
     from distributed.client import Client
-    
+
     try:
         client = Client.current()  # TODO: assumes the same scheduler
     except ValueError:
@@ -2796,8 +2796,6 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
         if not address or worker.scheduler.address == address:
             return worker._get_client(timeout=timeout)
 
-
-    
     raise ValueError("No global client found and no address provided")
 
 
