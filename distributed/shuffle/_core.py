@@ -13,7 +13,7 @@ from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
-from distributed.core import PooledRPCCall
+from distributed.core import PooledRPCCall, CommClosedError
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
@@ -104,12 +104,23 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     async def send(
         self, address: str, shards: list[tuple[_T_partition_id, bytes]]
     ) -> None:
-        self.raise_if_closed()
-        return await self.rpc(address).shuffle_receive(
-            data=to_serialize(shards),
-            shuffle_id=self.id,
-            run_id=self.run_id,
-        )
+        retries_left = 3
+        while True:
+            self.raise_if_closed()
+            try:
+                resp = await self.rpc(address).shuffle_receive(
+                    data=to_serialize(shards),
+                    shuffle_id=self.id,
+                    run_id=self.run_id,
+                )
+                break
+            except CommClosedError:
+                retries_left = retries_left - 1
+                if retries_left < 1:
+                    raise
+
+        return resp
+
 
     async def offload(self, func: Callable[..., _T], *args: Any) -> _T:
         self.raise_if_closed()
