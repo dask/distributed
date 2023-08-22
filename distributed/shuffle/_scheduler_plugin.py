@@ -120,6 +120,9 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         worker: str,
     ) -> ToPickle[ShuffleRunSpec]:
         try:
+            # FIXME: Sometimes, this doesn't actually get pickled
+            if isinstance(spec, ToPickle):
+                spec = spec.data
             return self.get(spec.id, worker)
         except KeyError:
             # FIXME: The current implementation relies on the barrier task to be

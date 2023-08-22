@@ -262,10 +262,6 @@ class ShuffleWorkerPlugin(WorkerPlugin):
                 key=key,
                 worker=self.worker.address,
             )
-        # if result["status"] == "error":
-        # raise RuntimeError(result["message"])
-        # assert result["status"] == "OK"
-
         if self.closed:
             raise ShuffleClosedError(f"{self} has already been closed")
         if shuffle_id in self.shuffles:
@@ -288,6 +284,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
 
+        # FIXME: Sometimes, this doesn't actually get pickled
+        if isinstance(result, ToPickle):
+            result = result.data
         shuffle: ShuffleRun = result.spec.create_run_on_worker(
             result.run_id, result.worker_for, self
         )
