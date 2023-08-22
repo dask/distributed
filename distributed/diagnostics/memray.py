@@ -34,7 +34,7 @@ def _start_memray(dask_worker: Worker, filename: str, **kwargs: Any) -> bool:
 
     dask_worker._memray = contextlib.ExitStack()  # type: ignore[attr-defined]
     dask_worker._memray.enter_context(  # type: ignore[attr-defined]
-        memray.Tracker(path, native_traces=True, **kwargs)
+        memray.Tracker(path, **kwargs)
     )
 
     return True
@@ -164,7 +164,7 @@ def memray_workers(
                 workers=w,
             )
             for worker_addr, profile in profiles.items():
-                path = directory / quote(worker_names[worker_addr], safe="")
+                path = directory / quote(str(worker_names[worker_addr]), safe="")
                 if report_args:
                     suffix = ".html"
                 else:

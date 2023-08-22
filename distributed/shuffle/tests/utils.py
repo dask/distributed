@@ -8,8 +8,7 @@ from distributed.client import Client
 from distributed.core import PooledRPCCall
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import Scheduler, TaskStateState
-from distributed.shuffle._shuffle import ShuffleId
-from distributed.shuffle._worker_plugin import ShuffleRun
+from distributed.shuffle._core import ShuffleId, ShuffleRun
 
 
 class PooledRPCShuffle(PooledRPCCall):

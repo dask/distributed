@@ -1542,11 +1542,6 @@ class ConnectionPool:
                 raise
             finally:
                 self._connecting_count -= 1
-        except asyncio.CancelledError:
-            current_task = asyncio.current_task()
-            assert current_task
-            reason = self._reasons.pop(current_task, "ConnectionPool closing.")
-            raise CommClosedError(reason)
         finally:
             self._pending_count -= 1
 
@@ -1599,12 +1594,13 @@ class ConnectionPool:
         except asyncio.CancelledError:
             # This is an outside cancel attempt
             connect_attempt.cancel()
-            try:
-                await connect_attempt
-            except CommClosedError:
-                pass
+            await connect_attempt
             raise
-        return await connect_attempt
+        try:
+            return connect_attempt.result()
+        except asyncio.CancelledError:
+            reason = self._reasons.pop(connect_attempt, "ConnectionPool closing.")
+            raise CommClosedError(reason)
 
     def reuse(self, addr: str, comm: Comm) -> None:
         """

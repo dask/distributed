@@ -348,8 +348,7 @@ class Nanny(ServerNode):
 
         self.ip = get_address_host(self.address)
 
-        for preload in self.preloads:
-            await preload.start()
+        await self.preloads.start()
 
         msg = await self.scheduler.register_nanny()
         for name, plugin in msg["nanny-plugins"].items():
@@ -581,8 +580,7 @@ class Nanny(ServerNode):
         self.status = Status.closing
         logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
 
-        for preload in self.preloads:
-            await preload.teardown()
+        await self.preloads.teardown()
 
         teardowns = [
             plugin.teardown(self)

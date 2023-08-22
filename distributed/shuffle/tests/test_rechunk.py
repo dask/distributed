@@ -17,11 +17,14 @@ from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
 
+from distributed.shuffle._core import ShuffleId
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import Split, split_axes
-from distributed.shuffle._scheduler_plugin import get_worker_for_hash_sharding
-from distributed.shuffle._shuffle import ShuffleId
-from distributed.shuffle._worker_plugin import ArrayRechunkRun
+from distributed.shuffle._rechunk import (
+    ArrayRechunkRun,
+    Split,
+    _get_worker_for_hash_sharding,
+    split_axes,
+)
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
 
@@ -52,8 +55,6 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
     ):
         s = Shuffle(
             worker_for=worker_for_mapping,
-            # FIXME: Is output_workers redundant with worker_for?
-            output_workers=set(worker_for_mapping.values()),
             old=old,
             new=new,
             directory=directory / name,
@@ -94,7 +95,7 @@ async def test_lowlevel_rechunk(
 
     new_indices = list(product(*(range(len(dim)) for dim in new)))
     for i, idx in enumerate(new_indices):
-        worker_for_mapping[idx] = get_worker_for_hash_sharding(i, workers)
+        worker_for_mapping[idx] = _get_worker_for_hash_sharding(i, workers)
 
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
 

@@ -13,6 +13,7 @@ import pytest
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
+from distributed.preloading import Preload
 from distributed.utils import open_port
 from distributed.utils_test import captured_logger, cluster, gen_cluster, gen_test
 
@@ -59,6 +60,19 @@ def dask_setup(worker):
         assert s.foo == "setup"
         async with Worker(s.address, preload=[text]) as w:
             assert w.foo == "setup"
+
+
+@gen_test()
+async def test_preload_manager_sequence():
+    text = """
+def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    async with Scheduler(dashboard_address=":0", preload=text) as s:
+        assert len(s.preloads) == 1
+        assert isinstance(s.preloads[0], Preload)
+        # Make sure list comprehensions return the correct # of items
+        assert len([x for x in s.preloads]) == len(s.preloads)
 
 
 @gen_cluster(nthreads=[])
@@ -286,7 +300,7 @@ async def test_client_preload_click(s):
 
 
 @gen_test()
-async def test_failure_doesnt_crash():
+async def test_failure_doesnt_crash_scheduler():
     text = """
 def dask_setup(worker):
     raise Exception(123)
@@ -295,16 +309,71 @@ def dask_teardown(worker):
     raise Exception(456)
 """
 
-    with captured_logger("distributed.scheduler") as s_logger:
-        with captured_logger("distributed.worker") as w_logger:
-            async with Scheduler(dashboard_address=":0", preload=text) as s:
-                async with Worker(s.address, preload=[text]) as w:
-                    pass
+    with captured_logger("distributed.preloading") as logger:
+        async with Scheduler(dashboard_address=":0", preload=text):
+            pass
 
-    assert "123" in s_logger.getvalue()
-    assert "123" in w_logger.getvalue()
-    assert "456" in s_logger.getvalue()
-    assert "456" in w_logger.getvalue()
+    logs = logger.getvalue()
+    assert "123" in logs
+    assert "456" in logs
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_failure_doesnt_crash_worker(s):
+    text = """
+def dask_setup(worker):
+    raise Exception(123)
+
+def dask_teardown(worker):
+    raise Exception(456)
+"""
+
+    with captured_logger("distributed.preloading") as logger:
+        async with Worker(s.address, preload=[text]):
+            pass
+
+    logs = logger.getvalue()
+    assert "123" in logs
+    assert "456" in logs
+
+
+@gen_cluster(client=False, nthreads=[])
+async def test_failure_doesnt_crash_nanny(s):
+    text = """
+def dask_setup(worker):
+    raise Exception(123)
+
+def dask_teardown(worker):
+    raise Exception(456)
+"""
+
+    with captured_logger("distributed.preloading") as logger:
+        async with Nanny(s.address, preload_nanny=[text]):
+            pass
+
+    logs = logger.getvalue()
+    assert "123" in logs
+    assert "456" in logs
+
+
+@gen_cluster(client=False)
+async def test_failure_doesnt_crash_client(s, a, b):
+    text = """
+def dask_setup(worker):
+    raise Exception(123)
+
+def dask_teardown(worker):
+    raise Exception(456)
+"""
+
+    with dask.config.set({"distributed.client.preload": [text]}):
+        with captured_logger("distributed.preloading") as logger:
+            async with Client(s.address, asynchronous=True):
+                pass
+
+    logs = logger.getvalue()
+    assert "123" in logs
+    assert "456" in logs
 
 
 @gen_cluster(nthreads=[])
