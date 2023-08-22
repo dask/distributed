@@ -13,7 +13,7 @@ from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
-from distributed.core import PooledRPCCall, CommClosedError
+from distributed.core import CommClosedError, PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
@@ -120,7 +120,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
                     raise
 
         return resp
-
 
     async def offload(self, func: Callable[..., _T], *args: Any) -> _T:
         self.raise_if_closed()
