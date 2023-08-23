@@ -263,7 +263,6 @@ class ShuffleWorkerPlugin(WorkerPlugin):
                 key=key,
                 worker=self.worker.address,
             )
-        # FIXME: Sometimes, this doesn't actually get pickled
         if isinstance(result, ToPickle):
             result = result.data
         if self.closed:
