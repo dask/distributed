@@ -189,7 +189,12 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
 
 @gen_test()
 async def test_basic_integration_local_cluster():
-    async with LocalCluster(n_workers=2, processes=False, asynchronous=True) as cluster:
+    async with LocalCluster(
+        n_workers=2,
+        processes=False,
+        asynchronous=True,
+        dashboard_address=":0",
+    ) as cluster:
         df = dask.datasets.timeseries(
             start="2000-01-01",
             end="2000-01-10",
