@@ -1053,7 +1053,8 @@ def test_processing_chain():
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
     worker_for = pd.Series(worker_for, name="_worker").astype("category")
 
-    data = split_by_worker(df, "_partitions", worker_for=worker_for)
+    meta = df.head(0)
+    data = split_by_worker(df, "_partitions", worker_for=worker_for, meta=meta)
     assert set(data) == set(worker_for.cat.categories)
     assert sum(map(len, data.values())) == len(df)
 
@@ -1098,7 +1099,7 @@ def test_processing_chain():
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = convert_partition(bio.read(), df.head(0))
+        out[k] = convert_partition(bio.read(), meta)
 
     shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(
@@ -1505,6 +1506,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
     def new_shuffle(
         self,
         name,
+        meta,
         worker_for_mapping,
         directory,
         loop,
@@ -1512,6 +1514,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
     ):
         s = Shuffle(
             column="_partition",
+            meta=meta,
             worker_for=worker_for_mapping,
             directory=directory / name,
             id=ShuffleId(name),
@@ -1568,6 +1571,7 @@ async def test_basic_lowlevel_shuffle(
             shuffles.append(
                 local_shuffle_pool.new_shuffle(
                     name=workers[ix],
+                    meta=meta,
                     worker_for_mapping=worker_for_mapping,
                     directory=tmp_path,
                     loop=loop_in_thread,
@@ -1623,7 +1627,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
         df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
         df["_partition"] = df.x % npartitions
         dfs.append(df)
-
+    meta = dfs[0].head(0)
     workers = ["A", "B"]
 
     worker_for_mapping = {}
@@ -1642,6 +1646,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
             name="A",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1649,6 +1654,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
         )
         sB = local_shuffle_pool.new_shuffle(
             name="B",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1674,6 +1680,7 @@ async def test_error_send(tmp_path, loop_in_thread):
         df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
         df["_partition"] = df.x % npartitions
         dfs.append(df)
+    meta = dfs[0].head(0)
 
     workers = ["A", "B"]
 
@@ -1693,6 +1700,7 @@ async def test_error_send(tmp_path, loop_in_thread):
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
             name="A",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1700,6 +1708,7 @@ async def test_error_send(tmp_path, loop_in_thread):
         )
         sB = local_shuffle_pool.new_shuffle(
             name="B",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1724,6 +1733,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
         df["_partition"] = df.x % npartitions
         dfs.append(df)
+    meta = dfs[0].head(0)
 
     workers = ["A", "B"]
 
@@ -1743,6 +1753,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
             name="A",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1750,6 +1761,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         )
         sB = local_shuffle_pool.new_shuffle(
             name="B",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -2083,9 +2095,31 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
 @gen_cluster(client=True)
 async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
     def make_partition(i):
-        """Return null column for one partition"""
+        """Return null column for every other partition"""
         if i % 2 == 1:
             return pd.DataFrame({"a": np.random.random(10), "b": [None] * 10})
+        return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
+
+    ddf = dd.from_map(make_partition, range(50))
+    out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
+    result, expected = c.compute([ddf, out])
+    del out
+    result = await result
+    expected = await expected
+    dd.assert_eq(result, expected)
+    del result
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_handle_mismatching_partitions_p2p_shuffling(c, s, a, b):
+    def make_partition(i):
+        """Return mismatched column types for every other partition"""
+        if i % 2 == 1:
+            return pd.DataFrame({"a": np.random.random(10), "b": [True] * 10})
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
 
     ddf = dd.from_map(make_partition, range(50))
