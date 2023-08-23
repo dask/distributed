@@ -115,10 +115,14 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def get_or_create(
         self,
-        spec: ShuffleSpec,
+        # FIXME: This should never be ToPickle[ShuffleSpec]
+        spec: ShuffleSpec | ToPickle[ShuffleSpec],
         key: str,
         worker: str,
     ) -> ToPickle[ShuffleRunSpec]:
+        # FIXME: Sometimes, this doesn't actually get pickled
+        if isinstance(spec, ToPickle):
+            spec = spec.data
         try:
             return self.get(spec.id, worker)
         except KeyError:

@@ -23,7 +23,7 @@ pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
 import dask
-from dask.distributed import Event, Nanny, Worker
+from dask.distributed import Event, LocalCluster, Nanny, Worker
 from dask.utils import stringify
 
 from distributed.client import Client
@@ -185,6 +185,28 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
+
+
+@pytest.mark.parametrize("processes", [True, False])
+@gen_test()
+async def test_basic_integration_local_cluster(processes):
+    async with LocalCluster(
+        n_workers=2,
+        processes=processes,
+        asynchronous=True,
+        dashboard_address=":0",
+    ) as cluster:
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        c = cluster.get_client()
+        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        x, y = c.compute([df, out])
+        x, y = await c.gather([x, y])
+        dd.assert_eq(x, y)
 
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
