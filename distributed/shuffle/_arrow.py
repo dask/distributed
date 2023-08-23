@@ -56,7 +56,7 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     while file.tell() < end:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
-    table = pa.concat_tables(shards, promote=True)
+    table = pa.concat_tables(shards, promote=True).combine_chunks()
 
     df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     return df.astype(meta.dtypes, copy=False)
@@ -68,7 +68,7 @@ def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
 
     return pa.concat_tables(
         (deserialize_table(buffer) for buffer in data), promote=True
-    )
+    ).combine_chunks()
 
 
 def serialize_table(table: pa.Table) -> bytes:
