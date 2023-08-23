@@ -1564,6 +1564,9 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
+        # on 3.11 this uses asyncio.timeout as a cancel scope to avoid having
+        # to track inner and outer CancelledError exceptions and correctly
+        # call .uncancel() when a CancelledError is caught.
         if sys.version_info >= (3, 11):
             reason: str | None = None
             try:
