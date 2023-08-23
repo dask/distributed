@@ -665,13 +665,7 @@ class Server:
             if not pc.is_running():
                 pc.start()
 
-    def __stop_listeners(self) -> asyncio.Future:
-        if self.__stopped:
-            noop_future = asyncio.get_event_loop().create_future()
-            noop_future.set_result(None)
-            return noop_future
-        self.__stopped = True
-        self.monitor.close()
+    def _stop_listeners(self) -> asyncio.Future:
         listeners_to_stop: set[Awaitable] = set()
 
         for listener in self.listeners:
@@ -688,11 +682,15 @@ class Server:
 
         return asyncio.gather(*listeners_to_stop)
 
-    def stop(self):
+    def stop(self) -> None:
         if self.__stopped:
             return
-        if not (stop_listeners := self.__stop_listeners()).done():
-            self._ongoing_background_tasks.call_soon(asyncio.wait_for(stop_listeners))
+        self.__stopped = True
+        self.monitor.close()
+        if not (stop_listeners := self._stop_listeners()).done():
+            self._ongoing_background_tasks.call_soon(
+                asyncio.wait_for(stop_listeners, timeout=None)
+            )
         if self._workdir is not None:
             self._workdir.release()
 
@@ -1031,12 +1029,14 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    async def close(self, timeout=None, reason=""):
+    async def close(self, timeout: float | None = None, reason: str = "") -> None:
         try:
             for pc in self.periodic_callbacks.values():
                 pc.stop()
 
-            await self.__stop_listeners()
+            self.__stopped = True
+            self.monitor.close()
+            await self._stop_listeners()
 
             # TODO: Deal with exceptions
             await self._ongoing_background_tasks.stop()
