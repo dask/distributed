@@ -41,6 +41,7 @@ from dask.utils import (
     format_bytes,
     funcname,
     parse_timedelta,
+    shorten_traceback,
     stringify,
     typename,
 )
@@ -317,18 +318,8 @@ class Future(WrappedKey):
             The result of the computation. Or a coroutine if the client is asynchronous.
         """
         self._verify_initialized()
-        if self.client.asynchronous:
+        with shorten_traceback():
             return self.client.sync(self._result, callback_timeout=timeout)
-
-        # shorten error traceback
-        result = self.client.sync(self._result, callback_timeout=timeout, raiseit=False)
-        if self.status == "error":
-            typ, exc, tb = result
-            raise exc.with_traceback(tb)
-        elif self.status == "cancelled":
-            raise result
-        else:
-            return result
 
     async def _result(self, raiseit=True):
         await self._state.wait()
@@ -2393,13 +2384,15 @@ class Client(SyncMethodMixin):
                 "Consider using a normal for loop and Client.submit/gather"
             )
 
-        elif isinstance(futures, Iterator):
+        if isinstance(futures, Iterator):
             return (self.gather(f, errors=errors, direct=direct) for f in futures)
-        else:
-            try:
-                local_worker = get_worker()
-            except ValueError:
-                local_worker = None
+
+        try:
+            local_worker = get_worker()
+        except ValueError:
+            local_worker = None
+
+        with shorten_traceback():
             return self.sync(
                 self._gather,
                 futures,
