@@ -63,5 +63,5 @@ repos:
           - pytest
           - tornado
           - pyarrow
-          - git+https://github.com/dask/dask
+          - git+https://github.com/crusaderky/dask@ipdb_except_hook  # DNM
           - git+https://github.com/dask/zict
