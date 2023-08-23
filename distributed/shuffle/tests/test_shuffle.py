@@ -147,8 +147,7 @@ async def test_basic_cudf_support(c, s, a, b):
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     assert shuffled.npartitions == df.npartitions
 
-    result, expected = c.compute([shuffled, df])
-    result, expected = await c.gather([result, expected])
+    result, expected = await c.compute([shuffled, df], sync=True)
     dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)
@@ -177,8 +176,7 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
         assert shuffled.npartitions == df.npartitions
     else:
         assert shuffled.npartitions == npartitions
-    result, expected = c.compute([shuffled, df])
-    result, expected = await c.gather([result, expected])
+    result, expected = await c.compute([shuffled, df], sync=True)
     dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)
@@ -237,9 +235,9 @@ async def test_concurrent(c, s, a, b, lose_annotations):
     )
     x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     y = dd.shuffle.shuffle(df, "y", shuffle="p2p")
-    x, y = c.compute([x, y])
-    x, y = await c.gather([x, y])
-    dd.assert_eq(x, y, check_index=False)
+    df, x, y = await c.compute([df, x, y], sync=True)
+    dd.assert_eq(x, df, check_index=False)
+    dd.assert_eq(y, df, check_index=False)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -335,11 +333,11 @@ async def test_closed_worker_during_transfer(c, s, a, b):
         freq="10 s",
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    result, expected = c.compute([shuffled, df])
+    fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
-    result, expected = await c.gather([result, expected])
+    result, expected = await fut
     dd.assert_eq(result, expected)
 
     await c.close()
@@ -439,13 +437,13 @@ async def test_crashed_worker_during_transfer(c, s, a):
             freq="10 s",
         )
         shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        result, expected = c.compute([shuffled, df])
+        fut = c.compute([shuffled, df], sync=True)
         await wait_until_worker_has_tasks(
             "shuffle-transfer", killed_worker_address, 1, s
         )
         await n.process.process.kill()
 
-        result, expected = await c.gather([result, expected])
+        result, expected = await fut
         dd.assert_eq(result, expected)
 
         await c.close()
@@ -508,11 +506,11 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
             freq="10 s",
         )
         shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        result, expected = c.compute([shuffled, df])
+        fut = c.compute([shuffled, df], sync=True)
         await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b, 0.001)
         await b.close()
 
-        result, expected = await c.gather([result, expected])
+        result, expected = await fut
         dd.assert_eq(result, expected)
 
         await c.close()
@@ -542,13 +540,13 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
                 freq="10 s",
             )
             shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-            result, expected = c.compute([shuffled, df])
+            fut = c.compute([shuffled, df], sync=True)
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", n.worker_address, 1, s
             )
             await n.process.process.kill()
 
-            result, expected = await c.gather([result, expected])
+            result, expected = await fut
             dd.assert_eq(result, expected)
 
             await c.close()
@@ -567,12 +565,12 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
             freq="10 s",
         )
         shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        result, expected = c.compute([shuffled, df])
+        fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w1)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w2)
     await w3.close()
 
-    result, expected = await c.gather([result, expected])
+    result, expected = await fut
     dd.assert_eq(result, expected)
 
     await check_worker_cleanup(w1)
@@ -606,7 +604,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
         freq="10 s",
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    result, expected = c.compute([shuffled, df])
+    fut = c.compute([shuffled, df], sync=True)
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
@@ -642,7 +640,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     restarted_shuffle = alive_shuffles[shuffle_id]
     restarted_shuffle.block_inputs_done.set()
 
-    result, expected = await c.gather([result, expected])
+    result, expected = await fut
     dd.assert_eq(result, expected)
 
     await c.close()
@@ -712,7 +710,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
         freq="10 s",
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    result, expected = c.compute([shuffled, df])
+    fut = c.compute([shuffled, df], sync=True)
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
 
     key = barrier_key(shuffle_id)
@@ -750,7 +748,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     restarted_shuffle = alive_shuffles[shuffle_id]
     restarted_shuffle.block_inputs_done.set()
 
-    result, expected = await c.gather([result, expected])
+    result, expected = await fut
     dd.assert_eq(result, expected)
 
     await c.close()
@@ -774,7 +772,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
             freq="10 s",
         )
         shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        result, expected = c.compute([shuffled, df])
+        fut = c.compute([shuffled, df], sync=True)
         shuffle_id = await wait_until_new_shuffle_is_initialized(s)
         key = barrier_key(shuffle_id)
         # Ensure that barrier is not executed on the nanny
@@ -799,7 +797,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         restarted_shuffle = get_shuffle_run_from_worker(shuffle_id, a)
         restarted_shuffle.block_inputs_done.set()
 
-        result, expected = await c.gather([result, expected])
+        result, expected = await fut
         dd.assert_eq(result, expected)
 
         await c.close()
@@ -816,11 +814,11 @@ async def test_closed_worker_during_unpack(c, s, a, b):
         freq="10 s",
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    result, expected = c.compute([shuffled, df])
+    fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
     await b.close()
 
-    result, expected = await c.gather([result, expected])
+    result, expected = await fut
     dd.assert_eq(result, expected)
 
     await c.close()
@@ -1825,12 +1823,12 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
             await asyncio.sleep(0)
 
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    result, expected = c.compute([shuffled, df])
+    fut = c.compute([shuffled, df], sync=True)
     await wait_until_new_shuffle_is_initialized(s)
     shuffle_extA.block_barrier.set()
     shuffle_extB.block_barrier.set()
 
-    result, expected = await c.gather([result, expected])
+    result, expected = await fut
     dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)
