@@ -887,6 +887,30 @@ async def test_remove_cancels_connect_attempts():
 
 
 @gen_test()
+async def test_remove_cancels_connect_before_task_running():
+    loop = asyncio.get_running_loop()
+    connect_finished = loop.create_future()
+
+    async def connect(*args, **kwargs):
+        await connect_finished
+
+    async def connect_to_server():
+        with pytest.raises(CommClosedError, match="Address removed."):
+            await rpc.connect("tcp://0.0.0.0")
+        return True
+
+    rpc = await ConnectionPool(limit=1)
+    with mock.patch("distributed.core.connect", connect):
+        t1 = asyncio.create_task(connect_to_server())
+        # Cancel the actual connect task before it can even run
+        while not rpc._connecting:
+            await asyncio.sleep(0)
+        rpc.remove("tcp://0.0.0.0")
+
+        assert await t1
+
+
+@gen_test()
 async def test_connection_pool_respects_limit():
     limit = 5
 

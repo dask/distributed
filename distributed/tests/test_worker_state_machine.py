@@ -57,7 +57,6 @@ from distributed.worker_state_machine import (
     RetryBusyWorkerEvent,
     RetryBusyWorkerLater,
     SecedeEvent,
-    SerializedTask,
     StateMachineEvent,
     TaskErredMsg,
     TaskState,
@@ -375,28 +374,28 @@ def test_event_to_dict_without_annotations():
 
 def test_computetask_to_dict():
     """The potentially very large ComputeTaskEvent.run_spec is not stored in the log"""
+
+    def f(arg):
+        pass
+
     ev = ComputeTaskEvent(
         key="x",
         who_has={"y": ["w1"]},
         nbytes={"y": 123},
         priority=(0,),
         duration=123.45,
-        run_spec=None,
+        run_spec=(f, "arg", {}),
         resource_restrictions={},
         actor=False,
         annotations={},
         span_id=None,
         stimulus_id="test",
-        function=b"blob",
-        args=b"blob",
-        kwargs=None,
         run_id=5,
     )
-    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    assert ev.run_spec is not None
     ev2 = ev.to_loggable(handled=11.22)
     assert ev2.handled == 11.22
-    assert ev2.run_spec == SerializedTask(task=None)
-    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    assert ev2.run_spec is None
     d = recursive_to_dict(ev2)
     assert d == {
         "cls": "ComputeTaskEvent",
@@ -404,7 +403,7 @@ def test_computetask_to_dict():
         "who_has": {"y": ["w1"]},
         "nbytes": {"y": 123},
         "priority": [0],
-        "run_spec": [None, None, None, None],
+        "run_spec": None,
         "duration": 123.45,
         "resource_restrictions": {},
         "actor": False,
@@ -412,14 +411,11 @@ def test_computetask_to_dict():
         "span_id": None,
         "stimulus_id": "test",
         "handled": 11.22,
-        "function": None,
-        "args": None,
-        "kwargs": None,
         "run_id": 5,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert isinstance(ev3, ComputeTaskEvent)
-    assert ev3.run_spec == SerializedTask(task=None)
+    assert ev3.run_spec is None
     assert ev3.priority == (0,)  # List is automatically converted back to tuple
 
 
@@ -431,15 +427,12 @@ def test_computetask_dummy():
         nbytes={},
         priority=(0,),
         duration=1.0,
-        run_spec=None,
+        run_spec=ComputeTaskEvent.dummy_runspec(),
         resource_restrictions={},
         actor=False,
         annotations={},
         span_id=None,
         stimulus_id="s",
-        function=None,
-        args=None,
-        kwargs=None,
         run_id=0,
     )
 

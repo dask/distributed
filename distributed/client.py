@@ -843,7 +843,7 @@ class Client(SyncMethodMixin):
 
     _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
-    preloads: list[preloading.Preload]
+    preloads: preloading.PreloadManager
     __loop: IOLoop | None = None
 
     def __init__(
@@ -1313,8 +1313,7 @@ class Client(SyncMethodMixin):
         for topic, handler in Client._default_event_handlers.items():
             self.subscribe_topic(topic, handler)
 
-        for preload in self.preloads:
-            await preload.start()
+        await self.preloads.start()
 
         self._handle_report_task = asyncio.create_task(self._handle_report())
 
@@ -1702,8 +1701,7 @@ class Client(SyncMethodMixin):
 
         self.status = "closing"
 
-        for preload in self.preloads:
-            await preload.teardown()
+        await self.preloads.teardown()
 
         with suppress(AttributeError):
             for pc in self._periodic_callbacks.values():
@@ -2210,8 +2208,8 @@ class Client(SyncMethodMixin):
         if mismatched_futures:
             raise ValueError(
                 "Cannot gather Futures created by another client. "
-                f"These are the {len(mismatched_futures)} (out of {len(futures)}) mismatched Futures and their client IDs "
-                f"(this client is {self.id}): "
+                f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
+                f"mismatched Futures and their client IDs (this client is {self.id}): "
                 f"{ {f: f.client.id for f in mismatched_futures} }"
             )
         keys = [stringify(future.key) for future in future_set]
