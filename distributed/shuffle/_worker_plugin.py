@@ -218,7 +218,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         if shuffle is None:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=spec.id,
-                spec=ToPickle(spec),
+                spec=spec,
                 key=key,
             )
 
@@ -239,7 +239,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     async def _refresh_shuffle(
         self,
         shuffle_id: ShuffleId,
-        spec: ToPickle,
+        spec: ShuffleSpec,
         key: str,
     ) -> ShuffleRun:
         ...
@@ -247,7 +247,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     async def _refresh_shuffle(
         self,
         shuffle_id: ShuffleId,
-        spec: ToPickle | None = None,
+        spec: ShuffleSpec | None = None,
         key: str | None = None,
     ) -> ShuffleRun:
         result: ShuffleRunSpec
@@ -258,7 +258,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             )
         else:
             result = await self.worker.scheduler.shuffle_get_or_create(
-                spec=spec,
+                spec=ToPickle(spec),
                 key=key,
                 worker=self.worker.address,
             )
