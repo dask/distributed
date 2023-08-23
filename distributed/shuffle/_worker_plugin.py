@@ -250,7 +250,8 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         spec: ShuffleSpec | None = None,
         key: str | None = None,
     ) -> ShuffleRun:
-        result: ShuffleRunSpec
+        # FIXME: This should never be ToPickle[ShuffleRunSpec]
+        result: ShuffleRunSpec | ToPickle[ShuffleRunSpec]
         if spec is None:
             result = await self.worker.scheduler.shuffle_get(
                 id=shuffle_id,

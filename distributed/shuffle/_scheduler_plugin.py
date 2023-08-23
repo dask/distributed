@@ -115,7 +115,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def get_or_create(
         self,
-        spec: ShuffleSpec,
+        # FIXME: This should never be ToPickle[ShuffleSpec]
+        spec: ShuffleSpec | ToPickle[ShuffleSpec],
         key: str,
         worker: str,
     ) -> ToPickle[ShuffleRunSpec]:
