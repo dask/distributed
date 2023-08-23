@@ -187,11 +187,12 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.parametrize("processes", [True, False])
 @gen_test()
-async def test_basic_integration_local_cluster():
+async def test_basic_integration_local_cluster(processes):
     async with LocalCluster(
         n_workers=2,
-        processes=False,
+        processes=processes,
         asynchronous=True,
         dashboard_address=":0",
     ) as cluster:
