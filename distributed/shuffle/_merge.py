@@ -52,7 +52,7 @@ def _calculate_partitions(df: pd.DataFrame, index: IndexLabel, npartitions: int)
         meta=df._meta._constructor_sliced([0]),
         transform_divisions=False,
     )
-    df2 = df.assign(**{_HASH_COLUMN_NAME: partitions})
+    df2 = df.assign(**{_HASH_COLUMN_NAME: partitions.values})
     df2._meta.index.name = df._meta.index.name
     return df2
 
