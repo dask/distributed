@@ -23,8 +23,9 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
+from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
-from dask.utils import parse_timedelta, stringify, tmpfile, typename
+from dask.utils import parse_timedelta, tmpfile, typename
 
 from distributed import (
     CancelledError,
@@ -198,13 +199,17 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 
         if ndeps == 0:
             x = da.random.random((100, 100), chunks=(10, 10))
+            random_keys = set(flatten(x.__dask_keys__()))
+            trivial_deps = {}
         else:
 
             def random(**kwargs):
                 assert len(kwargs) == ndeps
                 return np.random.random((10, 10))
 
-            trivial_deps = {f"k{i}": delayed(object()) for i in range(ndeps)}
+            trivial_deps = {
+                f"k{i}": delayed(object(), name=f"object-{i}") for i in range(ndeps)
+            }
 
             # TODO is there a simpler (non-blockwise) way to make this sort of graph?
             x = da.blockwise(
@@ -214,6 +219,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
                 dtype=float,
                 **trivial_deps,
             )
+            random_keys = set(flatten(x.__dask_keys__()))
 
         xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
         await xsum
@@ -223,7 +229,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         secondary_worker_key_fractions = []
         for keys in x.__dask_keys__():
             # Iterate along rows of the array.
-            keys = {stringify(k) for k in keys}
+            keys = set(keys)
 
             # No more than 2 workers should have any keys
             assert sum(any(k in w.data for k in keys) for w in workers) <= 2
@@ -251,10 +257,12 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
             for log in worker.transfer_incoming_log:
                 keys = log["keys"]
                 # The root-ish tasks should never be transferred
-                assert not any(k.startswith("random") for k in keys), keys
+                assert not random_keys.intersection(keys)
                 # `object-` keys (the trivial deps of the root random tasks) should be
                 # transferred
-                if any(not k.startswith("object") for k in keys):
+                if any(
+                    (not isinstance(k, str) or not k.startswith("object")) for k in keys
+                ):
                     # But not many other things should be
                     unexpected_transfers.append(list(keys))
 
@@ -2640,7 +2648,7 @@ async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     ev = Event()
     t0 = await padded_time(before=0)
     x0 = c.submit(ev.wait, key=("x", 0))
-    await wait_for_state(str(x0.key), "executing", a)
+    await wait_for_state(x0.key, "executing", a)
     tg = s.task_groups["x"]
     assert tg.start == tg.stop == 0
     t1 = await padded_time()
@@ -2675,7 +2683,7 @@ async def test_task_group_done(c, s, a, b):
 
     await wait([x0, x1, x2, y])
     del x2  # forgotten
-    await async_poll_for(lambda: str(("x", 2)) not in s.tasks, timeout=5)
+    await async_poll_for(lambda: ("x", 2) not in s.tasks, timeout=5)
 
     tg = s.task_groups["x"]
     assert tg.states == {

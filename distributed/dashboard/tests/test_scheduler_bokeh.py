@@ -15,7 +15,6 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 
 import dask
 from dask.core import flatten
-from dask.utils import stringify
 
 from distributed import Event
 from distributed.client import wait
@@ -910,7 +909,7 @@ async def test_TaskGraph_complex(c, s, a, b):
     gp.update()
     assert set(gp.layout.index.values()) == set(range(len(gp.layout.index)))
     visible = gp.node_source.data["visible"]
-    keys = list(map(stringify, flatten(y.__dask_keys__())))
+    keys = list(flatten(y.__dask_keys__()))
     assert all(visible[gp.layout.index[key]] == "True" for key in keys)
 
 
