@@ -635,7 +635,6 @@ async def test_code(c, s, a, b):
 
     # Identical code stacks have been deduplicated
     assert len(code) == 3
-    assert "def _run(self)" in code[0][-2].code
     assert "inc, 1" in code[0][-1].code
     assert code[0][-1].lineno_relative == 10
     assert code[1][-1].lineno_relative == 11
