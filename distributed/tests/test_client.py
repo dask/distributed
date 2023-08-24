@@ -458,21 +458,46 @@ def test_Future_release_sync(c):
     poll_for(lambda: not c.futures, timeout=0.3)
 
 
-def test_short_tracebacks(loop, c):
-    tblib = pytest.importorskip("tblib")
+@pytest.mark.parametrize("method", ["result", "gather"])
+def test_short_tracebacks(c, method):
+    """
+    See also
+    --------
+    test_short_tracebacks_async
+    dask/tests/test_traceback.py
+    """
     future = c.submit(div, 1, 0)
-    try:
-        future.result()
-    except Exception:
-        _, _, tb = sys.exc_info()
-    tb = tblib.Traceback(tb).to_dict()
-    n = 0
+    with pytest.raises(ZeroDivisionError) as e:
+        if method == "result":
+            future.result()
+        else:
+            c.gather(future)
 
-    while tb is not None:
-        n += 1
-        tb = tb["tb_next"]
+    frames = list(traceback.walk_tb(e.value.__traceback__))
+    assert len(frames) < 4
 
-    assert n < 5
+
+@pytest.mark.parametrize("method", ["await", "result", "gather"])
+@gen_cluster(client=True)
+async def test_short_tracebacks_async(c, s, a, b, method):
+    """
+    See also
+    --------
+    test_short_tracebacks
+    dask/tests/test_traceback.py
+    """
+    future = c.submit(div, 1, 0)
+
+    with pytest.raises(ZeroDivisionError) as e:
+        if method == "await":
+            await future
+        elif method == "result":
+            await future.result()
+        else:
+            await c.gather(future)
+
+    frames = list(traceback.walk_tb(e.value.__traceback__))
+    assert len(frames) < 4
 
 
 @gen_cluster(client=True)
