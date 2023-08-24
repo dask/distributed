@@ -77,8 +77,6 @@ class ReplayTaskClient:
         For a given future return the func, args and kwargs and future
         deps that would be executed remotely.
         """
-        from distributed.client import Future
-
         if isinstance(future, Future):
             await wait(future)
             key = future.key
