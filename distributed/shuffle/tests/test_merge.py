@@ -370,3 +370,27 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 ),
                 pd.merge(pdl, pdr, how=how, left_on=["a", "b"], right_on=["d", "e"]),
             )
+
+
+@pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
+@gen_cluster(client=True)
+async def test_index_merge_p2p(c, s, a, b, how):
+    pdf_left = pd.DataFrame({"a": [4, 2, 3] * 10, "b": 1}).set_index("a")
+    pdf_right = pd.DataFrame({"a": [4, 2, 3] * 10, "c": 1})
+
+    left = dd.from_pandas(pdf_left, npartitions=5, sort=False)
+    right = dd.from_pandas(pdf_right, npartitions=6)
+
+    assert_eq(
+        await c.compute(
+            left.merge(right, how=how, left_index=True, right_on="a", shuffle="p2p")
+        ),
+        pdf_left.merge(pdf_right, how=how, left_index=True, right_on="a"),
+    )
+
+    assert_eq(
+        await c.compute(
+            right.merge(left, how=how, right_index=True, left_on="a", shuffle="p2p")
+        ),
+        pdf_right.merge(pdf_left, how=how, right_index=True, left_on="a"),
+    )

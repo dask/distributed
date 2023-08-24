@@ -20,11 +20,12 @@ from dask.utils import key_split
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.worker import Status
 
+np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
 import dask
-from dask.distributed import Event, Nanny, Worker
+from dask.distributed import Event, LocalCluster, Nanny, Worker
 
 from distributed.client import Client
 from distributed.scheduler import KilledWorker, Scheduler
@@ -38,7 +39,7 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
     DataFrameShuffleRun,
-    get_worker_for_range_sharding,
+    _get_worker_for_range_sharding,
     split_by_partition,
     split_by_worker,
 )
@@ -122,6 +123,40 @@ async def test_minimal_version(c, s, a, b):
         await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
+@pytest.mark.gpu
+@pytest.mark.filterwarnings(
+    "ignore:Ignoring the following arguments to `from_pyarrow_table_dispatch`."
+)
+@gen_cluster(client=True)
+async def test_basic_cudf_support(c, s, a, b):
+    cudf = pytest.importorskip("cudf")
+    pytest.importorskip("dask_cudf")
+
+    try:
+        from dask.dataframe.dispatch import to_pyarrow_table_dispatch
+
+        to_pyarrow_table_dispatch(cudf.DataFrame())
+    except TypeError:
+        pytest.skip(reason="Newer version of dask_cudf is required.")
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    ).to_backend("cudf")
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    assert out.npartitions == df.npartitions
+    x, y = c.compute([df.x.size, out.x.size])
+    x = await x
+    y = await y
+    assert x == y
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
 def get_shuffle_run_from_worker(shuffle_id: ShuffleId, worker: Worker) -> ShuffleRun:
     plugin = worker.plugins["shuffle"]
     assert isinstance(plugin, ShuffleWorkerPlugin)
@@ -151,6 +186,28 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
+
+
+@pytest.mark.parametrize("processes", [True, False])
+@gen_test()
+async def test_basic_integration_local_cluster(processes):
+    async with LocalCluster(
+        n_workers=2,
+        processes=processes,
+        asynchronous=True,
+        dashboard_address=":0",
+    ) as cluster:
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        c = cluster.get_client()
+        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        x, y = c.compute([df, out])
+        x, y = await c.gather([x, y])
+        dd.assert_eq(x, y)
 
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
@@ -476,7 +533,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._scheduler_plugin.get_worker_for_range_sharding",
+        "distributed.shuffle._shuffle._get_worker_for_range_sharding",
         mock_get_worker_for_range_sharding,
     ):
         df = dask.datasets.timeseries(
@@ -509,7 +566,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
         return a.address
 
     with mock.patch(
-        "distributed.shuffle._scheduler_plugin.get_worker_for_range_sharding",
+        "distributed.shuffle._shuffle._get_worker_for_range_sharding",
         mock_mock_get_worker_for_range_sharding,
     ):
         async with Nanny(s.address, nthreads=1) as n:
@@ -574,7 +631,7 @@ class BlockedInputsDoneShuffle(DataFrameShuffleRun):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -633,7 +690,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(
@@ -681,7 +738,7 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -743,7 +800,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 
 @pytest.mark.slow
 @mock.patch(
-    "distributed.shuffle._worker_plugin.DataFrameShuffleRun",
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedInputsDoneShuffle,
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -1465,8 +1522,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
         s = Shuffle(
             column="_partition",
             worker_for=worker_for_mapping,
-            # FIXME: Is output_workers redundant with worker_for?
-            output_workers=set(worker_for_mapping.values()),
             directory=directory / name,
             id=ShuffleId(name),
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
@@ -1510,7 +1565,7 @@ async def test_basic_lowlevel_shuffle(
     worker_for_mapping = {}
 
     for part in range(npartitions):
-        worker_for_mapping[part] = get_worker_for_range_sharding(
+        worker_for_mapping[part] = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
     assert len(set(worker_for_mapping.values())) == min(n_workers, npartitions)
@@ -1584,7 +1639,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+        worker_for_mapping[part] = w = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
@@ -1635,7 +1690,7 @@ async def test_error_send(tmp_path, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+        worker_for_mapping[part] = w = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
@@ -1685,7 +1740,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
     partitions_for_worker = defaultdict(list)
 
     for part in range(npartitions):
-        worker_for_mapping[part] = w = get_worker_for_range_sharding(
+        worker_for_mapping[part] = w = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
         partitions_for_worker[w].append(part)
@@ -1852,15 +1907,15 @@ async def test_shuffle_run_consistency(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    shuffle_dict = scheduler_ext.get(shuffle_id, a.worker_address)
+    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
 
     # Worker plugin can fetch the current run
-    assert await worker_plugin._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
+    assert await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id)
 
     # This should never occur, but fetching an ID larger than the ID available on
     # the scheduler should result in an error.
     with pytest.raises(RuntimeError, match="invalid"):
-        await worker_plugin._get_shuffle_run(shuffle_id, shuffle_dict["run_id"] + 1)
+        await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id + 1)
 
     # Finish first execution
     worker_plugin.block_barrier.set()
@@ -1877,17 +1932,17 @@ async def test_shuffle_run_consistency(c, s, a):
     new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id == new_shuffle_id
 
-    new_shuffle_dict = scheduler_ext.get(shuffle_id, a.worker_address)
+    new_spec = scheduler_ext.get(shuffle_id, a.worker_address).data
 
     # Check invariant that the new run ID is larger than the previous
-    assert shuffle_dict["run_id"] < new_shuffle_dict["run_id"]
+    assert spec.run_id < new_spec.run_id
 
     # Worker plugin can fetch the new shuffle run
-    assert await worker_plugin._get_shuffle_run(shuffle_id, new_shuffle_dict["run_id"])
+    assert await worker_plugin._get_shuffle_run(shuffle_id, new_spec.run_id)
 
     # Fetching a stale run from a worker aware of the new run raises an error
     with pytest.raises(RuntimeError, match="stale"):
-        await worker_plugin._get_shuffle_run(shuffle_id, shuffle_dict["run_id"])
+        await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id)
 
     worker_plugin.block_barrier.set()
     await out
@@ -1901,13 +1956,11 @@ async def test_shuffle_run_consistency(c, s, a):
     independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id != independent_shuffle_id
 
-    independent_shuffle_dict = scheduler_ext.get(
-        independent_shuffle_id, a.worker_address
-    )
+    independent_spec = scheduler_ext.get(independent_shuffle_id, a.worker_address).data
 
     # Check invariant that the new run ID is larger than the previous
     # for independent shuffles
-    assert new_shuffle_dict["run_id"] < independent_shuffle_dict["run_id"]
+    assert new_spec.run_id < independent_spec.run_id
 
     worker_plugin.block_barrier.set()
     await out
@@ -2033,6 +2086,28 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
 
     await c.close()
     await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
+    def make_partition(i):
+        """Return null column for one partition"""
+        if i % 2 == 1:
+            return pd.DataFrame({"a": np.random.random(10), "b": [None] * 10})
+        return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
+
+    ddf = dd.from_map(make_partition, range(50))
+    out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
+    result, expected = c.compute([ddf, out])
+    del out
+    result = await result
+    expected = await expected
+    dd.assert_eq(result, expected)
+    del result
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
 
 

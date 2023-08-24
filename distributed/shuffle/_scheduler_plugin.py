@@ -4,23 +4,18 @@ import contextlib
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
-from functools import partial
-from itertools import product
 from typing import TYPE_CHECKING, Any
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol.pickle import dumps
+from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._core import (
+    SchedulerShuffleState,
     ShuffleId,
-    ShuffleState,
-    ShuffleType,
+    ShuffleRunSpec,
+    ShuffleSpec,
     barrier_key,
     id_from_key,
-)
-from distributed.shuffle._rechunk import ArrayRechunkState, get_worker_for_hash_sharding
-from distributed.shuffle._shuffle import (
-    DataFrameShuffleState,
-    get_worker_for_range_sharding,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
@@ -47,10 +42,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     """
 
     scheduler: Scheduler
-    active_shuffles: dict[ShuffleId, ShuffleState]
+    active_shuffles: dict[ShuffleId, SchedulerShuffleState]
     heartbeats: defaultdict[ShuffleId, dict]
-    _shuffles: defaultdict[ShuffleId, set[ShuffleState]]
-    _archived_by_stimulus: defaultdict[str, set[ShuffleState]]
+    _shuffles: defaultdict[ShuffleId, set[SchedulerShuffleState]]
+    _archived_by_stimulus: defaultdict[str, set[SchedulerShuffleState]]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -79,7 +74,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     async def barrier(self, id: ShuffleId, run_id: int) -> None:
         shuffle = self.active_shuffles[id]
-        assert shuffle.run_id == run_id, f"{run_id=} does not match {shuffle}"
+        if shuffle.run_id != run_id:
+            raise ValueError(f"{run_id=} does not match {shuffle}")
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
         await self.scheduler.broadcast(
             msg=msg,
@@ -107,7 +103,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             if shuffle_id in self.shuffle_ids():
                 self.heartbeats[shuffle_id][ws.address].update(d)
 
-    def get(self, id: ShuffleId, worker: str) -> dict[str, Any]:
+    def get(self, id: ShuffleId, worker: str) -> ToPickle[ShuffleRunSpec]:
         if worker not in self.scheduler.workers:
             # This should never happen
             raise RuntimeError(
@@ -115,36 +111,31 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             )  # pragma: nocover
         state = self.active_shuffles[id]
         state.participating_workers.add(worker)
-        return state.to_msg()
+        return ToPickle(state.run_spec)
 
     def get_or_create(
         self,
-        id: ShuffleId,
+        # FIXME: This should never be ToPickle[ShuffleSpec]
+        spec: ShuffleSpec | ToPickle[ShuffleSpec],
         key: str,
-        type: str,
         worker: str,
-        spec: dict[str, Any],
-    ) -> dict:
+    ) -> ToPickle[ShuffleRunSpec]:
+        # FIXME: Sometimes, this doesn't actually get pickled
+        if isinstance(spec, ToPickle):
+            spec = spec.data
         try:
-            return self.get(id, worker)
+            return self.get(spec.id, worker)
         except KeyError:
             # FIXME: The current implementation relies on the barrier task to be
             # known by its name. If the name has been mangled, we cannot guarantee
             # that the shuffle works as intended and should fail instead.
-            self._raise_if_barrier_unknown(id)
+            self._raise_if_barrier_unknown(spec.id)
             self._raise_if_task_not_processing(key)
-
-            state: ShuffleState
-            if type == ShuffleType.DATAFRAME:
-                state = self._create_dataframe_shuffle_state(id, spec)
-            elif type == ShuffleType.ARRAY_RECHUNK:
-                state = self._create_array_rechunk_state(id, spec)
-            else:  # pragma: no cover
-                raise TypeError(type)
-            self.active_shuffles[id] = state
-            self._shuffles[id].add(state)
+            state = spec.create_new_run(self)
+            self.active_shuffles[spec.id] = state
+            self._shuffles[spec.id].add(state)
             state.participating_workers.add(worker)
-            return state.to_msg()
+            return ToPickle(state.run_spec)
 
     def _raise_if_barrier_unknown(self, id: ShuffleId) -> None:
         key = barrier_key(id)
@@ -161,30 +152,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         task = self.scheduler.tasks[key]
         if task.state != "processing":
             raise RuntimeError(f"Expected {task} to be processing, is {task.state}.")
-
-    def _create_dataframe_shuffle_state(
-        self, id: ShuffleId, spec: dict[str, Any]
-    ) -> DataFrameShuffleState:
-        column = spec["column"]
-        npartitions = spec["npartitions"]
-        parts_out = spec["parts_out"]
-        assert column is not None
-        assert npartitions is not None
-        assert parts_out is not None
-
-        pick_worker = partial(get_worker_for_range_sharding, npartitions)
-
-        mapping = self._pin_output_workers(id, parts_out, pick_worker)
-        output_workers = set(mapping.values())
-
-        return DataFrameShuffleState(
-            id=id,
-            run_id=next(ShuffleState._run_id_iterator),
-            worker_for=mapping,
-            column=column,
-            output_workers=output_workers,
-            participating_workers=output_workers.copy(),
-        )
 
     def _pin_output_workers(
         self,
@@ -231,28 +198,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._set_restriction(dt, worker)
 
         return mapping
-
-    def _create_array_rechunk_state(
-        self, id: ShuffleId, spec: dict[str, Any]
-    ) -> ArrayRechunkState:
-        old = spec["old"]
-        new = spec["new"]
-        assert old is not None
-        assert new is not None
-
-        parts_out = product(*(range(len(c)) for c in new))
-        mapping = self._pin_output_workers(id, parts_out, get_worker_for_hash_sharding)
-        output_workers = set(mapping.values())
-
-        return ArrayRechunkState(
-            id=id,
-            run_id=next(ShuffleState._run_id_iterator),
-            worker_for=mapping,
-            output_workers=output_workers,
-            old=old,
-            new=new,
-            participating_workers=output_workers.copy(),
-        )
 
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
         if "shuffle_original_restrictions" in ts.annotations:
@@ -361,7 +306,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                     if not archived:
                         del self._archived_by_stimulus[shuffle._archived_by]
 
-    def _fail_on_workers(self, shuffle: ShuffleState, message: str) -> None:
+    def _fail_on_workers(self, shuffle: SchedulerShuffleState, message: str) -> None:
         worker_msgs = {
             worker: [
                 {
