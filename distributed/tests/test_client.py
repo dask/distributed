@@ -7221,6 +7221,8 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
             with Client(cluster2) as c1:
                 c2 = get_client()
 
+                print(c1.scheduler)
+                print(c2.scheduler)
                 c1_scheduler = c1.scheduler.address
                 c2_scheduler = c2.scheduler.address
                 assert c1_scheduler != c2_scheduler
@@ -8470,3 +8472,22 @@ async def test_gather_race_vs_AMM(c, s, a, direct):
         b.block_get_data.set()
 
     assert await fut == 3  # It's from a; it would be 2 if it were from b
+
+
+@gen_cluster(client=True)
+async def test_get_scheduler(c, s, a, b):
+    # See Issue #7965
+    # Testing if get_client will prefer current client first
+    def launch_cluster(id):
+        with LocalCluster(
+            n_workers=1, processes=False, dashboard_address=":0"
+        ) as cluster:
+            cluster_client = cluster.get_client()
+            compute_default = dask.base.get_scheduler()
+            assert (
+                compute_default is cluster_client.get
+            ), f"Dask compute selects wrong client. Cluster client {cluster_client} compute client {compute_default}"
+
+        with Client(n_workers=1, threads_per_worker=1) as c:
+            f = c.submit(launch_cluster, 0)
+            f.result()
