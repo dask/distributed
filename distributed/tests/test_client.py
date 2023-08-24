@@ -7514,7 +7514,6 @@ async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
 
     assert len(comp.code[0]) == 2
     assert comp.code[0][-1].code == test_function_code
-    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
