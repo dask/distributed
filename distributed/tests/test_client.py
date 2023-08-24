@@ -23,6 +23,7 @@ import zipfile
 from collections import deque, namedtuple
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager, nullcontext
+from dataclasses import dataclass
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -6206,12 +6207,21 @@ async def test_mixing_clients_different_scheduler(s, a, b):
             await c2.submit(inc, future)
 
 
+@dataclass(frozen=True)
+class MyHashable:
+    x: int
+    y: int
+
+
 @gen_cluster(client=True)
 async def test_tuple_keys(c, s, a, b):
     x = dask.delayed(inc)(1, dask_key_name=("x", 1))
     y = dask.delayed(inc)(x, dask_key_name=("y", 1))
     future = c.compute(y)
     assert (await future) == 3
+    z = dask.delayed(inc)(y, dask_key_name=("z", MyHashable(1, 2)))
+    with pytest.raises(TypeError, match="key"):
+        await c.compute(z)
 
 
 @gen_cluster(client=True)

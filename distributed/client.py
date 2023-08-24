@@ -47,7 +47,7 @@ from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
 from distributed.protocol.serialize import _is_dumpable
-from distributed.utils import Deadline, wait_for
+from distributed.utils import Deadline, validate_key, wait_for
 
 try:
     from dask.delayed import single_key
@@ -3138,6 +3138,10 @@ class Client(SyncMethodMixin):
 
             # Pack the high level graph before sending it to the scheduler
             keyset = set(keys)
+
+            # Validate keys
+            for key in keyset:
+                validate_key(key)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}

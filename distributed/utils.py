@@ -941,7 +941,10 @@ def truncate_exception(e, n=10000):
 
 def validate_key(k):
     """Validate a key as received on a stream."""
-    if not isinstance(k, (bytes, int, float, str, tuple)):
+    if isinstance(k, tuple):
+        for e in k:
+            validate_key(e)
+    elif not isinstance(k, (bytes, int, float, str)):
         raise TypeError(f"Unexpected key type {type(k)} (value: {k!r})")
 
 
