@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from dask.utils import stringify
-
-from distributed.client import futures_of, wait
+from distributed.client import Future, futures_of, wait
 from distributed.protocol.serialize import ToPickle
-from distributed.utils import sync
+from distributed.utils import sync, validate_key
 from distributed.utils_comm import pack_data
 
 logger = logging.getLogger(__name__)
@@ -29,7 +27,6 @@ class ReplayTaskScheduler:
     def _process_key(self, key):
         if isinstance(key, list):
             key = tuple(key)  # ensure not a list from msgpack
-        key = stringify(key)
         return key
 
     def get_error_cause(self, *args, keys=(), **kwargs):
@@ -80,11 +77,12 @@ class ReplayTaskClient:
         For a given future return the func, args and kwargs and future
         deps that would be executed remotely.
         """
-        if isinstance(future, str):
-            key = future
-        else:
+        if isinstance(future, Future):
             await wait(future)
             key = future.key
+        else:
+            validate_key(future)
+            key = future
         spec = await self.scheduler.get_runspec(key=key)
         return (*spec["task"], spec["deps"])
 

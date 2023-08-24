@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import ast
-
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -110,8 +108,7 @@ class ExampleAnnotationPlugin(SchedulerPlugin):
 
         if "priority" in annots:
             self.priority_matches = sum(
-                int(self.priority_fn(ast.literal_eval(k)) == p)
-                for k, p in annots["priority"].items()
+                int(self.priority_fn(k) == p) for k, p in annots["priority"].items()
             )
 
         if "qux" in annots:

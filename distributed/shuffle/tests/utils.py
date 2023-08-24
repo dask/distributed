@@ -73,7 +73,7 @@ class ShuffleAnnotationChaosPlugin(SchedulerPlugin):
         assert self.scheduler
         if finish != "waiting":
             return
-        if not key.startswith("shuffle-barrier-"):
+        if not isinstance(key, str) or not key.startswith("shuffle-barrier-"):
             return
         if key in self.seen:
             return

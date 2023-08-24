@@ -105,11 +105,10 @@ not in the "forgotten" state) using several containers:
 
 .. attribute:: tasks: {str: TaskState}
 
-   A dictionary mapping task keys (always strings) to :class:`TaskState`
-   objects.  Task keys are how information about tasks is communicated
-   between the scheduler and clients, or the scheduler and workers; this
-   dictionary is then used to find the corresponding :class:`TaskState`
-   object.
+   A dictionary mapping task keys to :class:`TaskState` objects. Task keys are how
+   information about tasks is communicated between the scheduler and clients, or the
+   scheduler and workers; this dictionary is then used to find the corresponding
+   :class:`TaskState` object.
 
 .. attribute:: unrunnable: {TaskState}
 
