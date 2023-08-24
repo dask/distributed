@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from distributed.client import futures_of, wait
+from distributed.client import Future, futures_of, wait
 from distributed.protocol.serialize import ToPickle
 from distributed.utils import sync, validate_key
 from distributed.utils_comm import pack_data
