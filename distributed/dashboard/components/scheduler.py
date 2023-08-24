@@ -2371,7 +2371,7 @@ class TaskGraph(DashboardComponent):
                     continue
                 xx = x[key]
                 yy = y[key]
-                node_key.append(escape.url_escape(key))
+                node_key.append(escape.url_escape(str(key)))
                 node_x.append(xx)
                 node_y.append(yy)
                 node_state.append(task.state)

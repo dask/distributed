@@ -5,7 +5,7 @@ import logging
 import uuid
 from collections import defaultdict
 
-from dask.utils import parse_timedelta, stringify
+from dask.utils import parse_timedelta
 
 from distributed.client import Future
 from distributed.utils import wait_for
@@ -214,7 +214,7 @@ class Queue:
     async def _put(self, value, timeout=None):
         if isinstance(value, Future):
             await self.client.scheduler.queue_put(
-                key=stringify(value.key), timeout=timeout, name=self.name
+                key=value.key, timeout=timeout, name=self.name
             )
         else:
             await self.client.scheduler.queue_put(
