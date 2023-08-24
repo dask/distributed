@@ -66,6 +66,7 @@ from distributed.utils_test import (
     gen_test,
     inc,
     nodebug,
+    padded_time,
     raises_with_cause,
     slowadd,
     slowdec,
@@ -2620,19 +2621,6 @@ async def test_task_groups(c, s, a, b, no_time_resync):
     assert tg.start > start
     assert tg.stop < stop
     assert "compute" in tg.all_durations
-
-
-async def padded_time(before=0.01, after=0.01):
-    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
-    from disrupting monotonicity tests (t0 < t1 < t2 < ...).
-    This prevents frequent flakiness on Windows and, more rarely, in Linux and
-    MacOSX (NoSchedulerDelayWorker and no_time_resync help, but aren't sufficient
-    on their own to ensure stability).
-    """
-    await asyncio.sleep(before)
-    t = time()
-    await asyncio.sleep(after)
-    return t
 
 
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
