@@ -283,9 +283,7 @@ def split_by_worker(
 
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
-    dtypes = dict(meta.dtypes)
-    dtypes.pop(column)
-    df = df.astype(dtypes, copy=False)
+    df = df.astype(meta.dtypes, copy=False)
 
     # (cudf support) Avoid pd.Series
     constructor = df._constructor_sliced
