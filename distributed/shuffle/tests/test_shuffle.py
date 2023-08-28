@@ -2124,7 +2124,7 @@ async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_handle_mismatching_partitions_p2p_shuffling(c, s, a, b):
+async def test_reconcile_mismatching_partitions_p2p_shuffling(c, s, a, b):
     def make_partition(i):
         """Return mismatched column types for every other partition"""
         if i % 2 == 1:
@@ -2140,6 +2140,27 @@ async def test_handle_mismatching_partitions_p2p_shuffling(c, s, a, b):
     dd.assert_eq(result, expected)
     del result
 
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
+    def make_partition(i):
+        """Return incompatible column types for every other partition"""
+        if i % 2 == 1:
+            return pd.DataFrame({"a": np.random.random(10), "b": ["a"] * 10})
+        return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
+
+    ddf = dd.from_map(make_partition, range(50))
+    out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
+    with raises_with_cause(
+        RuntimeError, "shuffle_transfer", ValueError, "could not convert"
+    ):
+        await c.compute(out)
+
+    await c.close()
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
