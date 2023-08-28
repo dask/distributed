@@ -3529,6 +3529,7 @@ class Scheduler(SchedulerState, ServerNode):
             default_port=self.default_port,
         )
 
+        self.jupyter = jupyter
         http_server_modules = dask.config.get("distributed.scheduler.http.routes")
         show_dashboard = dashboard or (dashboard is None and dashboard_address)
         # install vanilla route if show_dashboard but bokeh is not installed
@@ -3538,15 +3539,15 @@ class Scheduler(SchedulerState, ServerNode):
             except ImportError:
                 show_dashboard = False
                 http_server_modules.append("distributed.http.scheduler.missing_bokeh")
-        routes = get_handlers(
-            server=self, modules=http_server_modules, prefix=http_prefix
-        )
-        self.start_http_server(routes, dashboard_address, default_port=8787)
-        self.jupyter = jupyter
-        if show_dashboard:
+
+            routes = get_handlers(
+                server=self, modules=http_server_modules, prefix=http_prefix
+            )
+            self.start_http_server(routes, dashboard_address, default_port=8787)
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+
         if self.jupyter:
             try:
                 from jupyter_server.serverapp import ServerApp
