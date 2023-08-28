@@ -1618,9 +1618,7 @@ class Worker(BaseWorker, ServerNode):
                 abort_handshaking_comms()
 
         if _stops:
-
-            async def background_stops():
-                await asyncio.gather(*_stops)
+            await asyncio.gather(*_stops)
 
         # end copy-paste
 
@@ -2400,8 +2398,8 @@ class Worker(BaseWorker, ServerNode):
                 from distributed.actor import Actor  # TODO: create local actor
 
                 data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
-        args2 = pack_data(args, data, key_types=(bytes, str))
-        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
+        args2 = pack_data(args, data, key_types=(bytes, str, tuple))
+        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str, tuple))
         stop = time()
         if stop - start > 0.005:
             ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})

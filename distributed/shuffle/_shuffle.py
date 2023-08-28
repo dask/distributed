@@ -111,7 +111,7 @@ def rearrange_by_column_p2p(
             f"p2p requires all column names to be str, found: {unsupported}",
         )
 
-    name = f"shuffle-p2p-{token}"
+    name = f"shuffle_p2p-{token}"
     layer = P2PShuffleLayer(
         name,
         column,

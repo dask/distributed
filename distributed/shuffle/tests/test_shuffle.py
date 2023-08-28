@@ -15,6 +15,8 @@ from unittest import mock
 
 import pytest
 
+from dask.utils import key_split
+
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.worker import Status
 
@@ -23,8 +25,7 @@ pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
 import dask
-from dask.distributed import Event, Nanny, Worker
-from dask.utils import stringify
+from dask.distributed import Event, LocalCluster, Nanny, Worker
 
 from distributed.client import Client
 from distributed.scheduler import KilledWorker, Scheduler
@@ -184,6 +185,28 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.parametrize("processes", [True, False])
+@gen_test()
+async def test_basic_integration_local_cluster(processes):
+    async with LocalCluster(
+        n_workers=2,
+        processes=processes,
+        asynchronous=True,
+        dashboard_address=":0",
+    ) as cluster:
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        c = cluster.get_client()
+        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        x, y = c.compute([df, out])
+        x, y = await c.gather([x, y])
+        dd.assert_eq(x, y)
+
+
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
 async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npartitions):
@@ -280,7 +303,9 @@ async def wait_until_worker_has_tasks(
             [
                 key
                 for key, ts in scheduler.tasks.items()
-                if prefix in key and ts.state == "memory" and {ws} == ts.who_has
+                if prefix in key_split(key)
+                and ts.state == "memory"
+                and {ws} == ts.who_has
             ]
         )
         < count
@@ -305,7 +330,13 @@ async def wait_for_tasks_in_state(
         raise TypeError(dask_worker)
 
     while (
-        len([key for key, ts in tasks.items() if prefix in key and ts.state == state])
+        len(
+            [
+                key
+                for key, ts in tasks.items()
+                if prefix in key_split(key) and ts.state == state
+            ]
+        )
         < count
     ):
         await asyncio.sleep(interval)
@@ -815,7 +846,7 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     )
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     fut = c.compute([shuffled, df], sync=True)
-    await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
+    await wait_for_tasks_in_state("shuffle_p2p", "memory", 1, b)
     await b.close()
 
     result, expected = await fut
@@ -841,7 +872,7 @@ async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
     )
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = c.compute(out.x.size)
-    await wait_for_tasks_in_state("shuffle-p2p", "memory", 1, b)
+    await wait_for_tasks_in_state("shuffle_p2p", "memory", 1, b)
     await b.close()
 
     with pytest.raises(KilledWorker):
@@ -868,7 +899,7 @@ async def test_crashed_worker_during_unpack(c, s, a):
         shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         result = c.compute(shuffled)
 
-        await wait_until_worker_has_tasks("shuffle-p2p", killed_worker_address, 1, s)
+        await wait_until_worker_has_tasks("shuffle_p2p", killed_worker_address, 1, s)
         await n.process.process.kill()
 
         result = await result
@@ -1233,7 +1264,7 @@ async def test_crashed_worker_after_shuffle(c, s, a):
             out = block(out, in_event, block_event)
         out = c.compute(out)
 
-        await wait_until_worker_has_tasks("shuffle-p2p", n.worker_address, 1, s)
+        await wait_until_worker_has_tasks("shuffle_p2p", n.worker_address, 1, s)
         await in_event.wait()
         await n.process.process.kill()
         await block_event.set()
@@ -1261,7 +1292,7 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
         out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
         out = out.persist()
 
-        await wait_until_worker_has_tasks("shuffle-p2p", n.worker_address, 1, s)
+        await wait_until_worker_has_tasks("shuffle_p2p", n.worker_address, 1, s)
         await out
 
         await n.process.process.kill()
@@ -1376,10 +1407,10 @@ async def test_restrictions(c, s, a, b):
     y = y.persist(workers=a.address)
 
     await x
-    assert all(stringify(key) in b.data for key in x.__dask_keys__())
+    assert all(key in b.data for key in x.__dask_keys__())
 
     await y
-    assert all(stringify(key) in a.data for key in y.__dask_keys__())
+    assert all(key in a.data for key in y.__dask_keys__())
 
 
 @gen_cluster(client=True)

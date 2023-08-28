@@ -115,10 +115,14 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def get_or_create(
         self,
-        spec: ShuffleSpec,
+        # FIXME: This should never be ToPickle[ShuffleSpec]
+        spec: ShuffleSpec | ToPickle[ShuffleSpec],
         key: str,
         worker: str,
     ) -> ToPickle[ShuffleRunSpec]:
+        # FIXME: Sometimes, this doesn't actually get pickled
+        if isinstance(spec, ToPickle):
+            spec = spec.data
         try:
             return self.get(spec.id, worker)
         except KeyError:
@@ -285,7 +289,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         """Clean up scheduler and worker state once a shuffle becomes inactive."""
         if finish not in ("released", "forgotten"):
             return
-        if not key.startswith("shuffle-barrier-"):
+        if not isinstance(key, str) or not key.startswith("shuffle-barrier-"):
             return
         shuffle_id = id_from_key(key)
 
