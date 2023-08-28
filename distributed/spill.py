@@ -274,6 +274,12 @@ class HandledError(Exception):
     pass
 
 
+class CustomFile(zict.File):
+    def _safe_key(self, key):
+        # We don't need _proper_ stringification, just a unique mapping
+        return super()._safe_key(str(key))
+
+
 class Slow(zict.Func[str, object, bytes]):
     max_weight: int | Literal[False]
     weight_by_key: dict[str, SpilledSize]
@@ -293,7 +299,7 @@ class Slow(zict.Func[str, object, bytes]):
             Callable[[object], bytes],
             partial(serialize_bytelist, compression=compression, on_error="raise"),
         )
-        super().__init__(dump, deserialize_bytes, zict.File(spill_directory))
+        super().__init__(dump, deserialize_bytes, CustomFile(spill_directory))
         self.max_weight = max_weight
         self.weight_by_key = {}
         self.total_weight = SpilledSize(0, 0)
