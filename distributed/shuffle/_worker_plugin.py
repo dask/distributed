@@ -218,7 +218,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         if shuffle is None:
             shuffle = await self._refresh_shuffle(
                 shuffle_id=spec.id,
-                spec=ToPickle(spec),
+                spec=spec,
                 key=key,
             )
 
@@ -239,7 +239,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     async def _refresh_shuffle(
         self,
         shuffle_id: ShuffleId,
-        spec: ToPickle,
+        spec: ShuffleSpec,
         key: str,
     ) -> ShuffleRun:
         ...
@@ -247,10 +247,11 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     async def _refresh_shuffle(
         self,
         shuffle_id: ShuffleId,
-        spec: ToPickle | None = None,
+        spec: ShuffleSpec | None = None,
         key: str | None = None,
     ) -> ShuffleRun:
-        result: ShuffleRunSpec
+        # FIXME: This should never be ToPickle[ShuffleRunSpec]
+        result: ShuffleRunSpec | ToPickle[ShuffleRunSpec]
         if spec is None:
             result = await self.worker.scheduler.shuffle_get(
                 id=shuffle_id,
@@ -258,14 +259,12 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             )
         else:
             result = await self.worker.scheduler.shuffle_get_or_create(
-                spec=spec,
+                spec=ToPickle(spec),
                 key=key,
                 worker=self.worker.address,
             )
-        # if result["status"] == "error":
-        # raise RuntimeError(result["message"])
-        # assert result["status"] == "OK"
-
+        if isinstance(result, ToPickle):
+            result = result.data
         if self.closed:
             raise ShuffleClosedError(f"{self} has already been closed")
         if shuffle_id in self.shuffles:
@@ -287,7 +286,6 @@ class ShuffleWorkerPlugin(WorkerPlugin):
                         extension._runs_cleanup_condition.notify_all()
 
                 self.worker._ongoing_background_tasks.call_soon(_, self, existing)
-
         shuffle: ShuffleRun = result.spec.create_run_on_worker(
             result.run_id, result.worker_for, self
         )

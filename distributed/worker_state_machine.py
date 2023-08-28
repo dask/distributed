@@ -3591,6 +3591,7 @@ class BaseWorker(abc.ABC):
     def __init__(self, state: WorkerState):
         self.state = state
         self._async_instructions = set()
+        self.debug = dask.config.get("distributed.worker.validate")
 
     def _start_async_instruction(  # type: ignore[valid-type]
         self,
@@ -3716,9 +3717,12 @@ class BaseWorker(abc.ABC):
 
             elif isinstance(inst, GatherDep):
                 assert inst.to_gather
-                keys_str = ", ".join(peekn(27, inst.to_gather)[0])
-                if len(keys_str) > 80:
-                    keys_str = keys_str[:77] + "..."
+                if self.debug:
+                    keys_str = ", ".join(map(str, peekn(27, inst.to_gather)[0]))
+                    if len(keys_str) > 80:
+                        keys_str = keys_str[:77] + "..."
+                else:
+                    keys_str = "..."
 
                 self._start_async_instruction(
                     f"gather_dep({inst.worker}, {{{keys_str}}})",

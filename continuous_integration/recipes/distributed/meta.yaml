@@ -46,7 +46,7 @@ requirements:
     - toolz >=0.10.0
     - tornado >=6.0.4
     - urllib3 >=1.24.3
-    - zict >=2.2.0
+    - zict >=3.0.0
   run_constrained:
     - openssl !=1.1.1e
 

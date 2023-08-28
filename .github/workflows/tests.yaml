@@ -125,7 +125,7 @@ jobs:
           key: conda-${{ matrix.os }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
         env:
           # Increase this value to reset cache if continuous_integration/environment-${{ matrix.environment }}.yaml has not changed
-          CACHE_NUMBER: 1
+          CACHE_NUMBER: 2
         id: cache
 
       - name: Update environment
