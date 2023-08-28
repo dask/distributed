@@ -20,6 +20,7 @@ from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -101,25 +102,26 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         # up the comm pool on scheduler side
         await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
+    async def _send(
+        self, address: str, shards: list[tuple[_T_partition_id, bytes]]
+    ) -> None:
+        self.raise_if_closed()
+        return await self.rpc(address).shuffle_receive(
+            data=to_serialize(shards),
+            shuffle_id=self.id,
+            run_id=self.run_id,
+        )
+
     async def send(
         self, address: str, shards: list[tuple[_T_partition_id, bytes]]
     ) -> None:
-        retries_left = 3
-        while True:
-            self.raise_if_closed()
-            try:
-                resp = await self.rpc(address).shuffle_receive(
-                    data=to_serialize(shards),
-                    shuffle_id=self.id,
-                    run_id=self.run_id,
-                )
-                break
-            except CommClosedError:
-                retries_left = retries_left - 1
-                if retries_left < 1:
-                    raise
-
-        return resp
+        return await retry(
+            partial(self._send, address, shards),
+            count=3,
+            delay_min=1,
+            delay_max=5,
+            retry_on_exceptions=CommClosedError,
+        )
 
     async def offload(self, func: Callable[..., _T], *args: Any) -> _T:
         self.raise_if_closed()
