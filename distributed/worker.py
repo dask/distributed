@@ -436,7 +436,7 @@ class Worker(BaseWorker, ServerNode):
     _client: Client | None
     bandwidth_workers: defaultdict[str, tuple[float, int]]
     bandwidth_types: defaultdict[type, tuple[float, int]]
-    preloads: list[preloading.Preload]
+    preloads: preloading.PreloadManager
     contact_address: str | None
     _start_port: int | str | Collection[int] | None = None
     _start_host: str | None
@@ -1427,11 +1427,7 @@ class Worker(BaseWorker, ServerNode):
         if self.name is None:
             self.name = self.address
 
-        for preload in self.preloads:
-            try:
-                await preload.start()
-            except Exception:
-                logger.exception("Failed to start preload")
+        await self.preloads.start()
 
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
@@ -1581,11 +1577,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.stop_services()
 
-        for preload in self.preloads:
-            try:
-                await preload.teardown()
-            except Exception:
-                logger.exception("Failed to tear down preload")
+        await self.preloads.teardown()
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
@@ -1626,9 +1618,7 @@ class Worker(BaseWorker, ServerNode):
                 abort_handshaking_comms()
 
         if _stops:
-
-            async def background_stops():
-                await asyncio.gather(*_stops)
+            await asyncio.gather(*_stops)
 
         # end copy-paste
 
@@ -2112,11 +2102,7 @@ class Worker(BaseWorker, ServerNode):
                 data=response["data"],
                 stimulus_id=f"gather-dep-success-{time()}",
             )
-
-        # Note: CancelledError and asyncio.TimeoutError are rare conditions
-        # that can be raised by the network stack.
-        # See https://github.com/dask/distributed/issues/8006
-        except (OSError, asyncio.CancelledError, asyncio.TimeoutError):
+        except OSError:
             logger.exception("Worker stream died during communication: %s", worker)
             self.state.log.append(
                 ("gather-dep-failed", worker, to_gather, stimulus_id, time())
@@ -2412,8 +2398,8 @@ class Worker(BaseWorker, ServerNode):
                 from distributed.actor import Actor  # TODO: create local actor
 
                 data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
-        args2 = pack_data(args, data, key_types=(bytes, str))
-        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
+        args2 = pack_data(args, data, key_types=(bytes, str, tuple))
+        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str, tuple))
         stop = time()
         if stop - start > 0.005:
             ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})

@@ -1,6 +1,58 @@
 Changelog
 =========
 
+.. _v2023.8.1:
+
+2023.8.1
+--------
+
+Released on August 18, 2023
+
+New Features
+^^^^^^^^^^^^
+- Add ``memray`` integration (:pr:`8044`) `Florian Jetter`_
+
+Enhancements
+^^^^^^^^^^^^
+- Await ``async`` ``listener.stop`` in ``Worker.close`` (:pr:`8118`) `Hendrik Makait`_
+- Minor fixes in ``memray`` (:pr:`8113`) `Florian Jetter`_
+- Enable basic ``p2p`` shuffle for ``dask-cudf`` (:pr:`7743`) `Richard (Rick) Zamora`_
+- Don't shut down unresponsive workers on ``gather()`` (:pr:`8101`) `crusaderky`_
+- Propagate ``CancelledError`` in ``gather_from_workers`` (:pr:`8089`) `crusaderky`_
+- Better logging for anomalous task termination (:pr:`8082`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Handle null partitions in P2P shuffling (:pr:`8116`) `Hendrik Makait`_
+- Handle ``CancelledError`` properly in ``ConnectionPool`` (:pr:`8110`) `Florian Jetter`_
+- Fix additional race condition that can cause P2P restart to deadlock (:pr:`8094`) `Hendrik Makait`_
+- Ensure x-axis is uniform when plotting (:pr:`8093`) `Florian Jetter`_
+- Fix deadlock in P2P restarts (:pr:`8091`) `Hendrik Makait`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add ``memray`` integration to API docs (:pr:`8115`) `James Bourbeau`_
+- Fix default in description of ``LocalCluster`` s ``scheduler_port`` (:pr:`8073`) `Danferno`_
+
+Maintenance
+^^^^^^^^^^^
+- Remove ``types_mapper`` arg now that it is captured in ``from_pyarrow_table_dispatch`` (:pr:`8114`) `Richard (Rick) Zamora`_
+- Make P2P shuffle extensible (:pr:`8096`) `Hendrik Makait`_
+- Make ``PreloadManager`` a ``Sequence`` (:pr:`8112`) `Hendrik Makait`_
+- Introduce ``PreloadManager`` to handle failures in preload setup/teardown (:pr:`8078`) `Hendrik Makait`_
+- Restructure P2P code (:pr:`8098`) `Hendrik Makait`_
+- Make ``ToPickle`` a ``Generic`` (:pr:`8097`) `Hendrik Makait`_
+- Dedicated job for ``memray`` tests (:pr:`8104`) `Florian Jetter`_
+- Fix ``test_task_groups_update_start_stop``, again (:pr:`8102`) `crusaderky`_
+- Remove ``dumps_task`` (:pr:`8067`) `Florian Jetter`_
+- Simplify usage of queues in nanny (:pr:`6655`) `Florian Jetter`_
+- Fix flakiness in tests caused by ``WindowsTime`` (:pr:`8087`) `crusaderky`_
+- Overhaul ``gather()`` (:pr:`7997`) `crusaderky`_
+- Fix flaky ``test_asyncprocess.py::test_simple`` (:pr:`8085`) `crusaderky`_
+- Skip ``test_client.py::test_file_descriptors_dont_leak`` on Mac OS (:pr:`8080`) `Hendrik Makait`_
+- Reorder operations in ``Worker.close`` (:pr:`8076`) `Hendrik Makait`_
+
+
 .. _v2023.8.0:
 
 2023.8.0
@@ -5195,3 +5247,5 @@ significantly without many new features.
 .. _`jochenott`: https://github.com/jochenott
 .. _`minhnguyenxuan60`: https://github.com/minhnguyenxuan60
 .. _`mercyo12`: https://github.com/mercyo12
+.. _`Richard (Rick) Zamora`: https://github.com/rjzamora
+.. _`Danferno`: https://github.com/Danferno

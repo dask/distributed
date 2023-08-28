@@ -10,7 +10,8 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, NewType, TypeVar
+from functools import partial
+from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
 from dask import config
 
@@ -27,19 +28,21 @@ from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 
 if TYPE_CHECKING:
-    import pandas as pd
+    # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
-    # avoid circular dependencies
+    from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
+
+    # circular dependencies
     from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
+
+ShuffleId = NewType("ShuffleId", str)
+NDIndex: TypeAlias = tuple[int, ...]
+
 
 _T_partition_id = TypeVar("_T_partition_id")
 _T_partition_type = TypeVar("_T_partition_type")
 _T = TypeVar("_T")
-
-NDIndex: TypeAlias = tuple[int, ...]
-
-ShuffleId = NewType("ShuffleId", str)
 
 
 class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
@@ -49,7 +52,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self,
         id: ShuffleId,
         run_id: int,
-        output_workers: set[str],
         local_address: str,
         directory: str,
         executor: ThreadPoolExecutor,
@@ -60,7 +62,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     ):
         self.id = id
         self.run_id = run_id
-        self.output_workers = output_workers
         self.local_address = local_address
         self.executor = executor
         self.rpc = rpc
@@ -226,7 +227,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
     @abc.abstractmethod
     async def get_output_partition(
-        self, partition_id: _T_partition_id, key: str, meta: pd.DataFrame | None = None
+        self, partition_id: _T_partition_id, key: str, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
 
@@ -241,13 +242,12 @@ def get_worker_plugin() -> ShuffleWorkerPlugin:
             "`shuffle='p2p'` requires Dask's distributed scheduler. This task is not running on a Worker; "
             "please confirm that you've created a distributed Client and are submitting this computation through it."
         ) from e
-    plugin: ShuffleWorkerPlugin | None = worker.plugins.get("shuffle")  # type: ignore
-    if plugin is None:
+    try:
+        return worker.plugins["shuffle"]  # type: ignore
+    except KeyError as e:
         raise RuntimeError(
-            f"The worker {worker.address} does not have a ShuffleExtension. "
-            "Is pandas installed on the worker?"
-        )
-    return plugin
+            f"The worker {worker.address} does not have a P2P shuffle plugin."
+        ) from e
 
 
 _BARRIER_PREFIX = "shuffle-barrier-"
@@ -267,19 +267,60 @@ class ShuffleType(Enum):
     ARRAY_RECHUNK = "ArrayRechunk"
 
 
-@dataclass(eq=False)
-class ShuffleState(abc.ABC):
-    _run_id_iterator: ClassVar[itertools.count] = itertools.count(1)
+@dataclass(frozen=True)
+class ShuffleRunSpec(Generic[_T_partition_id]):
+    run_id: int = field(init=False, default_factory=partial(next, itertools.count(1)))  # type: ignore
+    spec: ShuffleSpec
+    worker_for: dict[_T_partition_id, str]
 
+    @property
+    def id(self) -> ShuffleId:
+        return self.spec.id
+
+
+@dataclass(frozen=True)
+class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
     id: ShuffleId
-    run_id: int
-    output_workers: set[str]
+
+    def create_new_run(
+        self,
+        plugin: ShuffleSchedulerPlugin,
+    ) -> SchedulerShuffleState:
+        worker_for = self._pin_output_workers(plugin)
+        return SchedulerShuffleState(
+            run_spec=ShuffleRunSpec(spec=self, worker_for=worker_for),
+            participating_workers=set(worker_for.values()),
+        )
+
+    @abc.abstractmethod
+    def _pin_output_workers(
+        self, plugin: ShuffleSchedulerPlugin
+    ) -> dict[_T_partition_id, str]:
+        """Pin output tasks to workers and return the mapping of partition ID to worker."""
+
+    @abc.abstractmethod
+    def create_run_on_worker(
+        self,
+        run_id: int,
+        worker_for: dict[_T_partition_id, str],
+        plugin: ShuffleWorkerPlugin,
+    ) -> ShuffleRun:
+        """Create the new shuffle run on the worker."""
+
+
+@dataclass(eq=False)
+class SchedulerShuffleState(Generic[_T_partition_id]):
+    run_spec: ShuffleRunSpec
     participating_workers: set[str]
     _archived_by: str | None = field(default=None, init=False)
 
-    @abc.abstractmethod
-    def to_msg(self) -> dict[str, Any]:
-        """Transform the shuffle state into a JSON-serializable message"""
+    @property
+    def id(self) -> ShuffleId:
+        return self.run_spec.id
+
+    @property
+    def run_id(self) -> int:
+        return self.run_spec.run_id
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"

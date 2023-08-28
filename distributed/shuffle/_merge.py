@@ -73,20 +73,22 @@ def hash_join_p2p(
         npartitions = max(lhs.npartitions, rhs.npartitions)
 
     if isinstance(left_on, Index):
-        left_on = None
+        _left_on = None
         left_index = True
     else:
         left_index = False
+        _left_on = left_on
 
     if isinstance(right_on, Index):
-        right_on = None
+        _right_on = None
         right_index = True
     else:
         right_index = False
+        _right_on = right_on
     merge_kwargs = dict(
         how=how,
-        left_on=left_on,
-        right_on=right_on,
+        left_on=_left_on,
+        right_on=_right_on,
         left_index=left_index,
         right_index=right_index,
         suffixes=suffixes,
@@ -104,11 +106,11 @@ def hash_join_p2p(
         name=merge_name,
         name_input_left=lhs._name,
         meta_input_left=lhs._meta,
-        left_on=left_on,
+        left_on=_left_on,
         n_partitions_left=lhs.npartitions,
         name_input_right=rhs._name,
         meta_input_right=rhs._meta,
-        right_on=right_on,
+        right_on=_right_on,
         n_partitions_right=rhs.npartitions,
         meta_output=meta,
         how=how,
@@ -159,6 +161,8 @@ def merge_unpack(
     meta_right: pd.DataFrame,
     result_meta: pd.DataFrame,
     suffixes: Suffixes,
+    left_index: bool,
+    right_index: bool,
 ):
     from dask.dataframe.multi import merge_chunk
 
@@ -178,6 +182,8 @@ def merge_unpack(
         left_on=left_on,
         right_on=right_on,
         suffixes=suffixes,
+        left_index=left_index,
+        right_index=right_index,
     )
 
 
@@ -383,5 +389,7 @@ class HashJoinP2PLayer(Layer):
                 self.meta_input_right,
                 self.meta_output,
                 self.suffixes,
+                self.left_index,
+                self.right_index,
             )
         return dsk
