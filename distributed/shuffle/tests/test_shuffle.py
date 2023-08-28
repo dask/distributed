@@ -6,6 +6,7 @@ import itertools
 import os
 import random
 import shutil
+import time
 from collections import defaultdict
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -2122,4 +2123,24 @@ async def test_set_index_p2p(c, s, *workers):
 
     await c.close()
     await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+)
+async def test_p2p_shuffle_timeout(c, s, a, b):
+    def block():
+        time.sleep(5)
+
+    df = pd.DataFrame({"a": [1, 2, 3, 4, 5, 6, 7, 8], "b": 1})
+    ddf = dd.from_pandas(df, npartitions=3)
+    ddf = ddf.set_index("a", shuffle="p2p", divisions=(1, 3, 8))
+    assert ddf.npartitions == 2
+
+    with dask.config.set({"distributed.comm.timeouts.connect": "3s"}):
+        await asyncio.gather(c.run(block, workers=[a.address]), c.compute(ddf))
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
