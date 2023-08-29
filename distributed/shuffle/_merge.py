@@ -46,10 +46,14 @@ def _calculate_partitions(df: pd.DataFrame, index: IndexLabel, npartitions: int)
     index = _prepare_index_for_partitioning(df, index)
     from dask.dataframe.shuffle import partitioning_index
 
+    meta = df._meta._constructor_sliced([0])
+    # Ensure that we have the same index as before to avoid alignment
+    # when calculating meta dtypes later on
+    meta.index = df._meta_nonempty.index[:1]
     partitions = index.map_partitions(
         partitioning_index,
         npartitions=npartitions or df.npartitions,
-        meta=df._meta._constructor_sliced([0]),
+        meta=meta,
         transform_divisions=False,
     )
     df2 = df.assign(**{_HASH_COLUMN_NAME: partitions})
@@ -136,6 +140,7 @@ def merge_transfer(
     id: ShuffleId,
     input_partition: int,
     npartitions: int,
+    meta: pd.DataFrame,
     parts_out: set[int],
 ):
     return shuffle_transfer(
@@ -144,6 +149,7 @@ def merge_transfer(
         input_partition=input_partition,
         npartitions=npartitions,
         column=_HASH_COLUMN_NAME,
+        meta=meta,
         parts_out=parts_out,
     )
 
@@ -157,8 +163,6 @@ def merge_unpack(
     how: MergeHow,
     left_on: IndexLabel,
     right_on: IndexLabel,
-    meta_left: pd.DataFrame,
-    meta_right: pd.DataFrame,
     result_meta: pd.DataFrame,
     suffixes: Suffixes,
     left_index: bool,
@@ -169,10 +173,10 @@ def merge_unpack(
     ext = get_worker_plugin()
     # If the partition is empty, it doesn't contain the hash column name
     left = ext.get_output_partition(
-        shuffle_id_left, barrier_left, output_partition, meta=meta_left
+        shuffle_id_left, barrier_left, output_partition
     ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     right = ext.get_output_partition(
-        shuffle_id_right, barrier_right, output_partition, meta=meta_right
+        shuffle_id_right, barrier_right, output_partition
     ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     return merge_chunk(
         left,
@@ -355,6 +359,7 @@ class HashJoinP2PLayer(Layer):
                 token_left,
                 i,
                 self.npartitions,
+                self.meta_input_left,
                 self.parts_out,
             )
         for i in range(self.n_partitions_right):
@@ -365,6 +370,7 @@ class HashJoinP2PLayer(Layer):
                 token_right,
                 i,
                 self.npartitions,
+                self.meta_input_right,
                 self.parts_out,
             )
 
@@ -385,8 +391,6 @@ class HashJoinP2PLayer(Layer):
                 self.how,
                 self.left_on,
                 self.right_on,
-                self.meta_input_left,
-                self.meta_input_right,
                 self.meta_output,
                 self.suffixes,
                 self.left_index,

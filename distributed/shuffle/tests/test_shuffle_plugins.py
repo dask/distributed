@@ -46,7 +46,7 @@ def test_split_by_worker():
             "_partition": [0, 1, 2, 0, 1],
         }
     )
-
+    meta = df[["x"]].head(0)
     workers = ["alice", "bob"]
     worker_for_mapping = {}
     npartitions = 3
@@ -55,7 +55,7 @@ def test_split_by_worker():
             npartitions, part, workers
         )
     worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
-    out = split_by_worker(df, "_partition", worker_for)
+    out = split_by_worker(df, "_partition", meta, worker_for)
     assert set(out) == {"alice", "bob"}
     assert list(out["alice"].to_pandas().columns) == list(df.columns)
 
@@ -71,8 +71,9 @@ def test_split_by_worker_empty():
             "_partition": [0, 1, 2, 0, 1],
         }
     )
+    meta = df[["x"]].head(0)
     worker_for = pd.Series({5: "chuck"}, name="_workers").astype("category")
-    out = split_by_worker(df, "_partition", worker_for)
+    out = split_by_worker(df, "_partition", meta, worker_for)
     assert out == {}
 
 
@@ -85,6 +86,7 @@ def test_split_by_worker_many_workers():
             "_partition": [5, 7, 5, 0, 1],
         }
     )
+    meta = df[["x"]].head(0)
     workers = ["a", "b", "c", "d", "e", "f", "g", "h"]
     npartitions = 10
     worker_for_mapping = {}
@@ -93,7 +95,7 @@ def test_split_by_worker_many_workers():
             npartitions, part, workers
         )
     worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
-    out = split_by_worker(df, "_partition", worker_for)
+    out = split_by_worker(df, "_partition", meta, worker_for)
     assert _get_worker_for_range_sharding(npartitions, 5, workers) in out
     assert _get_worker_for_range_sharding(npartitions, 0, workers) in out
     assert _get_worker_for_range_sharding(npartitions, 7, workers) in out
