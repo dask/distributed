@@ -3547,6 +3547,8 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        else:
+            self.http_server = None
 
         if self.jupyter:
             try:
