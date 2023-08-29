@@ -79,7 +79,7 @@ def shuffle_transfer(
 
 def shuffle_unpack(
     id: ShuffleId, output_partition: int, barrier_run_id: int
-) -> pd.DataFrame:
+) -> pa.Table:
     try:
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_partition
@@ -454,6 +454,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self._exception = e
             raise
 
+    def table_meta(self) -> pa.Table:
+        from dask.dataframe.dispatch import to_pyarrow_table_dispatch
+
+        return to_pyarrow_table_dispatch(self.meta, preserve_index=True)
+
     def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, bytes]:
         table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
@@ -490,7 +495,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         partition_id: int,
         key: str,
         **kwargs: Any,
-    ) -> pd.DataFrame:
+    ) -> pa.Table:
         self.raise_if_closed()
         if not self.transferred:
             raise RuntimeError("`get_output_partition` called before barrier task")
@@ -503,7 +508,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
             out = await self.offload(unpack_partition, data)
         except KeyError:
-            out = self.meta.copy()
+            out = self.table_meta()
         return out
 
     def _get_assigned_worker(self, id: int) -> str:

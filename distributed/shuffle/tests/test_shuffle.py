@@ -31,7 +31,7 @@ from distributed.client import Client
 from distributed.scheduler import KilledWorker, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
-    convert_partition,
+    ConvertPartition,
     list_of_buffers_to_table,
     serialize_table,
 )
@@ -1106,9 +1106,10 @@ def test_processing_chain():
                 filesystem[partition].write(serialize_table(table))
 
     out = {}
+    convert_partition = ConvertPartition(meta)
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = convert_partition(bio.read(), meta)
+        out[k] = convert_partition(bio.read())
 
     shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(
