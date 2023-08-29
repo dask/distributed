@@ -46,13 +46,17 @@ def _calculate_partitions(df: pd.DataFrame, index: IndexLabel, npartitions: int)
     index = _prepare_index_for_partitioning(df, index)
     from dask.dataframe.shuffle import partitioning_index
 
+    meta = df._meta._constructor_sliced([0])
+    # Ensure that we have the same index as before to avoid alignment
+    # when calculating meta dtypes later on
+    meta.index = df._meta_nonempty.index[:1]
     partitions = index.map_partitions(
         partitioning_index,
         npartitions=npartitions or df.npartitions,
-        meta=df._meta._constructor_sliced([0]),
+        meta=meta,
         transform_divisions=False,
     )
-    df2 = df.assign(**{_HASH_COLUMN_NAME: partitions.values})
+    df2 = df.assign(**{_HASH_COLUMN_NAME: partitions})
     df2._meta.index.name = df._meta.index.name
     return df2
 
