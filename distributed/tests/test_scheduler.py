@@ -1862,8 +1862,11 @@ async def test_dashboard_host(host, dashboard_address, expect):
     localhost.
     """
     async with Scheduler(host=host, dashboard_address=dashboard_address) as s:
-        sock = first(s.http_server._sockets.values())
-        assert sock.getsockname()[0] in expect
+        if dashboard_address is None:
+            assert s.http_server is None
+        else:
+            sock = first(s.http_server._sockets.values())
+            assert sock.getsockname()[0] in expect
 
 
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
