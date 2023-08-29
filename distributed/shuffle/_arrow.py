@@ -45,10 +45,8 @@ def check_minimal_arrow_version() -> None:
         )
 
 
-def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
+def unpack_partition(data: bytes) -> pd.DataFrame:
     import pyarrow as pa
-
-    from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
     file = BytesIO(data)
     end = len(data)
@@ -56,10 +54,18 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
     while file.tell() < end:
         sr = pa.RecordBatchStreamReader(file)
         shards.append(sr.read_all())
-    table = pa.concat_tables(shards, promote=True)
+    return pa.concat_tables(shards, promote=True)
 
-    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
-    return df.astype(meta.dtypes, copy=False)
+
+class ConvertPartition:
+    def __init__(self, meta: pd.DataFrame):
+        self.meta = meta
+
+    def __call__(self, table: pa.Table) -> pd.DataFrame:
+        from dask.dataframe.dispatch import from_pyarrow_table_dispatch
+
+        df = from_pyarrow_table_dispatch(self.meta, table, self_destruct=True)
+        return df.astype(self.meta.dtypes, copy=False)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:

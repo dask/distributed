@@ -18,11 +18,12 @@ from dask.layers import Layer
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import (
+    ConvertPartition,
     check_dtype_support,
     check_minimal_arrow_version,
-    convert_partition,
     list_of_buffers_to_table,
     serialize_table,
+    unpack_partition,
 )
 from distributed.shuffle._core import (
     NDIndex,
@@ -125,6 +126,13 @@ def rearrange_by_column_p2p(
         name,
         meta,
         [None] * (npartitions + 1),
+    ).map_partitions(
+        ConvertPartition(meta),
+        meta=meta,
+        token="convert-p2p",
+        enforce_metadata=False,
+        transform_divisions=False,
+        align_dataframes=False,
     )
 
 
@@ -485,7 +493,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         try:
             data = self._read_from_disk((partition_id,))
 
-            out = await self.offload(convert_partition, data, meta)
+            out = await self.offload(unpack_partition, data)
         except KeyError:
             out = meta.copy()
         return out
