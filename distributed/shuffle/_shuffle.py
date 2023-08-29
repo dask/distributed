@@ -56,6 +56,7 @@ def shuffle_transfer(
     input_partition: int,
     npartitions: int,
     column: str,
+    meta: pd.DataFrame,
     parts_out: set[int],
 ) -> int:
     try:
@@ -63,7 +64,11 @@ def shuffle_transfer(
             input,
             input_partition,
             spec=DataFrameShuffleSpec(
-                id=id, npartitions=npartitions, column=column, parts_out=parts_out
+                id=id,
+                npartitions=npartitions,
+                column=column,
+                meta=meta,
+                parts_out=parts_out,
             ),
         )
     except ShuffleClosedError:
@@ -73,11 +78,11 @@ def shuffle_transfer(
 
 
 def shuffle_unpack(
-    id: ShuffleId, output_partition: int, barrier_run_id: int, meta: pd.DataFrame
+    id: ShuffleId, output_partition: int, barrier_run_id: int
 ) -> pd.DataFrame:
     try:
         return get_worker_plugin().get_output_partition(
-            id, barrier_run_id, output_partition, meta=meta
+            id, barrier_run_id, output_partition
         )
     except Reschedule as e:
         raise e
@@ -256,6 +261,7 @@ class P2PShuffleLayer(Layer):
                 i,
                 self.npartitions,
                 self.column,
+                self.meta_input,
                 self.parts_out,
             )
 
@@ -268,7 +274,6 @@ class P2PShuffleLayer(Layer):
                 token,
                 part_out,
                 _barrier_key,
-                self.meta_input,
             )
         return dsk
 
@@ -276,6 +281,7 @@ class P2PShuffleLayer(Layer):
 def split_by_worker(
     df: pd.DataFrame,
     column: str,
+    meta: pd.DataFrame,
     worker_for: pd.Series,
 ) -> dict[Any, pa.Table]:
     """
@@ -284,6 +290,8 @@ def split_by_worker(
     import numpy as np
 
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
+
+    df = df.astype(meta.dtypes, copy=False)
 
     # (cudf support) Avoid pd.Series
     constructor = df._constructor_sliced
@@ -391,6 +399,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         self,
         worker_for: dict[int, str],
         column: str,
+        meta: pd.DataFrame,
         id: ShuffleId,
         run_id: int,
         local_address: str,
@@ -415,6 +424,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             memory_limiter_disk=memory_limiter_disk,
         )
         self.column = column
+        self.meta = meta
         partitions_of = defaultdict(list)
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
@@ -465,6 +475,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             out = split_by_worker(
                 data,
                 self.column,
+                self.meta,
                 self.worker_for,
             )
             out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
@@ -478,12 +489,9 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         self,
         partition_id: int,
         key: str,
-        meta: pd.DataFrame | None = None,
         **kwargs: Any,
     ) -> pd.DataFrame:
         self.raise_if_closed()
-        if meta is None:
-            raise ValueError("Excepted meta keyword argument")
         if not self.transferred:
             raise RuntimeError("`get_output_partition` called before barrier task")
 
@@ -495,7 +503,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
             out = await self.offload(unpack_partition, data)
         except KeyError:
-            out = meta.copy()
+            out = self.meta.copy()
         return out
 
     def _get_assigned_worker(self, id: int) -> str:
@@ -506,6 +514,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 class DataFrameShuffleSpec(ShuffleSpec[int]):
     npartitions: int
     column: str
+    meta: pd.DataFrame
     parts_out: set[int]
 
     def _pin_output_workers(self, plugin: ShuffleSchedulerPlugin) -> dict[int, str]:
@@ -517,6 +526,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
     ) -> ShuffleRun:
         return DataFrameShuffleRun(
             column=self.column,
+            meta=self.meta,
             worker_for=worker_for,
             id=self.id,
             run_id=run_id,
