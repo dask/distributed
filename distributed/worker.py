@@ -76,7 +76,7 @@ from distributed.core import (
 )
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
-from distributed.diagnostics import nvml, rmm
+from distributed.diagnostics import cudf, nvml, rmm
 from distributed.diagnostics.plugin import _get_plugin_name
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
@@ -3215,6 +3215,20 @@ else:
 
     DEFAULT_METRICS["rmm"] = rmm_metric
     del _rmm
+
+
+try:
+    import cudf as _cudf
+except Exception:
+    pass
+else:
+
+    async def cudf_metric(worker):
+        result = await offload(cudf.real_time)
+        return result
+
+    DEFAULT_METRICS["cudf"] = cudf_metric
+    del _cudf
 
 
 def print(
