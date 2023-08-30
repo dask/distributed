@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import contextlib
 import functools
 import logging
@@ -14,6 +15,8 @@ from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from dask.utils import funcname, tmpfile
+
+from distributed.protocol.pickle import dumps
 
 if TYPE_CHECKING:
     from distributed.scheduler import Scheduler, TaskStateState  # circular imports
@@ -330,7 +333,89 @@ class SchedulerUploadFile(SchedulerPlugin):
         await scheduler.upload_file(self.filename, self.data, load=self.load)
 
 
-class PackageInstall(WorkerPlugin, abc.ABC):
+class PackageInstall(SchedulerPlugin, abc.ABC):
+    """Abstract parent class for a scheduler plugin to install a set of packages
+
+    This accepts a set of packages to install on the scheduler and all workers.
+    You can also optionally ask for the worker to restart itself after
+    performing this installation.
+
+    .. note::
+
+       This will increase the time it takes to start up
+       each worker. If possible, we recommend including the
+       libraries in the worker environment or image. This is
+       primarily intended for experimentation and debugging.
+
+    Parameters
+    ----------
+    packages
+        A list of packages (with optional versions) to install
+    restart_workers
+        Whether or not to restart the worker after installing the packages
+        Only functions if the worker has an attached nanny process
+
+    See Also
+    --------
+    CondaInstall
+    PipInstall
+    """
+
+    WORKER_PLUGIN_CLASS: ClassVar[type]
+
+    installer: _PackageInstaller
+    name: str
+    restart_workers: bool
+
+    def __init__(
+        self,
+        installer: _PackageInstaller,
+        restart_workers: bool,
+    ):
+        self.installer = installer
+        self.restart_workers = restart_workers
+        self.name = f"{self.installer.INSTALLER}-install-{uuid.uuid4()}"
+
+    async def start(self, scheduler: Scheduler) -> None:
+        if not hasattr(scheduler, "_package_install_lock"):
+            scheduler._package_install_lock = asyncio.Lock()  # type: ignore[attr-defined]
+
+        async with scheduler._package_install_lock:  # type: ignore[attr-defined]
+            if not self._is_installed(scheduler):
+                logger.info(
+                    "%s installing the following packages on the scheduler: %s",
+                    self.installer.INSTALLER,
+                    self.installer.packages,
+                )
+                self._set_installed(scheduler)
+                self.installer.install()
+            else:
+                logger.info(
+                    "The following packages have already been installed on the scheduler: %s",
+                    self.installer.packages,
+                )
+
+            worker_plugin = _PackageInstallWorker(self.installer, self.restart_workers)
+            await scheduler.register_worker_plugin(None, dumps(worker_plugin))
+
+    def _is_installed(self, scheduler):
+        return scheduler.get_metadata(self._compose_installed_key(), default=False)
+
+    def _set_installed(self, scheduler):
+        scheduler.set_metadata(
+            self._compose_installed_key(),
+            True,
+        )
+
+    def _compose_installed_key(self):
+        return [
+            self.name,
+            "installed",
+            socket.gethostname(),
+        ]
+
+
+class _PackageInstallWorker(WorkerPlugin, abc.ABC):
     """Abstract parent class for a worker plugin to install a set of packages
 
     This accepts a set of packages to install on all workers.
@@ -354,24 +439,22 @@ class PackageInstall(WorkerPlugin, abc.ABC):
 
     See Also
     --------
-    CondaInstall
-    PipInstall
+    _CondaInstallWorker
+    _PipInstallWorker
     """
 
-    INSTALLER: ClassVar[str]
-
+    installer: _PackageInstaller
     name: str
-    packages: list[str]
     restart: bool
 
     def __init__(
         self,
-        packages: list[str],
+        installer: _PackageInstaller,
         restart: bool,
     ):
-        self.packages = packages
+        self.installer = installer
+        self.name = f"{self.installer.INSTALLER}-install-{uuid.uuid4()}"
         self.restart = restart
-        self.name = f"{self.INSTALLER}-install-{uuid.uuid4()}"
 
     async def setup(self, worker):
         from distributed.semaphore import Semaphore
@@ -388,15 +471,15 @@ class PackageInstall(WorkerPlugin, abc.ABC):
             if not await self._is_installed(worker):
                 logger.info(
                     "%s installing the following packages: %s",
-                    self.INSTALLER,
-                    self.packages,
+                    self.installer.INSTALLER,
+                    self.installer.packages,
                 )
                 await self._set_installed(worker)
-                self.install()
+                self.installer.install()
             else:
                 logger.info(
                     "The following packages have already been installed: %s",
-                    self.packages,
+                    self.installer.packages,
                 )
 
             if self.restart and worker.nanny and not await self._is_restarted(worker):
@@ -405,10 +488,6 @@ class PackageInstall(WorkerPlugin, abc.ABC):
                 worker.loop.add_callback(
                     worker.close_gracefully, restart=True, reason=f"{self.name}-setup"
                 )
-
-    @abc.abstractmethod
-    def install(self) -> None:
-        """Install the requested packages"""
 
     async def _is_installed(self, worker):
         return await worker.client.get_metadata(
@@ -444,8 +523,20 @@ class PackageInstall(WorkerPlugin, abc.ABC):
         return [self.name, "restarted", worker.nanny]
 
 
+class _PackageInstaller(abc.ABC):
+    INSTALLER: ClassVar[str]
+    packages: list[str]
+
+    def __init__(self, packages: list[str]) -> None:
+        self.packages = packages
+
+    @abc.abstractmethod
+    def install(self) -> None:
+        """Install the requested packages"""
+
+
 class CondaInstall(PackageInstall):
-    """A Worker Plugin to conda install a set of packages
+    """A Worker Plugin to pip install a set of packages
 
     This accepts a set of packages to install on all workers as well as
     options to use when installing.
@@ -462,19 +553,19 @@ class CondaInstall(PackageInstall):
     Parameters
     ----------
     packages
-        A list of packages (with optional versions) to install using conda
-    conda_options
-        Additional options to pass to conda
-    restart
+        A list of packages (with optional versions) to install using pip
+    pip_options
+        Additional options to pass to pip
+    restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
 
     Examples
     --------
-    >>> from dask.distributed import CondaInstall
-    >>> plugin = CondaInstall(packages=["scikit-learn"], conda_options=["--update-deps"])
+    >>> from dask.distributed import PipInstall
+    >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
 
-    >>> client.register_worker_plugin(plugin)
+    >>> client.register_scheduler_plugin(plugin)
 
     See Also
     --------
@@ -482,6 +573,17 @@ class CondaInstall(PackageInstall):
     PipInstall
     """
 
+    def __init__(
+        self,
+        packages: list[str],
+        conda_options: list[str] | None = None,
+        restart_workers: bool = False,
+    ):
+        installer = _CondaInstaller(packages, conda_options)
+        super().__init__(installer, restart_workers=restart_workers)
+
+
+class _CondaInstaller(_PackageInstaller):
     INSTALLER = "conda"
 
     conda_options: list[str]
@@ -490,9 +592,8 @@ class CondaInstall(PackageInstall):
         self,
         packages: list[str],
         conda_options: list[str] | None = None,
-        restart: bool = False,
-    ):
-        super().__init__(packages, restart=restart)
+    ) -> None:
+        super().__init__(packages)
         self.conda_options = conda_options or []
 
     def install(self) -> None:
@@ -541,7 +642,7 @@ class PipInstall(PackageInstall):
         A list of packages (with optional versions) to install using pip
     pip_options
         Additional options to pass to pip
-    restart
+    restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
 
@@ -550,7 +651,7 @@ class PipInstall(PackageInstall):
     >>> from dask.distributed import PipInstall
     >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
 
-    >>> client.register_worker_plugin(plugin)
+    >>> client.register_scheduler_plugin(plugin)
 
     See Also
     --------
@@ -558,6 +659,17 @@ class PipInstall(PackageInstall):
     CondaInstall
     """
 
+    def __init__(
+        self,
+        packages: list[str],
+        pip_options: list[str] | None = None,
+        restart_workers: bool = False,
+    ):
+        installer = _PipInstaller(packages, pip_options)
+        super().__init__(installer, restart_workers=restart_workers)
+
+
+class _PipInstaller(_PackageInstaller):
     INSTALLER = "pip"
 
     pip_options: list[str]
@@ -566,9 +678,8 @@ class PipInstall(PackageInstall):
         self,
         packages: list[str],
         pip_options: list[str] | None = None,
-        restart: bool = False,
-    ):
-        super().__init__(packages, restart=restart)
+    ) -> None:
+        super().__init__(packages)
         self.pip_options = pip_options or []
 
     def install(self) -> None:
