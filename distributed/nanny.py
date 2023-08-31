@@ -366,7 +366,12 @@ class Nanny(ServerNode):
                 if response != Status.running:
                     raise RuntimeError("Nanny failed to start worker process")
             except Exception:
-                await comm.write({"status": "error"})
+                try:
+                    await comm.write({"status": "error"})
+
+                # If self.instantiate() failed, the comm will already be closed.
+                except CommClosedError:
+                    pass
                 await self.close(reason="nanny-start-failed")
                 raise
             else:
