@@ -141,6 +141,7 @@ filterwarnings = [
     '''ignore:notifyAll\(\) is deprecated, use notify_all\(\) instead:DeprecationWarning:paramiko''',
     '''ignore:setDaemon\(\) is deprecated, set the daemon attribute instead:DeprecationWarning:paramiko''',
     '''ignore:`np.bool8` is a deprecated alias for `np.bool_`''',
+    '''ignore:is_sparse is deprecated and will:FutureWarning''',
 ]
 minversion = "6"
 markers = [
