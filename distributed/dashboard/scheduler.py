@@ -6,6 +6,7 @@ from tlz import memoize
 from tornado import web
 from tornado.ioloop import IOLoop
 
+from distributed.dashboard.components.cudf import cudf_spilling_doc
 from distributed.dashboard.components.nvml import (
     gpu_doc,
     gpu_memory_doc,
@@ -119,6 +120,7 @@ applications = {
     "/individual-gpu-memory": gpu_memory_doc,
     "/individual-gpu-utilization": gpu_utilization_doc,
     "/individual-rmm-memory": rmm_memory_doc,
+    "/individual-cudf-spilling": cudf_spilling_doc,
 }
 
 
