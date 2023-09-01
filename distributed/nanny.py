@@ -349,17 +349,35 @@ class Nanny(ServerNode):
         self.ip = get_address_host(self.address)
 
         await self.preloads.start()
+        saddr = self.scheduler.addr
+        comm = await self.rpc.connect(saddr)
+        comm.name = "Nanny->Scheduler (registration)"
 
-        msg = await self.scheduler.register_nanny()
-        for name, plugin in msg["nanny-plugins"].items():
-            await self.plugin_add(plugin=plugin, name=name)
+        try:
+            await comm.write({"op": "register_nanny", "address": self.address})
+            msg = await comm.read()
+            try:
+                for name, plugin in msg["nanny-plugins"].items():
+                    await self.plugin_add(plugin=plugin, name=name)
 
-        logger.info("        Start Nanny at: %r", self.address)
-        response = await self.instantiate()
+                logger.info("        Start Nanny at: %r", self.address)
+                response = await self.instantiate()
 
-        if response != Status.running:
-            await self.close(reason="nanny-start-failed")
-            return
+                if response != Status.running:
+                    raise RuntimeError("Nanny failed to start worker process")
+            except Exception:
+                try:
+                    await comm.write({"status": "error"})
+
+                # If self.instantiate() failed, the comm will already be closed.
+                except CommClosedError:
+                    pass
+                await self.close(reason="nanny-start-failed")
+                raise
+            else:
+                await comm.write({"status": "ok"})
+        finally:
+            await comm.close()
 
         assert self.worker_address
 
