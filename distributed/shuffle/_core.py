@@ -13,6 +13,9 @@ from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
+import dask.config
+from dask.utils import parse_timedelta
+
 from distributed.core import CommClosedError, PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
@@ -115,11 +118,18 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     async def send(
         self, address: str, shards: list[tuple[_T_partition_id, bytes]]
     ) -> None:
+        retry_count = dask.config.get("distributed.p2p.comm.retry.count")
+        retry_delay_min = parse_timedelta(
+            dask.config.get("distributed.p2p.comm.retry.delay.min"), default="s"
+        )
+        retry_delay_max = parse_timedelta(
+            dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
+        )
         return await retry(
             partial(self._send, address, shards),
-            count=3,
-            delay_min=1,
-            delay_max=5,
+            count=retry_count,
+            delay_min=retry_delay_min,
+            delay_max=retry_delay_max,
             retry_on_exceptions=CommClosedError,
         )
 

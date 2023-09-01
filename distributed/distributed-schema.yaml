@@ -1052,6 +1052,38 @@ properties:
                 description: |
                   The maximum number of erred tasks to remember.
 
+      p2p:
+        type: object
+        description: Configuration for P2P shuffles
+        properties:
+
+          comm:
+            type: object
+            description: Configuration settings for Dask communications specific to P2P
+            properties:
+
+              retry:
+                type: object
+                description: |
+                  Some operations (such as gathering data) are subject to re-tries with the below parameters
+                properties:
+
+                  count:
+                    type: integer
+                    minimum: 0
+                    description: |
+                      The number of times to retry a connection
+
+                  delay:
+                    type: object
+                    properties:
+                      min:
+                        type: string
+                        description: The first non-zero delay between retry attempts
+                      max:
+                        type: string
+                        description: The maximum delay between retries
+
       dashboard:
         type: object
         properties:
