@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -38,7 +38,7 @@ from distributed.core import (
     coerce_to_address,
     error_message,
 )
-from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diagnostics.plugin import NannyPlugin, _get_plugin_name
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -61,9 +61,6 @@ from distributed.worker_memory import (
     DeprecatedMemoryMonitor,
     NannyMemoryManager,
 )
-
-if TYPE_CHECKING:
-    from distributed.diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 
