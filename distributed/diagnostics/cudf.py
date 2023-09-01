@@ -12,15 +12,14 @@ except ImportError:
 
 def real_time():
     if get_global_manager is None:
-        return {}
+        return {"cudf-spilled": 0}
     mgr = get_global_manager()
     if mgr is None:
-        return {}
-    keys = {
-        "gpu-to-cpu": {"nbytes": 0, "time": 0},
-        "cpu-to-gpu": {"nbytes": 0, "time": 0},
+        return {"cudf-spilled": 0}
+
+    totals = mgr.statistics.spill_totals
+
+    return {
+        "cudf-spilled": totals.get(("gpu", "cpu"), (0,))[0]
+        - totals.get(("cpu", "gpu"), (0,))[0]
     }
-    for (src, dst), (nbytes, time) in mgr.statistics.spill_totals.items():
-        keys[f"{src}-to-{dst}"]["nbytes"] = nbytes
-        keys[f"{src}-to-{dst}"]["time"] = time
-    return keys
