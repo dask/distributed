@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import math
 import os
 import sys
 import tempfile
@@ -13,7 +14,14 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Callable, Container, Coroutine, Generator, Hashable
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Container,
+    Coroutine,
+    Generator,
+    Hashable,
+)
 from enum import Enum
 from functools import wraps
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, final
@@ -640,32 +648,32 @@ class Server:
             if not pc.is_running():
                 pc.start()
 
-    def stop(self):
-        if self.__stopped:
-            return
+    def _stop_listeners(self) -> asyncio.Future:
+        listeners_to_stop: set[Awaitable] = set()
 
-        self.__stopped = True
-        _stops = set()
         for listener in self.listeners:
             future = listener.stop()
             if inspect.isawaitable(future):
-                _stops.add(future)
-            try:
-                abort_handshaking_comms = listener.abort_handshaking_comms
-            except AttributeError:
-                pass
-            else:
-                abort_handshaking_comms()
+                warnings.warn(
+                    f"{type(listener)} is using an asynchronous `stop` method. "
+                    "Support for asynchronous `Listener.stop` will be removed in a future version",
+                    PendingDeprecationWarning,
+                )
+                listeners_to_stop.add(future)
+            elif hasattr(listener, "abort_handshaking_comms"):
+                listener.abort_handshaking_comms()
 
-        if _stops:
+        return asyncio.gather(*listeners_to_stop)
 
-            async def background_stops():
-                await asyncio.gather(*_stops)
-
-            self._ongoing_background_tasks.call_soon(background_stops)
-
+    def stop(self) -> None:
+        if self.__stopped:
+            return
+        self.__stopped = True
         self.monitor.close()
-
+        if not (stop_listeners := self._stop_listeners()).done():
+            self._ongoing_background_tasks.call_soon(
+                asyncio.wait_for(stop_listeners, timeout=None)
+            )
         if self._workdir is not None:
             self._workdir.release()
 
@@ -1004,32 +1012,14 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    async def close(self, timeout=None, reason=""):
+    async def close(self, timeout: float | None = None, reason: str = "") -> None:
         try:
             for pc in self.periodic_callbacks.values():
                 pc.stop()
 
-            if not self.__stopped:
-                self.monitor.close()
-                self.__stopped = True
-                _stops = set()
-                for listener in self.listeners:
-                    future = listener.stop()
-                    if inspect.isawaitable(future):
-                        warnings.warn(
-                            f"{type(listener)} is using an asynchronous `stop` method. "
-                            "Support for asynchronous `Listener.stop` will be removed in a future version",
-                            PendingDeprecationWarning,
-                        )
-                        _stops.add(future)
-                    try:
-                        abort_handshaking_comms = listener.abort_handshaking_comms
-                    except AttributeError:
-                        pass
-                    else:
-                        abort_handshaking_comms()
-                if _stops:
-                    await asyncio.gather(*_stops)
+            self.__stopped = True
+            self.monitor.close()
+            await self._stop_listeners()
 
             # TODO: Deal with exceptions
             await self._ongoing_background_tasks.stop()
@@ -1450,13 +1440,12 @@ class ConnectionPool:
         # _connecting contains futures actively trying to establish a connection
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
-        self._connecting: defaultdict[str, set[asyncio.Task[Comm]]] = defaultdict(set)
+        self._connecting: defaultdict[str, set[Callable[[str], None]]] = defaultdict(
+            set
+        )
         self._pending_count = 0
         self._connecting_count = 0
         self.status = Status.init
-        self._reasons: weakref.WeakKeyDictionary[
-            asyncio.Task[Any], str
-        ] = weakref.WeakKeyDictionary()
 
     def _validate(self) -> None:
         """
@@ -1564,43 +1553,78 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
-        # This construction is there to ensure that cancellation requests from
-        # the outside can be distinguished from cancellations of our own.
-        # Once the CommPool closes, we'll cancel the connect_attempt which will
-        # raise an OSError
-        # If the ``connect`` is cancelled from the outside, the Event.wait will
-        # be cancelled instead which we'll reraise as a CancelledError and allow
-        # it to propagate
-        connect_attempt = asyncio.create_task(self._connect(addr, timeout))
-        done = asyncio.Event()
-        connecting = self._connecting[addr]
-        connecting.add(connect_attempt)
+        # on 3.11 this uses asyncio.timeout as a cancel scope to avoid having
+        # to track inner and outer CancelledError exceptions and correctly
+        # call .uncancel() when a CancelledError is caught.
+        if sys.version_info >= (3, 11):
+            reason: str | None = None
+            try:
+                async with asyncio.timeout(math.inf) as scope:
 
-        def callback(task: asyncio.Task[Comm]) -> None:
-            done.set()
+                    def cancel_timeout_cb(reason_: str) -> None:
+                        nonlocal reason
+                        reason = reason_
+                        scope.reschedule(-1)
+
+                    self._connecting[addr].add(cancel_timeout_cb)
+                    try:
+                        return await self._connect(addr=addr, timeout=timeout)
+                    finally:
+                        connecting = self._connecting[addr]
+                        connecting.discard(cancel_timeout_cb)
+                        if not connecting:
+                            try:
+                                del self._connecting[addr]
+                            except KeyError:
+                                pass
+            except TimeoutError:
+                if reason is None:
+                    raise
+                raise CommClosedError(reason)
+        else:
+            # This construction is there to ensure that cancellation requests from
+            # the outside can be distinguished from cancellations of our own.
+            # Once the CommPool closes, we'll cancel the connect_attempt which will
+            # raise an OSError
+            # If the ``connect`` is cancelled from the outside, the Event.wait will
+            # be cancelled instead which we'll reraise as a CancelledError and allow
+            # it to propagate
+            connect_attempt = asyncio.create_task(self._connect(addr, timeout))
+            done = asyncio.Event()
+            reason = "ConnectionPool closing."
+
+            def cancel_task_cb(reason_: str) -> None:
+                nonlocal reason
+                reason = reason_
+                connect_attempt.cancel()
+
             connecting = self._connecting[addr]
-            connecting.discard(task)
+            connecting.add(cancel_task_cb)
 
-            if not connecting:
-                try:
-                    del self._connecting[addr]
-                except KeyError:  # pragma: no cover
-                    pass
+            def callback(task: asyncio.Task[Comm]) -> None:
+                done.set()
+                connecting = self._connecting[addr]
+                connecting.discard(cancel_task_cb)
 
-        connect_attempt.add_done_callback(callback)
+                if not connecting:
+                    try:
+                        del self._connecting[addr]
+                    except KeyError:  # pragma: no cover
+                        pass
 
-        try:
-            await done.wait()
-        except asyncio.CancelledError:
-            # This is an outside cancel attempt
-            connect_attempt.cancel()
-            await connect_attempt
-            raise
-        try:
-            return connect_attempt.result()
-        except asyncio.CancelledError:
-            reason = self._reasons.pop(connect_attempt, "ConnectionPool closing.")
-            raise CommClosedError(reason)
+            connect_attempt.add_done_callback(callback)
+
+            try:
+                await done.wait()
+            except asyncio.CancelledError:
+                # This is an outside cancel attempt
+                connect_attempt.cancel()
+                await connect_attempt
+                raise
+            try:
+                return connect_attempt.result()
+            except asyncio.CancelledError:
+                raise CommClosedError(reason)
 
     def reuse(self, addr: str, comm: Comm) -> None:
         """
@@ -1654,19 +1678,18 @@ class ConnectionPool:
                 self.semaphore.release()
 
         if addr in self._connecting:
-            tasks = self._connecting[addr]
-            for task in tasks:
-                self._reasons[task] = reason
-                task.cancel()
+            cbs = self._connecting[addr]
+            for cb in cbs:
+                cb(reason)
 
     async def close(self) -> None:
         """
         Close all communications
         """
         self.status = Status.closed
-        for tasks in self._connecting.values():
-            for task in tasks:
-                task.cancel()
+        for cbs in self._connecting.values():
+            for cb in cbs:
+                cb("ConnectionPool closing.")
         for d in [self.available, self.occupied]:
             comms = set()
             while d:

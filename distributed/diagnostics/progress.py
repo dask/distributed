@@ -10,7 +10,7 @@ from typing import ClassVar
 from tlz import groupby, valmap
 
 from dask.base import tokenize
-from dask.utils import key_split, stringify
+from dask.utils import key_split
 
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.metrics import time
@@ -68,7 +68,7 @@ class Progress(SchedulerPlugin):
     def __init__(self, keys, scheduler, minimum=0, dt=0.1, complete=False, name=None):
         self.name = name or f"progress-{tokenize(keys, minimum, dt, complete)}"
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
-        self.keys = {stringify(k) for k in self.keys}
+        self.keys = {k for k in self.keys}
         self.scheduler = scheduler
         self.complete = complete
         self._minimum = minimum

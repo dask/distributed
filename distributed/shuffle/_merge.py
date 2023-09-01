@@ -46,10 +46,14 @@ def _calculate_partitions(df: pd.DataFrame, index: IndexLabel, npartitions: int)
     index = _prepare_index_for_partitioning(df, index)
     from dask.dataframe.shuffle import partitioning_index
 
+    meta = df._meta._constructor_sliced([0])
+    # Ensure that we have the same index as before to avoid alignment
+    # when calculating meta dtypes later on
+    meta.index = df._meta_nonempty.index[:1]
     partitions = index.map_partitions(
         partitioning_index,
         npartitions=npartitions or df.npartitions,
-        meta=df._meta._constructor_sliced([0]),
+        meta=meta,
         transform_divisions=False,
     )
     df2 = df.assign(**{_HASH_COLUMN_NAME: partitions})
@@ -73,20 +77,22 @@ def hash_join_p2p(
         npartitions = max(lhs.npartitions, rhs.npartitions)
 
     if isinstance(left_on, Index):
-        left_on = None
+        _left_on = None
         left_index = True
     else:
         left_index = False
+        _left_on = left_on
 
     if isinstance(right_on, Index):
-        right_on = None
+        _right_on = None
         right_index = True
     else:
         right_index = False
+        _right_on = right_on
     merge_kwargs = dict(
         how=how,
-        left_on=left_on,
-        right_on=right_on,
+        left_on=_left_on,
+        right_on=_right_on,
         left_index=left_index,
         right_index=right_index,
         suffixes=suffixes,
@@ -104,11 +110,11 @@ def hash_join_p2p(
         name=merge_name,
         name_input_left=lhs._name,
         meta_input_left=lhs._meta,
-        left_on=left_on,
+        left_on=_left_on,
         n_partitions_left=lhs.npartitions,
         name_input_right=rhs._name,
         meta_input_right=rhs._meta,
-        right_on=right_on,
+        right_on=_right_on,
         n_partitions_right=rhs.npartitions,
         meta_output=meta,
         how=how,
@@ -134,6 +140,7 @@ def merge_transfer(
     id: ShuffleId,
     input_partition: int,
     npartitions: int,
+    meta: pd.DataFrame,
     parts_out: set[int],
 ):
     return shuffle_transfer(
@@ -142,6 +149,7 @@ def merge_transfer(
         input_partition=input_partition,
         npartitions=npartitions,
         column=_HASH_COLUMN_NAME,
+        meta=meta,
         parts_out=parts_out,
     )
 
@@ -155,20 +163,20 @@ def merge_unpack(
     how: MergeHow,
     left_on: IndexLabel,
     right_on: IndexLabel,
-    meta_left: pd.DataFrame,
-    meta_right: pd.DataFrame,
     result_meta: pd.DataFrame,
     suffixes: Suffixes,
+    left_index: bool,
+    right_index: bool,
 ):
     from dask.dataframe.multi import merge_chunk
 
     ext = get_worker_plugin()
     # If the partition is empty, it doesn't contain the hash column name
     left = ext.get_output_partition(
-        shuffle_id_left, barrier_left, output_partition, meta=meta_left
+        shuffle_id_left, barrier_left, output_partition
     ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     right = ext.get_output_partition(
-        shuffle_id_right, barrier_right, output_partition, meta=meta_right
+        shuffle_id_right, barrier_right, output_partition
     ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     return merge_chunk(
         left,
@@ -178,6 +186,8 @@ def merge_unpack(
         left_on=left_on,
         right_on=right_on,
         suffixes=suffixes,
+        left_index=left_index,
+        right_index=right_index,
     )
 
 
@@ -349,6 +359,7 @@ class HashJoinP2PLayer(Layer):
                 token_left,
                 i,
                 self.npartitions,
+                self.meta_input_left,
                 self.parts_out,
             )
         for i in range(self.n_partitions_right):
@@ -359,6 +370,7 @@ class HashJoinP2PLayer(Layer):
                 token_right,
                 i,
                 self.npartitions,
+                self.meta_input_right,
                 self.parts_out,
             )
 
@@ -379,9 +391,9 @@ class HashJoinP2PLayer(Layer):
                 self.how,
                 self.left_on,
                 self.right_on,
-                self.meta_input_left,
-                self.meta_input_right,
                 self.meta_output,
                 self.suffixes,
+                self.left_index,
+                self.right_index,
             )
         return dsk
