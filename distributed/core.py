@@ -703,9 +703,6 @@ class Server:
             )
         self.digest_metric("tick-duration", tick_duration)
         self._observed_tick_durations.append((now, tick_duration))
-        # TODO: Do we even care that this is accurate? If the event loop is
-        # blocked for long, we'd store data for a longer period of time. The
-        # stuff below just makes it accurate.
         threshold = now - self._tick_retention
         while (
             self._observed_tick_durations
