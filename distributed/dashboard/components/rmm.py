@@ -105,7 +105,7 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
                 <span style="font-size: 10px; font-family: Monaco, monospace;">@rmm_used{0.00 b} / @rmm_total{0.00 b}</span>
             </div>
             <div>
-                <span style="font-size: 12px; font-weight: bold;">Total GPU memory used:</span>&nbsp;
+                <span style="font-size: 12px; font-weight: bold;">GPU memory used:</span>&nbsp;
                 <span style="font-size: 10px; font-family: Monaco, monospace;">@gpu_used{0.00 b} / @gpu_total{0.00 b}</span>
             </div>
             <div>
@@ -152,7 +152,9 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
             gpu_total_worker = gpu_info["memory-total"]
             spilled_worker = cudf_metrics["cudf-spilled"]  # memory spilled to host
 
-            max_limit = max(max_limit, gpu_total_worker + spilled_worker)
+            max_limit = max(
+                max_limit, gpu_total_worker, gpu_used_worker + spilled_worker
+            )
             color_i = self._memory_color(gpu_used_worker, gpu_total_worker, ws.status)
 
             width += [
@@ -171,7 +173,7 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
             gpu_total.append(gpu_total_worker)
             spilled.append(spilled_worker)
 
-        title = f"RMM memory used: {format_bytes(sum(rmm_used))} / {format_bytes(sum(rmm_total))}\nTotal GPU memory used: {format_bytes(sum(gpu_used))} / {format_bytes(sum(gpu_total))}"
+        title = f"RMM memory used: {format_bytes(sum(rmm_used))} / {format_bytes(sum(rmm_total))}\nGPU memory used: {format_bytes(sum(gpu_used))} / {format_bytes(sum(gpu_total))}"
         if sum(spilled):
             title += f" + {format_bytes(sum(spilled))} spilled to CPU"
         self.root.title.text = title
