@@ -447,9 +447,6 @@ class Server:
         self._tick_counter = 0
         self._last_tick_counter = 0
         self._last_tick_cycle = time()
-        # TODO: Do we care about exact retention as we're calculating below?
-        # Instead we could just approx this by setting
-        # maxlen=retention / interval
         self._tick_retention = parse_timedelta(
             dask.config.get("distributed.admin.tick.retention")
         )
@@ -709,11 +706,10 @@ class Server:
         # TODO: Do we even care that this is accurate? If the event loop is
         # blocked for long, we'd store data for a longer period of time. The
         # stuff below just makes it accurate.
+        threshold = now - self._tick_retention
         while (
             self._observed_tick_durations
-            and now - self._observed_tick_durations[0][0]
-            # called very often!
-            > self._tick_retention
+            and self._observed_tick_durations[0][0] < threshold
         ):
             self._observed_tick_durations.popleft()
 
