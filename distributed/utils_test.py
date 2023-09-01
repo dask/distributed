@@ -2601,6 +2601,11 @@ class NoSchedulerDelayWorker(Worker):
 
     This worker class is useful for some tests which make time
     comparisons using times reported from workers.
+
+    See also
+    --------
+    no_time_resync
+    padded_time
     """
 
     @property
@@ -2618,6 +2623,11 @@ def no_time_resync():
     which, every 10 minutes, can cause time() to go backwards a few milliseconds.
 
     On Linux and MacOSX, this fixture is a no-op.
+
+    See also
+    --------
+    NoSchedulerDelayWorker
+    padded_time
     """
     if WINDOWS:
         time()  # Initialize or refresh delta
@@ -2627,3 +2637,20 @@ def no_time_resync():
         time.__self__.next_resync = bak
     else:
         yield
+
+
+async def padded_time(before=0.01, after=0.01):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
+    from disrupting monotonicity tests (t0 < t1 < t2 < ...).
+    This prevents frequent flakiness on Windows and, more rarely, in Linux and
+    MacOSX.
+
+    See also
+    --------
+    NoSchedulerDelayWorker
+    no_time_resync
+    """
+    await asyncio.sleep(before)
+    t = time()
+    await asyncio.sleep(after)
+    return t

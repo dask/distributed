@@ -146,12 +146,11 @@ async def test_basic_cudf_support(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     ).to_backend("cudf")
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    assert out.npartitions == df.npartitions
-    x, y = c.compute([df.x.size, out.x.size])
-    x = await x
-    y = await y
-    assert x == y
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    assert shuffled.npartitions == df.npartitions
+
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -174,15 +173,13 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
     if npartitions is None:
-        assert out.npartitions == df.npartitions
+        assert shuffled.npartitions == df.npartitions
     else:
-        assert out.npartitions == npartitions
-    x, y = c.compute([df.x.size, out.x.size])
-    x = await x
-    y = await y
-    assert x == y
+        assert shuffled.npartitions == npartitions
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -262,10 +259,9 @@ async def test_concurrent(c, s, a, b, lose_annotations):
     )
     x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     y = dd.shuffle.shuffle(df, "y", shuffle="p2p")
-    x, y = c.compute([x.x.size, y.y.size])
-    x = await x
-    y = await y
-    assert x == y
+    df, x, y = await c.compute([df, x, y], sync=True)
+    dd.assert_eq(x, df, check_index=False)
+    dd.assert_eq(y, df, check_index=False)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -368,14 +364,13 @@ async def test_closed_worker_during_transfer(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x, y = c.compute([df.x.size, out.x.size])
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
 
-    x = await x
-    y = await y
-    assert x == y
+    result, expected = await fut
+    dd.assert_eq(result, expected)
 
     await c.close()
     await check_worker_cleanup(a)
@@ -473,16 +468,15 @@ async def test_crashed_worker_during_transfer(c, s, a):
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
-        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        x, y = c.compute([df.x.size, out.x.size])
+        shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        fut = c.compute([shuffled, df], sync=True)
         await wait_until_worker_has_tasks(
             "shuffle-transfer", killed_worker_address, 1, s
         )
         await n.process.process.kill()
 
-        x = await x
-        y = await y
-        assert x == y
+        result, expected = await fut
+        dd.assert_eq(result, expected)
 
         await c.close()
         await check_worker_cleanup(a)
@@ -543,14 +537,13 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
-        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        x, y = c.compute([df.x.size, out.x.size])
+        shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        fut = c.compute([shuffled, df], sync=True)
         await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b, 0.001)
         await b.close()
 
-        x = await x
-        y = await y
-        assert x == y
+        result, expected = await fut
+        dd.assert_eq(result, expected)
 
         await c.close()
         await check_worker_cleanup(a)
@@ -578,16 +571,15 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
                 dtypes={"x": float, "y": float},
                 freq="10 s",
             )
-            out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-            x, y = c.compute([df.x.size, out.x.size])
+            shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+            fut = c.compute([shuffled, df], sync=True)
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", n.worker_address, 1, s
             )
             await n.process.process.kill()
 
-            x = await x
-            y = await y
-            assert x == y
+            result, expected = await fut
+            dd.assert_eq(result, expected)
 
             await c.close()
             await check_worker_cleanup(a)
@@ -604,14 +596,14 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
-        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        out = out.persist()
+        shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w1)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w2)
     await w3.close()
 
-    await c.compute(out)
-    del out
+    result, expected = await fut
+    dd.assert_eq(result, expected)
 
     await check_worker_cleanup(w1)
     await check_worker_cleanup(w2)
@@ -643,8 +635,8 @@ async def test_closed_worker_during_barrier(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x, y = c.compute([df.x.size, out.x.size])
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    fut = c.compute([shuffled, df], sync=True)
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
@@ -680,9 +672,8 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     restarted_shuffle = alive_shuffles[shuffle_id]
     restarted_shuffle.block_inputs_done.set()
 
-    x = await x
-    y = await y
-    assert x == y
+    result, expected = await fut
+    dd.assert_eq(result, expected)
 
     await c.close()
     await check_worker_cleanup(close_worker, closed=True)
@@ -750,8 +741,8 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x, y = c.compute([df.x.size, out.x.size])
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    fut = c.compute([shuffled, df], sync=True)
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
 
     key = barrier_key(shuffle_id)
@@ -789,9 +780,8 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     restarted_shuffle = alive_shuffles[shuffle_id]
     restarted_shuffle.block_inputs_done.set()
 
-    x = await x
-    y = await y
-    assert x == y
+    result, expected = await fut
+    dd.assert_eq(result, expected)
 
     await c.close()
     await check_worker_cleanup(close_worker, closed=True)
@@ -813,8 +803,8 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
-        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        x, y = c.compute([df.x.size, out.x.size])
+        shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        fut = c.compute([shuffled, df], sync=True)
         shuffle_id = await wait_until_new_shuffle_is_initialized(s)
         key = barrier_key(shuffle_id)
         # Ensure that barrier is not executed on the nanny
@@ -839,9 +829,8 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         restarted_shuffle = get_shuffle_run_from_worker(shuffle_id, a)
         restarted_shuffle.block_inputs_done.set()
 
-        x = await x
-        y = await y
-        assert x == y
+        result, expected = await fut
+        dd.assert_eq(result, expected)
 
         await c.close()
         await check_worker_cleanup(a)
@@ -856,14 +845,13 @@ async def test_closed_worker_during_unpack(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x, y = c.compute([df.x.size, out.x.size])
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle_p2p", "memory", 1, b)
     await b.close()
 
-    x = await x
-    y = await y
-    assert x == y
+    result, expected = await fut
+    dd.assert_eq(result, expected)
 
     await c.close()
     await check_worker_cleanup(a)
@@ -908,15 +896,15 @@ async def test_crashed_worker_during_unpack(c, s, a):
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
-        x = await c.compute(df.x.size)
-        out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-        y = c.compute(out.x.size)
+        expected = await c.compute(df)
+        shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+        result = c.compute(shuffled)
 
         await wait_until_worker_has_tasks("shuffle_p2p", killed_worker_address, 1, s)
         await n.process.process.kill()
 
-        y = await y
-        assert x == y
+        result = await result
+        dd.assert_eq(result, expected)
 
         await c.close()
         await check_worker_cleanup(a)
@@ -1063,7 +1051,8 @@ def test_processing_chain():
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
     worker_for = pd.Series(worker_for, name="_worker").astype("category")
 
-    data = split_by_worker(df, "_partitions", worker_for=worker_for)
+    meta = df.head(0)
+    data = split_by_worker(df, "_partitions", worker_for=worker_for, meta=meta)
     assert set(data) == set(worker_for.cat.categories)
     assert sum(map(len, data.values())) == len(df)
 
@@ -1108,7 +1097,7 @@ def test_processing_chain():
     out = {}
     for k, bio in filesystem.items():
         bio.seek(0)
-        out[k] = convert_partition(bio.read(), df.head(0))
+        out[k] = convert_partition(bio.read(), meta)
 
     shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(
@@ -1515,6 +1504,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
     def new_shuffle(
         self,
         name,
+        meta,
         worker_for_mapping,
         directory,
         loop,
@@ -1522,6 +1512,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
     ):
         s = Shuffle(
             column="_partition",
+            meta=meta,
             worker_for=worker_for_mapping,
             directory=directory / name,
             id=ShuffleId(name),
@@ -1578,6 +1569,7 @@ async def test_basic_lowlevel_shuffle(
             shuffles.append(
                 local_shuffle_pool.new_shuffle(
                     name=workers[ix],
+                    meta=meta,
                     worker_for_mapping=worker_for_mapping,
                     directory=tmp_path,
                     loop=loop_in_thread,
@@ -1633,7 +1625,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
         df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
         df["_partition"] = df.x % npartitions
         dfs.append(df)
-
+    meta = dfs[0].head(0)
     workers = ["A", "B"]
 
     worker_for_mapping = {}
@@ -1652,6 +1644,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
             name="A",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1659,6 +1652,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
         )
         sB = local_shuffle_pool.new_shuffle(
             name="B",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1684,6 +1678,7 @@ async def test_error_send(tmp_path, loop_in_thread):
         df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
         df["_partition"] = df.x % npartitions
         dfs.append(df)
+    meta = dfs[0].head(0)
 
     workers = ["A", "B"]
 
@@ -1703,6 +1698,7 @@ async def test_error_send(tmp_path, loop_in_thread):
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
             name="A",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1710,6 +1706,7 @@ async def test_error_send(tmp_path, loop_in_thread):
         )
         sB = local_shuffle_pool.new_shuffle(
             name="B",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1734,6 +1731,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
         df["_partition"] = df.x % npartitions
         dfs.append(df)
+    meta = dfs[0].head(0)
 
     workers = ["A", "B"]
 
@@ -1753,6 +1751,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
             name="A",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1760,6 +1759,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         )
         sB = local_shuffle_pool.new_shuffle(
             name="B",
+            meta=meta,
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
@@ -1796,29 +1796,29 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
         dtypes={"x": float, "y": float},
         freq="100 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    shuffled = shuffled.persist()
 
     shuffle_extA = a.plugins["shuffle"]
     shuffle_extB = b.plugins["shuffle"]
     await asyncio.gather(
         shuffle_extA.in_shuffle_receive.wait(), shuffle_extB.in_shuffle_receive.wait()
     )
-    del out
+    del shuffled
 
     if wait_until_forgotten:
         while s.tasks or shuffle_extA.shuffles or shuffle_extB.shuffles:
             await asyncio.sleep(0)
 
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x = c.compute(out.x.size)
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    result = c.compute(shuffled)
     await wait_until_new_shuffle_is_initialized(s)
     shuffle_extA.block_shuffle_receive.set()
     shuffle_extB.block_shuffle_receive.set()
 
-    x = await x
-    y = await c.compute(df.x.size)
-    assert x == y
+    result = await result
+    expected = await c.compute(df)
+    dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -1847,8 +1847,8 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
         dtypes={"x": float, "y": float},
         freq="100 s",
     )
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    out = out.persist()
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    shuffled = shuffled.persist()
 
     shuffle_extA = a.plugins["shuffle"]
     shuffle_extB = b.plugins["shuffle"]
@@ -1860,21 +1860,20 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
         [wait_for_barrier_on_A_task, wait_for_barrier_on_B_task],
         return_when=asyncio.FIRST_COMPLETED,
     )
-    del out
+    del shuffled
 
     if wait_until_forgotten:
         while s.tasks:
             await asyncio.sleep(0)
 
-    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
-    x, y = c.compute([df.x.size, out.x.size])
+    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    fut = c.compute([shuffled, df], sync=True)
     await wait_until_new_shuffle_is_initialized(s)
     shuffle_extA.block_barrier.set()
     shuffle_extB.block_barrier.set()
 
-    x = await x
-    y = await y
-    assert x == y
+    result, expected = await fut
+    dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -2093,7 +2092,7 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
 @gen_cluster(client=True)
 async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
     def make_partition(i):
-        """Return null column for one partition"""
+        """Return null column for every other partition"""
         if i % 2 == 1:
             return pd.DataFrame({"a": np.random.random(10), "b": [None] * 10})
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
@@ -2107,6 +2106,49 @@ async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
     dd.assert_eq(result, expected)
     del result
 
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_reconcile_mismatching_partitions_p2p_shuffling(c, s, a, b):
+    def make_partition(i):
+        """Return mismatched column types for every other partition"""
+        if i % 2 == 1:
+            return pd.DataFrame({"a": np.random.random(10), "b": [True] * 10})
+        return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
+
+    ddf = dd.from_map(make_partition, range(50))
+    out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
+    result, expected = c.compute([ddf, out])
+    del out
+    result = await result
+    expected = await expected
+    dd.assert_eq(result, expected)
+    del result
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
+    def make_partition(i):
+        """Return incompatible column types for every other partition"""
+        if i % 2 == 1:
+            return pd.DataFrame({"a": np.random.random(10), "b": ["a"] * 10})
+        return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
+
+    ddf = dd.from_map(make_partition, range(50))
+    out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
+    with raises_with_cause(
+        RuntimeError, "shuffle_transfer", ValueError, "could not convert"
+    ):
+        await c.compute(out)
+
+    await c.close()
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)

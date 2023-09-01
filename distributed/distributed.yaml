@@ -275,14 +275,15 @@ distributed:
       nframes: 0
       ignore-modules:
         - asyncio
-        - distributed
+        - functools
         - dask
-        - xarray
+        - distributed
+        - coiled
         - cudf
         - cuml
         - prefect
+        - xarray
         - xgboost
-        - coiled
     erred-tasks:
       max-history: 100
 

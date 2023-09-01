@@ -11,12 +11,12 @@ import distributed
 from distributed import Client, Event, Future, Worker, span, wait
 from distributed.compatibility import WINDOWS
 from distributed.diagnostics.plugin import SchedulerPlugin
-from distributed.metrics import time
 from distributed.utils_test import (
     NoSchedulerDelayWorker,
     async_poll_for,
     gen_cluster,
     inc,
+    padded_time,
     slowinc,
     wait_for_state,
 )
@@ -216,6 +216,8 @@ async def test_no_extension(c, s, a, b):
 )
 async def test_task_groups(c, s, a, b, release, no_time_resync):
     da = pytest.importorskip("dask.array")
+    t0 = await padded_time(before=0)
+
     with span("wf"):
         with span("p1"):
             a = da.ones(10, chunks=5, dtype="int64") + 1
@@ -224,9 +226,8 @@ async def test_task_groups(c, s, a, b, release, no_time_resync):
         a = a.sum()  # A TaskGroup attached directly to a non-leaf Span
         finalizer = c.compute(a)
 
-    t0 = time()
     assert await finalizer == 40
-    t1 = time()
+    t1 = await padded_time(after=0)
 
     if release:
         # Test that the information in the Spans survives the tasks
@@ -284,12 +285,12 @@ async def test_task_groups(c, s, a, b, release, no_time_resync):
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=NoSchedulerDelayWorker)
 async def test_before_first_task_finished(c, s, a, no_time_resync):
-    t0 = time()
+    t0 = await padded_time(before=0)
     ev = Event()
     x = c.submit(ev.wait, key="x")
     await wait_for_state("x", "executing", a)
     sp = s.extensions["spans"].spans_search_by_name["default",][-1]
-    t1 = time()
+    t1 = await padded_time()
     assert t0 < sp.enqueued < t1
     assert sp.start == 0
     assert t1 < sp.stop < t1 + 1
@@ -299,7 +300,7 @@ async def test_before_first_task_finished(c, s, a, no_time_resync):
 
     await ev.set()
     await x
-    t2 = time()
+    t2 = await padded_time()
     assert t0 < sp.enqueued < sp.start < t1 < sp.stop < t2
     assert sp.duration > 0
     assert sp.all_durations["compute"] > 0
@@ -694,7 +695,7 @@ async def test_active_cpu_seconds_not_done(c, s, a, some_done, no_time_resync):
 
     span = s.extensions["spans"].spans_search_by_name["default",][0]
     assert not span.done
-    now = time()
+    now = await padded_time()
 
     intervals = span.nthreads_intervals
     assert len(intervals) == 1
