@@ -188,7 +188,7 @@ async def test_dependent_tasks(c, s, w):
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_empty_plugin(c, s, w):
-    class EmptyPlugin:
+    class EmptyPlugin(WorkerPlugin):
         pass
 
     await c.register_worker_plugin(EmptyPlugin())
