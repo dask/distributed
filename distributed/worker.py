@@ -1850,9 +1850,15 @@ class Worker(BaseWorker, ServerNode):
         catch_errors: bool = True,
     ) -> dict[str, Any]:
         if isinstance(plugin, bytes):
-            # Note: historically we have accepted duck-typed classes that don't
-            # inherit from WorkerPlugin. Don't do `assert isinstance`.
-            plugin = cast("WorkerPlugin", pickle.loads(plugin))
+            plugin = pickle.loads(plugin)
+        if not isinstance(plugin, WorkerPlugin):
+            warnings.warn(
+                "Registering duck-typed plugins has been deprecated. "
+                "Please make sure your plugin subclasses `WorkerPlugin`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        plugin = cast(WorkerPlugin, plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)

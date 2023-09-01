@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -437,9 +437,19 @@ class Nanny(ServerNode):
         return result
 
     @log_errors
-    async def plugin_add(self, plugin=None, name=None):
+    async def plugin_add(
+        self, plugin: NannyPlugin | bytes, name: str | None = None
+    ) -> dict[str, Any]:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
+        if not isinstance(plugin, NannyPlugin):
+            warnings.warn(
+                "Registering duck-typed plugins has been deprecated. "
+                "Please make sure your plugin subclasses `NannyPlugin`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        plugin = cast(NannyPlugin, plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
@@ -456,7 +466,7 @@ class Nanny(ServerNode):
                     result = await result
             except Exception as e:
                 msg = error_message(e)
-                return msg
+                return cast(dict[str, Any], msg)
         if getattr(plugin, "restart", False):
             await self.restart(reason=f"nanny-plugin-{name}-restart")
 
