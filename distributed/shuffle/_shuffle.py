@@ -504,7 +504,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         return self.worker_for[id]
 
     def read(self, path: Path) -> tuple[Any, int]:
-        return read_from_disk(path)
+        return read_from_disk(path, self.meta)
 
 
 @dataclass(frozen=True)

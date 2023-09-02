@@ -82,10 +82,11 @@ def deserialize_table(buffer: bytes) -> pa.Table:
         return reader.read_all()
 
 
-def read_from_disk(path: Path) -> tuple[Any, int]:
+def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
     import pyarrow as pa
 
     shards = []
+    schema = pa.Schema.from_pandas(meta, preserve_index=True)
     with pa.OSFile(str(path), mode="rb") as f:
         pos = f.tell()
         end = f.seek(0, whence=2)
@@ -94,7 +95,7 @@ def read_from_disk(path: Path) -> tuple[Any, int]:
             sr = pa.RecordBatchStreamReader(f)
             shard = sr.read_all()
             arrs = [pa.concat_arrays(column.chunks) for column in shard.columns]
-            shard = pa.table(data=arrs, schema=shard.schema)
+            shard = pa.table(data=arrs, schema=schema)
             shards.append(shard)
         size = f.tell()
     return shards, size
