@@ -51,10 +51,9 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
 
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
-    table = pa.concat_tables(data, promote=True)
+    table = pa.concat_tables(data)
 
-    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
-    return df.astype(meta.dtypes, copy=False)
+    return from_pyarrow_table_dispatch(meta, table, self_destruct=True)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
@@ -62,7 +61,7 @@ def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     import pyarrow as pa
 
     return pa.concat_tables(
-        (deserialize_table(buffer) for buffer in data), promote=True
+        (deserialize_table(buffer) for buffer in data)
     )
 
 
