@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import pathlib
 import shutil
+from typing import Any, Callable
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
@@ -41,6 +42,7 @@ class DiskShardsBuffer(ShardsBuffer):
     def __init__(
         self,
         directory: str | pathlib.Path,
+        read: Callable[[pathlib.Path], tuple[Any, int]],
         memory_limiter: ResourceLimiter | None = None,
     ):
         super().__init__(
@@ -50,6 +52,7 @@ class DiskShardsBuffer(ShardsBuffer):
         )
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
+        self._read = read
 
     async def _process(self, id: str, shards: list[bytes]) -> None:
         """Write one buffer to file
@@ -74,7 +77,7 @@ class DiskShardsBuffer(ShardsBuffer):
                     for shard in shards:
                         f.write(shard)
 
-    def read(self, id: int | str) -> bytes:
+    def read(self, id: int | str) -> Any:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:
@@ -82,11 +85,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
         try:
             with self.time("read"):
-                with open(
-                    self.directory / str(id), mode="rb", buffering=100_000_000
-                ) as f:
-                    data = f.read()
-                    size = f.tell()
+                data, size = self._read(self.directory / str(id))
         except FileNotFoundError:
             raise KeyError(id)
 

@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
 import toolz
@@ -22,6 +23,7 @@ from distributed.shuffle._arrow import (
     check_minimal_arrow_version,
     convert_partition,
     list_of_buffers_to_table,
+    read_from_disk,
     serialize_table,
 )
 from distributed.shuffle._core import (
@@ -500,6 +502,9 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
+
+    def read(self, path: Path) -> tuple[Any, int]:
+        return read_from_disk(path)
 
 
 @dataclass(frozen=True)

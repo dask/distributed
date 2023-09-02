@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
 from distributed.core import PooledRPCCall
@@ -62,6 +63,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
         self._disk_buffer = DiskShardsBuffer(
             directory=directory,
+            read=self.read,
             memory_limiter=memory_limiter_disk,
         )
 
@@ -219,6 +221,10 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self, partition_id: _T_partition_id, key: str, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
+
+    @abc.abstractmethod
+    def read(self, path: Path) -> tuple[Any, int]:
+        raise NotImplementedError()
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from packaging.version import parse
 
@@ -88,3 +89,10 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 
     with pa.ipc.open_stream(pa.py_buffer(buffer)) as reader:
         return reader.read_all()
+
+
+def read_from_disk(path: Path) -> tuple[Any, int]:
+    with open(path, mode="rb", buffering=100_000_000) as f:
+        data = f.read()
+        size = f.tell()
+    return data, size
