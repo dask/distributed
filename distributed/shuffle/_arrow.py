@@ -92,7 +92,9 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 
 
 def read_from_disk(path: Path) -> tuple[Any, int]:
-    with open(path, mode="rb", buffering=100_000_000) as f:
+    import pyarrow as pa
+
+    with pa.OSFile(str(path), mode="rb") as f:
         data = f.read()
         size = f.tell()
     return data, size
