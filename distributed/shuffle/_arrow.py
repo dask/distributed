@@ -51,16 +51,7 @@ def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
 
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
-    file = BytesIO(data)
-    end = len(data)
-    shards = []
-    while file.tell() < end:
-        sr = pa.RecordBatchStreamReader(file)
-        shard = sr.read_all()
-        arrs = [pa.concat_arrays(column.chunks) for column in shard.columns]
-        shard = pa.table(data=arrs, schema=shard.schema)
-        shards.append(shard)
-    table = pa.concat_tables(shards, promote=True)
+    table = pa.concat_tables(data, promote=True)
 
     df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     return df.astype(meta.dtypes, copy=False)
@@ -94,7 +85,16 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 def read_from_disk(path: Path) -> tuple[Any, int]:
     import pyarrow as pa
 
+    shards = []
     with pa.OSFile(str(path), mode="rb") as f:
-        data = f.read()
+        pos = f.tell()
+        end = f.seek(0, whence=2)
+        f.seek(pos)
+        while f.tell() < end:
+            sr = pa.RecordBatchStreamReader(f)
+            shard = sr.read_all()
+            arrs = [pa.concat_arrays(column.chunks) for column in shard.columns]
+            shard = pa.table(data=arrs, schema=shard.schema)
+            shards.append(shard)
         size = f.tell()
-    return data, size
+    return shards, size
