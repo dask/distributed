@@ -21,7 +21,7 @@ from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
-    convert_partition,
+    convert_shards,
     list_of_buffers_to_table,
     read_from_disk,
     serialize_table,
@@ -495,7 +495,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         try:
             data = self._read_from_disk((partition_id,))
 
-            out = await self.offload(convert_partition, data, self.meta)
+            out = await self.offload(convert_shards, data, self.meta)
         except KeyError:
             out = self.meta.copy()
         return out

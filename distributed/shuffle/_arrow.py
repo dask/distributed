@@ -45,14 +45,15 @@ def check_minimal_arrow_version() -> None:
         )
 
 
-def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
+def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     import pyarrow as pa
 
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
-    table = pa.concat_tables(data)
+    table = pa.concat_tables(shards)
 
-    return from_pyarrow_table_dispatch(meta, table, self_destruct=True)
+    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
+    return df.astype(meta.dtypes, copy=False)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
