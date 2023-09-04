@@ -1008,5 +1008,6 @@ def _get_env_variables(config_key: str) -> dict[str, str]:
             f"{config_key} configuration must be of type dict. Instead got {type(cfg)}"
         )
     # Override dask config with explicitly defined env variables from the OS
-    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items()}
+    # Allow unsetting a variable in a config override by setting its value to None.
+    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items() if v is not None}
     return cfg

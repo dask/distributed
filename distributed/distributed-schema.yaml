@@ -644,14 +644,21 @@ properties:
               Environment variables to set on all worker processes started by nannies.
               These variables are set in the worker process after it has started.
 
+              To unset a variable in a config override, set its value to null (if using
+              a YAML config file) or None (if using dask.config.set) or "None" (if using
+              a DASK_* environment variable).
+
           pre-spawn-environ:
             type: object
             description: |
               Environment variables to set on all worker processes started by nannies.
-              These variables are set within the Nanny process,
-              before spawning the worker process.
-              Should be used for variables that must be set before
+              These variables are set within the Nanny process, before spawning the
+              worker process. Should be used for variables that must be set before
               process startup, interpreter startup, or imports.
+
+              To unset a variable in a config override, set its value to null (if using
+              a YAML config file) or None (if using dask.config.set) or "None" (if using
+              a DASK_* environment variable).
 
       client:
         type: object
