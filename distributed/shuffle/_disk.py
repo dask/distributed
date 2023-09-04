@@ -85,7 +85,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
         try:
             with self.time("read"):
-                data, size = self._read(self.directory / str(id))
+                data, size = self._read((self.directory / str(id)).resolve())
         except FileNotFoundError:
             raise KeyError(id)
 
