@@ -182,10 +182,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if not self.closed:
             self._exception = exception
 
-    def _read_from_disk(self, id: NDIndex) -> bytes:
+    def _read_from_disk(self, id: NDIndex) -> list[Any]:  # TODO: Typing
         self.raise_if_closed()
-        data: bytes = self._disk_buffer.read("_".join(str(i) for i in id))
-        return data
+        return self._disk_buffer.read("_".join(str(i) for i in id))
 
     async def receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
         await self._receive(data)
@@ -224,7 +223,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
     @abc.abstractmethod
     def read(self, path: Path) -> tuple[Any, int]:
-        raise NotImplementedError()
+        """Read shards from disk"""
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:

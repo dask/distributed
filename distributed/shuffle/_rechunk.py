@@ -102,8 +102,8 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from io import BytesIO
 from itertools import product
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import dask
@@ -263,26 +263,22 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     return axes
 
 
-def convert_chunk(data: bytes) -> np.ndarray:
+def convert_chunk(shards: list[tuple[NDIndex, np.ndarray]]) -> np.ndarray:
     import numpy as np
 
     from dask.array.core import concatenate3
 
-    file = BytesIO(data)
-    shards: dict[NDIndex, np.ndarray] = {}
+    indexed: dict[NDIndex, np.ndarray] = {}
+    for index, shard in shards:
+        indexed[index] = shard
+    del shards
 
-    while file.tell() < len(data):
-        for index, shard in pickle.load(file):
-            shards[index] = shard
-
-    subshape = [max(dim) + 1 for dim in zip(*shards.keys())]
-    assert len(shards) == np.prod(subshape)
+    subshape = [max(dim) + 1 for dim in zip(*indexed.keys())]
+    assert len(indexed) == np.prod(subshape)
 
     rec_cat_arg = np.empty(subshape, dtype="O")
-    for index, shard in shards.items():
+    for index, shard in indexed.items():
         rec_cat_arg[tuple(index)] = shard
-    del data
-    del file
     arrs = rec_cat_arg.tolist()
     return concatenate3(arrs)
 
@@ -444,6 +440,15 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         await self.flush_receive()
         data = self._read_from_disk(partition_id)
         return await self.offload(convert_chunk, data)
+
+    def read(self, path: Path) -> tuple[Any, int]:
+        shards: list[tuple[NDIndex, np.ndarray]] = []
+        with path.open(mode="rb") as f:
+            size = f.seek(0, os.SEEK_END)
+            f.seek(0)
+            while f.tell() < size:
+                shards.extend(pickle.load(f))
+        return shards, size
 
     def _get_assigned_worker(self, id: NDIndex) -> str:
         return self.worker_for[id]

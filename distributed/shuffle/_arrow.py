@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -85,14 +84,12 @@ def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
     shards = []
     schema = pa.Schema.from_pandas(meta, preserve_index=True)
     with pa.OSFile(str(path), mode="rb") as f:
-        pos = f.tell()
-        end = f.seek(0, whence=2)
-        f.seek(pos)
-        while f.tell() < end:
+        size = f.seek(0, whence=2)
+        f.seek(0)
+        while f.tell() < size:
             sr = pa.RecordBatchStreamReader(f)
             shard = sr.read_all()
             arrs = [pa.concat_arrays(column.chunks) for column in shard.columns]
             shard = pa.table(data=arrs, schema=schema)
             shards.append(shard)
-        size = f.tell()
     return shards, size
