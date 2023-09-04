@@ -349,6 +349,40 @@ async def test_environment_variable_pre_post_spawn(c, s, n):
     assert "POST-SPAWN" not in os.environ
 
 
+@gen_cluster(
+    nthreads=[],
+    client=True,
+    config={
+        "distributed.nanny.pre-spawn-environ.PRE1": 1,
+        "distributed.nanny.pre-spawn-environ.PRE2": 2,
+        "distributed.nanny.pre-spawn-environ.PRE3": 3,
+        "distributed.nanny.environ.POST1": 4,
+        "distributed.nanny.environ.POST2": 5,
+        "distributed.nanny.environ.POST3": 6,
+    },
+)
+async def test_environment_variable_overlay(c, s):
+    """You can set a value to None to unset a variable in a config overlay"""
+    # Not the same as running Nanny(config=...), which would not work for pre-spawn
+    # variables
+    with dask.config.set(
+        {
+            "distributed.nanny.pre-spawn-environ.PRE2": 7,
+            "distributed.nanny.pre-spawn-environ.PRE3": None,
+            "distributed.nanny.environ.POST2": 8,
+            "distributed.nanny.environ.POST3": None,
+        },
+    ):
+        async with Nanny(s.address):
+            env = await c.submit(lambda: os.environ)
+            assert env["PRE1"] == "1"
+            assert env["PRE2"] == "7"
+            assert "PRE3" not in env
+            assert env["POST1"] == "4"
+            assert env["POST2"] == "8"
+            assert "POST3" not in env
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_config_param_overlays(c, s):
     with dask.config.set({"test123.foo": 1, "test123.bar": 2}):
