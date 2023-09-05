@@ -32,8 +32,8 @@ def check_minimal_arrow_version() -> None:
     Raises a RuntimeError in case pyarrow is not installed or installed version
     is not recent enough.
     """
-    # First version to introduce Table.sort_by
-    minversion = "7.0.0"
+    # First version that supports concatenating extension arrays (apache/arrow#14463)
+    minversion = "12.0.0"
     try:
         import pyarrow as pa
     except ImportError:
