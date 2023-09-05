@@ -2896,7 +2896,7 @@ class SchedulerState:
         return (
             len(tg) > self.total_nthreads * 2
             and len(tg.dependencies) < 5
-            and sum(map(len, tg.dependencies)) < 5
+            and sum(map(len, tg.dependencies)) < max(5, len(tg) * 0.01)
         )
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:

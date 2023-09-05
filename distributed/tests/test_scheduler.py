@@ -4472,3 +4472,18 @@ async def test_scatter_creates_ts(c, s, a, b):
         await a.close()
         assert await x2 == 2
     assert s.tasks["x"].run_spec is not None
+
+
+@gen_cluster(client=True)
+async def test_rootish_for_many_tasks(c, s, a, b):
+    def f(x, y=None):
+        pass
+
+    base = c.map(inc, range(10))
+    derived = c.map(f, range(2000), y=base)
+
+    while derived[0].key not in s.tasks:
+        await asyncio.sleep(0.01)
+
+    ts = s.tasks[derived[0].key]
+    assert s.is_rootish(s.tasks[derived[0].key])
