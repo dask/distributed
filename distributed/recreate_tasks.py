@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 
+from dask.core import validate_key
+
 from distributed.client import Future, futures_of, wait
 from distributed.protocol.serialize import ToPickle
-from distributed.utils import sync, validate_key
+from distributed.utils import sync
 from distributed.utils_comm import pack_data
 
 logger = logging.getLogger(__name__)
