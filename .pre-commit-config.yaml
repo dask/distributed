@@ -67,4 +67,5 @@ repos:
           - git+https://github.com/dask/zict
 
 # Increase this value to clear the cache on GitHub actions
-# if nothing else in this file has changed: 0
+# if nothing else in this file has changed:
+# CACHE_NUMBER: 0
