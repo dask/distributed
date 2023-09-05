@@ -35,7 +35,7 @@
           {% for dts in ts.waiting_on %}
           <tr>
               <td> waiting on </td>
-              <td><a href="{{ url_escape(dts.key) }}.html">{{dts.key}}</a> </td>
+              <td><a href="{{ url_escape(str(dts.key)) }}.html">{{dts.key}}</a> </td>
           </tr>
           {% end %}
           {% end %}
@@ -79,7 +79,7 @@
           </thead>
           {% for dts in ts.dependencies %}
           <tr>
-            <td> <a href="{{ url_escape(dts.key) }}.html">{{dts.key}}</a> </td>
+            <td> <a href="{{ url_escape(str(dts.key)) }}.html">{{dts.key}}</a> </td>
             <td> {{ dts.state }} </td>
           </tr>
           {% end %}
@@ -95,7 +95,7 @@
           </thead>
           {% for dts in ts.dependents %}
           <tr>
-            <td> <a href="{{ url_escape(dts.key) }}.html">{{dts.key}}</a> </td>
+            <td> <a href="{{ url_escape(str(dts.key)) }}.html">{{dts.key}}</a> </td>
             <td> {{ dts.state }} </td>
           </tr>
           {% end %}
@@ -142,7 +142,7 @@
               {% for key, start, finish, recommendations, stimulus_id, transition_time in scheduler.story(Task) %}
               <tr>
                   <td> {{ fromtimestamp(transition_time) }} </td>
-                  <td> <a href="{{ url_escape(key) }}.html">{{key}}</a> </td>
+                  <td> <a href="{{ url_escape(str(key)) }}.html">{{key}}</a> </td>
                   <td> {{ start }} </td>
                   <td> {{ finish }} </td>
                   <td> {{ stimulus_id }} </td>
@@ -156,7 +156,7 @@
                   <td> </td>
                   <td> </td>
                   <td> </td>
-                  <td> <a href="{{ url_escape(key2) }}.html">{{key2}}</a> </td>
+                  <td> <a href="{{ url_escape(str(key2)) }}.html">{{key2}}</a> </td>
                   <td> {{ rec }} </td>
               </tr>
                 {% end %}
