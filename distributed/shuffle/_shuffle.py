@@ -213,7 +213,7 @@ class P2PShuffleLayer(Layer):
         for key in keys:
             if isinstance(key, tuple) and len(key) == 2:
                 name, part = key
-                if part == self.name:
+                if name == self.name:
                     assert isinstance(part, int)
                     parts.add(part)
         return parts
