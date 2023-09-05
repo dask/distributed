@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import pickle
+import random
 import re
 import sys
 from collections.abc import Collection
@@ -22,7 +23,7 @@ from tlz import concat, first, merge
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import delayed
+from dask import bag, delayed
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import parse_timedelta, tmpfile, typename
@@ -4472,3 +4473,39 @@ async def test_scatter_creates_ts(c, s, a, b):
         await a.close()
         assert await x2 == 2
     assert s.tasks["x"].run_spec is not None
+
+
+@pytest.mark.parametrize("finalize", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 4,
+    worker_kwargs={"memory_limit": "100 kB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+)
+async def test_refuse_to_schedule_huge_task(c, s, *workers, finalize):
+    """If the total size of a task's input grossly exceed the memory available on the
+    worker, the scheduler must refuse to compute it
+    """
+    bg = bag.from_sequence(
+        [random.randbytes(30_000) for _ in range(4)],
+        npartitions=4,
+    )
+    match = r"worth of input dependencies, but worker .* has memory_limit set to"
+    if finalize:
+        fut = c.compute(bg)
+        match += r".* you called client.compute()"
+    else:
+        bg = bg.repartition(npartitions=1).persist()
+        fut = list(c.futures_of(bg))[0]
+
+    with pytest.raises(MemoryError, match=match):
+        await fut
+
+    # The task never reached the workers
+    for w in workers:
+        for ev in w.state.log:
+            assert fut.key not in ev
