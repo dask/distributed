@@ -65,3 +65,6 @@ repos:
           - pyarrow
           - git+https://github.com/dask/dask
           - git+https://github.com/dask/zict
+
+# Increase this value to clear the cache on GitHub actions
+# if nothing else in this file has changed: 0
