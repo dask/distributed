@@ -65,3 +65,7 @@ repos:
           - pyarrow
           - git+https://github.com/dask/dask
           - git+https://github.com/dask/zict
+
+# Increase this value to clear the cache on GitHub actions if nothing else in this file
+# has changed. See also same variable in .github/workflows/test.yaml
+# CACHE_NUMBER: 0
