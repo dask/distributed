@@ -5108,19 +5108,17 @@ class Client(SyncMethodMixin):
                     stacklevel=2,
                 )
         else:
-            if isinstance(plugin, NannyPlugin):  # type: ignore[unreachable]
+            warnings.warn(  # type: ignore[unreachable]
+                "Registering duck-typed plugins has been deprecated. "
+                "Please make sure your plugin subclasses `NannyPlugin` "
+                "or `WorkerPlugin`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if nanny is True:
                 method = self._register_nanny_plugin
-            elif isinstance(plugin, WorkerPlugin):
-                method = self._register_worker_plugin
             else:
                 method = self._register_worker_plugin
-                warnings.warn(
-                    "Registering duck-typed plugins has been deprecated. "
-                    "Please make sure your plugin subclasses `NannyPlugin` "
-                    "or `WorkerPlugin`.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
 
         return self.sync(method, plugin=plugin, name=name, idempotent=False)
 
