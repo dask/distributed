@@ -2214,18 +2214,11 @@ class BlockedBarrierShuffleRun(DataFrameShuffleRun):
         super().__init__(*args, **kwargs)
         self.in_barrier = asyncio.Event()
         self.block_barrier = asyncio.Event()
-        self.in_get_output_partition = asyncio.Event()
-        self.block_get_output_partition = asyncio.Event()
 
     async def barrier(self):
         self.in_barrier.set()
         await self.block_barrier.wait()
         return await super().barrier()
-
-    async def get_output_partition(self, *args, **kwargs):
-        # self.in_get_output_partition.set()
-        # await self.block_get_output_partition.wait()
-        return await super().get_output_partition(*args, **kwargs)
 
 
 @mock.patch(
