@@ -656,8 +656,9 @@ class Server:
             if inspect.isawaitable(future):
                 warnings.warn(
                     f"{type(listener)} is using an asynchronous `stop` method. "
-                    "Support for asynchronous `Listener.stop` will be removed in a future version",
-                    PendingDeprecationWarning,
+                    "Support for asynchronous `Listener.stop` has been deprecated and "
+                    "will be removed in a future version",
+                    DeprecationWarning,
                 )
                 listeners_to_stop.add(future)
             elif hasattr(listener, "abort_handshaking_comms"):
