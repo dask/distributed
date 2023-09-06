@@ -67,6 +67,8 @@ from distributed.comm.addressing import address_from_user_args
 from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
+    ErrorMessage,
+    OKMessage,
     PooledRPCCall,
     Status,
     coerce_to_address,
@@ -1847,7 +1849,7 @@ class Worker(BaseWorker, ServerNode):
         plugin: WorkerPlugin | bytes,
         name: str | None = None,
         catch_errors: bool = True,
-    ) -> dict[str, Any]:
+    ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
         if not isinstance(plugin, WorkerPlugin):
@@ -1878,8 +1880,7 @@ class Worker(BaseWorker, ServerNode):
             except Exception as e:
                 if not catch_errors:
                     raise
-                msg = error_message(e)
-                return cast("dict[str, Any]", msg)
+                return error_message(e)
 
         return {"status": "OK"}
 

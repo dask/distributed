@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from typing import Any, ClassVar, Literal, cast
+from typing import ClassVar, Literal, cast
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -33,6 +33,7 @@ from distributed.core import (
     AsyncTaskGroupClosedError,
     CommClosedError,
     ErrorMessage,
+    OKMessage,
     RPCClosed,
     Status,
     coerce_to_address,
@@ -436,7 +437,7 @@ class Nanny(ServerNode):
     @log_errors
     async def plugin_add(
         self, plugin: NannyPlugin | bytes, name: str | None = None
-    ) -> dict[str, Any]:
+    ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
         if not isinstance(plugin, NannyPlugin):
@@ -462,8 +463,7 @@ class Nanny(ServerNode):
                 if isawaitable(result):
                     result = await result
             except Exception as e:
-                msg = error_message(e)
-                return cast(dict[str, Any], msg)
+                return error_message(e)
         if getattr(plugin, "restart", False):
             await self.restart(reason=f"nanny-plugin-{name}-restart")
 
