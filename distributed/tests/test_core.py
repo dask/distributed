@@ -1402,7 +1402,7 @@ class TCPAsyncListenerBackend(TCPBackend):
 @gen_test()
 async def test_async_listener_stop(monkeypatch):
     monkeypatch.setitem(backends, "tcp", TCPAsyncListenerBackend())
-    with pytest.warns(PendingDeprecationWarning):
+    with pytest.warns(DeprecationWarning):
         async with Server({}) as s:
             await s.listen(0)
             assert s.listeners

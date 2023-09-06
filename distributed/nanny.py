@@ -349,17 +349,35 @@ class Nanny(ServerNode):
         self.ip = get_address_host(self.address)
 
         await self.preloads.start()
+        saddr = self.scheduler.addr
+        comm = await self.rpc.connect(saddr)
+        comm.name = "Nanny->Scheduler (registration)"
 
-        msg = await self.scheduler.register_nanny()
-        for name, plugin in msg["nanny-plugins"].items():
-            await self.plugin_add(plugin=plugin, name=name)
+        try:
+            await comm.write({"op": "register_nanny", "address": self.address})
+            msg = await comm.read()
+            try:
+                for name, plugin in msg["nanny-plugins"].items():
+                    await self.plugin_add(plugin=plugin, name=name)
 
-        logger.info("        Start Nanny at: %r", self.address)
-        response = await self.instantiate()
+                logger.info("        Start Nanny at: %r", self.address)
+                response = await self.instantiate()
 
-        if response != Status.running:
-            await self.close(reason="nanny-start-failed")
-            return
+                if response != Status.running:
+                    raise RuntimeError("Nanny failed to start worker process")
+            except Exception:
+                try:
+                    await comm.write({"status": "error"})
+
+                # If self.instantiate() failed, the comm will already be closed.
+                except CommClosedError:
+                    pass
+                await self.close(reason="nanny-start-failed")
+                raise
+            else:
+                await comm.write({"status": "ok"})
+        finally:
+            await comm.close()
 
         assert self.worker_address
 
@@ -990,5 +1008,6 @@ def _get_env_variables(config_key: str) -> dict[str, str]:
             f"{config_key} configuration must be of type dict. Instead got {type(cfg)}"
         )
     # Override dask config with explicitly defined env variables from the OS
-    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items()}
+    # Allow unsetting a variable in a config override by setting its value to None.
+    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items() if v is not None}
     return cfg

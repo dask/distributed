@@ -1,6 +1,45 @@
 Changelog
 =========
 
+.. _v2023.9.0:
+
+2023.9.0
+--------
+
+Released on September 1, 2023
+
+New Features
+^^^^^^^^^^^^
+
+Enhancements
+^^^^^^^^^^^^
+- Don't capture ``functools`` frames in code (:pr:`8146`) `crusaderky`_
+- Ignore ``asyncio`` when scraping code (:pr:`8122`) `Matthew Rocklin`_
+- Remove stringification (:pr:`8083`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure ``NannyPlugin`` are always installed (:pr:`8107`) `Florian Jetter`_
+- Don't use exception hooks to shorten tracebacks (:pr:`8127`) `crusaderky`_
+- Fix P2P shuffle with ``LocalCluster(..., processes=False)`` (:pr:`8125`) `Hendrik Makait`_
+- Merge with P2P shuffle fails if ``left_index`` or ``right_index`` is ``True`` (:pr:`8121`) `Patrick Hoefler`_
+
+Documentation
+^^^^^^^^^^^^^
+- Do not advertise ``@span`` decorator (:pr:`8120`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Assert DF equality in P2P tests (:pr:`8117`) `Hendrik Makait`_
+- Fix warnings from ``pandas=2.1.0`` (:pr:`8145`) `Patrick Hoefler`_
+- Enforce ``dtypes`` early in P2P shuffling (:pr:`8131`) `Hendrik Makait`_
+- Bump ``actions/checkout`` from 3.5.3 to 3.6.0 (:pr:`8139`)
+- Fix flakiness in ``test_spans`` (:pr:`8132`) `crusaderky`_
+- Remove duplicated teardown logic in ``Server.close``, ``Nanny.close``, and ``Server.stop`` (:pr:`8129`) `David Gold`_
+- Fix flaky ``test_task_counter`` (:pr:`8134`) `crusaderky`_
+- Use ``asyncio.timeout()`` in ``ConnectionPool`` where available (:pr:`8109`) `Thomas Grainger`_
+
+
 .. _v2023.8.1:
 
 2023.8.1
@@ -5249,3 +5288,4 @@ significantly without many new features.
 .. _`mercyo12`: https://github.com/mercyo12
 .. _`Richard (Rick) Zamora`: https://github.com/rjzamora
 .. _`Danferno`: https://github.com/Danferno
+.. _`David Gold`: https://github.com/thedeg123

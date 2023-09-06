@@ -32,7 +32,7 @@ from tlz import first, groupby, merge, partition_all, valmap
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
-from dask.core import flatten
+from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
 from dask.utils import (
@@ -48,7 +48,7 @@ from dask.widgets import get_template
 
 from distributed.core import ErrorMessage
 from distributed.protocol.serialize import _is_dumpable
-from distributed.utils import Deadline, validate_key, wait_for
+from distributed.utils import Deadline, wait_for
 
 try:
     from dask.delayed import single_key
