@@ -2190,9 +2190,9 @@ def test_set_index_p2p_with_existing_index(loop):
     with LocalCluster(
         n_workers=2, dashboard_address=":0", loop=loop
     ) as cluster, Client(cluster) as c:
-        ddf.set_index("a", shuffle="p2p")
+        ddf = ddf.set_index("a", shuffle="p2p")
         result = c.compute(ddf, sync=True)
-        dd.assert_eq(result, df)
+        dd.assert_eq(result, df.set_index("a"))
 
 
 def test_sort_values_p2p_with_existing_divisions(loop):
