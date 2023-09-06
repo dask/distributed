@@ -3782,10 +3782,11 @@ class Client(SyncMethodMixin):
 
         async def _():
             results = await asyncio.gather(
-                self.register_scheduler_plugin(
+                self.register_plugin(
                     SchedulerUploadFile(filename, load=load), name=name
                 ),
-                self.register_worker_plugin(UploadFile(filename, load=load), name=name),
+                # FIXME: Make scheduler plugin responsible for (de)registering worker plugin
+                self.register_plugin(UploadFile(filename, load=load), name=name),
             )
             return results[1]  # Results from workers upload
 
@@ -4818,9 +4819,9 @@ class Client(SyncMethodMixin):
     def register_plugin(
         self,
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
-        name: str | None,
+        name: str | None = None,
         idempotent: bool = False,
-    ) -> OKMessage | dict[str, OKMessage]:
+    ):
         """Register a plugin.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html
@@ -4847,11 +4848,11 @@ class Client(SyncMethodMixin):
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
         name: str,
         idempotent: bool,
-    ) -> OKMessage | dict[str, OKMessage]:
+    ):
         raise TypeError(plugin)
 
     @_register_plugin.register
-    def _(self, plugin: SchedulerPlugin, name: str, idempotent: bool) -> OKMessage:
+    def _(self, plugin: SchedulerPlugin, name: str, idempotent: bool):
         return self.sync(
             self._register_scheduler_plugin,
             plugin=plugin,
@@ -4871,9 +4872,7 @@ class Client(SyncMethodMixin):
         )
 
     @_register_plugin.register
-    def _(
-        self, plugin: WorkerPlugin, name: str, idempotent: bool
-    ) -> dict[str, OKMessage]:
+    def _(self, plugin: WorkerPlugin, name: str, idempotent: bool):
         return self.sync(
             self._register_worker_plugin,
             plugin=plugin,
@@ -4884,7 +4883,7 @@ class Client(SyncMethodMixin):
 
     async def _register_scheduler_plugin(
         self, plugin: SchedulerPlugin, name: str, idempotent: bool
-    ) -> OKMessage:
+    ):
         return await self.scheduler.register_scheduler_plugin(
             plugin=dumps(plugin),
             name=name,
@@ -4893,7 +4892,7 @@ class Client(SyncMethodMixin):
 
     def register_scheduler_plugin(
         self, plugin: SchedulerPlugin, name: str | None = None, idempotent: bool = False
-    ) -> OKMessage:
+    ):
         """Register a scheduler plugin.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -4945,7 +4944,7 @@ class Client(SyncMethodMixin):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
-        >>> client.register_scheduler_plugin(plugin, name='foo')
+        >>> client.register_plugin(plugin, name='foo')
         >>> client.unregister_scheduler_plugin(name='foo')
 
         See Also
@@ -5009,7 +5008,7 @@ class Client(SyncMethodMixin):
         plugin: NannyPlugin | WorkerPlugin,
         name: str | None = None,
         nanny: bool | None = None,
-    ) -> dict[str, OKMessage]:
+    ):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 

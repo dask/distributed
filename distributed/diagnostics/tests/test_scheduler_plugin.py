@@ -366,11 +366,11 @@ async def test_register_scheduler_plugin(c, s, a, b):
             scheduler.foo = "bar"
 
     assert not hasattr(s, "foo")
-    await c.register_scheduler_plugin(Dummy1())
+    await c.register_plugin(Dummy1())
     assert s.foo == "bar"
 
     with pytest.warns(UserWarning) as w:
-        await c.register_scheduler_plugin(Dummy1())
+        await c.register_plugin(Dummy1())
     assert "Scheduler already contains" in w[0].message.args[0]
 
     class Dummy2(SchedulerPlugin):
@@ -381,7 +381,7 @@ async def test_register_scheduler_plugin(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(RuntimeError, match="raising in start method"):
-        await c.register_scheduler_plugin(Dummy2())
+        await c.register_plugin(Dummy2())
     # total number of plugins should be unchanged
     assert n_plugins == len(s.plugins)
 
@@ -394,7 +394,7 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(ValueError) as excinfo:
-        await c.register_scheduler_plugin(Dummy1())
+        await c.register_plugin(Dummy1())
 
     msg = str(excinfo.value)
     assert "disallowed from deserializing" in msg
@@ -410,7 +410,7 @@ async def test_unregister_scheduler_plugin(s):
             self.name = "plugin"
 
     plugin = Plugin()
-    await s.register_scheduler_plugin(plugin=dumps(plugin))
+    await s.register_plugin(plugin=dumps(plugin))
     assert "plugin" in s.plugins
 
     await s.unregister_scheduler_plugin(name="plugin")
@@ -426,7 +426,7 @@ async def test_unregister_scheduler_plugin_from_client(c, s, a, b):
         name = "plugin"
 
     assert "plugin" not in s.plugins
-    await c.register_scheduler_plugin(Plugin())
+    await c.register_plugin(Plugin())
     assert "plugin" in s.plugins
 
     await c.unregister_scheduler_plugin("plugin")
@@ -446,7 +446,7 @@ async def test_log_event_plugin(c, s, a, b):
         def log_event(self, name, msg):
             self.scheduler._recorded_events.append((name, msg))
 
-    await c.register_scheduler_plugin(EventPlugin())
+    await c.register_plugin(EventPlugin())
 
     def f():
         get_worker().log_event("foo", 123)
@@ -462,7 +462,7 @@ async def test_register_plugin_on_scheduler(c, s, a, b):
         async def start(self, scheduler: Scheduler) -> None:
             scheduler._foo = "bar"  # type: ignore
 
-    await s.register_scheduler_plugin(MyPlugin())
+    await s.register_plugin(MyPlugin())
 
     assert s._foo == "bar"
 
