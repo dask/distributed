@@ -2186,9 +2186,8 @@ def test_set_index_p2p_with_existing_index():
         npartitions=4,
     )
     with Client() as c:
-        ddf = ddf.set_index("a", shuffle="p2p")
-        result = c.compute(ddf, sync=True)
-        dd.assert_eq(result, df.set_index("a"))
+        with pytest.raises(TypeError, match="_partitions.*integer"):
+            ddf.set_index("a", shuffle="p2p")
 
 
 def test_sort_values_p2p_with_existing_divisions():
@@ -2202,11 +2201,5 @@ def test_sort_values_p2p_with_existing_divisions():
     )
     with Client() as c:
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            ddf = ddf.set_index("a").sort_values("b")
-            result = c.compute(ddf, sync=True)
-        dd.assert_eq(
-            result,
-            df.set_index("a").sort_values("b"),
-            check_index=False,
-            sort_results=False,
-        )
+            with pytest.raises(TypeError, match="_partitions.*integer"):
+                ddf = ddf.set_index("a").sort_values("b")
