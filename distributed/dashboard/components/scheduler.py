@@ -276,7 +276,9 @@ class MemoryColor:
     orange: float
     red: float
 
-    def __init__(self, neutral_color="blue", target_color="orange", terminated_color="red"):
+    def __init__(
+        self, neutral_color="blue", target_color="orange", terminated_color="red"
+    ):
         self.neutral_color = neutral_color
         self.target_color = target_color
         self.terminated_color = terminated_color
