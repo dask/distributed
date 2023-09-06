@@ -9,6 +9,8 @@ import sys
 import pytest
 
 pytest.importorskip("bokeh")
+from urllib.parse import quote_plus
+
 from bokeh.server.server import BokehTornado
 from tlz import first
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
@@ -1158,6 +1160,24 @@ async def test_memory_by_key(c, s, a, b):
     mbk.update()
     assert mbk.source.data["name"] == ["add", "inc"]
     assert mbk.source.data["nbytes"] == [x.nbytes, sys.getsizeof(1)]
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_worker_info(c, s, a, b):
+    port = s.http_server.port
+
+    da = pytest.importorskip("dask.array")
+    x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+
+    host = f"http://127.0.0.1:{port}"
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"{host}/info/main/workers.html")
+    assert response.code == 200
+    for w in [a, b]:
+        response = await http_client.fetch(
+            f"{host}/info/worker/{quote_plus(w.address)}.html"
+        )
+        assert response.code == 200
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
