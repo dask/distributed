@@ -3,18 +3,19 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import toolz
 
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
+from dask.typing import Key
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -141,8 +142,7 @@ def rearrange_by_column_p2p(
     )
 
 
-_T_Key: TypeAlias = Union[tuple[str, int], str]
-_T_LowLevelGraph: TypeAlias = dict[_T_Key, tuple]
+_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
 
 
 class P2PShuffleLayer(Layer):
@@ -177,7 +177,7 @@ class P2PShuffleLayer(Layer):
             f"{type(self).__name__}<name='{self.name}', npartitions={self.npartitions}>"
         )
 
-    def get_output_keys(self) -> set[_T_Key]:
+    def get_output_keys(self) -> set[Key]:
         return {(self.name, part) for part in self.parts_out}
 
     def is_materialized(self) -> bool:
@@ -195,10 +195,10 @@ class P2PShuffleLayer(Layer):
             self._cached_dict = dsk
         return self._cached_dict
 
-    def __getitem__(self, key: _T_Key) -> tuple:
+    def __getitem__(self, key: Key) -> tuple:
         return self._dict[key]
 
-    def __iter__(self) -> Iterator[_T_Key]:
+    def __iter__(self) -> Iterator[Key]:
         return iter(self._dict)
 
     def __len__(self) -> int:
@@ -215,19 +215,19 @@ class P2PShuffleLayer(Layer):
             parts_out=parts_out,
         )
 
-    def _keys_to_parts(self, keys: Iterable[_T_Key]) -> set[int]:
+    def _keys_to_parts(self, keys: Iterable[Key]) -> set[int]:
         """Simple utility to convert keys to partition indices."""
         parts = set()
         for key in keys:
             if isinstance(key, tuple) and len(key) == 2:
-                _name, _part = key
-                if _name != self.name:
-                    continue
-                parts.add(_part)
+                name, part = key
+                if name == self.name:
+                    assert isinstance(part, int)
+                    parts.add(part)
         return parts
 
     def cull(
-        self, keys: Iterable[_T_Key], all_keys: Any
+        self, keys: set[Key], all_keys: Collection[Key]
     ) -> tuple[P2PShuffleLayer, dict]:
         """Cull a P2PShuffleLayer HighLevelGraph layer.
 
