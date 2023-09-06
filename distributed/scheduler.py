@@ -81,7 +81,15 @@ from distributed.comm import (
 )
 from distributed.comm.addressing import addresses_from_user_args
 from distributed.compatibility import PeriodicCallback
-from distributed.core import Status, clean_exception, error_message, rpc, send_recv
+from distributed.core import (
+    ErrorMessage,
+    OKMessage,
+    Status,
+    clean_exception,
+    error_message,
+    rpc,
+    send_recv,
+)
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -7483,7 +7491,9 @@ class Scheduler(SchedulerState, ServerNode):
         self.remove_plugin(name=plugin.name)
         return {"metadata": plugin.metadata, "state": plugin.state}
 
-    async def register_worker_plugin(self, comm, plugin, name, idempotent=False):
+    async def register_worker_plugin(
+        self, plugin: bytes, name: str, idempotent: bool = False
+    ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
         if name in self.plugins and idempotent:
@@ -7496,7 +7506,9 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return responses
 
-    async def unregister_worker_plugin(self, comm, name):
+    async def unregister_worker_plugin(
+        self, name: str
+    ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
             self.worker_plugins.pop(name)
@@ -7506,7 +7518,9 @@ class Scheduler(SchedulerState, ServerNode):
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
 
-    async def register_nanny_plugin(self, comm, plugin, name, idempotent=False):
+    async def register_nanny_plugin(
+        self, plugin: bytes, name: str, idempotent: bool = False
+    ) -> dict[str, OKMessage]:
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
         if name in self.plugins and idempotent:
@@ -7525,7 +7539,9 @@ class Scheduler(SchedulerState, ServerNode):
             )
             return responses
 
-    async def unregister_nanny_plugin(self, comm, name):
+    async def unregister_nanny_plugin(
+        self, name: str
+    ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
             self.nanny_plugins.pop(name)

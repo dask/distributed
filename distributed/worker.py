@@ -79,7 +79,7 @@ from distributed.core import (
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
-from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
+from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
 from distributed.http import get_handlers
@@ -1847,7 +1847,7 @@ class Worker(BaseWorker, ServerNode):
     async def plugin_add(
         self,
         plugin: WorkerPlugin | bytes,
-        name: str | None = None,
+        name: str,
         catch_errors: bool = True,
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
@@ -1860,10 +1860,6 @@ class Worker(BaseWorker, ServerNode):
                 stacklevel=2,
             )
         plugin = cast(WorkerPlugin, plugin)
-
-        if name is None:
-            name = _get_plugin_name(plugin)
-
         assert name
 
         if name in self.plugins:
@@ -1885,7 +1881,7 @@ class Worker(BaseWorker, ServerNode):
         return {"status": "OK"}
 
     @log_errors
-    async def plugin_remove(self, name: str) -> dict[str, Any]:
+    async def plugin_remove(self, name: str) -> ErrorMessage | OKMessage:
         logger.info(f"Removing Worker plugin {name}")
         try:
             plugin = self.plugins.pop(name)
@@ -1894,8 +1890,7 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     result = await result
         except Exception as e:
-            msg = error_message(e)
-            return cast("dict[str, Any]", msg)
+            return error_message(e)
 
         return {"status": "OK"}
 

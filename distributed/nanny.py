@@ -39,7 +39,7 @@ from distributed.core import (
     coerce_to_address,
     error_message,
 )
-from distributed.diagnostics.plugin import NannyPlugin, _get_plugin_name
+from distributed.diagnostics.plugin import NannyPlugin
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -454,7 +454,7 @@ class Nanny(ServerNode):
 
     @log_errors
     async def plugin_add(
-        self, plugin: NannyPlugin | bytes, name: str | None = None
+        self, plugin: NannyPlugin | bytes, name: str
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
@@ -466,10 +466,6 @@ class Nanny(ServerNode):
                 stacklevel=2,
             )
         plugin = cast(NannyPlugin, plugin)
-
-        if name is None:
-            name = _get_plugin_name(plugin)
-
         assert name
 
         self.plugins[name] = plugin
@@ -488,7 +484,7 @@ class Nanny(ServerNode):
         return {"status": "OK"}
 
     @log_errors
-    async def plugin_remove(self, name=None):
+    async def plugin_remove(self, name: str) -> ErrorMessage | OKMessage:
         logger.info(f"Removing Nanny plugin {name}")
         try:
             plugin = self.plugins.pop(name)
