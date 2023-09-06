@@ -280,6 +280,6 @@ async def test_duck_typed_worker_plugin_is_deprecated(c, s, a):
             pass
 
     n_existing_plugins = len(a.plugins)
-    with pytest.warns(DeprecationWarning, match="duck-typed"):
+    with pytest.warns(DeprecationWarning, match="duck-typed.*WorkerPlugin"):
         await c.register_worker_plugin(DuckPlugin())
     assert len(a.plugins) == n_existing_plugins + 1
