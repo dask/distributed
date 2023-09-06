@@ -7497,7 +7497,7 @@ class Scheduler(SchedulerState, ServerNode):
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
         if name in self.plugins and idempotent:
-            return {w: {"status": "OK"} for w in self.workers}
+            return {}
 
         self.worker_plugins[name] = plugin
 
@@ -7524,7 +7524,7 @@ class Scheduler(SchedulerState, ServerNode):
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
         if name in self.plugins and idempotent:
-            return {self.workers[w].nanny: {"status": "OK"} for w in self.workers}
+            return {}
 
         self.nanny_plugins[name] = plugin
         async with self._starting_nannies_cond:
