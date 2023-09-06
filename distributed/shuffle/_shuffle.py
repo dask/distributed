@@ -105,9 +105,15 @@ def rearrange_by_column_p2p(
     column: str,
     npartitions: int | None = None,
 ) -> DataFrame:
+    import pandas as pd
+
     from dask.dataframe.core import new_dd_object
 
     meta = df._meta
+    if not pd.api.types.is_integer_dtype(meta[column]):
+        raise TypeError(
+            f"Expected meta {column=} to be an integer column, is {meta[column].dtype}."
+        )
     check_dtype_support(meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
@@ -327,7 +333,7 @@ def split_by_worker(
     return out
 
 
-def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
+def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
     """
     Split data into many arrow batches, partitioned by final partition
     """
@@ -388,6 +394,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         A ``ResourceLimiter`` limiting the total amount of memory used in either
         buffer.
     """
+
+    column: str
+    meta: pd.DataFrame
+    partitions_of: dict[str, list[int]]
+    worker_for: pd.Series
 
     def __init__(
         self,
