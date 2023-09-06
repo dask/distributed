@@ -2167,30 +2167,34 @@ async def test_set_index_p2p(c, s, *workers):
     await check_scheduler_cleanup(s)
 
 
-def test_shuffle_p2p_with_existing_index():
+def test_shuffle_p2p_with_existing_index(loop):
     df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
     ddf = dd.from_pandas(
         df,
         npartitions=4,
     )
-    with Client() as c:
+    with LocalCluster(
+        n_workers=2, dashboard_address=":0", loop=loop
+    ) as cluster, Client(cluster) as c:
         ddf = ddf.shuffle("a", shuffle="p2p")
         result = c.compute(ddf, sync=True)
         dd.assert_eq(result, df)
 
 
-def test_set_index_p2p_with_existing_index():
+def test_set_index_p2p_with_existing_index(loop):
     df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
     ddf = dd.from_pandas(
         df,
         npartitions=4,
     )
-    with Client() as c:
+    with LocalCluster(
+        n_workers=2, dashboard_address=":0", loop=loop
+    ) as cluster, Client(cluster) as c:
         with pytest.raises(TypeError, match="_partitions.*integer"):
             ddf.set_index("a", shuffle="p2p")
 
 
-def test_sort_values_p2p_with_existing_divisions():
+def test_sort_values_p2p_with_existing_divisions(loop):
     "Regression test for #8165"
     df = pd.DataFrame(
         {"a": np.random.randint(0, 3, 20), "b": np.random.randint(0, 3, 20)}
@@ -2199,7 +2203,9 @@ def test_sort_values_p2p_with_existing_divisions():
         df,
         npartitions=4,
     )
-    with Client() as c:
+    with LocalCluster(
+        n_workers=2, dashboard_address=":0", loop=loop
+    ) as cluster, Client(cluster) as c:
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
             with pytest.raises(TypeError, match="_partitions.*integer"):
                 ddf = ddf.set_index("a").sort_values("b")
