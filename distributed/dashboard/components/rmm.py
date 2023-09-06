@@ -41,7 +41,7 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
     @log_errors
     def __init__(self, scheduler, width=600, **kwargs):
         DashboardComponent.__init__(self)
-        MemoryColor.__init__(self)
+        MemoryColor.__init__(self, neutral_color="#76B900")
 
         self.last = 0
         self.scheduler = scheduler

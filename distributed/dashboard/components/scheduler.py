@@ -276,10 +276,15 @@ class MemoryColor:
     orange: float
     red: float
 
-    def __init__(self):
+    def __init__(self, neutral_color="blue", target_color="orange", terminated_color="red"):
+        self.neutral_color = neutral_color
+        self.target_color = target_color
+        self.terminated_color = terminated_color
+
         target = dask.config.get("distributed.worker.memory.target")
         spill = dask.config.get("distributed.worker.memory.spill")
         terminate = dask.config.get("distributed.worker.memory.terminate")
+
         # These values can be False. It's also common to configure them to impossibly
         # high values to achieve the same effect.
         self.orange = min(target or math.inf, spill or math.inf)
@@ -287,14 +292,14 @@ class MemoryColor:
 
     def _memory_color(self, current: int, limit: int, status: Status) -> str:
         if status != Status.running:
-            return "red"
+            return self.terminated_color
         if not limit:
-            return "blue"
+            return self.neutral_color
         if current >= limit * self.red:
-            return "red"
+            return self.terminated_color
         if current >= limit * self.orange:
-            return "orange"
-        return "blue"
+            return self.target_color
+        return self.neutral_color
 
 
 class ClusterMemory(DashboardComponent, MemoryColor):
