@@ -5107,8 +5107,26 @@ class Client(SyncMethodMixin):
                     UserWarning,
                     stacklevel=2,
                 )
+        elif isinstance(plugin, SchedulerPlugin):  # type: ignore[unreachable]
+            if nanny:
+                warnings.warn(
+                    "Registering a scheduler plugin as a nanny plugin is not allowed; "
+                    " subclass `NannyPlugin` to create a nanny plugin or register "
+                    "your scheduler plugin with `Client.register_plugin.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            else:
+                warnings.warn(
+                    "Registering a scheduler plugin as a worker plugin is not allowed; "
+                    " subclass `WorkerPlugin` to create a worker plugin or register "
+                    "your scheduler plugin with `Client.register_plugin.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            method = self._register_scheduler_plugin
         else:
-            warnings.warn(  # type: ignore[unreachable]
+            warnings.warn(
                 "Registering duck-typed plugins has been deprecated. "
                 "Please make sure your plugin subclasses `NannyPlugin` "
                 "or `WorkerPlugin`.",
