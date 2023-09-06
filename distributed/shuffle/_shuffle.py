@@ -109,7 +109,7 @@ def rearrange_by_column_p2p(
     from dask.dataframe.core import new_dd_object
 
     meta = df._meta
-    if not pd.api.types.is_integer_dtype(meta[column]):
+    if not pd.api.types.is_integer_dtype(meta[column].dtype):
         raise TypeError(
             f"Expected meta {column=} to be an integer column, is {meta[column].dtype}."
         )
