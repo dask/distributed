@@ -410,7 +410,7 @@ async def test_unregister_scheduler_plugin(s):
             self.name = "plugin"
 
     plugin = Plugin()
-    await s.register_plugin(plugin=dumps(plugin))
+    await s.register_scheduler_plugin(plugin=dumps(plugin))
     assert "plugin" in s.plugins
 
     await s.unregister_scheduler_plugin(name="plugin")
@@ -462,7 +462,7 @@ async def test_register_plugin_on_scheduler(c, s, a, b):
         async def start(self, scheduler: Scheduler) -> None:
             scheduler._foo = "bar"  # type: ignore
 
-    await s.register_plugin(MyPlugin())
+    await s.register_scheduler_plugin(MyPlugin())
 
     assert s._foo == "bar"
 

@@ -6907,7 +6907,7 @@ def test_futures_in_subgraphs(loop_in_thread):
 @gen_cluster(client=True)
 async def test_get_task_metadata(c, s, a, b):
     # Populate task metadata
-    await c.register_worker_plugin(TaskStateMetadataPlugin())
+    await c.register_plugin(TaskStateMetadataPlugin())
 
     async with get_task_metadata() as tasks:
         f = c.submit(slowinc, 1)
@@ -6927,7 +6927,7 @@ async def test_get_task_metadata(c, s, a, b):
 @gen_cluster(client=True)
 async def test_get_task_metadata_multiple(c, s, a, b):
     # Populate task metadata
-    await c.register_worker_plugin(TaskStateMetadataPlugin())
+    await c.register_plugin(TaskStateMetadataPlugin())
 
     # Ensure that get_task_metadata only collects metadata for
     # tasks which are submitted and completed within its context
@@ -6958,7 +6958,7 @@ async def test_register_worker_plugin_exception(c, s, a, b):
             raise ValueError("Setup failed")
 
     with pytest.raises(ValueError, match="Setup failed"):
-        await c.register_worker_plugin(MyPlugin())
+        await c.register_plugin(MyPlugin())
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -7594,7 +7594,7 @@ async def test_upload_directory(c, s, a, b, tmp_path):
         f.write("from foo import x")
 
     plugin = UploadDirectory(tmp_path, restart=True, update_path=True)
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
 
     [name] = a.plugins
     assert os.path.split(tmp_path)[-1] in name

@@ -421,7 +421,7 @@ class BlockedGetOrCreateWorkerPlugin(ShuffleWorkerPlugin):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_get_or_create_from_dangling_transfer(c, s, a, b):
-    await c.register_worker_plugin(BlockedGetOrCreateWorkerPlugin(), name="shuffle")
+    await c.register_plugin(BlockedGetOrCreateWorkerPlugin(), name="shuffle")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -1786,9 +1786,7 @@ class BlockedShuffleReceiveShuffleWorkerPlugin(ShuffleWorkerPlugin):
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
-    await c.register_worker_plugin(
-        BlockedShuffleReceiveShuffleWorkerPlugin(), name="shuffle"
-    )
+    await c.register_plugin(BlockedShuffleReceiveShuffleWorkerPlugin(), name="shuffle")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1839,7 +1837,7 @@ class BlockedBarrierShuffleWorkerPlugin(ShuffleWorkerPlugin):
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
-    await c.register_worker_plugin(BlockedBarrierShuffleWorkerPlugin(), name="shuffle")
+    await c.register_plugin(BlockedBarrierShuffleWorkerPlugin(), name="shuffle")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1891,7 +1889,7 @@ async def test_shuffle_run_consistency(c, s, a):
         The P2P implementation relies on the correctness of this behavior,
         but it is an implementation detail that users should not rely upon.
     """
-    await c.register_worker_plugin(BlockedBarrierShuffleWorkerPlugin(), name="shuffle")
+    await c.register_plugin(BlockedBarrierShuffleWorkerPlugin(), name="shuffle")
     worker_plugin = a.plugins["shuffle"]
     scheduler_ext = s.plugins["shuffle"]
 
@@ -1998,9 +1996,7 @@ class BlockedShuffleAccessAndFailWorkerPlugin(ShuffleWorkerPlugin):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_replace_stale_shuffle(c, s, a, b):
-    await c.register_worker_plugin(
-        BlockedShuffleAccessAndFailWorkerPlugin(), name="shuffle"
-    )
+    await c.register_plugin(BlockedShuffleAccessAndFailWorkerPlugin(), name="shuffle")
     ext_A = a.plugins["shuffle"]
     ext_B = b.plugins["shuffle"]
 

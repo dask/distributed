@@ -4971,7 +4971,7 @@ class Client(SyncMethodMixin):
         setup : callable(dask_worker: Worker) -> None
             Function to register and run on all workers
         """
-        return self.register_worker_plugin(_WorkerSetupPlugin(setup))
+        return self.register_plugin(_WorkerSetupPlugin(setup))
 
     async def _register_worker_plugin(
         self, plugin: WorkerPlugin, name: str, idempotent: bool
@@ -5057,11 +5057,11 @@ class Client(SyncMethodMixin):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
-        >>> client.register_worker_plugin(plugin)
+        >>> client.register_plugin(plugin)
 
         You can get access to the plugin with the ``get_worker`` function
 
-        >>> client.register_worker_plugin(other_plugin, name='my-plugin')
+        >>> client.register_plugin(other_plugin, name='my-plugin')
         >>> def f():
         ...    worker = get_worker()
         ...    plugin = worker.plugins['my-plugin']
@@ -5161,7 +5161,7 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         name : str
-            Name of the plugin to unregister. See the :meth:`Client.register_worker_plugin`
+            Name of the plugin to unregister. See the :meth:`Client.register_plugin`
             docstring for more information.
 
         Examples
@@ -5179,12 +5179,12 @@ class Client(SyncMethodMixin):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
-        >>> client.register_worker_plugin(plugin, name='foo')
+        >>> client.register_plugin(plugin, name='foo')
         >>> client.unregister_worker_plugin(name='foo')
 
         See Also
         --------
-        register_worker_plugin
+        register_plugin
         """
         return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
 
@@ -5321,7 +5321,7 @@ class Client(SyncMethodMixin):
         # removed and torn down (see distributed.worker.Worker.plugin_add()), so
         # this is effectively idempotent, i.e., forwarding the same logger twice
         # won't cause every LogRecord to be forwarded twice
-        return self.register_worker_plugin(
+        return self.register_plugin(
             ForwardLoggingPlugin(logger_name, level, topic), plugin_name
         )
 
