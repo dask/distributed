@@ -104,9 +104,15 @@ def rearrange_by_column_p2p(
     column: str,
     npartitions: int | None = None,
 ) -> DataFrame:
+    import pandas as pd
+
     from dask.dataframe.core import new_dd_object
 
     meta = df._meta
+    if not pd.api.types.is_integer_dtype(meta[column].dtype):
+        raise TypeError(
+            f"Expected meta {column=} to be an integer column, is {meta[column].dtype}."
+        )
     check_dtype_support(meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
