@@ -7483,9 +7483,12 @@ class Scheduler(SchedulerState, ServerNode):
         self.remove_plugin(name=plugin.name)
         return {"metadata": plugin.metadata, "state": plugin.state}
 
-    async def register_worker_plugin(self, comm, plugin, name=None):
+    async def register_worker_plugin(self, comm, plugin, name, idempotent=False):
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
+        if name in self.plugins and idempotent:
+            return {w: {"status": "OK"} for w in self.workers}
+
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
@@ -7503,9 +7506,12 @@ class Scheduler(SchedulerState, ServerNode):
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
 
-    async def register_nanny_plugin(self, comm, plugin, name):
-        """Registers a setup function, and call it on every worker"""
+    async def register_nanny_plugin(self, comm, plugin, name, idempotent=False):
+        """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
+        if name in self.plugins and idempotent:
+            return {self.workers[w].nanny: {"status": "OK"} for w in self.workers}
+
         self.nanny_plugins[name] = plugin
         async with self._starting_nannies_cond:
             if self._starting_nannies:
