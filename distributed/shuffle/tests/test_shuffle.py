@@ -2190,8 +2190,9 @@ def test_set_index_p2p_with_existing_index(loop):
     with LocalCluster(
         n_workers=2, dashboard_address=":0", loop=loop
     ) as cluster, Client(cluster) as c:
-        with pytest.raises(TypeError, match="_partitions.*integer"):
-            ddf.set_index("a", shuffle="p2p")
+        ddf.set_index("a", shuffle="p2p")
+        result = c.compute(ddf, sync=True)
+        dd.assert_eq(result, df)
 
 
 def test_sort_values_p2p_with_existing_divisions(loop):
@@ -2207,5 +2208,11 @@ def test_sort_values_p2p_with_existing_divisions(loop):
         n_workers=2, dashboard_address=":0", loop=loop
     ) as cluster, Client(cluster) as c:
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            with pytest.raises(TypeError, match="_partitions.*integer"):
-                ddf = ddf.set_index("a").sort_values("b")
+            ddf = ddf.set_index("a").sort_values("b")
+            result = c.compute(ddf, sync=True)
+            dd.assert_eq(
+                result,
+                df.set_index("a").sort_values("b"),
+                check_index=False,
+                sort_results=False,
+            )
