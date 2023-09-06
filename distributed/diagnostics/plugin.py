@@ -361,6 +361,7 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
     PipInstall
     """
 
+    LOCK: ClassVar[asyncio.Lock] = asyncio.Lock()
     WORKER_PLUGIN_CLASS: ClassVar[type]
 
     installer: _PackageInstaller
@@ -377,10 +378,7 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
         self.name = f"{self.installer.INSTALLER}-install-{uuid.uuid4()}"
 
     async def start(self, scheduler: Scheduler) -> None:
-        if not hasattr(scheduler, "_package_install_lock"):
-            scheduler._package_install_lock = asyncio.Lock()  # type: ignore[attr-defined]
-
-        async with scheduler._package_install_lock:  # type: ignore[attr-defined]
+        async with PackageInstall.LOCK:
             if not self._is_installed(scheduler):
                 logger.info(
                     "%s installing the following packages on the scheduler: %s",
