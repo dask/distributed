@@ -79,7 +79,7 @@ from distributed.core import (
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
-from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
 from distributed.http import get_handlers
@@ -1460,7 +1460,9 @@ class Worker(BaseWorker, ServerNode):
 
         plugins_msgs = await asyncio.gather(
             *(
-                self.plugin_add(plugin=plugin, catch_errors=False)
+                self.plugin_add(
+                    plugin=plugin, name=_get_plugin_name(plugin), catch_errors=False
+                )
                 for plugin in self._pending_plugins
             ),
             return_exceptions=True,
@@ -1847,7 +1849,7 @@ class Worker(BaseWorker, ServerNode):
     async def plugin_add(
         self,
         plugin: WorkerPlugin | bytes,
-        name: str,
+        name: str | None = None,
         catch_errors: bool = True,
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
@@ -1860,6 +1862,9 @@ class Worker(BaseWorker, ServerNode):
                 stacklevel=2,
             )
         plugin = cast(WorkerPlugin, plugin)
+
+        if name is None:
+            name = _get_plugin_name(plugin)
         assert name
 
         if name in self.plugins:
