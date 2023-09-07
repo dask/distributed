@@ -4896,7 +4896,10 @@ class Client(SyncMethodMixin):
     def register_scheduler_plugin(
         self, plugin: SchedulerPlugin, name: str | None = None, idempotent: bool = False
     ):
-        """Register a scheduler plugin.
+        """
+        Register a scheduler plugin.
+
+        .. warning:: Deprecated, use :meth:`Client.register_plugin` instead.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
 
@@ -5014,6 +5017,8 @@ class Client(SyncMethodMixin):
     ):
         """
         Registers a lifecycle worker plugin for all current and future workers.
+
+        .. warning:: Deprecated, use :meth:`Client.register_plugin` instead.
 
         This registers a new object to handle setup, task state transitions and
         teardown for workers in this cluster. The plugin will instantiate
