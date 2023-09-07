@@ -319,3 +319,43 @@ async def test_duck_typed_register_worker_plugin_is_deprecated(c, s, a):
         await c.register_worker_plugin(DuckPlugin())
     assert len(a.plugins) == n_existing_plugins + 1
     assert a.foo == 123
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_register_idempotent_plugins(c, s, a):
+    class IdempotentPlugin(WorkerPlugin):
+        def __init__(self, instance=None):
+            self.name = "idempotentplugin"
+            self.instance = instance
+
+        def setup(self, worker):
+            if self.instance != "first":
+                raise RuntimeError(
+                    "Only the first plugin should be started when idempotent is set"
+                )
+
+    first = IdempotentPlugin(instance="first")
+    await c.register_plugin(first, idempotent=True)
+    assert "idempotentplugin" in a.plugins
+
+    second = IdempotentPlugin(instance="second")
+    await c.register_plugin(second, idempotent=True)
+    assert "idempotentplugin" in a.plugins
+    assert a.plugins["idempotentplugin"].instance == "first"
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_register_non_idempotent_plugins(c, s, a):
+    class NonIdempotentPlugin(WorkerPlugin):
+        def __init__(self, instance=None):
+            self.name = "nonidempotentplugin"
+            self.instance = instance
+
+    first = NonIdempotentPlugin(instance="first")
+    await c.register_plugin(first, idempotent=False)
+    assert "nonidempotentplugin" in a.plugins
+
+    second = NonIdempotentPlugin(instance="second")
+    await c.register_plugin(second, idempotent=False)
+    assert "nonidempotentplugin" in a.plugins
+    assert a.plugins["nonidempotentplugin"].instance == "second"
