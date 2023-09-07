@@ -222,7 +222,7 @@ async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npart
     if npartitions == 1:
         # FIXME: distributed#7816
         with raises_with_cause(
-            RuntimeError, "shuffle_transfer failed", RuntimeError, "Barrier task"
+            RuntimeError, "failed during transfer", RuntimeError, "Barrier task"
         ):
             await c.compute(out)
     else:
@@ -285,7 +285,7 @@ async def test_bad_disk(c, s, a, b):
     while not b.plugins["shuffle"].shuffles:
         await asyncio.sleep(0.01)
     shutil.rmtree(b.local_directory)
-    with pytest.raises(RuntimeError, match=f"shuffle_transfer failed .* {shuffle_id}"):
+    with pytest.raises(RuntimeError, match=f"{shuffle_id} failed during transfer"):
         out = await c.compute(out)
 
     await c.close()
@@ -2143,7 +2143,7 @@ async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
     with raises_with_cause(
-        RuntimeError, "shuffle_transfer", ValueError, "could not convert"
+        RuntimeError, "failed during transfer", ValueError, "could not convert"
     ):
         await c.compute(out)
 

@@ -236,7 +236,7 @@ async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
     assert x2.chunks == new
     # FIXME: distributed#7816
     with raises_with_cause(
-        RuntimeError, "rechunk_transfer failed", RuntimeError, "Barrier task"
+        RuntimeError, "failed during transfer", RuntimeError, "Barrier task"
     ):
         await c.compute(x2)
 
