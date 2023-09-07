@@ -16,7 +16,7 @@
           </tr>
           <tr>
               <th> Call stack </th>
-              <td><a class="button is-primary" href="../call-stack/{{ url_escape(Task) }}.html">Call Stack</a></td>
+              <td><a class="button is-primary" href="../call-stack/{{ url_escape(str(Task)) }}.html">Call Stack</a></td>
           </tr>
           {% end %}
           {% if ts.type %}
@@ -117,8 +117,9 @@
         <h3 class="title is-5"> Clients with future </h3>
         <div class="content">
           <ul>
+            <!--FIXME: There was supposed to be a client route but there isn't-->
             {% for cs in ts.who_wants %}
-            <li> <a href="../client/{{ url_escape(cs.client_key) }}.html">{{cs.client_key}}</a></li>
+            <li>{{ cs.client_key }}</li>
             {% end %}
           </ul>
         </div>
@@ -139,7 +140,7 @@
                   <th> Recommended Action </th>
               </thead>
 
-              {% for key, start, finish, recommendations, stimulus_id, transition_time in scheduler.story(Task) %}
+              {% for key, start, finish, recommendations, stimulus_id, transition_time in scheduler.story(ts.key) %}
               <tr>
                   <td> {{ fromtimestamp(transition_time) }} </td>
                   <td> <a href="{{ url_escape(str(key)) }}.html">{{key}}</a> </td>

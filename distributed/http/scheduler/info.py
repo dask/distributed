@@ -4,7 +4,9 @@ import json
 import logging
 import os
 import os.path
+from collections.abc import Hashable
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from tlz import first, merge
 from tornado import escape
@@ -16,6 +18,9 @@ from distributed.diagnostics.websocket import WebsocketPlugin
 from distributed.http.utils import RequestHandler, redirect
 from distributed.metrics import time
 from distributed.utils import log_errors
+
+if TYPE_CHECKING:
+    from distributed import Scheduler
 
 ns = {
     func.__name__: func
@@ -85,18 +90,28 @@ class Exceptions(RequestHandler):
         )
 
 
+def _get_actual_scheduler_key(key: str, scheduler: Scheduler) -> Hashable:
+    for k in scheduler.tasks:
+        if str(k) == key:
+            return k
+    raise KeyError(key)
+
+
 class Task(RequestHandler):
     @log_errors
     def get(self, task):
         task = escape.url_unescape(task)
-        if task not in self.server.tasks:
+
+        try:
+            requested_key = _get_actual_scheduler_key(task, self.server)
+        except KeyError:
             self.send_error(404)
             return
 
         self.render(
             "task.html",
             title="Task: " + task,
-            Task=task,
+            Task=requested_key,
             scheduler=self.server,
             **merge(
                 self.server.__dict__,
@@ -152,7 +167,13 @@ class TaskCallStack(RequestHandler):
     @log_errors
     async def get(self, key):
         key = escape.url_unescape(key)
-        call_stack = await self.server.get_call_stack(keys=[key])
+
+        try:
+            requested_key = _get_actual_scheduler_key(key, self.server)
+        except KeyError:
+            self.send_error(404)
+            return
+        call_stack = await self.server.get_call_stack(keys=[requested_key])
         if not call_stack:
             self.write(
                 "<p>Task not actively running. "
