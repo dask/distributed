@@ -4830,10 +4830,10 @@ class Client(SyncMethodMixin):
         ----------
         plugin :
             A nanny, scheduler, or worker plugin to register.
-        name : str
+        name :
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
-        idempotent : bool
+        idempotent :
             Do not re-register if a plugin of the given name already exists.
         """
         if name is None:
