@@ -42,7 +42,7 @@ async def test_register_worker_plugin_typing_over_nanny_keyword(c, s, a):
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_duck_typed_register_nanny_plugin_is_deprecated(c, s, a):
-    class DuckPlugin(NannyPlugin):
+    class DuckPlugin:
         def setup(self, nanny):
             nanny.foo = 123
 

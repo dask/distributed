@@ -5086,7 +5086,7 @@ class Client(SyncMethodMixin):
         """
         warnings.warn(
             "`Client.register_worker_plugin` has been deprecated; "
-            "please `Client.register_plugin` instead",
+            "please use `Client.register_plugin` instead",
             DeprecationWarning,
             stacklevel=2,
         )
