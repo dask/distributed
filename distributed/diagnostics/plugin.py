@@ -403,7 +403,6 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
     async def close(self) -> None:
         async with PackageInstall.LOCK:
             await self._scheduler.unregister_worker_plugin(comm=None, name=self.name)
-        return await super().close()
 
     def _is_installed(self, scheduler):
         return scheduler.get_metadata(self._compose_installed_key(), default=False)
