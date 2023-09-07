@@ -53,7 +53,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
-from dask.core import get_deps
+from dask.core import get_deps, validate_key
 from dask.utils import (
     format_bytes,
     format_time,
@@ -114,7 +114,6 @@ from distributed.utils import (
     no_default,
     offload,
     recursive_to_dict,
-    validate_key,
     wait_for,
 )
 from distributed.utils_comm import (
