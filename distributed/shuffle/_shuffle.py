@@ -504,9 +504,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
         await self.flush_receive()
         try:
-            data = self._read_from_disk((partition_id,))
 
-            out = await self.offload(convert_shards, data, self.meta)
+            def _(partition_id: int, meta: pd.DataFrame) -> pd.DataFrame:
+                data = self._read_from_disk((partition_id,))
+                return convert_shards(data, meta)
+
+            out = await self.offload(_, partition_id, self.meta)
         except KeyError:
             out = self.meta.copy()
         return out
