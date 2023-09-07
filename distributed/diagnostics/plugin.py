@@ -367,6 +367,7 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
     installer: _PackageInstaller
     name: str
     restart_workers: bool
+    _scheduler: Scheduler
 
     def __init__(
         self,
@@ -378,6 +379,7 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
         self.name = f"{self.installer.INSTALLER}-install-{uuid.uuid4()}"
 
     async def start(self, scheduler: Scheduler) -> None:
+        self._scheduler = scheduler
         async with PackageInstall.LOCK:
             if not self._is_installed(scheduler):
                 logger.info(
@@ -394,7 +396,14 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
                 )
 
             worker_plugin = _PackageInstallWorker(self.installer, self.restart_workers)
-            await scheduler.register_worker_plugin(None, dumps(worker_plugin))
+            await scheduler.register_worker_plugin(
+                comm=None, plugin=dumps(worker_plugin), name=self.name
+            )
+
+    async def close(self) -> None:
+        async with PackageInstall.LOCK:
+            await self._scheduler.unregister_worker_plugin(comm=None, name=self.name)
+        return await super().close()
 
     def _is_installed(self, scheduler):
         return scheduler.get_metadata(self._compose_installed_key(), default=False)
