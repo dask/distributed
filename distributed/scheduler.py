@@ -7496,7 +7496,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
-        if name in self.plugins and idempotent:
+        if name in self.worker_plugins and idempotent:
             return {}
 
         self.worker_plugins[name] = plugin
@@ -7523,7 +7523,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> dict[str, OKMessage]:
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
-        if name in self.plugins and idempotent:
+        if name in self.nanny_plugins and idempotent:
             return {}
 
         self.nanny_plugins[name] = plugin
