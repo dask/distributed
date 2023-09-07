@@ -394,13 +394,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
                 repartitioned[id].append(shard)
         return {k: pickle.dumps(v) for k, v in repartitioned.items()}
 
-    async def add_partition(
+    async def _add_partition(
         self, data: np.ndarray, partition_id: NDIndex, **kwargs: Any
     ) -> int:
-        self.raise_if_closed()
-        if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to {self}")
-
         def _() -> dict[str, tuple[NDIndex, bytes]]:
             """Return a mapping of worker addresses to a tuple of input partition
             IDs and shard data.
@@ -433,15 +429,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(
+    async def _get_output_partition(
         self, partition_id: NDIndex, key: str, **kwargs: Any
     ) -> np.ndarray:
-        self.raise_if_closed()
-        if not self.transferred:
-            raise RuntimeError("`get_output_partition` called before barrier task")
-
-        await self._ensure_output_worker(partition_id, key)
-        await self.flush_receive()
         data = self._read_from_disk(partition_id)
         return await self.offload(convert_chunk, data)
 

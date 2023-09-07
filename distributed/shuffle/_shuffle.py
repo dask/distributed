@@ -104,9 +104,15 @@ def rearrange_by_column_p2p(
     column: str,
     npartitions: int | None = None,
 ) -> DataFrame:
+    import pandas as pd
+
     from dask.dataframe.core import new_dd_object
 
     meta = df._meta
+    if not pd.api.types.is_integer_dtype(meta[column].dtype):
+        raise TypeError(
+            f"Expected meta {column=} to be an integer column, is {meta[column].dtype}."
+        )
     check_dtype_support(meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
@@ -453,16 +459,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         del data
         return {(k,): serialize_table(v) for k, v in groups.items()}
 
-    async def add_partition(
+    async def _add_partition(
         self,
         data: pd.DataFrame,
         partition_id: int,
         **kwargs: Any,
     ) -> int:
-        self.raise_if_closed()
-        if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to {self}")
-
         def _() -> dict[str, tuple[int, bytes]]:
             out = split_by_worker(
                 data,
@@ -477,19 +479,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(
+    async def _get_output_partition(
         self,
         partition_id: int,
         key: str,
         **kwargs: Any,
     ) -> pd.DataFrame:
-        self.raise_if_closed()
-        if not self.transferred:
-            raise RuntimeError("`get_output_partition` called before barrier task")
-
-        await self._ensure_output_worker(partition_id, key)
-
-        await self.flush_receive()
         try:
             data = self._read_from_disk((partition_id,))
 

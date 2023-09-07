@@ -4906,8 +4906,22 @@ class Client(SyncMethodMixin):
 
     async def _register_worker_plugin(self, plugin=None, name=None, nanny=None):
         if nanny or nanny is None and isinstance(plugin, NannyPlugin):
+            if not isinstance(plugin, NannyPlugin):
+                warnings.warn(
+                    "Registering duck-typed plugins has been deprecated. "
+                    "Please make sure your plugin subclasses `NannyPlugin`.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             method = self.scheduler.register_nanny_plugin
         else:
+            if not isinstance(plugin, WorkerPlugin):
+                warnings.warn(
+                    "Registering duck-typed plugins has been deprecated. "
+                    "Please make sure your plugin subclasses `WorkerPlugin`.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             method = self.scheduler.register_worker_plugin
 
         responses = await method(plugin=dumps(plugin), name=name)

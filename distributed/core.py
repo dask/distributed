@@ -24,7 +24,7 @@ from collections.abc import (
 )
 from enum import Enum
 from functools import wraps
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, final
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, TypeVar, final
 
 import tblib
 from tlz import merge
@@ -1728,6 +1728,10 @@ class ErrorMessage(TypedDict):
     traceback: protocol.Serialize | None
     exception_text: str
     traceback_text: str
+
+
+class OKMessage(TypedDict):
+    status: Literal["OK"]
 
 
 def error_message(e: BaseException, status: str = "error") -> ErrorMessage:
