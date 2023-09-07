@@ -29,18 +29,17 @@ def check_minimal_arrow_version() -> None:
     """Verify that the the correct version of pyarrow is installed to support
     the P2P extension.
 
-    Raises a RuntimeError in case pyarrow is not installed or installed version
-    is not recent enough.
+    Raises a ModuleNotFoundError if pyarrow is not installed or an
+    ImportError if the installed version is not recent enough.
     """
     # First version that supports concatenating extension arrays (apache/arrow#14463)
     minversion = "12.0.0"
     try:
         import pyarrow as pa
-    except ImportError:
-        raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}")
-
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(f"P2P shuffling requires pyarrow>={minversion}")
     if parse(pa.__version__) < parse(minversion):
-        raise RuntimeError(
+        raise ImportError(
             f"P2P shuffling requires pyarrow>={minversion} but only found {pa.__version__}"
         )
 
