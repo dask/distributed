@@ -1460,9 +1460,7 @@ class Worker(BaseWorker, ServerNode):
 
         plugins_msgs = await asyncio.gather(
             *(
-                self.plugin_add(
-                    plugin=plugin, name=_get_plugin_name(plugin), catch_errors=False
-                )
+                self.plugin_add(plugin=plugin, catch_errors=False)
                 for plugin in self._pending_plugins
             ),
             return_exceptions=True,
