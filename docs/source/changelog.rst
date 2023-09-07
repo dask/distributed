@@ -1,15 +1,37 @@
 Changelog
 =========
 
+.. _v2023.9.1:
+
+2023.9.1
+--------
+
+Released on September 6, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Raise in P2P if ``column`` ``dtype`` is wrong  (:pr:`8167`) `Hendrik Makait`_
+- Auto-fail tasks with deps larger than the worker memory (:pr:`8135`) `crusaderky`_
+- Make workers table sortable (:pr:`8153`) `Jacob Tomlinson`_
+- Support for unsetting environment variables (:pr:`8144`) `crusaderky`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate asynchronous ``Listener.stop()`` (:pr:`8151`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Initial tweaks after Dask key type changes (:pr:`8162`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.6.0 to 4.0.0 (:pr:`8159`)
+- Fix flaky ``test_worker_metrics`` (:pr:`8154`) `crusaderky`_
+
+
 .. _v2023.9.0:
 
 2023.9.0
 --------
 
 Released on September 1, 2023
-
-New Features
-^^^^^^^^^^^^
 
 Enhancements
 ^^^^^^^^^^^^

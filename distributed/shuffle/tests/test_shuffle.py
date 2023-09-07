@@ -2161,3 +2161,89 @@ async def test_set_index_p2p(c, s, *workers):
     await c.close()
     await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
     await check_scheduler_cleanup(s)
+
+
+def test_shuffle_p2p_with_existing_index(client):
+    df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
+    ddf = dd.from_pandas(
+        df,
+        npartitions=4,
+    )
+    ddf = ddf.shuffle("a", shuffle="p2p")
+    result = client.compute(ddf, sync=True)
+    dd.assert_eq(result, df)
+
+
+def test_set_index_p2p_with_existing_index(client):
+    df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
+    ddf = dd.from_pandas(
+        df,
+        npartitions=4,
+    )
+    ddf = ddf.set_index("a", shuffle="p2p")
+    result = client.compute(ddf, sync=True)
+    dd.assert_eq(result, df.set_index("a"))
+
+
+def test_sort_values_p2p_with_existing_divisions(client):
+    "Regression test for #8165"
+    df = pd.DataFrame(
+        {"a": np.random.randint(0, 3, 20), "b": np.random.randint(0, 3, 20)}
+    )
+    ddf = dd.from_pandas(
+        df,
+        npartitions=4,
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        ddf = ddf.set_index("a").sort_values("b")
+        result = client.compute(ddf, sync=True)
+        dd.assert_eq(
+            result,
+            df.set_index("a").sort_values("b"),
+            check_index=False,
+            sort_results=False,
+        )
+
+
+class BlockedBarrierShuffleRun(DataFrameShuffleRun):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_barrier = asyncio.Event()
+        self.block_barrier = asyncio.Event()
+
+    async def barrier(self):
+        self.in_barrier.set()
+        await self.block_barrier.wait()
+        return await super().barrier()
+
+
+@mock.patch(
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
+    BlockedBarrierShuffleRun,
+)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
+    await invoke_annotation_chaos(1.0, c)
+
+    expected = pd.DataFrame({"a": list(range(10))})
+    ddf = dd.from_pandas(expected, npartitions=2)
+    ddf = ddf.shuffle("a")
+    fut = c.compute(ddf)
+
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s)
+    shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
+    await shuffleA.in_barrier.wait()
+
+    async with Worker(s.address) as b:
+        # Restrict an unpack task to B so that the previously non-participating
+        # worker takes part in the unpack phase
+        for key in s.tasks:
+            if key_split(key) == "shuffle_p2p":
+                s.set_restrictions({key: {b.address}})
+                break
+
+        shuffleA.block_barrier.set()
+        result = await fut
+        dd.assert_eq(result, expected)
