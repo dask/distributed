@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from distributed import Scheduler, SchedulerPlugin, Worker, get_worker
+from distributed import Nanny, Scheduler, SchedulerPlugin, Worker, get_worker
 from distributed.protocol.pickle import dumps
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
@@ -607,3 +607,37 @@ async def test_update_graph_hook_complex(c, s, a, b):
     with dask.annotate(global_annot=24):
         await c.compute(f4)
     assert plugin.success
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_scheduler_plugin_in_register_worker_plugin_overrides(c, s, a):
+    class DuckPlugin(SchedulerPlugin):
+        def start(self, scheduler):
+            scheduler.foo = 123
+
+        def stop(self, scheduler):
+            pass
+
+    n_existing_plugins = len(s.plugins)
+    assert not hasattr(s, "foo")
+    with pytest.warns(UserWarning, match="scheduler plugin as a worker plugin"):
+        await c.register_worker_plugin(DuckPlugin(), nanny=False)
+    assert len(s.plugins) == n_existing_plugins + 1
+    assert s.foo == 123
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_scheduler_plugin_in_register_worker_plugin_overrides_nanny(c, s, a):
+    class DuckPlugin(SchedulerPlugin):
+        def start(self, scheduler):
+            scheduler.foo = 123
+
+        def stop(self, scheduler):
+            pass
+
+    n_existing_plugins = len(s.plugins)
+    assert not hasattr(s, "foo")
+    with pytest.warns(UserWarning, match="scheduler plugin as a nanny plugin"):
+        await c.register_worker_plugin(DuckPlugin(), nanny=True)
+    assert len(s.plugins) == n_existing_plugins + 1
+    assert s.foo == 123
