@@ -438,8 +438,12 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
 
         await self._ensure_output_worker(partition_id, key)
         await self.flush_receive()
-        data = self._read_from_disk(partition_id)
-        return await self.offload(convert_chunk, data)
+
+        def _(partition_id: NDIndex) -> np.ndarray:
+            data = self._read_from_disk(partition_id)
+            return convert_chunk(data)
+
+        return await self.offload(_, partition_id)
 
     def read(self, path: Path) -> tuple[Any, int]:
         shards: list[tuple[NDIndex, np.ndarray]] = []
