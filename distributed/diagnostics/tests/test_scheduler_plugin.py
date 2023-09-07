@@ -358,7 +358,7 @@ async def test_lifecycle():
 
 
 @gen_cluster(client=True)
-async def test_register_scheduler_plugin(c, s, a, b):
+async def test_register_plugin(c, s, a, b):
     class Dummy1(SchedulerPlugin):
         name = "Dummy1"
 
@@ -386,8 +386,24 @@ async def test_register_scheduler_plugin(c, s, a, b):
     assert n_plugins == len(s.plugins)
 
 
+@gen_cluster(client=True)
+async def test_register_scheduler_plugin_deprecated(c, s, a, b):
+    class Dummy(SchedulerPlugin):
+        name = "Dummy"
+
+        def start(self, scheduler):
+            scheduler.foo = "bar"
+
+    assert not hasattr(s, "foo")
+    with pytest.warns(
+        DeprecationWarning, match="register_scheduler_plugin.*deprecated"
+    ):
+        await c.register_scheduler_plugin(Dummy())
+        assert s.foo == "bar"
+
+
 @gen_cluster(client=True, config={"distributed.scheduler.pickle": False})
-async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
+async def test_register_plugin_pickle_disabled(c, s, a, b):
     class Dummy1(SchedulerPlugin):
         def start(self, scheduler):
             scheduler.foo = "bar"

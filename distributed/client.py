@@ -5093,9 +5093,9 @@ class Client(SyncMethodMixin):
             method = self._register_worker_plugin
             if nanny is True:
                 warnings.warn(
-                    "Registering a nanny plugin as a worker plugin is not "
-                    "allowed; subclass `WorkerPlugin` to create a worker "
-                    "plugin or remove `nanny=False`",
+                    "Registering a worker plugin as a nanny plugin is not "
+                    "allowed; subclass `NannyPlugin` to create a nanny "
+                    "plugin or remove `nanny=True`",
                     UserWarning,
                     stacklevel=2,
                 )
@@ -5103,9 +5103,9 @@ class Client(SyncMethodMixin):
             method = self._register_nanny_plugin
             if nanny is False:
                 warnings.warn(
-                    "Registering a worker plugin as a nanny plugin is not "
-                    "allowed; subclass `NannyPlugin` to create a nanny "
-                    "plugin or remove `nanny=True`",
+                    "Registering a nanny plugin as a worker plugin is not "
+                    "allowed; subclass `WorkerPlugin` to create a worker "
+                    "plugin or remove `nanny=False`",
                     UserWarning,
                     stacklevel=2,
                 )
