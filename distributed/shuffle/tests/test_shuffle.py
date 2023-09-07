@@ -2225,42 +2225,24 @@ class BlockedBarrierShuffleRun(DataFrameShuffleRun):
     "distributed.shuffle._shuffle.DataFrameShuffleRun",
     BlockedBarrierShuffleRun,
 )
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
-async def test_unpack_gets_rescheduled_on_bystanding_worker(c, s, a, b):
-    """Test that when we lost annotations, unpack tasks run on bystanding workers
-    do not fail but get rescheduled.
-
-    This test is heavily using worker restrictions to simulate certain scheduler
-    decisions of placing tasks.
-    """
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
     await invoke_annotation_chaos(1.0, c)
 
     expected = pd.DataFrame({"a": list(range(10))})
     ddf = dd.from_pandas(expected, npartitions=2)
+    ddf = ddf.shuffle("a")
+    fut = c.compute(ddf)
 
-    # B should not participate in the initial shuffle phases, so place all outputs on A
-    def mock_get_worker_for_range_sharding(
-        output_partition: int, workers: list[str], npartitions: int
-    ) -> str:
-        return a.address
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s)
+    shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
+    await shuffleA.in_barrier.wait()
 
-    with mock.patch(
-        "distributed.shuffle._shuffle._get_worker_for_range_sharding",
-        mock_get_worker_for_range_sharding,
-    ):
-        # Restrict all tasks to A so that B does not participate in the transfer and
-        # barrier phases
-        with dask.annotate(workers=[a.address]):
-            ddf = ddf.shuffle("a")
-        fut = c.compute(ddf)
-        shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-        key = barrier_key(shuffle_id)
-        await wait_for_state(key, "processing", s)
-        shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
-        await shuffleA.in_barrier.wait()
-
-        # Restrict an unpack task to B so that the previously bystanding
-        # worker participates in the unpack phase
+    async with Worker(s.address) as b:
+        # Restrict an unpack task to B so that the previously non-participating
+        # worker takes part in the unpack phase
         for key in s.tasks:
             if key_split(key) == "shuffle_p2p":
                 s.set_restrictions({key: {b.address}})
