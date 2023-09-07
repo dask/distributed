@@ -4849,7 +4849,10 @@ class Client(SyncMethodMixin):
         name: str,
         idempotent: bool,
     ):
-        raise TypeError(plugin)
+        raise TypeError(
+            "Registering duck-typed plugins is not allowed. Please subclass "
+            "NannyPlugin, WorkerPlugin, or SchedulerPlugin to create a plugin."
+        )
 
     @_register_plugin.register
     def _(self, plugin: SchedulerPlugin, name: str, idempotent: bool):

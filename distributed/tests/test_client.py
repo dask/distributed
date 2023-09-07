@@ -7616,6 +7616,22 @@ async def test_upload_directory(c, s, a, b, tmp_path):
     assert files_start == files_end  # no change
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_duck_typed_register_plugin_raises(c, s, a):
+    class DuckPlugin:
+        def setup(self, worker):
+            pass
+
+        def teardown(self, worker):
+            pass
+
+    n_existing_plugins = len(a.plugins)
+
+    with pytest.raises(TypeError, match="duck-typed.*subclass.*Plugin"):
+        await c.register_plugin(DuckPlugin())
+    assert len(a.plugins) == n_existing_plugins
+
+
 @gen_cluster(client=True)
 async def test_exception_text(c, s, a, b):
     def bad(x):
