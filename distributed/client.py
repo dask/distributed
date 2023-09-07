@@ -4850,7 +4850,7 @@ class Client(SyncMethodMixin):
         idempotent: bool,
     ):
         raise TypeError(
-            "Registering duck-typed plugins is not allowed. Please subclass "
+            "Registering duck-typed plugins is not allowed. Please inherit from "
             "NannyPlugin, WorkerPlugin, or SchedulerPlugin to create a plugin."
         )
 
@@ -5101,7 +5101,7 @@ class Client(SyncMethodMixin):
             if nanny is True:
                 warnings.warn(
                     "Registering a worker plugin as a nanny plugin is not "
-                    "allowed; subclass `NannyPlugin` to create a nanny "
+                    "allowed; inherit from `NannyPlugin` to create a nanny "
                     "plugin or remove `nanny=True`",
                     UserWarning,
                     stacklevel=2,
@@ -5111,7 +5111,7 @@ class Client(SyncMethodMixin):
             if nanny is False:
                 warnings.warn(
                     "Registering a nanny plugin as a worker plugin is not "
-                    "allowed; subclass `WorkerPlugin` to create a worker "
+                    "allowed; inherit from `WorkerPlugin` to create a worker "
                     "plugin or remove `nanny=False`",
                     UserWarning,
                     stacklevel=2,
@@ -5120,7 +5120,7 @@ class Client(SyncMethodMixin):
             if nanny:
                 warnings.warn(
                     "Registering a scheduler plugin as a nanny plugin is not allowed; "
-                    " subclass `NannyPlugin` to create a nanny plugin or register "
+                    " inherit from `NannyPlugin` to create a nanny plugin or register "
                     "your scheduler plugin with `Client.register_plugin.",
                     UserWarning,
                     stacklevel=2,
@@ -5128,7 +5128,7 @@ class Client(SyncMethodMixin):
             else:
                 warnings.warn(
                     "Registering a scheduler plugin as a worker plugin is not allowed; "
-                    " subclass `WorkerPlugin` to create a worker plugin or register "
+                    " inherit from `WorkerPlugin` to create a worker plugin or register "
                     "your scheduler plugin with `Client.register_plugin.",
                     UserWarning,
                     stacklevel=2,
@@ -5137,7 +5137,7 @@ class Client(SyncMethodMixin):
         else:
             warnings.warn(
                 "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin subclasses `NannyPlugin` "
+                "Please make sure your plugin inherits from `NannyPlugin` "
                 "or `WorkerPlugin`.",
                 DeprecationWarning,
                 stacklevel=2,

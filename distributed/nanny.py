@@ -461,7 +461,7 @@ class Nanny(ServerNode):
         if not isinstance(plugin, NannyPlugin):
             warnings.warn(
                 "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin subclasses `NannyPlugin`.",
+                "Please make sure your plugin inherits from `NannyPlugin`.",
                 DeprecationWarning,
                 stacklevel=2,
             )

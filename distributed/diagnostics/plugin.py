@@ -34,7 +34,7 @@ class SchedulerPlugin:
 
     To implement a plugin:
 
-    1. subclass this class
+    1. inherit from this class
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
@@ -205,7 +205,7 @@ class WorkerPlugin:
 
     To implement a plugin:
 
-    1. subclass this class
+    1. inherit from this class
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
@@ -279,7 +279,7 @@ class NannyPlugin:
 
     To implement a plugin:
 
-    1. subclass this class
+    1. inherit from this class
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 

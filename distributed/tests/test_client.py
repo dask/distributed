@@ -7627,7 +7627,7 @@ async def test_duck_typed_register_plugin_raises(c, s, a):
 
     n_existing_plugins = len(a.plugins)
 
-    with pytest.raises(TypeError, match="duck-typed.*subclass.*Plugin"):
+    with pytest.raises(TypeError, match="duck-typed.*inherit from.*Plugin"):
         await c.register_plugin(DuckPlugin())
     assert len(a.plugins) == n_existing_plugins
 
