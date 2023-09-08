@@ -32,7 +32,7 @@ async def test_pip_install(c, s, a):
             await c.register_plugin(
                 PipInstall(packages=["requests"], pip_options=["--upgrade"])
             )
-            assert Popen.call_count == 2
+            assert Popen.call_count == 1
             args = Popen.call_args[0][0]
             assert "python" in args[0]
             assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
@@ -56,7 +56,7 @@ async def test_conda_install(c, s, a):
             await c.register_plugin(
                 CondaInstall(packages=["requests"], conda_options=["--update-deps"])
             )
-            assert run_command_mock.call_count == 2
+            assert run_command_mock.call_count == 1
             command = run_command_mock.call_args[0][0]
             assert command == "INSTALL"
             arguments = run_command_mock.call_args[0][1]
@@ -171,7 +171,7 @@ async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
                     packages=["requests"],
                 )
             )
-            assert install_mock.call_count == 2
+            assert install_mock.call_count == 1
             logs = logger.getvalue()
             assert "already been installed" in logs
 
