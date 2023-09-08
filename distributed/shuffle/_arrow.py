@@ -83,7 +83,7 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
     import pyarrow as pa
 
-    batch_size = parse_bytes("10 MiB")
+    batch_size = parse_bytes("1 MiB")
     batch = []
     shards = []
     schema = pa.Schema.from_pandas(meta, preserve_index=True)
