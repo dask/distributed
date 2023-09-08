@@ -46,12 +46,12 @@ from distributed.diagnostics.plugin import (
     CondaInstall,
     Environ,
     NannyPlugin,
+    PackageInstall,
     PipInstall,
     SchedulerPlugin,
     UploadDirectory,
     UploadFile,
     WorkerPlugin,
-    _PackageInstallWorker,
 )
 from distributed.diagnostics.progressbar import progress
 from distributed.event import Event
