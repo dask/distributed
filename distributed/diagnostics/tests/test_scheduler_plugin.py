@@ -620,7 +620,7 @@ async def test_scheduler_plugin_in_register_worker_plugin_overrides(c, s, a):
 
     n_existing_plugins = len(s.plugins)
     assert not hasattr(s, "foo")
-    with pytest.warns(UserWarning, match="scheduler plugin as a worker plugin"):
+    with pytest.warns(UserWarning, match="`SchedulerPlugin` as a worker plugin"):
         await c.register_worker_plugin(DuckPlugin(), nanny=False)
     assert len(s.plugins) == n_existing_plugins + 1
     assert s.foo == 123
@@ -637,7 +637,7 @@ async def test_scheduler_plugin_in_register_worker_plugin_overrides_nanny(c, s, 
 
     n_existing_plugins = len(s.plugins)
     assert not hasattr(s, "foo")
-    with pytest.warns(UserWarning, match="scheduler plugin as a nanny plugin"):
+    with pytest.warns(UserWarning, match="`SchedulerPlugin` as a nanny plugin"):
         await c.register_worker_plugin(DuckPlugin(), nanny=True)
     assert len(s.plugins) == n_existing_plugins + 1
     assert s.foo == 123

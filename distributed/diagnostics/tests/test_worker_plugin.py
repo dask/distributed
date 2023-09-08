@@ -298,7 +298,7 @@ async def test_register_worker_plugin_typing_over_nanny_keyword(c, s, a):
 
     n_existing_plugins = len(a.plugins)
     assert not hasattr(a, "foo")
-    with pytest.warns(UserWarning, match="worker plugin as a nanny plugin"):
+    with pytest.warns(UserWarning, match="`WorkerPlugin` as a nanny plugin"):
         await c.register_worker_plugin(DuckPlugin(), nanny=True)
     assert len(a.plugins) == n_existing_plugins + 1
     assert a.foo == 123
