@@ -83,10 +83,12 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
     import pyarrow as pa
 
+    from dask.dataframe.dispatch import pyarrow_schema_dispatch
+
     batch_size = parse_bytes("1 MiB")
     batch = []
     shards = []
-    schema = pa.Schema.from_pandas(meta, preserve_index=True)
+    schema = pyarrow_schema_dispatch(meta, preserve_index=True)
 
     with pa.OSFile(str(path), mode="rb") as f:
         size = f.seek(0, whence=2)
