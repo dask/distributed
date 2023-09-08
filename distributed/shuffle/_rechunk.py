@@ -111,13 +111,14 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
 from distributed.core import PooledRPCCall
-from distributed.exceptions import Reschedule
 from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
     get_worker_plugin,
+    handle_transfer_errors,
+    handle_unpack_errors,
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
@@ -143,27 +144,21 @@ def rechunk_transfer(
     new: ChunkedAxes,
     old: ChunkedAxes,
 ) -> int:
-    try:
+    with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
             spec=ArrayRechunkSpec(id=id, new=new, old=old),
         )
-    except Exception as e:
-        raise RuntimeError(f"rechunk_transfer failed during shuffle {id}") from e
 
 
 def rechunk_unpack(
     id: ShuffleId, output_chunk: NDIndex, barrier_run_id: int
 ) -> np.ndarray:
-    try:
+    with handle_unpack_errors(id):
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_chunk
         )
-    except Reschedule as e:
-        raise e
-    except Exception as e:
-        raise RuntimeError(f"rechunk_unpack failed during shuffle {id}") from e
 
 
 def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:

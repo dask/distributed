@@ -1839,7 +1839,7 @@ async def test_bad_local_directory(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_taskstate_metadata(c, s):
     async with Worker(s.address) as a:
-        await c.register_worker_plugin(TaskStateMetadataPlugin())
+        await c.register_plugin(TaskStateMetadataPlugin())
 
         f = c.submit(inc, 1)
         await f
@@ -3363,7 +3363,7 @@ async def test_worker_running_before_running_plugins(c, s, caplog):
         def teardown(self, worker):
             pass
 
-    await c.register_worker_plugin(InitWorkerNewThread())
+    await c.register_plugin(InitWorkerNewThread())
     async with Worker(s.address) as worker:
         assert await c.submit(inc, 1) == 2
         assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
@@ -3473,7 +3473,7 @@ async def test_forward_output(c, s, a, b, capsys):
     assert "" == err
 
     # After installing, output should be forwarded
-    await c.register_worker_plugin(plugin, "forward")
+    await c.register_plugin(plugin, "forward")
     await asyncio.sleep(0.1)  # Let setup messages come in
     capsys.readouterr()
 
@@ -3515,7 +3515,7 @@ async def test_forward_output(c, s, a, b, capsys):
 
     # Registering the plugin is idempotent
     other_plugin = ForwardOutput()
-    await c.register_worker_plugin(other_plugin, "forward")
+    await c.register_plugin(other_plugin, "forward")
     await asyncio.sleep(0.1)  # Let teardown/setup messages come in
     out, err = capsys.readouterr()
 

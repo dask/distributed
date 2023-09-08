@@ -311,7 +311,7 @@ async def test_chaos_rechunk(c, s, *workers):
 
     plugin = KillWorker(delay="4 s", mode="sys.exit")
 
-    await c.register_worker_plugin(plugin, name="kill")
+    await c.register_plugin(plugin, name="kill")
 
     da = pytest.importorskip("dask.array")
 

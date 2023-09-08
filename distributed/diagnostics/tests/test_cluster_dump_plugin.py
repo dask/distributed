@@ -8,7 +8,7 @@ from distributed.utils_test import gen_cluster, inc
 @gen_cluster(client=True)
 async def test_cluster_dump_plugin(c, s, *workers, tmp_path):
     dump_file = tmp_path / "cluster_dump.msgpack.gz"
-    await c.register_scheduler_plugin(ClusterDump(str(dump_file)), name="cluster-dump")
+    await c.register_plugin(ClusterDump(str(dump_file)), name="cluster-dump")
     plugin = s.plugins["cluster-dump"]
     assert plugin.scheduler is s
 

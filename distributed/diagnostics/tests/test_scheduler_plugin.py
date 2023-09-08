@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from distributed import Scheduler, SchedulerPlugin, Worker, get_worker
+from distributed import Nanny, Scheduler, SchedulerPlugin, Worker, get_worker
 from distributed.protocol.pickle import dumps
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
@@ -358,7 +358,7 @@ async def test_lifecycle():
 
 
 @gen_cluster(client=True)
-async def test_register_scheduler_plugin(c, s, a, b):
+async def test_register_plugin(c, s, a, b):
     class Dummy1(SchedulerPlugin):
         name = "Dummy1"
 
@@ -366,11 +366,11 @@ async def test_register_scheduler_plugin(c, s, a, b):
             scheduler.foo = "bar"
 
     assert not hasattr(s, "foo")
-    await c.register_scheduler_plugin(Dummy1())
+    await c.register_plugin(Dummy1())
     assert s.foo == "bar"
 
     with pytest.warns(UserWarning) as w:
-        await c.register_scheduler_plugin(Dummy1())
+        await c.register_plugin(Dummy1())
     assert "Scheduler already contains" in w[0].message.args[0]
 
     class Dummy2(SchedulerPlugin):
@@ -381,20 +381,36 @@ async def test_register_scheduler_plugin(c, s, a, b):
 
     n_plugins = len(s.plugins)
     with pytest.raises(RuntimeError, match="raising in start method"):
-        await c.register_scheduler_plugin(Dummy2())
+        await c.register_plugin(Dummy2())
     # total number of plugins should be unchanged
     assert n_plugins == len(s.plugins)
 
 
+@gen_cluster(client=True)
+async def test_register_scheduler_plugin_deprecated(c, s, a, b):
+    class Dummy(SchedulerPlugin):
+        name = "Dummy"
+
+        def start(self, scheduler):
+            scheduler.foo = "bar"
+
+    assert not hasattr(s, "foo")
+    with pytest.warns(
+        DeprecationWarning, match="register_scheduler_plugin.*deprecated"
+    ):
+        await c.register_scheduler_plugin(Dummy())
+        assert s.foo == "bar"
+
+
 @gen_cluster(client=True, config={"distributed.scheduler.pickle": False})
-async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
+async def test_register_plugin_pickle_disabled(c, s, a, b):
     class Dummy1(SchedulerPlugin):
         def start(self, scheduler):
             scheduler.foo = "bar"
 
     n_plugins = len(s.plugins)
     with pytest.raises(ValueError) as excinfo:
-        await c.register_scheduler_plugin(Dummy1())
+        await c.register_plugin(Dummy1())
 
     msg = str(excinfo.value)
     assert "disallowed from deserializing" in msg
@@ -426,7 +442,7 @@ async def test_unregister_scheduler_plugin_from_client(c, s, a, b):
         name = "plugin"
 
     assert "plugin" not in s.plugins
-    await c.register_scheduler_plugin(Plugin())
+    await c.register_plugin(Plugin())
     assert "plugin" in s.plugins
 
     await c.unregister_scheduler_plugin("plugin")
@@ -446,7 +462,7 @@ async def test_log_event_plugin(c, s, a, b):
         def log_event(self, name, msg):
             self.scheduler._recorded_events.append((name, msg))
 
-    await c.register_scheduler_plugin(EventPlugin())
+    await c.register_plugin(EventPlugin())
 
     def f():
         get_worker().log_event("foo", 123)
@@ -591,3 +607,37 @@ async def test_update_graph_hook_complex(c, s, a, b):
     with dask.annotate(global_annot=24):
         await c.compute(f4)
     assert plugin.success
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_scheduler_plugin_in_register_worker_plugin_overrides(c, s, a):
+    class DuckPlugin(SchedulerPlugin):
+        def start(self, scheduler):
+            scheduler.foo = 123
+
+        def stop(self, scheduler):
+            pass
+
+    n_existing_plugins = len(s.plugins)
+    assert not hasattr(s, "foo")
+    with pytest.warns(UserWarning, match="`SchedulerPlugin` as a worker plugin"):
+        await c.register_worker_plugin(DuckPlugin(), nanny=False)
+    assert len(s.plugins) == n_existing_plugins + 1
+    assert s.foo == 123
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_scheduler_plugin_in_register_worker_plugin_overrides_nanny(c, s, a):
+    class DuckPlugin(SchedulerPlugin):
+        def start(self, scheduler):
+            scheduler.foo = 123
+
+        def stop(self, scheduler):
+            pass
+
+    n_existing_plugins = len(s.plugins)
+    assert not hasattr(s, "foo")
+    with pytest.warns(UserWarning, match="`SchedulerPlugin` as a nanny plugin"):
+        await c.register_worker_plugin(DuckPlugin(), nanny=True)
+    assert len(s.plugins) == n_existing_plugins + 1
+    assert s.foo == 123
