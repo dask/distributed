@@ -5100,9 +5100,9 @@ class Client(SyncMethodMixin):
             method = self._register_worker_plugin
             if nanny is True:
                 warnings.warn(
-                    "Registering a worker plugin as a nanny plugin is not "
-                    "allowed; inherit from `NannyPlugin` to create a nanny "
-                    "plugin or remove `nanny=True`",
+                    "Registering a `WorkerPlugin` as a nanny plugin is not "
+                    "allowed, registering as a worker plugin instead. "
+                    "To register as a nanny plugin, inherit from `NannyPlugin`.",
                     UserWarning,
                     stacklevel=2,
                 )
@@ -5110,26 +5110,26 @@ class Client(SyncMethodMixin):
             method = self._register_nanny_plugin
             if nanny is False:
                 warnings.warn(
-                    "Registering a nanny plugin as a worker plugin is not "
-                    "allowed; inherit from `WorkerPlugin` to create a worker "
-                    "plugin or remove `nanny=False`",
+                    "Registering a `NannyPlugin` as a worker plugin is not "
+                    "allowed, registering as a nanny plugin instead. "
+                    "To register as a worker plugin, inherit from `WorkerPlugin`.",
                     UserWarning,
                     stacklevel=2,
                 )
         elif isinstance(plugin, SchedulerPlugin):  # type: ignore[unreachable]
             if nanny:
                 warnings.warn(
-                    "Registering a scheduler plugin as a nanny plugin is not allowed; "
-                    " inherit from `NannyPlugin` to create a nanny plugin or register "
-                    "your scheduler plugin with `Client.register_plugin.",
+                    "Registering a `SchedulerPlugin` as a nanny plugin is not "
+                    "allowed, registering as a scheduler plugin instead. "
+                    "To register as a nanny plugin, inherit from `NannyPlugin`.",
                     UserWarning,
                     stacklevel=2,
                 )
             else:
                 warnings.warn(
-                    "Registering a scheduler plugin as a worker plugin is not allowed; "
-                    " inherit from `WorkerPlugin` to create a worker plugin or register "
-                    "your scheduler plugin with `Client.register_plugin.",
+                    "Registering a `SchedulerPlugin` as a worker plugin is not "
+                    "allowed, registering as a scheduler plugin instead. "
+                    "To register as a worker plugin, inherit from `WorkerPlugin`.",
                     UserWarning,
                     stacklevel=2,
                 )
