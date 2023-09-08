@@ -139,7 +139,13 @@ class WorkerLogs(RequestHandler):
     @log_errors
     async def get(self, worker):
         worker = escape.url_unescape(worker)
-        logs = await self.server.get_worker_logs(workers=[worker])
+        try:
+            logs = await self.server.get_worker_logs(workers=[worker])
+        except Exception:
+            if not any(worker == w.address for w in self.server.workers.values()):
+                self.send_error(404)
+                return
+            raise
         logs = logs[worker]
         self.render(
             "logs.html",
@@ -153,7 +159,11 @@ class WorkerCallStacks(RequestHandler):
     @log_errors
     async def get(self, worker):
         worker = escape.url_unescape(worker)
-        keys = {ts.key for ts in self.server.workers[worker].processing}
+        try:
+            keys = {ts.key for ts in self.server.workers[worker].processing}
+        except KeyError:
+            self.send_error(404)
+            return
         call_stack = await self.server.get_call_stack(keys=keys)
         self.render(
             "call-stack.html",

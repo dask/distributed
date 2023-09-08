@@ -1178,9 +1178,18 @@ async def test_worker_info(c, s, a, b):
         http_client = AsyncHTTPClient()
         await ev1.wait()
         response = await http_client.fetch(
+            f"{host}/info/task/foo.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
             f"{host}/info/task/{quote_plus(str(f.key))}.html"
         )
         assert response.code == 200
+
+        response = await http_client.fetch(
+            f"{host}/info/call-stack/foo.html", raise_error=False
+        )
+        assert response.code == 404
         response = await http_client.fetch(
             f"{host}/info/call-stack/{quote_plus(str(f.key))}.html"
         )
@@ -1188,11 +1197,27 @@ async def test_worker_info(c, s, a, b):
 
         response = await http_client.fetch(f"{host}/info/main/workers.html")
         assert response.code == 200
+
+        response = await http_client.fetch(
+            f"{host}/info/worker/bar.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/call-stacks/bar.html", raise_error=False
+        )
+        assert response.code == 404
+
+        response = await http_client.fetch(
+            f"{host}/info/logs/bar.html", raise_error=False
+        )
+        assert response.code == 404
+
         for w in [a, b]:
             response = await http_client.fetch(
                 f"{host}/info/worker/{quote_plus(w.address)}.html"
             )
             assert response.code == 200
+
             response = await http_client.fetch(
                 f"{host}/info/call-stacks/{quote_plus(w.address)}.html"
             )
