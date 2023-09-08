@@ -136,7 +136,7 @@ __all__ = [
     "MultiLock",
     "Nanny",
     "NannyPlugin",
-    "_PackageInstallWorker",
+    "PackageInstall",
     "PipInstall",
     "Pub",
     "Queue",
