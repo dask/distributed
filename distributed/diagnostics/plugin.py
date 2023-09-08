@@ -402,7 +402,9 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
                     self.installer.packages,
                 )
 
-            worker_plugin = _PackageInstallWorker(self.installer, self.restart_workers)
+            worker_plugin = _PackageInstallWorker(
+                self.installer, self.restart_workers, self.name
+            )
             await scheduler.register_worker_plugin(
                 plugin=dumps(worker_plugin), name=self.name
             )
@@ -433,7 +435,7 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
 class _PackageInstallWorker(WorkerPlugin):
     """Worker plugin to install a set of packages
 
-    This accepts a set of packages to install on all workers.
+    This accepts an installer which will install a set of packages on all workers.
     You can also optionally ask for the worker to restart itself after
     performing this installation.
 
@@ -446,11 +448,13 @@ class _PackageInstallWorker(WorkerPlugin):
 
     Parameters
     ----------
-    packages
-        A list of packages (with optional versions) to install
+    installer
+        Installer that installs a set of packages
     restart
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
+    name:
+        Name of the plugin
 
     See Also
     --------
@@ -461,14 +465,10 @@ class _PackageInstallWorker(WorkerPlugin):
     name: str
     restart: bool
 
-    def __init__(
-        self,
-        installer: _PackageInstaller,
-        restart: bool,
-    ):
+    def __init__(self, installer: _PackageInstaller, restart: bool, name: str):
         self.installer = installer
-        self.name = f"{self.installer.INSTALLER}-install-{uuid.uuid4()}"
         self.restart = restart
+        self.name = name
 
     async def setup(self, worker):
         from distributed.semaphore import Semaphore
