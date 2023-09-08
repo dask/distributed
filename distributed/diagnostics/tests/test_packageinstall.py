@@ -211,7 +211,7 @@ class FailingInstall(PackageInstall):
 async def test_package_install_failing_does_not_restart_on_nanny(c, s, a):
     (addr,) = s.workers
     with pytest.raises(RuntimeError):
-        await c.register_scheduler_plugin(
+        await c.register_plugin(
             FailingInstall(
                 packages=["requests"],
                 restart_workers=True,
