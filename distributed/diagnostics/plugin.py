@@ -423,12 +423,6 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
             socket.gethostname(),
         ]
 
-    def setup(self, worker):
-        raise TypeError(
-            "PackageInstall is a scheduler plugin, not a worker plugin; "
-            "use `client.register_scheduler_plugin(...) to register it."
-        )
-
 
 class _PackageInstallWorker(WorkerPlugin, abc.ABC):
     """Abstract parent class for a worker plugin to install a set of packages
