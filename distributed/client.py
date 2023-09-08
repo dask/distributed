@@ -4882,7 +4882,6 @@ class Client(SyncMethodMixin):
             name=name,
             idempotent=idempotent,
         )
-        ...
 
     async def _register_scheduler_plugin(
         self, plugin: SchedulerPlugin, name: str, idempotent: bool
