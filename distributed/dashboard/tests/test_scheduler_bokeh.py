@@ -9,6 +9,8 @@ import sys
 import pytest
 
 pytest.importorskip("bokeh")
+from urllib.parse import quote_plus
+
 from bokeh.server.server import BokehTornado
 from tlz import first
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
@@ -1158,6 +1160,74 @@ async def test_memory_by_key(c, s, a, b):
     mbk.update()
     assert mbk.source.data["name"] == ["add", "inc"]
     assert mbk.source.data["nbytes"] == [x.nbytes, sys.getsizeof(1)]
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_worker_info(c, s, a, b):
+    port = s.http_server.port
+    ev1 = Event()
+    ev2 = Event()
+
+    def block_on_event(enter, wait):
+        enter.set()
+        wait.wait()
+
+    f = c.submit(block_on_event, ev1, ev2, workers=[a.address])
+    try:
+        host = f"http://127.0.0.1:{port}"
+        http_client = AsyncHTTPClient()
+        await ev1.wait()
+        response = await http_client.fetch(
+            f"{host}/info/task/foo.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/task/{quote_plus(str(f.key))}.html"
+        )
+        assert response.code == 200
+
+        response = await http_client.fetch(
+            f"{host}/info/call-stack/foo.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/call-stack/{quote_plus(str(f.key))}.html"
+        )
+        assert response.code == 200
+
+        response = await http_client.fetch(f"{host}/info/main/workers.html")
+        assert response.code == 200
+
+        response = await http_client.fetch(
+            f"{host}/info/worker/bar.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/call-stacks/bar.html", raise_error=False
+        )
+        assert response.code == 404
+
+        response = await http_client.fetch(
+            f"{host}/info/logs/bar.html", raise_error=False
+        )
+        assert response.code == 404
+
+        for w in [a, b]:
+            response = await http_client.fetch(
+                f"{host}/info/worker/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+
+            response = await http_client.fetch(
+                f"{host}/info/call-stacks/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+            response = await http_client.fetch(
+                f"{host}/info/logs/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+    finally:
+        await ev2.set()
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})

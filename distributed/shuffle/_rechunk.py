@@ -111,13 +111,14 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
 from distributed.core import PooledRPCCall
-from distributed.exceptions import Reschedule
 from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
     get_worker_plugin,
+    handle_transfer_errors,
+    handle_unpack_errors,
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
@@ -143,27 +144,21 @@ def rechunk_transfer(
     new: ChunkedAxes,
     old: ChunkedAxes,
 ) -> int:
-    try:
+    with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
             spec=ArrayRechunkSpec(id=id, new=new, old=old),
         )
-    except Exception as e:
-        raise RuntimeError(f"rechunk_transfer failed during shuffle {id}") from e
 
 
 def rechunk_unpack(
     id: ShuffleId, output_chunk: NDIndex, barrier_run_id: int
 ) -> np.ndarray:
-    try:
+    with handle_unpack_errors(id):
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_chunk
         )
-    except Reschedule as e:
-        raise e
-    except Exception as e:
-        raise RuntimeError(f"rechunk_unpack failed during shuffle {id}") from e
 
 
 def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
@@ -390,13 +385,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
                 repartitioned[id].append(shard)
         return {k: pickle.dumps(v) for k, v in repartitioned.items()}
 
-    async def add_partition(
+    async def _add_partition(
         self, data: np.ndarray, partition_id: NDIndex, **kwargs: Any
     ) -> int:
-        self.raise_if_closed()
-        if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to {self}")
-
         def _() -> dict[str, tuple[NDIndex, bytes]]:
             """Return a mapping of worker addresses to a tuple of input partition
             IDs and shard data.
@@ -429,16 +420,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(
+    async def _get_output_partition(
         self, partition_id: NDIndex, key: str, **kwargs: Any
     ) -> np.ndarray:
-        self.raise_if_closed()
-        if not self.transferred:
-            raise RuntimeError("`get_output_partition` called before barrier task")
-
-        await self._ensure_output_worker(partition_id, key)
-        await self.flush_receive()
-
         def _(partition_id: NDIndex) -> np.ndarray:
             data = self._read_from_disk(partition_id)
             return convert_chunk(data)

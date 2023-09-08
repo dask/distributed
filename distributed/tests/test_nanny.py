@@ -590,7 +590,7 @@ async def test_failure_during_worker_initialization(s):
 async def test_environ_plugin(c, s, a, b):
     from dask.distributed import Environ
 
-    await c.register_worker_plugin(Environ({"ABC": 123}))
+    await c.register_plugin(Environ({"ABC": 123}))
 
     async with Nanny(s.address, name="new") as n:
         results = await c.run(os.getenv, "ABC")
@@ -822,7 +822,7 @@ async def test_log_event(c, s):
 async def test_nanny_plugin_simple(c, s, a):
     """A plugin should be registered to already existing workers but also to new ones."""
     plugin = DummyNannyPlugin("foo")
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
     assert a._plugin_registered
     async with Nanny(s.address) as n:
         assert n._plugin_registered
@@ -865,7 +865,7 @@ async def test_nanny_plugin_register_during_start_success(c, s, restart):
     try:
         await n.in_instantiate.wait()
 
-        register = asyncio.create_task(c.register_worker_plugin(plugin))
+        register = asyncio.create_task(c.register_plugin(plugin))
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.shield(register), timeout=0.1)
         n.wait_instantiate.set()
@@ -898,7 +898,7 @@ async def test_nanny_plugin_register_during_start_failure(c, s, restart):
     start = asyncio.create_task(n.start())
     await n.in_instantiate.wait()
 
-    register = asyncio.create_task(c.register_worker_plugin(plugin))
+    register = asyncio.create_task(c.register_plugin(plugin))
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(asyncio.shield(register), timeout=0.1)
     n.wait_instantiate.set()
@@ -949,7 +949,7 @@ async def test_nanny_plugin_register_nanny_killed(c, s, restart):
     try:
         plugin = DummyNannyPlugin("foo", restart=restart)
         await asyncio.to_thread(in_instantiate.wait)
-        register = asyncio.create_task(c.register_worker_plugin(plugin))
+        register = asyncio.create_task(c.register_plugin(plugin))
     finally:
         proc.kill()
     assert await register == {}

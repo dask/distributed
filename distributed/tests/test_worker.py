@@ -464,7 +464,7 @@ async def test_base_exception_in_task(c, s, a, sync, exc_type):
 
 @gen_test()
 async def test_plugin_exception():
-    class MyPlugin:
+    class MyPlugin(WorkerPlugin):
         def setup(self, worker=None):
             raise ValueError("Setup failed")
 
@@ -478,11 +478,11 @@ async def test_plugin_exception():
 
 @gen_test()
 async def test_plugin_multiple_exceptions():
-    class MyPlugin1:
+    class MyPlugin1(WorkerPlugin):
         def setup(self, worker=None):
             raise ValueError("MyPlugin1 Error")
 
-    class MyPlugin2:
+    class MyPlugin2(WorkerPlugin):
         def setup(self, worker=None):
             raise RuntimeError("MyPlugin2 Error")
 
@@ -1699,7 +1699,7 @@ async def test_pip_install(c, s, a):
         with mock.patch(
             "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
         ) as Popen:
-            await c.register_worker_plugin(
+            await c.register_plugin(
                 PipInstall(packages=["requests"], pip_options=["--upgrade"])
             )
             assert Popen.call_count == 1
@@ -1723,7 +1723,7 @@ async def test_conda_install(c, s, a):
         module_mock.run_command = run_command_mock
         module_mock.Commands.INSTALL = "INSTALL"
         with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            await c.register_worker_plugin(
+            await c.register_plugin(
                 CondaInstall(packages=["requests"], conda_options=["--update-deps"])
             )
             assert run_command_mock.call_count == 1
@@ -1756,7 +1756,7 @@ async def test_pip_install_fails(c, s, a, b):
             "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
         ) as Popen:
             with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
+                await c.register_plugin(PipInstall(packages=["not-a-package"]))
 
             assert Popen.call_count == 1
             logs = logger.getvalue()
@@ -1771,7 +1771,7 @@ async def test_conda_install_fails_when_conda_not_found(c, s, a, b):
     ) as logger:
         with mock.patch.dict("sys.modules", {"conda": None}):
             with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(CondaInstall(packages=["not-a-package"]))
+                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
             logs = logger.getvalue()
             assert "install failed" in logs
             assert "conda could not be found" in logs
@@ -1789,7 +1789,7 @@ async def test_conda_install_fails_when_conda_raises(c, s, a, b):
         module_mock.Commands.INSTALL = "INSTALL"
         with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
             with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(CondaInstall(packages=["not-a-package"]))
+                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
             assert run_command_mock.call_count == 1
             logs = logger.getvalue()
             assert "install failed" in logs
@@ -1807,7 +1807,7 @@ async def test_conda_install_fails_on_returncode(c, s, a, b):
         module_mock.Commands.INSTALL = "INSTALL"
         with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
             with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(CondaInstall(packages=["not-a-package"]))
+                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
             assert run_command_mock.call_count == 1
             logs = logger.getvalue()
             assert "install failed" in logs
@@ -1830,7 +1830,7 @@ async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
     ) as logger:
         install_mock = mock.Mock(name="install")
         with mock.patch.object(StubInstall, "install", install_mock):
-            await c.register_worker_plugin(
+            await c.register_plugin(
                 StubInstall(
                     packages=["requests"],
                 )
@@ -1844,7 +1844,7 @@ async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_package_install_restarts_on_nanny(c, s, a):
     (addr,) = s.workers
-    await c.register_worker_plugin(
+    await c.register_plugin(
         StubInstall(
             packages=["requests"],
             restart=True,
@@ -1869,7 +1869,7 @@ class FailingInstall(PackageInstall):
 async def test_package_install_failing_does_not_restart_on_nanny(c, s, a):
     (addr,) = s.workers
     with pytest.raises(RuntimeError):
-        await c.register_worker_plugin(
+        await c.register_plugin(
             FailingInstall(
                 packages=["requests"],
                 restart=True,
@@ -2037,7 +2037,7 @@ async def test_bad_local_directory(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_taskstate_metadata(c, s):
     async with Worker(s.address) as a:
-        await c.register_worker_plugin(TaskStateMetadataPlugin())
+        await c.register_plugin(TaskStateMetadataPlugin())
 
         f = c.submit(inc, 1)
         await f
@@ -3561,7 +3561,7 @@ async def test_worker_running_before_running_plugins(c, s, caplog):
         def teardown(self, worker):
             pass
 
-    await c.register_worker_plugin(InitWorkerNewThread())
+    await c.register_plugin(InitWorkerNewThread())
     async with Worker(s.address) as worker:
         assert await c.submit(inc, 1) == 2
         assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
@@ -3671,7 +3671,7 @@ async def test_forward_output(c, s, a, b, capsys):
     assert "" == err
 
     # After installing, output should be forwarded
-    await c.register_worker_plugin(plugin, "forward")
+    await c.register_plugin(plugin, "forward")
     await asyncio.sleep(0.1)  # Let setup messages come in
     capsys.readouterr()
 
@@ -3713,7 +3713,7 @@ async def test_forward_output(c, s, a, b, capsys):
 
     # Registering the plugin is idempotent
     other_plugin = ForwardOutput()
-    await c.register_worker_plugin(other_plugin, "forward")
+    await c.register_plugin(other_plugin, "forward")
     await asyncio.sleep(0.1)  # Let teardown/setup messages come in
     out, err = capsys.readouterr()
 

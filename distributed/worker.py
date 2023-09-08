@@ -67,6 +67,8 @@ from distributed.comm.addressing import address_from_user_args
 from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
+    ErrorMessage,
+    OKMessage,
     PooledRPCCall,
     Status,
     coerce_to_address,
@@ -77,7 +79,7 @@ from distributed.core import (
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
-from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
 from distributed.http import get_handlers
@@ -155,7 +157,6 @@ if TYPE_CHECKING:
 
     # Circular imports
     from distributed.client import Client
-    from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.nanny import Nanny
     from distributed.scheduler import T_runspec
 
@@ -1848,15 +1849,20 @@ class Worker(BaseWorker, ServerNode):
         plugin: WorkerPlugin | bytes,
         name: str | None = None,
         catch_errors: bool = True,
-    ) -> dict[str, Any]:
+    ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
-            # Note: historically we have accepted duck-typed classes that don't
-            # inherit from WorkerPlugin. Don't do `assert isinstance`.
-            plugin = cast("WorkerPlugin", pickle.loads(plugin))
+            plugin = pickle.loads(plugin)
+        if not isinstance(plugin, WorkerPlugin):
+            warnings.warn(
+                "Registering duck-typed plugins has been deprecated. "
+                "Please make sure your plugin subclasses `WorkerPlugin`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        plugin = cast(WorkerPlugin, plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
-
         assert name
 
         if name in self.plugins:
@@ -1873,13 +1879,12 @@ class Worker(BaseWorker, ServerNode):
             except Exception as e:
                 if not catch_errors:
                     raise
-                msg = error_message(e)
-                return cast("dict[str, Any]", msg)
+                return error_message(e)
 
         return {"status": "OK"}
 
     @log_errors
-    async def plugin_remove(self, name: str) -> dict[str, Any]:
+    async def plugin_remove(self, name: str) -> ErrorMessage | OKMessage:
         logger.info(f"Removing Worker plugin {name}")
         try:
             plugin = self.plugins.pop(name)
@@ -1888,8 +1893,7 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     result = await result
         except Exception as e:
-            msg = error_message(e)
-            return cast("dict[str, Any]", msg)
+            return error_message(e)
 
         return {"status": "OK"}
 
