@@ -93,7 +93,7 @@ def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
         f.seek(0)
         prev = 0
         offset = f.tell()
-        while offset() < size:
+        while offset < size:
             sr = pa.RecordBatchStreamReader(f)
             shard = sr.read_all()
             offset = f.tell()
