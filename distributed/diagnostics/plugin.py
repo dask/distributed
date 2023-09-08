@@ -413,16 +413,16 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
         async with PackageInstall.LOCK:
             await self._scheduler.unregister_worker_plugin(name=self.name)
 
-    def _is_installed(self, scheduler):
+    def _is_installed(self, scheduler: Scheduler) -> bool:
         return scheduler.get_metadata(self._compose_installed_key(), default=False)
 
-    def _set_installed(self, scheduler):
+    def _set_installed(self, scheduler: Scheduler) -> None:
         scheduler.set_metadata(
             self._compose_installed_key(),
             True,
         )
 
-    def _compose_installed_key(self):
+    def _compose_installed_key(self) -> list[str]:
         return [
             self.name,
             "installed",
