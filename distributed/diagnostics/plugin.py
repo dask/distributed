@@ -551,7 +551,7 @@ class _PackageInstaller(abc.ABC):
 
 
 class CondaInstall(PackageInstall):
-    """A Worker Plugin to pip install a set of packages
+    """A Worker Plugin to conda install a set of packages
 
     This accepts a set of packages to install on all workers as well as
     options to use when installing.
@@ -568,17 +568,17 @@ class CondaInstall(PackageInstall):
     Parameters
     ----------
     packages
-        A list of packages (with optional versions) to install using pip
-    pip_options
-        Additional options to pass to pip
+        A list of packages (with optional versions) to install using conda
+    conda_options
+        Additional options to pass to conda
     restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
 
     Examples
     --------
-    >>> from dask.distributed import PipInstall
-    >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
+    >>> from dask.distributed import CondaInstall
+    >>> plugin = CondaInstall(packages=["scikit-learn"], conda_options=["--update-deps"])
 
     >>> client.register_plugin(plugin)
 
