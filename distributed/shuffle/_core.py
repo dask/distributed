@@ -334,3 +334,25 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
 
     def __hash__(self) -> int:
         return hash(self.run_id)
+
+
+@contextlib.contextmanager
+def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
+    try:
+        yield
+    except ShuffleClosedError:
+        raise Reschedule()
+    except Exception as e:
+        raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
+
+
+@contextlib.contextmanager
+def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
+    try:
+        yield
+    except Reschedule as e:
+        raise e
+    except ShuffleClosedError:
+        raise Reschedule()
+    except Exception as e:
+        raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
