@@ -430,8 +430,8 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
         ]
 
 
-class _PackageInstallWorker(WorkerPlugin, abc.ABC):
-    """Abstract parent class for a worker plugin to install a set of packages
+class _PackageInstallWorker(WorkerPlugin):
+    """Worker plugin to install a set of packages
 
     This accepts a set of packages to install on all workers.
     You can also optionally ask for the worker to restart itself after
@@ -454,8 +454,7 @@ class _PackageInstallWorker(WorkerPlugin, abc.ABC):
 
     See Also
     --------
-    _CondaInstallWorker
-    _PipInstallWorker
+    PackageInstall
     """
 
     installer: _PackageInstaller
