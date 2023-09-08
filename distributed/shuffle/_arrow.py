@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 
 from packaging.version import parse
 
+from dask.utils import parse_bytes
+
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
@@ -81,15 +83,35 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
     import pyarrow as pa
 
+    batch_size = parse_bytes("10 MiB")
+    batch = []
     shards = []
     schema = pa.Schema.from_pandas(meta, preserve_index=True)
+
     with pa.OSFile(str(path), mode="rb") as f:
         size = f.seek(0, whence=2)
         f.seek(0)
-        while f.tell() < size:
+        prev = 0
+        offset = f.tell()
+        while offset() < size:
             sr = pa.RecordBatchStreamReader(f)
             shard = sr.read_all()
-            arrs = [pa.concat_arrays(column.chunks) for column in shard.columns]
-            shard = pa.table(data=arrs, schema=schema)
-            shards.append(shard)
+            offset = f.tell()
+            batch.append(shard)
+
+            if offset - prev >= batch_size:
+                table = pa.concat_tables(batch)
+                shards.append(_copy_table(table, schema))
+                batch = []
+                prev = offset
+    if batch:
+        table = pa.concat_tables(batch)
+        shards.append(_copy_table(table, schema))
     return shards, size
+
+
+def _copy_table(table: pa.Table, schema: pa.Schema) -> pa.Table:
+    import pyarrow as pa
+
+    arrs = [pa.concat_arrays(column.chunks) for column in table.columns]
+    return pa.table(data=arrs, schema=schema)
