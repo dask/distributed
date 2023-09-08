@@ -364,7 +364,7 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
     PipInstall
     """
 
-    LOCK: ClassVar[asyncio.Lock] = asyncio.Lock()
+    LOCK: ClassVar[asyncio.Lock | None] = None
     WORKER_PLUGIN_CLASS: ClassVar[type]
 
     installer: _PackageInstaller
@@ -383,6 +383,10 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
 
     async def start(self, scheduler: Scheduler) -> None:
         self._scheduler = scheduler
+
+        if PackageInstall.LOCK is None:
+            PackageInstall.LOCK = asyncio.Lock()
+
         async with PackageInstall.LOCK:
             if not self._is_installed(scheduler):
                 logger.info(
@@ -404,6 +408,8 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
             )
 
     async def close(self) -> None:
+        assert PackageInstall.LOCK is not None
+
         async with PackageInstall.LOCK:
             await self._scheduler.unregister_worker_plugin(name=self.name)
 
