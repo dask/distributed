@@ -58,7 +58,10 @@ def identifier(frame: FrameType | None) -> str:
     else:
         co = frame.f_code
         if isinstance(co, type(len)):
-            return f"{co.__module__}.{co.__qualname__}:{_f_lineno(frame)}"  # type: ignore[unreachable]
+            if co.__module__:  # type: ignore[unreachable]
+                return f"{co.__module__}.{co.__qualname__}:{_f_lineno(frame)}"
+            else:
+                return f"{co.__qualname__}:{_f_lineno(frame)}"
         else:
             return ";".join(
                 (
@@ -105,7 +108,7 @@ def info_frame(frame: FrameType) -> dict[str, Any]:
     f_lineno = _f_lineno(frame)
     if isinstance(co, type(len)):
         line = ""  # type: ignore[unreachable]
-        name = f"builtins.{co.__qualname__}"
+        name = co.__qualname__
         filename = "<built-in>"
     else:
         name = co.co_name
