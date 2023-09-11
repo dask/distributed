@@ -56,13 +56,17 @@ def identifier(frame: FrameType | None) -> str:
     if frame is None:
         return "None"
     else:
-        return ";".join(
-            (
-                frame.f_code.co_name,
-                frame.f_code.co_filename,
-                str(frame.f_code.co_firstlineno),
+        co = frame.f_code
+        if isinstance(co, type(len)):
+            return f"{co.__module__}.{co.__qualname__}:{_f_lineno(frame)}"  # type: ignore[unreachable]
+        else:
+            return ";".join(
+                (
+                    co.co_name,
+                    co.co_filename,
+                    str(co.co_firstlineno),
+                )
             )
-        )
 
 
 def _f_lineno(frame: FrameType) -> int:
@@ -75,6 +79,8 @@ def _f_lineno(frame: FrameType) -> int:
 
     f_lasti = frame.f_lasti
     code = frame.f_code
+    if isinstance(code, type(len)):
+        return -1  # type: ignore[unreachable]
     prev_line = code.co_firstlineno
 
     for start, next_line in dis.findlinestarts(code):
@@ -97,10 +103,17 @@ def repr_frame(frame: FrameType) -> str:
 def info_frame(frame: FrameType) -> dict[str, Any]:
     co = frame.f_code
     f_lineno = _f_lineno(frame)
-    line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
+    if isinstance(co, type(len)):
+        line = ""  # type: ignore[unreachable]
+        name = f"builtins.{co.__qualname__}"
+        filename = "<built-in>"
+    else:
+        name = co.co_name
+        filename = co.co_filename
+        line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
     return {
-        "filename": co.co_filename,
-        "name": co.co_name,
+        "filename": filename,
+        "name": name,
         "line_number": f_lineno,
         "line": line,
     }

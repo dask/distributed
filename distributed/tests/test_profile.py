@@ -378,3 +378,22 @@ def test_stack_overflow():
 
     finally:
         sys.setrecursionlimit(old)
+
+
+class MockFrame:
+    def __init__(self, f_back=None, f_code=None):
+        self.f_back = self
+        self.f_code = len
+        self.f_lineno = 1
+
+
+def test_builtin():
+    # https://github.com/dask/distributed/issues/8163
+    assert identifier(MockFrame()) == "builtins.len:1"
+
+    assert info_frame(MockFrame()) == {
+        "filename": "<built-in>",
+        "name": "builtins.len",
+        "line_number": 1,
+        "line": "",
+    }
