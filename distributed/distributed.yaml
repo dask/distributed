@@ -282,6 +282,7 @@ distributed:
         - cudf
         - cuml
         - prefect
+        - rechunker
         - xarray
         - xgboost
     erred-tasks:
