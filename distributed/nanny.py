@@ -461,7 +461,7 @@ class Nanny(ServerNode):
         if not isinstance(plugin, NannyPlugin):
             warnings.warn(
                 "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin subclasses `NannyPlugin`.",
+                "Please make sure your plugin inherits from `NannyPlugin`.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -469,7 +469,6 @@ class Nanny(ServerNode):
 
         if name is None:
             name = _get_plugin_name(plugin)
-
         assert name
 
         self.plugins[name] = plugin
@@ -488,7 +487,7 @@ class Nanny(ServerNode):
         return {"status": "OK"}
 
     @log_errors
-    async def plugin_remove(self, name=None):
+    async def plugin_remove(self, name: str) -> ErrorMessage | OKMessage:
         logger.info(f"Removing Nanny plugin {name}")
         try:
             plugin = self.plugins.pop(name)

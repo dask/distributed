@@ -392,9 +392,7 @@ async def test_graph_execution_width(c, s, *workers):
     passthrough1 = [delayed(slowidentity)(r, delay=0) for r in roots]
     passthrough2 = [delayed(slowidentity)(r, delay=0) for r in passthrough1]
     done = [delayed(lambda r: None)(r) for r in passthrough2]
-    await c.register_worker_plugin(
-        CountData(keys=[f.key for f in roots]), name="count-roots"
-    )
+    await c.register_plugin(CountData(keys=[f.key for f in roots]), name="count-roots")
     fs = c.compute(done)
     await wait(fs)
 

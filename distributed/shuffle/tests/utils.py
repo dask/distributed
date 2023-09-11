@@ -96,4 +96,4 @@ async def invoke_annotation_chaos(rate: float, client: Client) -> None:
     if not rate:
         return
     plugin = ShuffleAnnotationChaosPlugin(rate)
-    await client.register_scheduler_plugin(plugin)
+    await client.register_plugin(plugin)

@@ -17,7 +17,6 @@ from dask.layers import Layer
 from dask.typing import Key
 
 from distributed.core import PooledRPCCall
-from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
@@ -32,8 +31,9 @@ from distributed.shuffle._core import (
     ShuffleSpec,
     barrier_key,
     get_worker_plugin,
+    handle_transfer_errors,
+    handle_unpack_errors,
 )
-from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
@@ -59,7 +59,7 @@ def shuffle_transfer(
     meta: pd.DataFrame,
     parts_out: set[int],
 ) -> int:
-    try:
+    with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             input_partition,
@@ -71,25 +71,15 @@ def shuffle_transfer(
                 parts_out=parts_out,
             ),
         )
-    except ShuffleClosedError:
-        raise Reschedule()
-    except Exception as e:
-        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
 
 
 def shuffle_unpack(
     id: ShuffleId, output_partition: int, barrier_run_id: int
 ) -> pd.DataFrame:
-    try:
+    with handle_unpack_errors(id):
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_partition
         )
-    except Reschedule as e:
-        raise e
-    except ShuffleClosedError:
-        raise Reschedule()
-    except Exception as e:
-        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}") from e
 
 
 def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
