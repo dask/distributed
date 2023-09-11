@@ -34,7 +34,7 @@ import threading
 from collections import defaultdict, deque
 from collections.abc import Callable, Collection
 from time import sleep
-from types import FrameType
+from types import CodeType, FrameType
 from typing import Any
 
 import tlz as toolz
@@ -57,7 +57,7 @@ def identifier(frame: FrameType | None) -> str:
         return "None"
     else:
         co = frame.f_code
-        if isinstance(co, type(len)):
+        if not isinstance(co, CodeType):
             if co.__module__:  # type: ignore[unreachable]
                 return f"{co.__module__}.{co.__qualname__}:{_f_lineno(frame)}"
             else:
@@ -82,7 +82,7 @@ def _f_lineno(frame: FrameType) -> int:
 
     f_lasti = frame.f_lasti
     code = frame.f_code
-    if isinstance(code, type(len)):
+    if not isinstance(code, CodeType):
         return -1  # type: ignore[unreachable]
     prev_line = code.co_firstlineno
 
@@ -106,7 +106,7 @@ def repr_frame(frame: FrameType) -> str:
 def info_frame(frame: FrameType) -> dict[str, Any]:
     co = frame.f_code
     f_lineno = _f_lineno(frame)
-    if isinstance(co, type(len)):
+    if not isinstance(co, CodeType):
         line = ""  # type: ignore[unreachable]
         name = co.__qualname__
         filename = "<built-in>"
