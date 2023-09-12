@@ -142,15 +142,21 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
                 rmm_metrics = ws.metrics["rmm"]
                 gpu_metrics = ws.metrics["gpu"]
                 gpu_info = ws.extra["gpu"]
+            except KeyError:
+                rmm_metrics = {"rmm-used": 0, "rmm-total": 0}
+                gpu_metrics = {"memory-used": 0}
+                gpu_info = {"memory-total": 0}
+
+            try:
                 cudf_metrics = ws.metrics["cudf"]
             except KeyError:
-                continue
+                cudf_metrics = {"cudf-spilled": 0}
 
             rmm_used_worker = rmm_metrics["rmm-used"]  # RMM memory only
             rmm_total_worker = rmm_metrics["rmm-total"]
             gpu_used_worker = gpu_metrics["memory-used"]  # All GPU memory
             gpu_total_worker = gpu_info["memory-total"]
-            spilled_worker = cudf_metrics["cudf-spilled"]  # memory spilled to host
+            spilled_worker = cudf_metrics["cudf-spilled"] or 0  # memory spilled to host
 
             max_limit = max(
                 max_limit, gpu_total_worker, gpu_used_worker + spilled_worker

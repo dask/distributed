@@ -12,10 +12,10 @@ except ImportError:
 
 def real_time():
     if get_global_manager is None:
-        return {"cudf-spilled": 0}
+        return {"cudf-spilled": None}
     mgr = get_global_manager()
     if mgr is None:
-        return {"cudf-spilled": 0}
+        return {"cudf-spilled": None}
 
     totals = mgr.statistics.spill_totals
 
