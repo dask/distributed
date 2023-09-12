@@ -398,7 +398,7 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
 
 
 def run_worker(q, scheduler_q, config, **kwargs):
-    with dask.config.set(config):
+    with config_for_cluster_tests(**config):
         from distributed import Worker
 
         reset_logger_locks()
@@ -422,7 +422,7 @@ def run_worker(q, scheduler_q, config, **kwargs):
 
 @log_errors
 def run_nanny(q, scheduler_q, config, **kwargs):
-    with dask.config.set(config):
+    with config_for_cluster_tests(**config):
         scheduler_addr = scheduler_q.get()
 
         async def _():
@@ -617,7 +617,7 @@ def cluster(
 
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), config_for_cluster_tests():
+    with check_process_leak(check=True), check_instances():
         if nanny:
             _run_worker = run_nanny
         else:
