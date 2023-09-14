@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import itertools
+import logging
 import os
 import random
 import shutil
@@ -608,6 +609,34 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
     await check_worker_cleanup(w2)
     await check_worker_cleanup(w3, closed=True)
     await check_scheduler_cleanup(s)
+
+
+class RaiseOnCloseShuffleRun(DataFrameShuffleRun):
+    async def close(self, *args, **kwargs):
+        raise RuntimeError("test-exception-on-close")
+
+
+@mock.patch(
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
+    RaiseOnCloseShuffleRun,
+)
+@gen_cluster(client=True, nthreads=[])
+async def test_exception_on_close_cleans_up(c, s, caplog):
+    # Ensure that everything is cleaned up and does not lock up if an exception
+    # is raised during shuffle close.
+    with caplog.at_level(logging.ERROR):
+        async with Worker(s.address) as w:
+            df = dask.datasets.timeseries(
+                start="2000-01-01",
+                end="2000-01-10",
+                dtypes={"x": float, "y": float},
+                freq="10 s",
+            )
+            shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+            await c.compute([shuffled, df], sync=True)
+
+    assert any("test-exception-on-close" in record.message for record in caplog.records)
+    await check_worker_cleanup(w, closed=True)
 
 
 class BlockedInputsDoneShuffle(DataFrameShuffleRun):
