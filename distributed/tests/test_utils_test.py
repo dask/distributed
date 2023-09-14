@@ -1091,3 +1091,19 @@ async def test_ensure_no_new_clients():
         async with Client(s.address, asynchronous=True):
             with ensure_no_new_clients():
                 pass
+
+
+@pytest.mark.parametrize("nanny", [False, True])
+def test_cluster_uses_config_for_test(nanny):
+    key = "distributed.admin.tick.interval"
+    local = dask.config.get(key)
+
+    with cluster(nanny=nanny, nworkers=1) as (scheduler, workers):
+        with Client(scheduler["address"]) as client:
+            s_remote = client.run_on_scheduler(dask.config.get, key)
+            assert s_remote != local
+
+            w_remote = client.run(dask.config.get, key)
+            w_remote = next(iter(w_remote.values()))
+            assert w_remote != local
+            assert w_remote == s_remote
