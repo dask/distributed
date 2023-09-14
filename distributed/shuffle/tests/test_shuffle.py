@@ -637,7 +637,6 @@ async def test_exception_on_close_cleans_up(c, s, caplog):
 
     assert any("test-exception-on-close" in record.message for record in caplog.records)
     await check_worker_cleanup(w, closed=True)
-    w.logs
 
 
 class BlockedInputsDoneShuffle(DataFrameShuffleRun):
