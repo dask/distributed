@@ -55,7 +55,7 @@ deprecations = {
     "rmm": "distributed.rmm",
 }
 
-# Affects yaml and env variables configs, as well as calls tgo dask.config.set()
+# Affects yaml and env variables configs, as well as calls to dask.config.set()
 # before importing distributed
 dask.config.rename(deprecations)
 # Affects dask.config.set() from now on
