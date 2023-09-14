@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import itertools
 import logging
 import os
@@ -32,8 +31,9 @@ from distributed.client import Client
 from distributed.scheduler import KilledWorker, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
-    convert_partition,
+    convert_shards,
     list_of_buffers_to_table,
+    read_from_disk,
     serialize_table,
 )
 from distributed.shuffle._limiter import ResourceLimiter
@@ -965,7 +965,7 @@ async def test_heartbeat(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
-def test_processing_chain():
+def test_processing_chain(tmp_path):
     """
     This is a serial version of the entire compute chain
 
@@ -1114,18 +1114,16 @@ def test_processing_chain():
         if w1 is not w2
     )
 
-    # Our simple file system
-    filesystem = defaultdict(io.BytesIO)
-
     for partitions in splits_by_worker.values():
         for partition, tables in partitions.items():
             for table in tables:
-                filesystem[partition].write(serialize_table(table))
+                with (tmp_path / str(partition)).open("ab") as f:
+                    f.write(serialize_table(table))
 
     out = {}
-    for k, bio in filesystem.items():
-        bio.seek(0)
-        out[k] = convert_partition(bio.read(), meta)
+    for k in range(npartitions):
+        shards, _ = read_from_disk(tmp_path / str(k), meta)
+        out[k] = convert_shards(shards, meta)
 
     shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(

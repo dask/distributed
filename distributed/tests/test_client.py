@@ -3359,7 +3359,7 @@ def test_default_get(loop_in_thread):
     try:
         check_minimal_arrow_version()
         has_pyarrow = True
-    except RuntimeError:
+    except ImportError:
         pass
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
