@@ -34,7 +34,7 @@ import threading
 from collections import defaultdict, deque
 from collections.abc import Callable, Collection
 from time import sleep
-from types import CodeType, FrameType
+from types import FrameType
 from typing import Any
 
 import tlz as toolz
@@ -57,12 +57,7 @@ def identifier(frame: FrameType | None) -> str:
         return "None"
     else:
         co = frame.f_code
-        if not isinstance(co, CodeType):
-            if co.__module__:  # type: ignore[unreachable]
-                return f"{co.__module__}.{co.__qualname__}:{_f_lineno(frame)}"
-            else:
-                return f"{co.__qualname__}:{_f_lineno(frame)}"
-        else:
+        try:
             return ";".join(
                 (
                     co.co_name,
@@ -70,6 +65,11 @@ def identifier(frame: FrameType | None) -> str:
                     str(co.co_firstlineno),
                 )
             )
+        except AttributeError:
+            if co.__module__:
+                return f"{co.__module__}.{co.__qualname__}:{_f_lineno(frame)}"  # type: ignore[attr-defined]
+            else:
+                return f"{co.__qualname__}:{_f_lineno(frame)}"  # type: ignore[attr-defined]
 
 
 def _f_lineno(frame: FrameType) -> int:
@@ -82,16 +82,17 @@ def _f_lineno(frame: FrameType) -> int:
 
     f_lasti = frame.f_lasti
     code = frame.f_code
-    if not isinstance(code, CodeType):
-        return -1  # type: ignore[unreachable]
-    prev_line = code.co_firstlineno
+    try:
+        prev_line = code.co_firstlineno
 
-    for start, next_line in dis.findlinestarts(code):
-        if f_lasti < start:
-            return prev_line
-        prev_line = next_line
+        for start, next_line in dis.findlinestarts(code):
+            if f_lasti < start:
+                return prev_line
+            prev_line = next_line
 
-    return prev_line
+        return prev_line
+    except Exception:
+        return -1
 
 
 def repr_frame(frame: FrameType) -> str:
@@ -106,14 +107,14 @@ def repr_frame(frame: FrameType) -> str:
 def info_frame(frame: FrameType) -> dict[str, Any]:
     co = frame.f_code
     f_lineno = _f_lineno(frame)
-    if not isinstance(co, CodeType):
-        line = ""  # type: ignore[unreachable]
-        name = co.__qualname__
-        filename = "<built-in>"
-    else:
+    try:
         name = co.co_name
         filename = co.co_filename
         line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
+    except (AttributeError, IndexError):
+        line = ""
+        name = co.__qualname__  # type: ignore[attr-defined]
+        filename = "<built-in>"
     return {
         "filename": filename,
         "name": name,
