@@ -4507,3 +4507,19 @@ async def test_refuse_to_schedule_huge_task(c, s, *workers, finalize):
     for w in workers:
         for ev in w.state.log:
             assert fut.key not in ev
+
+
+@gen_cluster(client=True)
+async def test_html_repr(c, s, a, b):
+    futs = c.map(slowinc, range(10), delay=0.1, key=[("slowinc", i) for i in range(10)])
+    f = c.submit(sum, futs)
+
+    while not f.done():
+        assert isinstance(s._repr_html_(), str)
+        assert isinstance(s.workers[a.address]._repr_html_(), str)
+        assert isinstance(s.workers[b.address]._repr_html_(), str)
+        for ts in s.tasks.values():
+            assert isinstance(ts._repr_html_(), str)
+        await asyncio.sleep(0.01)
+
+    await f
