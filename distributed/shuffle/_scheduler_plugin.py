@@ -66,7 +66,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     async def start(self, scheduler: Scheduler) -> None:
         worker_plugin = ShuffleWorkerPlugin()
         await self.scheduler.register_worker_plugin(
-            dumps(worker_plugin), name="shuffle"
+            dumps(worker_plugin), name="shuffle", comm=None
         )
 
     def shuffle_ids(self) -> set[ShuffleId]:
