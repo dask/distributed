@@ -46,6 +46,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "numpydoc",
     "sphinx_click.ext",
+    "sphinx_design",
 ]
 
 numpydoc_show_class_members = False
