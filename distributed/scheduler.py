@@ -7492,7 +7492,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(
-        self, plugin: bytes, name: str, idempotent: bool = False
+        self, plugin: bytes, name: str, idempotent: bool = False, comm: None = None
     ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
