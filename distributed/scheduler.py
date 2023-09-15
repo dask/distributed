@@ -7492,7 +7492,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(
-        self, plugin: bytes, name: str, idempotent: bool = False
+        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
     ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
@@ -7507,7 +7507,7 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def unregister_worker_plugin(
-        self, name: str
+        self, comm: None, name: str
     ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
@@ -7519,7 +7519,7 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def register_nanny_plugin(
-        self, plugin: bytes, name: str, idempotent: bool = False
+        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
     ) -> dict[str, OKMessage]:
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
@@ -7540,7 +7540,7 @@ class Scheduler(SchedulerState, ServerNode):
             return responses
 
     async def unregister_nanny_plugin(
-        self, name: str
+        self, comm: None, name: str
     ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
