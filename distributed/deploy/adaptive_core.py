@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 import tlz as toolz
 from tornado.ioloop import IOLoop
 
+import dask.config
 from dask.utils import parse_timedelta
 
 from distributed.compatibility import PeriodicCallback
@@ -135,7 +136,7 @@ class AdaptiveCore:
         # internal state
         self.close_counts = defaultdict(int)
         self._adapting = False
-        self.log = deque(maxlen=10000)
+        self.log = deque(maxlen=dask.config.get("distributed.admin.log-length"))
 
     def stop(self) -> None:
         logger.info("Adaptive stop")

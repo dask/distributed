@@ -199,7 +199,7 @@ def test_watch():
         return time() > start + 0.500
 
     try:
-        log = watch(interval="10ms", cycle="50ms", stop=stop)
+        log = watch(interval="10ms", cycle="50ms", stop=stop, maxlen=10_000)
 
         stop_called.wait(2)
         sleep(0.5)

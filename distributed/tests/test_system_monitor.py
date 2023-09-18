@@ -10,7 +10,7 @@ from distributed.system_monitor import SystemMonitor
 
 
 def test_SystemMonitor():
-    sm = SystemMonitor()
+    sm = SystemMonitor(maxlen=5)
 
     # __init__ calls update()
     a = sm.recent()
@@ -32,6 +32,22 @@ def test_SystemMonitor():
     assert all(len(q) == 2 for q in sm.quantities.values())
 
     assert "cpu" in repr(sm)
+
+
+def test_maxlen_zero():
+    """maxlen is floored to 1 otherwise recent() would not work"""
+    sm = SystemMonitor(maxlen=0)
+    sm.update()
+    sm.update()
+    assert len(sm.quantities["memory"]) == 1
+    assert sm.recent()["memory"] == sm.quantities["memory"][-1]
+
+
+def test_maxlen_omit():
+    sm = SystemMonitor()
+    sm.update()
+    sm.update()
+    assert len(sm.quantities["memory"]) > 0
 
 
 def test_count():

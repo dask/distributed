@@ -1796,6 +1796,7 @@ def config_for_cluster_tests(**extra_config):
         {
             "local_directory": tempfile.gettempdir(),
             "distributed.admin.tick.interval": "500 ms",
+            "distributed.admin.log-length": 10_000,
             "distributed.scheduler.validate": True,
             "distributed.worker.validate": True,
             "distributed.worker.profile.enabled": False,
@@ -2452,10 +2453,11 @@ async def wait_for_stimulus(
 @pytest.fixture
 def ws():
     """An empty WorkerState"""
-    state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
-    yield state
-    if state.validate:
-        state.validate_state()
+    with dask.config.set({"distributed.admin.log-length": 10_000}):
+        state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
+        yield state
+        if state.validate:
+            state.validate_state()
 
 
 @pytest.fixture(params=["executing", "long-running"])

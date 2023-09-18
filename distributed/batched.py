@@ -56,7 +56,7 @@ class BatchedSend:
         self.byte_count = 0
         self.next_deadline = None
         self.recent_message_log = deque(
-            maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
+            maxlen=dask.config.get("distributed.admin.log-length")
         )
         self.serializers = serializers
         self._consecutive_failures = 0

@@ -3012,7 +3012,7 @@ async def test_retire_state_change(c, s, a, b):
     await asyncio.gather(*coros)
 
 
-@gen_cluster(client=True, config={"distributed.scheduler.events-log-length": 3})
+@gen_cluster(client=True, config={"distributed.admin.log-length": 3})
 async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 1")
     assert len(s.events["test"]) == 1
@@ -3020,7 +3020,7 @@ async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 3")
     assert len(s.events["test"]) == 3
 
-    # adding a forth message will drop the first one and length stays at 3
+    # adding a fourth message will drop the first one and length stays at 3
     s.log_event("test", "dummy message 4")
     assert len(s.events["test"]) == 3
     assert s.events["test"][0][1] == "dummy message 2"

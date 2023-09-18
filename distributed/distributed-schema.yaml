@@ -78,31 +78,6 @@ properties:
 
               This can be helpful to reduce costs and stop zombie processes from roaming the earth.
 
-          transition-log-length:
-            type: integer
-            minimum: 0
-            description: |
-              How long should we keep the transition log
-
-              Every time a task transitions states (like "waiting", "processing", "memory", "released")
-              we record that transition in a log.
-
-              To make sure that we don't run out of memory
-              we will clear out old entries after a certain length.
-              This is that length.
-
-          events-log-length:
-            type: integer
-            minimum: 0
-            description: |
-              How long should we keep the events log
-
-              All events (e.g. worker heartbeat) are stored in the events log.
-
-              To make sure that we don't run out of memory
-              we will clear out old entries after a certain length.
-              This is that length.
-
           work-stealing:
             type: boolean
             description: |
@@ -860,11 +835,6 @@ properties:
             type: string
             description: The default protocol to use, like tcp or tls
 
-          recent-messages-log-length:
-            type: integer
-            minimum: 0
-            description: number of messages to keep for debugging
-
           tls:
             type: object
             properties:
@@ -1126,12 +1096,11 @@ properties:
               If the traceback is larger than this size (in bytes) then we truncate it.
 
           log-length:
-            type: integer
+            type: [integer, 'null']
             minimum: 0
             description: |
-              Default length of logs to keep in memory
-
-              The scheduler and workers keep the last 10000 or so log entries in memory.
+              Default length of logs to keep in memory. This is useful for debugging
+              cluster issues. Set to null for unlimited.
 
           log-format:
             type: string

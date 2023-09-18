@@ -18,8 +18,6 @@ distributed:
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
     idle-timeout: null      # Shut down after this duration, like "1h" or "30 minutes"
-    transition-log-length: 100000
-    events-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
     worker-saturation: 1.1 # Send this fraction of nthreads root tasks to workers
@@ -224,7 +222,6 @@ distributed:
     offload: 10MiB # Size after which we choose to offload serialization to another thread
     default-scheme: tcp
     socket-backlog: 2048
-    recent-messages-log-length: 0  # number of messages to keep for debugging
     ucx:
       cuda-copy: null  # enable cuda-copy
       tcp: null  # enable tcp
@@ -310,7 +307,7 @@ distributed:
       cycle: 1s       # time between checking event loop speed
 
     max-error-length: 10000 # Maximum size traceback after error to return
-    log-length: 10000  # default length of logs to keep in memory
+    log-length: 1000  # default length of logs to keep in memory
     log-format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:

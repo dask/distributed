@@ -1629,7 +1629,7 @@ class SchedulerState:
 
     #: History of task state transitions.
     #: The length can be tweaked through
-    #: distributed.scheduler.transition-log-length
+    #: distributed.admin.log-length
     transition_log: deque[Transition]
 
     #: Total number of transitions since the cluster was started
@@ -1721,7 +1721,7 @@ class SchedulerState:
         self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
 
         self.transition_log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
+            maxlen=dask.config.get("distributed.admin.log-length")
         )
         self.transition_counter = 0
         self._idle_transition_counter = 0
@@ -3657,9 +3657,7 @@ class Scheduler(SchedulerState, ServerNode):
         ]
 
         self.events = defaultdict(
-            partial(
-                deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
-            )
+            partial(deque, maxlen=dask.config.get("distributed.admin.log-length"))
         )
         self.event_counts = defaultdict(int)
         self.event_subscriber = defaultdict(set)

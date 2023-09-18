@@ -1316,8 +1316,9 @@ class WorkerState:
         self.executed_count = 0
         self.long_running = set()
         self.transfer_message_bytes_limit = transfer_message_bytes_limit
-        self.log = deque(maxlen=100_000)
-        self.stimulus_log = deque(maxlen=10_000)
+        maxlen = dask.config.get("distributed.admin.log-length")
+        self.log = deque(maxlen=maxlen)
+        self.stimulus_log = deque(maxlen=maxlen)
         self.task_counter = TaskCounter()
         self.transition_counter = 0
         self.transition_counter_max = transition_counter_max
