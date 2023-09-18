@@ -8387,15 +8387,6 @@ async def test_fast_close_on_aexit_failure(s):
     assert (stop - start) < 2
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_wait_for_workers_no_default(c, s):
-    with pytest.warns(
-        FutureWarning,
-        match="specify the `n_workers` argument when using `Client.wait_for_workers`",
-    ):
-        await c.wait_for_workers()
-
-
 @pytest.mark.parametrize(
     "value, exception",
     [
