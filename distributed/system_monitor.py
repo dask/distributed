@@ -36,8 +36,6 @@ class SystemMonitor:
     gpu_name: str | None
     gpu_memory_total: int
 
-    # Defaults to 1h capture time assuming the default
-    # distributed.admin.system_monitor.interval = 500ms
     def __init__(
         self,
         maxlen: int | None | NoDefault = no_default,
@@ -49,7 +47,7 @@ class SystemMonitor:
         self.count = 0
 
         if maxlen is no_default:
-            maxlen = dask.config.get("distributed.admin.log-length")
+            maxlen = dask.config.get("distributed.admin.system-monitor.log-length")
         if isinstance(maxlen, int):
             maxlen = max(1, maxlen)
         elif maxlen is not None:  # pragma: nocover

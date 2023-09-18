@@ -307,11 +307,13 @@ distributed:
       cycle: 1s       # time between checking event loop speed
 
     max-error-length: 10000 # Maximum size traceback after error to return
-    log-length: 1000  # default length of logs to keep in memory
+    log-length: 10000  # Maximum length of worker/scheduler logs to keep in memory
     log-format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    low-level-log-length: 1000  # Maximum length of various logs for developers
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:
       interval: 500ms
+      log-length: 7200  # Maximum number of samples to keep in memory
       disk: true  # Monitor host-wide disk I/O
       host-cpu: false  # Monitor host-wide CPU usage, with very granular breakdown
       gil:

@@ -389,7 +389,7 @@ def watch(
     - dict[str, Any] (output of ``create()``)
     """
     if maxlen is no_default:
-        maxlen = dask.config.get("distributed.admin.log-length")
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
         assert isinstance(maxlen, int) or maxlen is None
     log: deque[tuple[float, dict[str, Any]]] = deque(maxlen=maxlen)
 

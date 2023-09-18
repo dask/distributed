@@ -567,7 +567,7 @@ class Worker(BaseWorker, ServerNode):
         self.active_threads = {}
         self.active_keys = set()
         self.profile_keys = defaultdict(profile.create)
-        maxlen = dask.config.get("distributed.admin.log-length")
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
         self.profile_keys_history = deque(maxlen=maxlen)
         self.profile_history = deque(maxlen=maxlen)
         self.profile_recent = profile.create()

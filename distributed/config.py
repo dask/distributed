@@ -46,17 +46,17 @@ deprecations = {
     "bokeh-export-tool": "distributed.dashboard.export-tool",
     "tick-time": "distributed.admin.tick.interval",
     "tick-maximum-delay": "distributed.admin.tick.limit",
+    "log-length": "distributed.admin.log-length",
     "log-format": "distributed.admin.log-format",
     "pdb-on-err": "distributed.admin.pdb-on-err",
     "ucx": "distributed.comm.ucx",
     "rmm": "distributed.rmm",
-    # log-length aliases
-    "transition-log-length": "distributed.admin.log-length",
-    "distributed.scheduler.transition-log-length": "distributed.admin.log-length",
-    "distributed.scheduler.events-log-length": "distributed.admin.log-length",
-    "log-length": "distributed.admin.log-length",
-    "recent-messages-log-length": "distributed.admin.log-length",
-    "distributed.comm.recent-messages-log-length": "distributed.admin.log-length",
+    # low-level-log-length aliases
+    "transition-log-length": "distributed.admin.low-level-log-length",
+    "distributed.scheduler.transition-log-length": "distributed.admin.low-level-log-length",
+    "distributed.scheduler.events-log-length": "distributed.admin.low-level-log-length",
+    "recent-messages-log-length": "distributed.admin.low-level-log-length",
+    "distributed.comm.recent-messages-log-length": "distributed.admin.low-level-log-length",
 }
 
 # Affects yaml and env variables configs, as well as calls to dask.config.set()

@@ -1099,8 +1099,9 @@ properties:
             type: [integer, 'null']
             minimum: 0
             description: |
-              Default length of logs to keep in memory. This is useful for debugging
-              cluster issues. Set to null for unlimited.
+              Maximum length of worker/scheduler logs to keep in memory.
+              They can be retrieved with get_scheduler_logs() / get_worker_logs().
+              Set to null for unlimited.
 
           log-format:
             type: string
@@ -1108,6 +1109,14 @@ properties:
               The log format to emit.
 
               See https://docs.python.org/3/library/logging.html#logrecord-attributes
+
+          low-level-log-length:
+            type: [integer, 'null']
+            minimum: 0
+            description: |
+              Maximum length of various event logs for developers.
+              Set to null for unlimited.
+
           event-loop:
             type: string
             description: |
@@ -1127,6 +1136,13 @@ properties:
               interval:
                 type: string
                 description: Polling time to query cpu/memory statistics default 500ms
+              log-length:
+                type: [ integer, 'null' ]
+                minimum: 0
+                description: |
+                  Maximum number of samples to keep in memory.
+                  Multiply by `interval` to obtain log duration.
+                  Set to null for unlimited.
               disk:
                 type: boolean
                 description: Should we include disk metrics?  (they can cause issues in some systems)

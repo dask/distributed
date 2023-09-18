@@ -10,7 +10,7 @@ from distributed.system_monitor import SystemMonitor
 
 
 def test_SystemMonitor():
-    sm = SystemMonitor(maxlen=5)
+    sm = SystemMonitor()
 
     # __init__ calls update()
     a = sm.recent()
@@ -41,13 +41,6 @@ def test_maxlen_zero():
     sm.update()
     assert len(sm.quantities["memory"]) == 1
     assert sm.recent()["memory"] == sm.quantities["memory"][-1]
-
-
-def test_maxlen_omit():
-    sm = SystemMonitor()
-    sm.update()
-    sm.update()
-    assert len(sm.quantities["memory"]) > 0
 
 
 def test_count():

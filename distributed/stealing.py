@@ -105,7 +105,7 @@ class WorkStealing(SchedulerPlugin):
         )
         # `callback_time` is in milliseconds
         self.scheduler.add_plugin(self)
-        maxlen = dask.config.get("distributed.admin.log-length")
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
         self.scheduler.events["stealing"] = deque(maxlen=maxlen)
         self.count = 0
         self.in_flight = {}

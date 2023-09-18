@@ -136,7 +136,9 @@ class AdaptiveCore:
         # internal state
         self.close_counts = defaultdict(int)
         self._adapting = False
-        self.log = deque(maxlen=dask.config.get("distributed.admin.log-length"))
+        self.log = deque(
+            maxlen=dask.config.get("distributed.admin.low-level-log-length")
+        )
 
     def stop(self) -> None:
         logger.info("Adaptive stop")
