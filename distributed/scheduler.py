@@ -54,6 +54,7 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.utils
 from dask.core import get_deps, validate_key
+from dask.typing import no_default
 from dask.utils import (
     format_bytes,
     format_time,
@@ -119,7 +120,6 @@ from distributed.utils import (
     get_fileno_limit,
     key_split_group,
     log_errors,
-    no_default,
     offload,
     recursive_to_dict,
     wait_for,
@@ -7419,7 +7419,7 @@ class Scheduler(SchedulerState, ServerNode):
                 metadata = metadata[key]
             return metadata
         except KeyError:
-            if default != no_default:
+            if default is not no_default:
                 return default
             else:
                 raise
