@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import itertools
+import logging
 import os
 import random
 import shutil
@@ -31,8 +31,9 @@ from distributed.client import Client
 from distributed.scheduler import KilledWorker, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
-    convert_partition,
+    convert_shards,
     list_of_buffers_to_table,
+    read_from_disk,
     serialize_table,
 )
 from distributed.shuffle._limiter import ResourceLimiter
@@ -610,6 +611,34 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
     await check_scheduler_cleanup(s)
 
 
+class RaiseOnCloseShuffleRun(DataFrameShuffleRun):
+    async def close(self, *args, **kwargs):
+        raise RuntimeError("test-exception-on-close")
+
+
+@mock.patch(
+    "distributed.shuffle._shuffle.DataFrameShuffleRun",
+    RaiseOnCloseShuffleRun,
+)
+@gen_cluster(client=True, nthreads=[])
+async def test_exception_on_close_cleans_up(c, s, caplog):
+    # Ensure that everything is cleaned up and does not lock up if an exception
+    # is raised during shuffle close.
+    with caplog.at_level(logging.ERROR):
+        async with Worker(s.address) as w:
+            df = dask.datasets.timeseries(
+                start="2000-01-01",
+                end="2000-01-10",
+                dtypes={"x": float, "y": float},
+                freq="10 s",
+            )
+            shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+            await c.compute([shuffled, df], sync=True)
+
+    assert any("test-exception-on-close" in record.message for record in caplog.records)
+    await check_worker_cleanup(w, closed=True)
+
+
 class BlockedInputsDoneShuffle(DataFrameShuffleRun):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -936,7 +965,7 @@ async def test_heartbeat(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
-def test_processing_chain():
+def test_processing_chain(tmp_path):
     """
     This is a serial version of the entire compute chain
 
@@ -1085,18 +1114,16 @@ def test_processing_chain():
         if w1 is not w2
     )
 
-    # Our simple file system
-    filesystem = defaultdict(io.BytesIO)
-
     for partitions in splits_by_worker.values():
         for partition, tables in partitions.items():
             for table in tables:
-                filesystem[partition].write(serialize_table(table))
+                with (tmp_path / str(partition)).open("ab") as f:
+                    f.write(serialize_table(table))
 
     out = {}
-    for k, bio in filesystem.items():
-        bio.seek(0)
-        out[k] = convert_partition(bio.read(), meta)
+    for k in range(npartitions):
+        shards, _ = read_from_disk(tmp_path / str(k), meta)
+        out[k] = convert_shards(shards, meta)
 
     shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(

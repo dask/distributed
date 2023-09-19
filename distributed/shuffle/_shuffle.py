@@ -7,6 +7,7 @@ from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import toolz
@@ -20,8 +21,9 @@ from distributed.core import PooledRPCCall
 from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
-    convert_partition,
+    convert_shards,
     list_of_buffers_to_table,
+    read_from_disk,
     serialize_table,
 )
 from distributed.shuffle._core import (
@@ -321,7 +323,7 @@ def split_by_worker(
     return out
 
 
-def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
+def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
     """
     Split data into many arrow batches, partitioned by final partition
     """
@@ -382,6 +384,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         A ``ResourceLimiter`` limiting the total amount of memory used in either
         buffer.
     """
+
+    column: str
+    meta: pd.DataFrame
+    partitions_of: dict[str, list[int]]
+    worker_for: pd.Series
 
     def __init__(
         self,
@@ -476,15 +483,21 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         **kwargs: Any,
     ) -> pd.DataFrame:
         try:
-            data = self._read_from_disk((partition_id,))
 
-            out = await self.offload(convert_partition, data, self.meta)
+            def _(partition_id: int, meta: pd.DataFrame) -> pd.DataFrame:
+                data = self._read_from_disk((partition_id,))
+                return convert_shards(data, meta)
+
+            out = await self.offload(_, partition_id, self.meta)
         except KeyError:
             out = self.meta.copy()
         return out
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
+
+    def read(self, path: Path) -> tuple[Any, int]:
+        return read_from_disk(path, self.meta)
 
 
 @dataclass(frozen=True)
