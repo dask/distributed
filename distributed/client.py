@@ -3022,6 +3022,7 @@ class Client(SyncMethodMixin):
         """
         if nframes <= 0:
             return ()
+
         ignore_modules = dask.config.get(
             "distributed.diagnostics.computations.ignore-modules"
         )
@@ -3030,10 +3031,26 @@ class Client(SyncMethodMixin):
                 "Ignored modules must be a list. Instead got "
                 f"({type(ignore_modules)}, {ignore_modules})"
             )
-        pattern: re.Pattern | None = None
+        ignore_files = dask.config.get(
+            "distributed.diagnostics.computations.ignore-files"
+        )
+        if not isinstance(ignore_files, list):
+            raise TypeError(
+                "Ignored files must be a list. Instead got "
+                f"({type(ignore_files)}, {ignore_files})"
+            )
+
+        mod_pattern: re.Pattern | None = None
+        fname_pattern: re.Pattern | None = None
         if stacklevel is None:
             if ignore_modules:
-                pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
+                mod_pattern = re.compile(
+                    "|".join([f"(?:{mod})" for mod in ignore_modules])
+                )
+            if ignore_files:
+                fname_pattern = re.compile(
+                    r".*[\\/](" + "|".join(mod for mod in ignore_files) + r")([\\/]|$)"
+                )
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
@@ -3044,12 +3061,13 @@ class Client(SyncMethodMixin):
         ):
             if len(code) >= nframes:
                 break
-            elif stacklevel is not None and i != stacklevel:
+            if stacklevel is not None and i != stacklevel:
                 continue
-            elif pattern is not None and (
-                pattern.match(fr.f_globals.get("__name__", ""))
-                or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
-            ):
+            if fr.f_code.co_name in ("<listcomp>", "<dictcomp>"):
+                continue
+            if mod_pattern and mod_pattern.match(fr.f_globals.get("__name__", "")):
+                continue
+            if fname_pattern and fname_pattern.match(fr.f_code.co_filename):
                 continue
 
             kwargs = dict(

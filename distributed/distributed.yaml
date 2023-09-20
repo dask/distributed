@@ -281,10 +281,17 @@ distributed:
         - coiled
         - cudf
         - cuml
+        - pluggy  # part of pytest
         - prefect
         - rechunker
         - xarray
         - xgboost
+      ignore-files:
+        - runpy\.py  # `python -m pytest` shell command
+        - pytest  # `pytest` shell command
+        - py\.test  # `py.test` shell command
+        - _pytest  # pytest implementation
+        - pycharm  # Run pytest from PyCharm GUI
     erred-tasks:
       max-history: 100
 
