@@ -287,9 +287,10 @@ distributed:
         - xarray
         - xgboost
       ignore-files:
-        - runpy\.py  # `python -m pytest` shell command
+        - runpy\.py  # `python -m pytest` (or other module) shell command
         - pytest  # `pytest` shell command
         - py\.test  # `py.test` shell command
+        - pytest-script\.py  # `pytest` shell command in Windows
         - _pytest  # pytest implementation
         - pycharm  # Run pytest from PyCharm GUI
     erred-tasks:
