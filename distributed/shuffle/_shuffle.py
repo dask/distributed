@@ -227,6 +227,7 @@ class P2PShuffleLayer(Layer):
         parameter.
         """
         parts_out = self._keys_to_parts(keys)
+        # Protect against mutations later on with frozenset
         input_parts = frozenset(
             {(self.name_input, i) for i in range(self.npartitions_input)}
         )
