@@ -1827,9 +1827,7 @@ class Worker(BaseWorker, ServerNode):
     ) -> dict[str, Any]:
 
         if external:
-            print("external ds update data", flush=True)
             stimulus_id = f"external-task-{time()}"
-            print("coucou ds le external du worker ", flush=True)
             self.handle_stimulus(ExternalTaskEvent(data=data, stimulus_id=stimulus_id))
         if stimulus_id is None:
             stimulus_id = f"update-data-{time()}"

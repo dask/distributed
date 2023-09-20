@@ -183,6 +183,8 @@ class Future(WrappedKey):
         Client that should own this future.  Defaults to _get_global_client()
     inform: bool
         Do we inform the scheduler that we need an update on this future
+    external: bool
+        Do we consider this the data associated to thi future as external
     state: FutureState
         The state of the future
 
@@ -2526,6 +2528,8 @@ class Client(SyncMethodMixin):
         ----------
         data : list, dict, or object
             Data to scatter out to workers.  Output type matches input type.
+        keys: list, dict, or object
+            keys of the data to scatter to the workers.
         workers : list of tuples (optional)
             Optionally constrain locations of data.
             Specify workers as hostname/port pairs, e.g.
@@ -2550,6 +2554,8 @@ class Client(SyncMethodMixin):
             ``dask.distributed.TimeoutError``
         asynchronous: bool
             If True the client is in asynchronous mode
+        external: bool 
+            If True the data has been generated from an external application
 
         Returns
         -------

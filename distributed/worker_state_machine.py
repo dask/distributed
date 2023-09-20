@@ -1844,7 +1844,6 @@ class WorkerState:
             # Some types fail pickling (example: _thread.lock objects);
             # send their name as a best effort.
             type_serialized = pickle.dumps(typename(ts.type))
-
         return ExternalTaskFinishedMsg(
             key=ts.key,
             run_id=run_id,
@@ -2537,7 +2536,7 @@ class WorkerState:
             )
         # NOTE: this will trigger transitions
         elif msg_type == "external-task-finished":
-            assert run_id != RUN_ID_SENTINEL
+            #assert run_id != RUN_ID_SENTINEL
             instructions.append(
                 self._get_external_task_finished_msg(
                     ts,
@@ -2628,6 +2627,7 @@ class WorkerState:
         ("waiting", "constrained"): _transition_waiting_constrained,
         ("waiting", "ready"): _transition_waiting_ready,
         ("waiting", "released"): _transition_generic_released,
+        ("external", "memory"): _transition_external_memory,
     }
 
     def _notify_plugins(self, method_name: str, *args: Any, **kwargs: Any) -> None:
@@ -2661,7 +2661,7 @@ class WorkerState:
 
         if ts.state == finish:
             return {}, []
-
+        
         start = ts.state
         func = self._TRANSITIONS_TABLE.get((start, finish))
 
@@ -2677,6 +2677,10 @@ class WorkerState:
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
+            recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
+            self._notify_plugins("transition", ts.key, start, finish)
+
+        elif "external" in (start, finish) and "memory" in (start, finish):
             recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
             self._notify_plugins("transition", ts.key, start, finish)
 

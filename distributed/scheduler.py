@@ -2424,7 +2424,6 @@ class SchedulerState:
         **kwargs: Any,
     ) -> RecsMsgs:
         ts = self.tasks[key]
-
         assert worker
         assert isinstance(worker, str)
 
@@ -2454,8 +2453,6 @@ class SchedulerState:
         ############################
         if nbytes is not None:
             ts.set_nbytes(nbytes)
-
-        self._exit_processing_common(ts)
 
         recommendations: Recs = {}
         client_msgs: Msgs = {}
@@ -4991,53 +4988,17 @@ class Scheduler(SchedulerState, ServerNode):
                 assert ws in ts.who_has
         return recommendations, client_msgs, worker_msgs
     
-    def stimulusexternal_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
+    def stimulus_external_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
-        logger.debug("Stimulus external task finished %s[%d] %s", key, run_id, worker)
 
+        logger.debug("Stimulus external task finished %s[%d] %s", key, run_id, worker)
         recommendations: Recs = {}
         client_msgs: Msgs = {}
         worker_msgs: Msgs = {}
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts.state in ("released", "queued", "no-worker"):
-            logger.debug(
-                "Received already computed task, worker: %s, state: %s"
-                ", key: %s, who_has: %s",
-                worker,
-                ts.state if ts else "forgotten",
-                key,
-                ts.who_has if ts else {},
-            )
-            worker_msgs[worker] = [
-                {
-                    "op": "free-keys",
-                    "keys": [key],
-                    "stimulus_id": stimulus_id,
-                }
-            ]
-        elif ts.run_id != run_id:
-            if not ts.processing_on or ts.processing_on.address != worker:
-                logger.debug(
-                    "Received stale task run, worker: %s, key: %s, run_id: %d (%d)",
-                    worker,
-                    key,
-                    run_id,
-                    ts.run_id,
-                )
-                worker_msgs[worker] = [
-                    {
-                        "op": "free-keys",
-                        "keys": [key],
-                        "stimulus_id": stimulus_id,
-                    }
-                ]
-            else:
-                recommendations[ts.key] = "released"
-        elif ts.state == "memory":
-            self.add_keys(worker=worker, keys=[key])
-        else: # it will include the external tasks too 
+        if ts.state == "external":
             ts.metadata.update(kwargs["metadata"])
             r: tuple = self._transition(
                 key, "memory", stimulus_id, worker=worker, **kwargs
@@ -5343,7 +5304,6 @@ class Scheduler(SchedulerState, ServerNode):
                 ts = self.new_task(k, None, "external") if external else self.new_task(k, None, "released") 
             ts.who_wants.add(cs)
             cs.wants_what.add(ts)
-            print("ds desires keys", flush= True)
             if ts.state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
@@ -5734,18 +5694,20 @@ class Scheduler(SchedulerState, ServerNode):
     def handle_external_task_finished(
             self, key: str, worker: str, stimulus_id: str, **msg: Any
         ) -> None:
-            if worker not in self.workers:
-                return
-            self.validate_key(key)
+        if worker not in self.workers:
+            return
+        #self.validate_key(key)
 
-            r: tuple = self.stimulus_external_task_finished(
-                key=key, worker=worker, stimulus_id=stimulus_id, **msg
-            )
-            recommendations, client_msgs, worker_msgs = r
-            self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
-            self.send_all(client_msgs, worker_msgs)
+        r: tuple = self.stimulus_external_task_finished(
+            key=key, worker=worker, stimulus_id=stimulus_id, **msg
+        )
+        recommendations, client_msgs, worker_msgs = r
 
-            self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+        self._transitions(recommendations, client_msgs, worker_msgs, stimulus_id)
+        self.send_all(client_msgs, worker_msgs)
+
+        self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+
 
     def handle_task_erred(self, key: str, stimulus_id: str, **msg: Any) -> None:
         r: tuple = self.stimulus_task_erred(key=key, stimulus_id=stimulus_id, **msg)
