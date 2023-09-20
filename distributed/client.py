@@ -209,14 +209,15 @@ class Future(WrappedKey):
     _cb_executor = None
     _cb_executor_pid = None
 
-    def __init__(self, key, client=None, inform=True, state=None):
+    def __init__(self, key, client=None, inform=True, external=False, state=None):
         self.key = key
         self._cleared = False
         self._client = client
         self._input_state = state
         self._inform = inform
+        self._external = external
         self._state = None
-        self._bind_late()
+        self._bind_late()        
 
     @property
     def client(self):
@@ -237,7 +238,7 @@ class Future(WrappedKey):
             if self.key in self._client.futures:
                 self._state = self._client.futures[self.key]
             else:
-                self._state = self._client.futures[self.key] = FutureState()
+                self._state = self._client.futures[self.key] = FutureState(external=self._external)
 
             if self._inform:
                 self._client._send_to_scheduler(
@@ -245,6 +246,7 @@ class Future(WrappedKey):
                         "op": "client-desires-keys",
                         "keys": [self.key],
                         "client": self._client.id,
+                        "external": self._external,
                     }
                 )
 
@@ -317,8 +319,8 @@ class Future(WrappedKey):
             The result of the computation. Or a coroutine if the client is asynchronous.
         """
         self._verify_initialized()
-        with shorten_traceback():
-            return self.client.sync(self._result, callback_timeout=timeout)
+        #with shorten_traceback(): #st.traceback
+        return self.client.sync(self._result, callback_timeout=timeout)
 
     async def _result(self, raiseit=True):
         await self._state.wait()
@@ -538,9 +540,10 @@ class FutureState:
 
     __slots__ = ("_event", "status", "type", "exception", "traceback")
 
-    def __init__(self):
+    def __init__(self, external=False):
         self._event = None
-        self.status = "pending"
+
+        self.status = "external" if external else "pending"
         self.type = None
 
     def _get_event(self):
@@ -2392,12 +2395,14 @@ class Client(SyncMethodMixin):
     async def _scatter(
         self,
         data,
+        keys=None,
         workers=None,
         broadcast=False,
         direct=None,
         local_worker=None,
         timeout=no_default,
         hash=True,
+        external=False,
     ):
         if timeout == no_default:
             timeout = self._timeout
@@ -2417,10 +2422,13 @@ class Client(SyncMethodMixin):
             unpack = True
             data = [data]
         if isinstance(data, (list, tuple)):
-            if hash:
-                names = [type(x).__name__ + "-" + tokenize(x) for x in data]
+            if keys:
+                names=[k for k in keys]
             else:
-                names = [type(x).__name__ + "-" + uuid.uuid4().hex for x in data]
+                if hash:
+                    names = [type(x).__name__ + "-" + tokenize(x) for x in data]
+                else:
+                    names = [type(x).__name__ + "-" + uuid.uuid4().hex for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)
@@ -2463,12 +2471,12 @@ class Client(SyncMethodMixin):
                     raise ValueError("No valid workers found")
 
                 _, who_has, nbytes = await scatter_to_workers(
-                    nthreads, data2, rpc=self.rpc
+                    nthreads, data2, rpc=self.rpc, external=external,
                 )
-
-                await self.scheduler.update_data(
-                    who_has=who_has, nbytes=nbytes, client=self.id
-                )
+                if not external:
+                    await self.scheduler.update_data(
+                        who_has=who_has, nbytes=nbytes, client=self.id
+                    )
             else:
                 await self.scheduler.scatter(
                     data=data2,
@@ -2478,7 +2486,7 @@ class Client(SyncMethodMixin):
                     timeout=timeout,
                 )
 
-        out = {k: Future(k, self, inform=False) for k in data}
+        out = {k: Future(k, self, inform=False, external=external) for k in data}
         for key, typ in types.items():
             self.futures[key].finish(type=typ)
 
@@ -2497,12 +2505,15 @@ class Client(SyncMethodMixin):
     def scatter(
         self,
         data,
+        keys=None,
         workers=None,
         broadcast=False,
         direct=None,
         hash=True,
         timeout=no_default,
         asynchronous=None,
+        external=False,
+
     ):
         """Scatter data into distributed memory
 
@@ -2603,6 +2614,7 @@ class Client(SyncMethodMixin):
         return self.sync(
             self._scatter,
             data,
+            keys=keys,
             workers=workers,
             broadcast=broadcast,
             direct=direct,
@@ -2610,6 +2622,7 @@ class Client(SyncMethodMixin):
             timeout=timeout,
             asynchronous=asynchronous,
             hash=hash,
+            external=external,
         )
 
     async def _cancel(self, futures, force=False):

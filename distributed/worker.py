@@ -148,6 +148,7 @@ from distributed.worker_state_machine import (
     TaskState,
     UnpauseEvent,
     UpdateDataEvent,
+    ExternalTaskEvent,
     WorkerState,
 )
 
@@ -1821,10 +1822,18 @@ class Worker(BaseWorker, ServerNode):
         self,
         data: dict[str, object],
         stimulus_id: str | None = None,
+        external: True | None = None, 
+
     ) -> dict[str, Any]:
+
+        if external:
+            print("external ds update data", flush=True)
+            stimulus_id = f"external-task-{time()}"
+            print("coucou ds le external du worker ", flush=True)
+            self.handle_stimulus(ExternalTaskEvent(data=data, stimulus_id=stimulus_id))
         if stimulus_id is None:
             stimulus_id = f"update-data-{time()}"
-        self.handle_stimulus(UpdateDataEvent(data=data, stimulus_id=stimulus_id))
+            self.handle_stimulus(UpdateDataEvent(data=data, stimulus_id=stimulus_id))
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
     async def set_resources(self, **resources: float) -> None:

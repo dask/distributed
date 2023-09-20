@@ -150,7 +150,7 @@ class WrappedKey:
 _round_robin_counter = [0]
 
 
-async def scatter_to_workers(nthreads, data, rpc=rpc):
+async def scatter_to_workers(nthreads, data, rpc=rpc, external=False):
     """Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
@@ -174,7 +174,14 @@ async def scatter_to_workers(nthreads, data, rpc=rpc):
 
     rpcs = {addr: rpc(addr) for addr in d}
     try:
-        out = await All([rpcs[address].update_data(data=v) for address, v in d.items()])
+        out = await All(
+            [
+                rpcs[address].update_data(
+                    data=v, external=external
+                ) 
+                for address, v in d.items()
+            ]
+        )
     finally:
         for r in rpcs.values():
             await r.close_rpc()
