@@ -243,7 +243,7 @@ class HashJoinP2PLayer(Layer):
         all input partitions. This method does not require graph
         materialization.
         """
-        deps = defaultdict(frozenset)
+        deps = {}
         parts_out = parts_out or self._keys_to_parts(keys)
         keys = {(self.name_input_left, i) for i in range(self.npartitions)}
         keys |= {(self.name_input_right, i) for i in range(self.npartitions)}
