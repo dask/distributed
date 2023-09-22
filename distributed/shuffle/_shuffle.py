@@ -227,8 +227,11 @@ class P2PShuffleLayer(Layer):
         parameter.
         """
         parts_out = self._keys_to_parts(keys)
-        input_parts = {(self.name_input, i) for i in range(self.npartitions_input)}
-        culled_deps = {(self.name, part): input_parts.copy() for part in parts_out}
+        # Protect against mutations later on with frozenset
+        input_parts = frozenset(
+            {(self.name_input, i) for i in range(self.npartitions_input)}
+        )
+        culled_deps = {(self.name, part): input_parts for part in parts_out}
 
         if parts_out != set(self.parts_out):
             culled_layer = self._cull(parts_out)

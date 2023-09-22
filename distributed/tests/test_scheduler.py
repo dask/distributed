@@ -4244,8 +4244,8 @@ async def test_KilledWorker_informative_message(s, a, b):
     with pytest.raises(KilledWorker) as excinfo:
         raise ex
     msg = str(excinfo.value)
-    assert "Attempted to run task foo-bar" in msg
-    assert str(s.allowed_failures) in msg
+    assert "Attempted to run task foo-bar on 667 different workers" in msg
+    assert a.address in msg
     assert "worker logs" in msg
     assert "https://distributed.dask.org/en/stable/killed.html" in msg
 
