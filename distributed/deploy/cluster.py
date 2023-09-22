@@ -33,9 +33,6 @@ from distributed.utils import (
 logger = logging.getLogger(__name__)
 
 
-no_default = "__no_default__"
-
-
 class Cluster(SyncMethodMixin):
     """Superclass for cluster objects
 

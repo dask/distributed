@@ -700,6 +700,12 @@ async def test_offload_preserves_contextvars():
     await asyncio.gather(set_var("foo"), set_var("bar"))
 
 
+def test_no_default_deprecated():
+    with pytest.warns(FutureWarning, match="no_default is deprecated"):
+        from distributed.utils import no_default
+    assert no_default is dask.typing.no_default
+
+
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())
