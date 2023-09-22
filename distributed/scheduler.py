@@ -68,6 +68,7 @@ from distributed import cluster_dump, preloading, profile
 from distributed import versions as version_module
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
+from distributed.asyncio import RLock
 from distributed.batched import BatchedSend
 from distributed.client import SourceCode
 from distributed.collections import HeapSet
@@ -114,7 +115,6 @@ from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
     TimeoutError,
-    empty_context,
     format_dashboard_link,
     get_fileno_limit,
     key_split_group,
@@ -3541,8 +3541,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_timeout = None
         self.idle_since = time()
         self.time_started = self.idle_since  # compatibility for dask-gateway
-        self._replica_cond = asyncio.Condition()
-        self._running_replica_operations = defaultdict(int)
+        self._replica_lock = RLock()
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
 
@@ -6377,22 +6376,13 @@ class Scheduler(SchedulerState, ServerNode):
         if not msgs:
             return {"status": "OK"}
 
-        async with self._replica_cond:
-            await self._replica_cond.wait_for(
-                lambda: not self._running_replica_operations
-            )
-            self._running_replica_operations["rebalance"] += 1
-            try:
-                result = await self._rebalance_move_data(msgs, stimulus_id)
-                if result["status"] == "partial-fail" and keys is None:
-                    # Only return failed keys if the client explicitly asked for them
-                    result = {"status": "OK"}
-                return result
-            finally:
-                self._running_replica_operations["rebalance"] -= 1
-                if not self._running_replica_operations["rebalance"]:
-                    del self._running_replica_operations["rebalance"]
-                self._replica_cond.notify_all()
+        # Downgrade reentrant lock to non-reentrant
+        async with self._replica_lock(("rebalance", object())):
+            result = await self._rebalance_move_data(msgs, stimulus_id)
+            if result["status"] == "partial-fail" and keys is None:
+                # Only return failed keys if the client explicitly asked for them
+                result = {"status": "OK"}
+            return result
 
     def _rebalance_find_msgs(
         self,
@@ -6650,7 +6640,6 @@ class Scheduler(SchedulerState, ServerNode):
         workers=None,
         branching_factor=2,
         delete=True,
-        lock=True,
         stimulus_id=None,
     ):
         """Replicate data throughout cluster
@@ -6676,98 +6665,88 @@ class Scheduler(SchedulerState, ServerNode):
         """
         stimulus_id = stimulus_id or f"replicate-{time()}"
         assert branching_factor > 0
-        async with self._replica_cond if lock else empty_context:
-            if lock:
-                await self._replica_cond.wait_for(
-                    lambda: not self._running_replica_operations
-                )
-                self._running_replica_operations["replicate"] += 1
-            try:
-                if workers is not None:
-                    workers = {self.workers[w] for w in self.workers_list(workers)}
-                    workers = {ws for ws in workers if ws.status == Status.running}
-                else:
-                    workers = self.running
+        # Downgrade reentrant lock to non-reentrant
+        async with self._replica_lock(("replicate", object())):
+            if workers is not None:
+                workers = {self.workers[w] for w in self.workers_list(workers)}
+                workers = {ws for ws in workers if ws.status == Status.running}
+            else:
+                workers = self.running
 
-                if n is None:
-                    n = len(workers)
-                else:
-                    n = min(n, len(workers))
-                if n == 0:
-                    raise ValueError("Can not use replicate to delete data")
+            if n is None:
+                n = len(workers)
+            else:
+                n = min(n, len(workers))
+            if n == 0:
+                raise ValueError("Can not use replicate to delete data")
 
-                tasks = {self.tasks[k] for k in keys}
-                missing_data = [ts.key for ts in tasks if not ts.who_has]
-                if missing_data:
-                    return {"status": "partial-fail", "keys": missing_data}
+            tasks = {self.tasks[k] for k in keys}
+            missing_data = [ts.key for ts in tasks if not ts.who_has]
+            if missing_data:
+                return {"status": "partial-fail", "keys": missing_data}
 
-                # Delete extraneous data
-                if delete:
-                    del_worker_tasks = defaultdict(set)
-                    for ts in tasks:
-                        del_candidates = tuple(ts.who_has & workers)
-                        if len(del_candidates) > n:
-                            for ws in random.sample(
-                                del_candidates, len(del_candidates) - n
-                            ):
-                                del_worker_tasks[ws].add(ts)
+            # Delete extraneous data
+            if delete:
+                del_worker_tasks = defaultdict(set)
+                for ts in tasks:
+                    del_candidates = tuple(ts.who_has & workers)
+                    if len(del_candidates) > n:
+                        for ws in random.sample(
+                            del_candidates, len(del_candidates) - n
+                        ):
+                            del_worker_tasks[ws].add(ts)
 
-                    # Note: this never raises exceptions
-                    await asyncio.gather(
-                        *[
-                            self.delete_worker_data(
-                                ws.address, [t.key for t in tasks], stimulus_id
-                            )
-                            for ws, tasks in del_worker_tasks.items()
-                        ]
-                    )
-
-                # Copy not-yet-filled data
-                while tasks:
-                    gathers = defaultdict(dict)
-                    for ts in list(tasks):
-                        if ts.state == "forgotten":
-                            # task is no longer needed by any client or dependent task
-                            tasks.remove(ts)
-                            continue
-                        n_missing = n - len(ts.who_has & workers)
-                        if n_missing <= 0:
-                            # Already replicated enough
-                            tasks.remove(ts)
-                            continue
-
-                        count = min(n_missing, branching_factor * len(ts.who_has))
-                        assert count > 0
-
-                        for ws in random.sample(tuple(workers - ts.who_has), count):
-                            gathers[ws.address][ts.key] = [
-                                wws.address for wws in ts.who_has
-                            ]
-
-                    await asyncio.gather(
-                        *(
-                            # Note: this never raises exceptions
-                            self.gather_on_worker(w, who_has)
-                            for w, who_has in gathers.items()
+                # Note: this never raises exceptions
+                await asyncio.gather(
+                    *[
+                        self.delete_worker_data(
+                            ws.address, [t.key for t in tasks], stimulus_id
                         )
-                    )
-                    for r, v in gathers.items():
-                        self.log_event(r, {"action": "replicate-add", "who_has": v})
-
-                self.log_event(
-                    "all",
-                    {
-                        "action": "replicate",
-                        "workers": list(workers),
-                        "key-count": len(keys),
-                        "branching-factor": branching_factor,
-                    },
+                        for ws, tasks in del_worker_tasks.items()
+                    ]
                 )
-            finally:
-                self._running_replica_operations["replicate"] -= 1
-                if not self._running_replica_operations["replicate"]:
-                    del self._running_replica_operations["replicate"]
-                self._replica_cond.notify_all()
+
+            # Copy not-yet-filled data
+            while tasks:
+                gathers = defaultdict(dict)
+                for ts in list(tasks):
+                    if ts.state == "forgotten":
+                        # task is no longer needed by any client or dependent task
+                        tasks.remove(ts)
+                        continue
+                    n_missing = n - len(ts.who_has & workers)
+                    if n_missing <= 0:
+                        # Already replicated enough
+                        tasks.remove(ts)
+                        continue
+
+                    count = min(n_missing, branching_factor * len(ts.who_has))
+                    assert count > 0
+
+                    for ws in random.sample(tuple(workers - ts.who_has), count):
+                        gathers[ws.address][ts.key] = [
+                            wws.address for wws in ts.who_has
+                        ]
+
+                await asyncio.gather(
+                    *(
+                        # Note: this never raises exceptions
+                        self.gather_on_worker(w, who_has)
+                        for w, who_has in gathers.items()
+                    )
+                )
+                for r, v in gathers.items():
+                    self.log_event(r, {"action": "replicate-add", "who_has": v})
+
+            self.log_event(
+                "all",
+                {
+                    "action": "replicate",
+                    "workers": list(workers),
+                    "key-count": len(keys),
+                    "branching-factor": branching_factor,
+                },
+            )
 
     def workers_to_close(
         self,
@@ -6962,15 +6941,8 @@ class Scheduler(SchedulerState, ServerNode):
         # This lock makes retire_workers, rebalance, and replicate mutually
         # exclusive and will no longer be necessary once rebalance and replicate are
         # migrated to the Active Memory Manager.
-        # Note that, incidentally, it also prevents multiple calls to retire_workers
-        # from running in parallel - this is unnecessary.
-        async with self._replica_cond:
-            await self._replica_cond.wait_for(
-                lambda: "replicate" not in self._running_replica_operations
-                and "rebalance" not in self._running_replica_operations
-            )
-            self._running_replica_operations["retire-workers"] += 1
-        try:
+        # However, it allows multiple instances of retire_workers to run in parallel.
+        async with self._replica_lock("retire-workers"):
             if names is not None:
                 if workers is not None:
                     raise TypeError("names and workers are mutually exclusive")
@@ -7046,12 +7018,6 @@ class Scheduler(SchedulerState, ServerNode):
             finally:
                 if stop_amm:
                     amm.stop()
-        finally:
-            async with self._replica_cond:
-                self._running_replica_operations["retire-workers"] -= 1
-                if not self._running_replica_operations["retire-workers"]:
-                    del self._running_replica_operations["retire-workers"]
-                self._replica_cond.notify_all()
 
         self.log_event("all", {"action": "retire-workers", "workers": workers_info})
         self.log_event(list(workers_info), {"action": "retired"})

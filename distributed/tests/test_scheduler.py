@@ -739,6 +739,14 @@ async def test_retire_workers_empty(s):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 10)
 async def test_retire_workers_concurrently(c, s, *workers):
+    """Test that replicate(), rebalance(), and retire_workers() can be called at the
+    same time. Note how these three activities are mutually exclusive with each other,
+    but you can have multiple instances of retire_workers running at the same time.
+
+    See also
+    --------
+    test_active_memory_manager.py::test_RetireWorker_stress
+    """
     futs = c.map(inc, range(100))
     await wait(futs)
     before = s.transition_counter
@@ -746,7 +754,8 @@ async def test_retire_workers_concurrently(c, s, *workers):
         *(
             s.replicate(keys=[fut.key for fut in futs], n=2),
             s.rebalance(),
-            *(s.retire_workers(workers=[w.address]) for w in workers[::2]),
+            s.retire_workers(workers=[workers[0].address]),
+            s.retire_workers(workers=[workers[1].address]),
         )
     )
     await c.gather(futs)
