@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from io import BytesIO
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from packaging.version import parse
+
+from dask.utils import parse_bytes
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -29,45 +31,29 @@ def check_minimal_arrow_version() -> None:
     """Verify that the the correct version of pyarrow is installed to support
     the P2P extension.
 
-    Raises a RuntimeError in case pyarrow is not installed or installed version
-    is not recent enough.
+    Raises a ModuleNotFoundError if pyarrow is not installed or an
+    ImportError if the installed version is not recent enough.
     """
-    # First version to introduce Table.sort_by
-    minversion = "7.0.0"
+    # First version that supports concatenating extension arrays (apache/arrow#14463)
+    minversion = "12.0.0"
     try:
         import pyarrow as pa
-    except ImportError:
-        raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}")
-
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(f"P2P shuffling requires pyarrow>={minversion}")
     if parse(pa.__version__) < parse(minversion):
-        raise RuntimeError(
+        raise ImportError(
             f"P2P shuffling requires pyarrow>={minversion} but only found {pa.__version__}"
         )
 
 
-def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
-    import pandas as pd
+def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     import pyarrow as pa
 
-    file = BytesIO(data)
-    end = len(data)
-    shards = []
-    while file.tell() < end:
-        sr = pa.RecordBatchStreamReader(file)
-        shards.append(sr.read_all())
-    table = pa.concat_tables(shards, promote=True)
+    from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
-    def default_types_mapper(pyarrow_dtype: pa.DataType) -> object:
-        # Avoid converting strings from `string[pyarrow]` to `string[python]`
-        # if we have *some* `string[pyarrow]`
-        if (
-            pyarrow_dtype in {pa.large_string(), pa.string()}
-            and pd.StringDtype("pyarrow") in meta.dtypes.values
-        ):
-            return pd.StringDtype("pyarrow")
-        return None
+    table = pa.concat_tables(shards)
 
-    df = table.to_pandas(self_destruct=True, types_mapper=default_types_mapper)
+    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     return df.astype(meta.dtypes, copy=False)
 
 
@@ -92,3 +78,42 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 
     with pa.ipc.open_stream(pa.py_buffer(buffer)) as reader:
         return reader.read_all()
+
+
+def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
+    import pyarrow as pa
+
+    from dask.dataframe.dispatch import pyarrow_schema_dispatch
+
+    batch_size = parse_bytes("1 MiB")
+    batch = []
+    shards = []
+    schema = pyarrow_schema_dispatch(meta, preserve_index=True)
+
+    with pa.OSFile(str(path), mode="rb") as f:
+        size = f.seek(0, whence=2)
+        f.seek(0)
+        prev = 0
+        offset = f.tell()
+        while offset < size:
+            sr = pa.RecordBatchStreamReader(f)
+            shard = sr.read_all()
+            offset = f.tell()
+            batch.append(shard)
+
+            if offset - prev >= batch_size:
+                table = pa.concat_tables(batch)
+                shards.append(_copy_table(table, schema))
+                batch = []
+                prev = offset
+    if batch:
+        table = pa.concat_tables(batch)
+        shards.append(_copy_table(table, schema))
+    return shards, size
+
+
+def _copy_table(table: pa.Table, schema: pa.Schema) -> pa.Table:
+    import pyarrow as pa
+
+    arrs = [pa.concat_arrays(column.chunks) for column in table.columns]
+    return pa.table(data=arrs, schema=schema)

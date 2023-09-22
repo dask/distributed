@@ -58,7 +58,7 @@ dfs = [
     pd.DataFrame(
         np.random.randn(10, 5),
         columns=list("ABCDE"),
-        index=pd.period_range("2000", periods=10, freq="B"),
+        index=pd.period_range("2000", periods=10, freq="D"),
     ),
     pd.DataFrame(
         np.random.randn(10, 5),

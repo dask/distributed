@@ -16,7 +16,7 @@
           </tr>
           <tr>
               <th> Call stack </th>
-              <td><a class="button is-primary" href="../call-stack/{{ url_escape(Task) }}.html">Call Stack</a></td>
+              <td><a class="button is-primary" href="../call-stack/{{ url_escape(str(Task)) }}.html">Call Stack</a></td>
           </tr>
           {% end %}
           {% if ts.type %}
@@ -35,7 +35,7 @@
           {% for dts in ts.waiting_on %}
           <tr>
               <td> waiting on </td>
-              <td><a href="{{ url_escape(dts.key) }}.html">{{dts.key}}</a> </td>
+              <td><a href="{{ url_escape(str(dts.key)) }}.html">{{dts.key}}</a> </td>
           </tr>
           {% end %}
           {% end %}
@@ -79,7 +79,7 @@
           </thead>
           {% for dts in ts.dependencies %}
           <tr>
-            <td> <a href="{{ url_escape(dts.key) }}.html">{{dts.key}}</a> </td>
+            <td> <a href="{{ url_escape(str(dts.key)) }}.html">{{dts.key}}</a> </td>
             <td> {{ dts.state }} </td>
           </tr>
           {% end %}
@@ -95,7 +95,7 @@
           </thead>
           {% for dts in ts.dependents %}
           <tr>
-            <td> <a href="{{ url_escape(dts.key) }}.html">{{dts.key}}</a> </td>
+            <td> <a href="{{ url_escape(str(dts.key)) }}.html">{{dts.key}}</a> </td>
             <td> {{ dts.state }} </td>
           </tr>
           {% end %}
@@ -117,8 +117,9 @@
         <h3 class="title is-5"> Clients with future </h3>
         <div class="content">
           <ul>
+            <!--FIXME: There was supposed to be a client route but there isn't-->
             {% for cs in ts.who_wants %}
-            <li> <a href="../client/{{ url_escape(cs.client_key) }}.html">{{cs.client_key}}</a></li>
+            <li>{{ cs.client_key }}</li>
             {% end %}
           </ul>
         </div>
@@ -139,10 +140,10 @@
                   <th> Recommended Action </th>
               </thead>
 
-              {% for key, start, finish, recommendations, stimulus_id, transition_time in scheduler.story(Task) %}
+              {% for key, start, finish, recommendations, stimulus_id, transition_time in scheduler.story(ts.key) %}
               <tr>
                   <td> {{ fromtimestamp(transition_time) }} </td>
-                  <td> <a href="{{ url_escape(key) }}.html">{{key}}</a> </td>
+                  <td> <a href="{{ url_escape(str(key)) }}.html">{{key}}</a> </td>
                   <td> {{ start }} </td>
                   <td> {{ finish }} </td>
                   <td> {{ stimulus_id }} </td>
@@ -156,7 +157,7 @@
                   <td> </td>
                   <td> </td>
                   <td> </td>
-                  <td> <a href="{{ url_escape(key2) }}.html">{{key2}}</a> </td>
+                  <td> <a href="{{ url_escape(str(key2)) }}.html">{{key2}}</a> </td>
                   <td> {{ rec }} </td>
               </tr>
                 {% end %}

@@ -22,7 +22,7 @@ with open(fn) as f:
 
 dask.config.update_defaults(defaults)
 
-aliases = {
+deprecations = {
     "allowed-failures": "distributed.scheduler.allowed-failures",
     "bandwidth": "distributed.scheduler.bandwidth",
     "default-data-size": "distributed.scheduler.default-data-size",
@@ -55,7 +55,11 @@ aliases = {
     "rmm": "distributed.rmm",
 }
 
-dask.config.rename(aliases)
+# Affects yaml and env variables configs, as well as calls to dask.config.set()
+# before importing distributed
+dask.config.rename(deprecations)
+# Affects dask.config.set() from now on
+dask.config.deprecations.update(deprecations)
 
 
 #########################

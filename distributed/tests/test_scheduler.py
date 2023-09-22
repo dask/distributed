@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import pickle
+import random
 import re
 import sys
 from collections.abc import Collection
@@ -22,9 +23,10 @@ from tlz import concat, first, merge
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import delayed
+from dask import bag, delayed
+from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
-from dask.utils import apply, parse_timedelta, stringify, tmpfile, typename
+from dask.utils import parse_timedelta, tmpfile, typename
 
 from distributed import (
     CancelledError,
@@ -65,6 +67,7 @@ from distributed.utils_test import (
     gen_test,
     inc,
     nodebug,
+    padded_time,
     raises_with_cause,
     slowadd,
     slowdec,
@@ -74,7 +77,7 @@ from distributed.utils_test import (
     varying,
     wait_for_state,
 )
-from distributed.worker import dumps_function, dumps_task, get_worker, secede
+from distributed.worker import dumps_function, secede
 
 pytestmark = pytest.mark.ci1
 
@@ -198,13 +201,17 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 
         if ndeps == 0:
             x = da.random.random((100, 100), chunks=(10, 10))
+            random_keys = set(flatten(x.__dask_keys__()))
+            trivial_deps = {}
         else:
 
             def random(**kwargs):
                 assert len(kwargs) == ndeps
                 return np.random.random((10, 10))
 
-            trivial_deps = {f"k{i}": delayed(object()) for i in range(ndeps)}
+            trivial_deps = {
+                f"k{i}": delayed(object(), name=f"object-{i}") for i in range(ndeps)
+            }
 
             # TODO is there a simpler (non-blockwise) way to make this sort of graph?
             x = da.blockwise(
@@ -214,6 +221,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
                 dtype=float,
                 **trivial_deps,
             )
+            random_keys = set(flatten(x.__dask_keys__()))
 
         xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
         await xsum
@@ -223,7 +231,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         secondary_worker_key_fractions = []
         for keys in x.__dask_keys__():
             # Iterate along rows of the array.
-            keys = {stringify(k) for k in keys}
+            keys = set(keys)
 
             # No more than 2 workers should have any keys
             assert sum(any(k in w.data for k in keys) for w in workers) <= 2
@@ -251,10 +259,12 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
             for log in worker.transfer_incoming_log:
                 keys = log["keys"]
                 # The root-ish tasks should never be transferred
-                assert not any(k.startswith("random") for k in keys), keys
+                assert not random_keys.intersection(keys)
                 # `object-` keys (the trivial deps of the root random tasks) should be
                 # transferred
-                if any(not k.startswith("object") for k in keys):
+                if any(
+                    (not isinstance(k, str) or not k.startswith("object")) for k in keys
+                ):
                     # But not many other things should be
                     unexpected_transfers.append(list(keys))
 
@@ -345,7 +355,26 @@ async def test_decide_worker_rootish_while_last_worker_is_retiring(c, s, a):
         await wait(xs + ys)
 
 
-@pytest.mark.slow
+from distributed import WorkerPlugin
+
+
+class CountData(WorkerPlugin):
+    def __init__(self, keys):
+        self.keys = keys
+        self.worker = None
+        self.count = 0
+
+    def setup(self, worker):
+        self.worker = worker
+
+    def transition(self, start, finish, *args, **kwargs):
+        count = 0
+        for k in self.worker.data:
+            if k in self.keys:
+                count += 1
+        self.count = max(self.count, count)
+
+
 @gen_cluster(
     nthreads=[("", 2)] * 4,
     client=True,
@@ -359,33 +388,16 @@ async def test_graph_execution_width(c, s, *workers):
     The number of parallel work streams match the number of threads.
     """
 
-    class Refcount:
-        "Track how many instances of this class exist; logs the count at creation and deletion"
-
-        count = 0
-        lock = dask.utils.SerializableLock()
-        log = []
-
-        def __init__(self):
-            with self.lock:
-                type(self).count += 1
-                self.log.append(self.count)
-
-        def __del__(self):
-            with self.lock:
-                self.log.append(self.count)
-                type(self).count -= 1
-
-    roots = [delayed(Refcount)() for _ in range(32)]
+    roots = [delayed(inc)(ix) for ix in range(32)]
     passthrough1 = [delayed(slowidentity)(r, delay=0) for r in roots]
     passthrough2 = [delayed(slowidentity)(r, delay=0) for r in passthrough1]
     done = [delayed(lambda r: None)(r) for r in passthrough2]
-
+    await c.register_plugin(CountData(keys=[f.key for f in roots]), name="count-roots")
     fs = c.compute(done)
     await wait(fs)
-    # NOTE: the max should normally equal `total_nthreads`. But some macOS CI machines
-    # are slow enough that they aren't able to reach the full parallelism of 8 threads.
-    assert max(Refcount.log) <= s.total_nthreads
+
+    res = await c.run(lambda dask_worker: dask_worker.plugins["count-roots"].count)
+    assert all(0 < count <= 2 for count in res.values())
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -969,24 +981,6 @@ def test_dumps_function():
     assert a != c
 
 
-def test_dumps_task():
-    d = dumps_task((inc, 1))
-    assert set(d) == {"function", "args"}
-
-    def f(x, y=2):
-        return x + y
-
-    d = dumps_task((apply, f, (1,), {"y": 10}))
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert cloudpickle.loads(d["kwargs"]) == {"y": 10}
-
-    d = dumps_task((apply, f, (1,)))
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert set(d) == {"function", "args"}
-
-
 @pytest.mark.parametrize("worker_saturation", [1.0, float("inf")])
 @gen_cluster(client=True)
 async def test_ready_remove_worker(c, s, a, b, worker_saturation):
@@ -1373,9 +1367,9 @@ async def test_update_graph_culls(s, a, b):
         layers={
             "foo": MaterializedLayer(
                 {
-                    "x": dumps_task((inc, 1)),
-                    "y": dumps_task((inc, "x")),
-                    "z": dumps_task((inc, 2)),
+                    "x": (inc, 1),
+                    "y": (inc, "x"),
+                    "z": (inc, 2),
                 }
             )
         },
@@ -2596,7 +2590,7 @@ async def test_no_dangling_asyncio_tasks():
 
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
-async def test_task_groups(c, s, a, b):
+async def test_task_groups(c, s, a, b, no_time_resync):
     start = time()
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
@@ -2645,7 +2639,7 @@ async def test_task_groups(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
-async def test_task_groups_update_start_stop(c, s, a):
+async def test_task_groups_update_start_stop(c, s, a, no_time_resync):
     """TaskGroup.stop increases as the tasks in the group finish.
     TaskGroup.start can move backwards in the following use case:
 
@@ -2655,25 +2649,25 @@ async def test_task_groups_update_start_stop(c, s, a):
     - task (x, 0) finishes
     """
     ev = Event()
-    t0 = time()
+    t0 = await padded_time(before=0)
     x0 = c.submit(ev.wait, key=("x", 0))
-    await wait_for_state(str(x0.key), "executing", a)
+    await wait_for_state(x0.key, "executing", a)
     tg = s.task_groups["x"]
     assert tg.start == tg.stop == 0
-    t1 = time()
+    t1 = await padded_time()
     x1 = c.submit(inc, 1, key=("x", 1))
     await x1
-    t2 = time()
+    t2 = await padded_time()
     assert t0 < t1 < tg.start < tg.stop < t2
 
     await ev.set()
     await x0
-    t3 = time()
+    t3 = await padded_time()
     assert t0 < tg.start < t1 < t2 < tg.stop < t3
 
     x2 = c.submit(inc, 1, key=("x", 2))
     await x2
-    t4 = time()
+    t4 = await padded_time(after=0)
     assert t0 < tg.start < t1 < t2 < t3 < tg.stop < t4
 
 
@@ -2692,7 +2686,7 @@ async def test_task_group_done(c, s, a, b):
 
     await wait([x0, x1, x2, y])
     del x2  # forgotten
-    await async_poll_for(lambda: str(("x", 2)) not in s.tasks, timeout=5)
+    await async_poll_for(lambda: ("x", 2) not in s.tasks, timeout=5)
 
     tg = s.task_groups["x"]
     assert tg.states == {
@@ -2890,56 +2884,41 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
-async def test_gather_bad_worker_removed(c, s, a, b):
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    # This behaviour is independent of retries.
+    # Disable them to reduce the complexity of this test.
+    config={"distributed.comm.retry.count": 0},
+)
+async def test_gather_bad_worker(c, s, a, direct):
+    """Upon connection failure, gather() tries again indefinitely and transparently,
+    for as long as the batched comms channel is active.
     """
-    Upon connection failure or missing expected keys during gather, a worker is
-    shut down. The tasks should be rescheduled onto different workers, transparently
-    to `client.gather`.
-    """
-    x = c.submit(slowinc, 1, workers=[a.address], allow_other_workers=True)
-
-    def finalizer(*args):
-        return get_worker().address
-
-    fin = c.submit(
-        finalizer, x, key="final", workers=[a.address], allow_other_workers=True
-    )
-
+    x = c.submit(inc, 1, key="x")
+    c.rpc = await FlakyConnectionPool(failing_connections=3)
     s.rpc = await FlakyConnectionPool(failing_connections=1)
 
-    # This behaviour is independent of retries. Remove them to reduce complexity
-    # of this setup
-    with dask.config.set({"distributed.comm.retry.count": 0}):
-        with captured_logger(
-            logging.getLogger("distributed.scheduler")
-        ) as sched_logger, captured_logger(
-            logging.getLogger("distributed.client")
-        ) as client_logger:
-            # Gather using the client (as an ordinary user would)
-            # Upon a missing key, the client will remove the bad worker and
-            # reschedule the computations
+    with captured_logger("distributed.scheduler") as sched_logger:
+        with captured_logger("distributed.client") as client_logger:
+            assert await c.gather(x, direct=direct) == 2
 
-            # Both tasks are rescheduled onto `b`, since `a` was removed.
-            assert await fin == b.address
+    assert "Couldn't gather keys: {'x': 'memory'}" in sched_logger.getvalue()
+    assert "Couldn't gather 1 keys, rescheduling ('x',)" in client_logger.getvalue()
 
-            await a.finished()
-            assert list(s.workers) == [b.address]
-
-            sched_logger = sched_logger.getvalue()
-            client_logger = client_logger.getvalue()
-            assert "Shut down workers that don't have promised key" in sched_logger
-
-            assert "Couldn't gather 1 keys, rescheduling" in client_logger
-
-            assert s.tasks[fin.key].who_has == {s.workers[b.address]}
-            assert a.state.executed_count == 2
-            assert b.state.executed_count >= 1
-            # ^ leave room for a future switch from `remove_worker` to `retire_workers`
-
-    # Ensure that the communication was done via the scheduler, i.e. we actually hit a
-    # bad connection
-    assert s.rpc.cnn_count > 0
+    if direct:
+        # 1. try direct=True; fail
+        # 2. fall back to direct=False; fail
+        # 3. try direct=True again; fail
+        # 4. fall back to direct=False again; success
+        assert c.rpc.cnn_count == 2
+        assert s.rpc.cnn_count == 2
+    else:
+        # 1. try direct=False; fail
+        # 2. try again direct=False; success
+        assert c.rpc.cnn_count == 0
+        assert s.rpc.cnn_count == 2
 
 
 @gen_cluster(client=True)
@@ -4508,3 +4487,39 @@ async def test_scatter_creates_ts(c, s, a, b):
         await a.close()
         assert await x2 == 2
     assert s.tasks["x"].run_spec is not None
+
+
+@pytest.mark.parametrize("finalize", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 4,
+    worker_kwargs={"memory_limit": "100 kB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+)
+async def test_refuse_to_schedule_huge_task(c, s, *workers, finalize):
+    """If the total size of a task's input grossly exceed the memory available on the
+    worker, the scheduler must refuse to compute it
+    """
+    bg = bag.from_sequence(
+        [random.randbytes(30_000) for _ in range(4)],
+        npartitions=4,
+    )
+    match = r"worth of input dependencies, but worker .* has memory_limit set to"
+    if finalize:
+        fut = c.compute(bg)
+        match += r".* you called client.compute()"
+    else:
+        bg = bg.repartition(npartitions=1).persist()
+        fut = list(c.futures_of(bg))[0]
+
+    with pytest.raises(MemoryError, match=match):
+        await fut
+
+    # The task never reached the workers
+    for w in workers:
+        for ev in w.state.log:
+            assert fut.key not in ev

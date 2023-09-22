@@ -8,8 +8,7 @@ from distributed.client import Client
 from distributed.core import PooledRPCCall
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import Scheduler, TaskStateState
-from distributed.shuffle._shuffle import ShuffleId
-from distributed.shuffle._worker_plugin import ShuffleRun
+from distributed.shuffle._core import ShuffleId, ShuffleRun
 
 
 class PooledRPCShuffle(PooledRPCCall):
@@ -74,7 +73,7 @@ class ShuffleAnnotationChaosPlugin(SchedulerPlugin):
         assert self.scheduler
         if finish != "waiting":
             return
-        if not key.startswith("shuffle-barrier-"):
+        if not isinstance(key, str) or not key.startswith("shuffle-barrier-"):
             return
         if key in self.seen:
             return
@@ -97,4 +96,4 @@ async def invoke_annotation_chaos(rate: float, client: Client) -> None:
     if not rate:
         return
     plugin = ShuffleAnnotationChaosPlugin(rate)
-    await client.register_scheduler_plugin(plugin)
+    await client.register_plugin(plugin)

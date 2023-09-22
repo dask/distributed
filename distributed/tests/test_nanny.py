@@ -8,6 +8,7 @@ import os
 import random
 import sys
 import warnings
+import weakref
 from contextlib import suppress
 from unittest import mock
 
@@ -23,7 +24,7 @@ from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, error_message
 from distributed.diagnostics import SchedulerPlugin
-from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.diagnostics.plugin import NannyPlugin, WorkerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
@@ -348,6 +349,40 @@ async def test_environment_variable_pre_post_spawn(c, s, n):
     assert "POST-SPAWN" not in os.environ
 
 
+@gen_cluster(
+    nthreads=[],
+    client=True,
+    config={
+        "distributed.nanny.pre-spawn-environ.PRE1": 1,
+        "distributed.nanny.pre-spawn-environ.PRE2": 2,
+        "distributed.nanny.pre-spawn-environ.PRE3": 3,
+        "distributed.nanny.environ.POST1": 4,
+        "distributed.nanny.environ.POST2": 5,
+        "distributed.nanny.environ.POST3": 6,
+    },
+)
+async def test_environment_variable_overlay(c, s):
+    """You can set a value to None to unset a variable in a config overlay"""
+    # Not the same as running Nanny(config=...), which would not work for pre-spawn
+    # variables
+    with dask.config.set(
+        {
+            "distributed.nanny.pre-spawn-environ.PRE2": 7,
+            "distributed.nanny.pre-spawn-environ.PRE3": None,
+            "distributed.nanny.environ.POST2": 8,
+            "distributed.nanny.environ.POST3": None,
+        },
+    ):
+        async with Nanny(s.address):
+            env = await c.submit(lambda: os.environ)
+            assert env["PRE1"] == "1"
+            assert env["PRE2"] == "7"
+            assert "PRE3" not in env
+            assert env["POST1"] == "4"
+            assert env["POST2"] == "8"
+            assert "POST3" not in env
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_config_param_overlays(c, s):
     with dask.config.set({"test123.foo": 1, "test123.bar": 2}):
@@ -555,7 +590,7 @@ async def test_failure_during_worker_initialization(s):
 async def test_environ_plugin(c, s, a, b):
     from dask.distributed import Environ
 
-    await c.register_worker_plugin(Environ({"ABC": 123}))
+    await c.register_plugin(Environ({"ABC": 123}))
 
     async with Nanny(s.address, name="new") as n:
         results = await c.run(os.getenv, "ABC")
@@ -781,3 +816,140 @@ async def test_log_event(c, s):
             "traceback_text": "",
         },
     ] == [msg[1] for msg in s.get_events("test-topic4")]
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_nanny_plugin_simple(c, s, a):
+    """A plugin should be registered to already existing workers but also to new ones."""
+    plugin = DummyNannyPlugin("foo")
+    await c.register_plugin(plugin)
+    assert a._plugin_registered
+    async with Nanny(s.address) as n:
+        assert n._plugin_registered
+
+
+class DummyNannyPlugin(NannyPlugin):
+    def __init__(self, name, restart=False):
+        self.restart = restart
+        self.name = name
+        self.nanny = None
+
+    def setup(self, nanny):
+        print(f"Setup on {nanny}")
+        self.nanny = weakref.ref(nanny)
+        nanny._plugin_registered = True
+
+    def teardown(self, nanny):
+        nanny._plugin_registered = False
+
+
+class SlowNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = asyncio.Event()
+        self.wait_instantiate = asyncio.Event()
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        await self.wait_instantiate.wait()
+        return await super().instantiate()
+
+
+@pytest.mark.parametrize("restart", [True, False])
+@gen_cluster(client=True, nthreads=[])
+async def test_nanny_plugin_register_during_start_success(c, s, restart):
+    plugin = DummyNannyPlugin("foo", restart=restart)
+    n = SlowNanny(s.address)
+    assert not hasattr(n, "_plugin_registered")
+    start = asyncio.create_task(n.start())
+    try:
+        await n.in_instantiate.wait()
+
+        register = asyncio.create_task(c.register_plugin(plugin))
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(register), timeout=0.1)
+        n.wait_instantiate.set()
+        assert await register
+        await start
+        assert n._plugin_registered
+    finally:
+        start.cancel()
+        await n.close()
+
+
+class SlowBrokenNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = asyncio.Event()
+        self.wait_instantiate = asyncio.Event()
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        await self.wait_instantiate.wait()
+        raise RuntimeError("Nope")
+
+
+@pytest.mark.parametrize("restart", [True, False])
+@gen_cluster(client=True, nthreads=[])
+async def test_nanny_plugin_register_during_start_failure(c, s, restart):
+    plugin = DummyNannyPlugin("foo", restart=restart)
+    n = SlowBrokenNanny(s.address)
+    assert not hasattr(n, "_plugin_registered")
+    start = asyncio.create_task(n.start())
+    await n.in_instantiate.wait()
+
+    register = asyncio.create_task(c.register_plugin(plugin))
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(asyncio.shield(register), timeout=0.1)
+    n.wait_instantiate.set()
+    with pytest.raises(RuntimeError):
+        await start
+    assert not await register
+
+
+class SlowDistNanny(Nanny):
+    def __init__(self, *args, in_instantiate, wait_instantiate, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = in_instantiate
+        self.wait_instantiate = wait_instantiate
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        self.wait_instantiate.wait()
+        return await super().instantiate()
+
+
+def run_nanny(scheduler_addr, in_instantiate, wait_instantiate):
+    async def _():
+        worker = await SlowDistNanny(
+            scheduler_addr,
+            wait_instantiate=wait_instantiate,
+            in_instantiate=in_instantiate,
+        )
+        await worker.finished()
+
+    asyncio.run(_())
+
+
+@pytest.mark.parametrize("restart", [True, False])
+@gen_cluster(client=True, nthreads=[])
+async def test_nanny_plugin_register_nanny_killed(c, s, restart):
+    in_instantiate = get_mp_context().Event()
+    wait_instantiate = get_mp_context().Event()
+    proc = get_mp_context().Process(
+        name="run_nanny",
+        target=run_nanny,
+        kwargs={
+            "in_instantiate": in_instantiate,
+            "wait_instantiate": wait_instantiate,
+        },
+        args=(s.address,),
+    )
+    proc.start()
+    try:
+        plugin = DummyNannyPlugin("foo", restart=restart)
+        await asyncio.to_thread(in_instantiate.wait)
+        register = asyncio.create_task(c.register_plugin(plugin))
+    finally:
+        proc.kill()
+    assert await register == {}

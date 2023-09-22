@@ -700,60 +700,6 @@ async def test_offload_preserves_contextvars():
     await asyncio.gather(set_var("foo"), set_var("bar"))
 
 
-def test_serialize_for_cli_deprecated():
-    with pytest.warns(FutureWarning, match="serialize_for_cli is deprecated"):
-        from distributed.utils import serialize_for_cli
-    assert serialize_for_cli is dask.config.serialize
-
-
-def test_deserialize_for_cli_deprecated():
-    with pytest.warns(FutureWarning, match="deserialize_for_cli is deprecated"):
-        from distributed.utils import deserialize_for_cli
-    assert deserialize_for_cli is dask.config.deserialize
-
-
-def test_parse_bytes_deprecated():
-    with pytest.warns(FutureWarning, match="parse_bytes is deprecated"):
-        from distributed.utils import parse_bytes
-    assert parse_bytes is dask.utils.parse_bytes
-
-
-def test_format_bytes_deprecated():
-    with pytest.warns(FutureWarning, match="format_bytes is deprecated"):
-        from distributed.utils import format_bytes
-    assert format_bytes is dask.utils.format_bytes
-
-
-def test_format_time_deprecated():
-    with pytest.warns(FutureWarning, match="format_time is deprecated"):
-        from distributed.utils import format_time
-    assert format_time is dask.utils.format_time
-
-
-def test_funcname_deprecated():
-    with pytest.warns(FutureWarning, match="funcname is deprecated"):
-        from distributed.utils import funcname
-    assert funcname is dask.utils.funcname
-
-
-def test_parse_timedelta_deprecated():
-    with pytest.warns(FutureWarning, match="parse_timedelta is deprecated"):
-        from distributed.utils import parse_timedelta
-    assert parse_timedelta is dask.utils.parse_timedelta
-
-
-def test_typename_deprecated():
-    with pytest.warns(FutureWarning, match="typename is deprecated"):
-        from distributed.utils import typename
-    assert typename is dask.utils.typename
-
-
-def test_tmpfile_deprecated():
-    with pytest.warns(FutureWarning, match="tmpfile is deprecated"):
-        from distributed.utils import tmpfile
-    assert tmpfile is dask.utils.tmpfile
-
-
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())

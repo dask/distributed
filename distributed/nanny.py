@@ -15,8 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import ClassVar, Literal, cast
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -34,12 +33,13 @@ from distributed.core import (
     AsyncTaskGroupClosedError,
     CommClosedError,
     ErrorMessage,
+    OKMessage,
     RPCClosed,
     Status,
     coerce_to_address,
     error_message,
 )
-from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diagnostics.plugin import NannyPlugin, _get_plugin_name
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -62,9 +62,6 @@ from distributed.worker_memory import (
     DeprecatedMemoryMonitor,
     NannyMemoryManager,
 )
-
-if TYPE_CHECKING:
-    from distributed.diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -349,19 +346,36 @@ class Nanny(ServerNode):
 
         self.ip = get_address_host(self.address)
 
-        for preload in self.preloads:
-            await preload.start()
+        await self.preloads.start()
+        saddr = self.scheduler.addr
+        comm = await self.rpc.connect(saddr)
+        comm.name = "Nanny->Scheduler (registration)"
 
-        msg = await self.scheduler.register_nanny()
-        for name, plugin in msg["nanny-plugins"].items():
-            await self.plugin_add(plugin=plugin, name=name)
+        try:
+            await comm.write({"op": "register_nanny", "address": self.address})
+            msg = await comm.read()
+            try:
+                for name, plugin in msg["nanny-plugins"].items():
+                    await self.plugin_add(plugin=plugin, name=name)
 
-        logger.info("        Start Nanny at: %r", self.address)
-        response = await self.instantiate()
+                logger.info("        Start Nanny at: %r", self.address)
+                response = await self.instantiate()
 
-        if response != Status.running:
-            await self.close(reason="nanny-start-failed")
-            return
+                if response != Status.running:
+                    raise RuntimeError("Nanny failed to start worker process")
+            except Exception:
+                try:
+                    await comm.write({"status": "error"})
+
+                # If self.instantiate() failed, the comm will already be closed.
+                except CommClosedError:
+                    pass
+                await self.close(reason="nanny-start-failed")
+                raise
+            else:
+                await comm.write({"status": "ok"})
+        finally:
+            await comm.close()
 
         assert self.worker_address
 
@@ -439,13 +453,22 @@ class Nanny(ServerNode):
         return result
 
     @log_errors
-    async def plugin_add(self, plugin=None, name=None):
+    async def plugin_add(
+        self, plugin: NannyPlugin | bytes, name: str | None = None
+    ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
+        if not isinstance(plugin, NannyPlugin):
+            warnings.warn(
+                "Registering duck-typed plugins has been deprecated. "
+                "Please make sure your plugin inherits from `NannyPlugin`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        plugin = cast(NannyPlugin, plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
-
         assert name
 
         self.plugins[name] = plugin
@@ -457,15 +480,14 @@ class Nanny(ServerNode):
                 if isawaitable(result):
                     result = await result
             except Exception as e:
-                msg = error_message(e)
-                return msg
+                return error_message(e)
         if getattr(plugin, "restart", False):
             await self.restart(reason=f"nanny-plugin-{name}-restart")
 
         return {"status": "OK"}
 
     @log_errors
-    async def plugin_remove(self, name=None):
+    async def plugin_remove(self, name: str) -> ErrorMessage | OKMessage:
         logger.info(f"Removing Nanny plugin {name}")
         try:
             plugin = self.plugins.pop(name)
@@ -566,7 +588,7 @@ class Nanny(ServerNode):
             "Closing Nanny gracefully at %r. Reason: %s", self.address_safe, reason
         )
 
-    async def close(
+    async def close(  # type:ignore[override]
         self, timeout: float = 5, reason: str = "nanny-close"
     ) -> Literal["OK"]:
         """
@@ -582,8 +604,7 @@ class Nanny(ServerNode):
         self.status = Status.closing
         logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
 
-        for preload in self.preloads:
-            await preload.teardown()
+        await self.preloads.teardown()
 
         teardowns = [
             plugin.teardown(self)
@@ -594,11 +615,9 @@ class Nanny(ServerNode):
         await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         self.stop()
-        try:
-            if self.process is not None:
-                await self.kill(timeout=timeout, reason=reason)
-        except Exception:
-            logger.exception("Error in Nanny killing Worker subprocess")
+        if self.process is not None:
+            await self.kill(timeout=timeout, reason=reason)
+
         self.process = None
         await self.rpc.close()
         self.status = Status.closed
@@ -689,9 +708,9 @@ class WorkerProcess:
         if self.status == Status.starting:
             await self.running.wait()
             return self.status
-
-        self.init_result_q = init_q = get_mp_context().Queue()
-        self.child_stop_q = get_mp_context().Queue()
+        mp_ctx = get_mp_context()
+        self.init_result_q = mp_ctx.Queue()
+        self.child_stop_q = mp_ctx.Queue()
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
@@ -739,8 +758,6 @@ class WorkerProcess:
         assert self.worker_address
         self.status = Status.running
         self.running.set()
-
-        init_q.close()
 
         return self.status
 
@@ -825,11 +842,8 @@ class WorkerProcess:
         logger.info("Nanny asking worker to close. Reason: %s", reason)
 
         process = self.process
-        assert process
-        queue = self.child_stop_q
-        assert queue
         wait_timeout = timeout * 0.8
-        queue.put(
+        self.child_stop_q.put(
             {
                 "op": "stop",
                 "timeout": wait_timeout,
@@ -837,10 +851,8 @@ class WorkerProcess:
                 "reason": reason,
             }
         )
-        await asyncio.sleep(0)  # otherwise we get broken pipe errors
-        queue.close()
-        del queue
-
+        self.child_stop_q.close()
+        assert process is not None
         try:
             try:
                 await process.join(wait_timeout)
@@ -963,14 +975,8 @@ class WorkerProcess:
                 logger.exception(f"Failed to {failure_type} worker")
                 init_result_q.put({"uid": uid, "exception": e})
                 init_result_q.close()
-                # If we hit an exception here we need to wait for a least
-                # one interval for the outside to pick up this message.
-                # Otherwise we arrive in a race condition where the process
-                # cleanup wipes the queue before the exception can be
-                # properly handled. See also
-                # WorkerProcess._wait_until_connected (the 3 is for good
-                # measure)
-                sync_sleep(cls._init_msg_interval * 3)
+            finally:
+                init_result_q.join_thread()
 
         with contextlib.ExitStack() as stack:
 
@@ -1008,5 +1014,6 @@ def _get_env_variables(config_key: str) -> dict[str, str]:
             f"{config_key} configuration must be of type dict. Instead got {type(cfg)}"
         )
     # Override dask config with explicitly defined env variables from the OS
-    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items()}
+    # Allow unsetting a variable in a config override by setting its value to None.
+    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items() if v is not None}
     return cfg

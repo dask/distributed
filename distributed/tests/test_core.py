@@ -887,6 +887,30 @@ async def test_remove_cancels_connect_attempts():
 
 
 @gen_test()
+async def test_remove_cancels_connect_before_task_running():
+    loop = asyncio.get_running_loop()
+    connect_finished = loop.create_future()
+
+    async def connect(*args, **kwargs):
+        await connect_finished
+
+    async def connect_to_server():
+        with pytest.raises(CommClosedError, match="Address removed."):
+            await rpc.connect("tcp://0.0.0.0")
+        return True
+
+    rpc = await ConnectionPool(limit=1)
+    with mock.patch("distributed.core.connect", connect):
+        t1 = asyncio.create_task(connect_to_server())
+        # Cancel the actual connect task before it can even run
+        while not rpc._connecting:
+            await asyncio.sleep(0)
+        rpc.remove("tcp://0.0.0.0")
+
+        assert await t1
+
+
+@gen_test()
 async def test_connection_pool_respects_limit():
     limit = 5
 
@@ -1027,7 +1051,7 @@ async def test_tick_logging(s, a, b):
 @pytest.mark.parametrize("serialize", [echo_serialize, echo_no_serialize])
 @gen_test()
 async def test_compression(compression, serialize):
-    with dask.config.set(compression=compression):
+    with dask.config.set({"distributed.comm.compression": compression}):
         async with Server({"echo": serialize}) as server:
             await server.listen("tcp://")
 
@@ -1378,7 +1402,7 @@ class TCPAsyncListenerBackend(TCPBackend):
 @gen_test()
 async def test_async_listener_stop(monkeypatch):
     monkeypatch.setitem(backends, "tcp", TCPAsyncListenerBackend())
-    with pytest.warns(PendingDeprecationWarning):
+    with pytest.warns(DeprecationWarning):
         async with Server({}) as s:
             await s.listen(0)
             assert s.listeners

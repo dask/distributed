@@ -13,7 +13,7 @@ from tlz import concat, drop, groupby, merge
 
 import dask.config
 from dask.optimization import SubgraphCallable
-from dask.utils import is_namedtuple_instance, parse_timedelta, stringify
+from dask.utils import is_namedtuple_instance, parse_timedelta
 
 from distributed.core import ConnectionPool, rpc
 from distributed.utils import All
@@ -24,51 +24,60 @@ logger = logging.getLogger(__name__)
 async def gather_from_workers(
     who_has: Mapping[str, Collection[str]],
     rpc: ConnectionPool,
-    close: bool = True,
+    *,
     serializers: list[str] | None = None,
     who: str | None = None,
-) -> tuple[dict[str, object], dict[str, list[str]], list[str]]:
+) -> tuple[dict[str, object], list[str], list[str], list[str]]:
     """Gather data directly from peers
 
     Parameters
     ----------
-    who_has: dict
-        Dict mapping keys to sets of workers that may have that key
-    rpc: callable
+    who_has:
+        mapping from keys to worker addresses
+    rpc:
+        RPC channel to use
 
-    Returns dict mapping key to value
+    Returns
+    -------
+    Tuple:
+
+    - Successfully retrieved: ``{key: value, ...}``
+    - Keys that were not available on any worker: ``[key, ...]``
+    - Keys that raised exception; e.g. failed to deserialize: ``[key, ...]``
+    - Workers that failed to respond: ``[address, ...]``
 
     See Also
     --------
     gather
     _gather
+    Scheduler.get_who_has
     """
     from distributed.worker import get_data_from_worker
 
-    bad_addresses: set[str] = set()
-    missing_workers = set()
-    original_who_has = who_has
-    new_who_has = {k: set(v) for k, v in who_has.items()}
-    results: dict[str, object] = {}
-    all_bad_keys: set[str] = set()
+    to_gather = {k: set(v) for k, v in who_has.items()}
+    data: dict[str, object] = {}
+    failed_keys: list[str] = []
+    missing_workers: set[str] = set()
+    busy_workers: set[str] = set()
 
-    while len(results) + len(all_bad_keys) < len(who_has):
+    while to_gather:
         d = defaultdict(list)
-        rev = dict()
-        bad_keys = set()
-        for key, addresses in new_who_has.items():
-            if key in results:
+        for key, addresses in to_gather.items():
+            addresses -= missing_workers
+            ready_addresses = addresses - busy_workers
+            if ready_addresses:
+                d[random.choice(list(ready_addresses))].append(key)
+
+        if not d:
+            if busy_workers:
+                await asyncio.sleep(0.15)
+                busy_workers.clear()
                 continue
-            try:
-                addr = random.choice(list(addresses - bad_addresses))
-                d[addr].append(key)
-                rev[key] = addr
-            except IndexError:
-                bad_keys.add(key)
-        if bad_keys:
-            all_bad_keys |= bad_keys
-        coroutines = {
-            address: asyncio.create_task(
+
+            return data, list(to_gather), failed_keys, list(missing_workers)
+
+        tasks = [
+            asyncio.create_task(
                 retry_operation(
                     partial(
                         get_data_from_worker,
@@ -77,36 +86,47 @@ async def gather_from_workers(
                         address,
                         who=who,
                         serializers=serializers,
-                        max_connections=False,
                     ),
                     operation="get_data_from_worker",
                 ),
                 name=f"get-data-from-{address}",
             )
             for address, keys in d.items()
-        }
-        response: dict[str, object] = {}
-        for worker, c in coroutines.items():
-            try:
-                r = await c
-            except OSError:
-                missing_workers.add(worker)
-            except ValueError as e:
-                logger.info(
-                    "Got an unexpected error while collecting from workers: %s", e
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for address, r in zip(d, results):
+            if isinstance(r, OSError):
+                missing_workers.add(address)
+            elif isinstance(r, Exception):
+                # For example, deserialization error
+                logger.error(
+                    "Unexpected error while collecting tasks %s from %s",
+                    d[address],
+                    address,
+                    exc_info=r,
                 )
-                missing_workers.add(worker)
+                for key in d[address]:
+                    failed_keys.append(key)
+                    del to_gather[key]
+            elif isinstance(r, BaseException):  # pragma: nocover
+                # for example, asyncio.CancelledError
+                raise r
             else:
-                response.update(r["data"])
+                assert isinstance(r, dict), r
+                if r["status"] == "busy":
+                    busy_workers.add(address)
+                    continue
 
-        bad_addresses |= {v for k, v in rev.items() if k not in response}
-        results.update(response)
+                assert r["status"] == "OK"
+                for key in d[address]:
+                    if key in r["data"]:
+                        data[key] = r["data"][key]
+                        del to_gather[key]
+                    else:
+                        to_gather[key].remove(address)
 
-    return (
-        results,
-        {k: list(original_who_has[k]) for k in all_bad_keys},
-        list(missing_workers),
-    )
+    return data, [], failed_keys, list(missing_workers)
 
 
 class WrappedKey:
@@ -184,9 +204,9 @@ def _namedtuple_packing(o: Any, handler: Callable[..., Any]) -> Any:
 
 
 def _unpack_remotedata_inner(
-    o: Any, byte_keys: bool, found_keys: set[WrappedKey]
+    o: Any, byte_keys: bool, found_futures: set[WrappedKey]
 ) -> Any:
-    """Inner implementation of `unpack_remotedata` that adds found wrapped keys to `found_keys`"""
+    """Inner implementation of `unpack_remotedata` that adds found wrapped keys to `found_futures`"""
 
     typ = type(o)
     if typ is tuple:
@@ -196,7 +216,7 @@ def _unpack_remotedata_inner(
             # Unpack futures within the arguments of the subgraph callable
             futures: set[WrappedKey] = set()
             args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])
-            found_keys.update(futures)
+            found_futures.update(futures)
 
             # Unpack futures within the subgraph callable itself
             sc: SubgraphCallable = o[0]
@@ -207,9 +227,9 @@ def _unpack_remotedata_inner(
             }
             future_keys: tuple = ()
             if futures:  # If no futures is in the subgraph, we just use `sc` as-is
-                found_keys.update(futures)
+                found_futures.update(futures)
                 future_keys = (
-                    tuple(stringify(f.key) for f in futures)
+                    tuple(f.key for f in futures)
                     if byte_keys
                     else tuple(f.key for f in futures)
                 )
@@ -218,34 +238,34 @@ def _unpack_remotedata_inner(
             return (sc,) + args + future_keys
         else:
             return tuple(
-                _unpack_remotedata_inner(item, byte_keys, found_keys) for item in o
+                _unpack_remotedata_inner(item, byte_keys, found_futures) for item in o
             )
     elif is_namedtuple_instance(o):
         return _namedtuple_packing(
             o,
             partial(
-                _unpack_remotedata_inner, byte_keys=byte_keys, found_keys=found_keys
+                _unpack_remotedata_inner,
+                byte_keys=byte_keys,
+                found_futures=found_futures,
             ),
         )
 
     if typ in collection_types:
         if not o:
             return o
-        outs = [_unpack_remotedata_inner(item, byte_keys, found_keys) for item in o]
+        outs = [_unpack_remotedata_inner(item, byte_keys, found_futures) for item in o]
         return typ(outs)
     elif typ is dict:
         if o:
             return {
-                k: _unpack_remotedata_inner(v, byte_keys, found_keys)
+                k: _unpack_remotedata_inner(v, byte_keys, found_futures)
                 for k, v in o.items()
             }
         else:
             return o
     elif issubclass(typ, WrappedKey):  # TODO use type is Future
         k = o.key
-        if byte_keys:
-            k = stringify(k)
-        found_keys.add(o)
+        found_futures.add(o)
         return k
     else:
         return o
@@ -278,8 +298,8 @@ def unpack_remotedata(o: Any, byte_keys: bool = False) -> tuple[Any, set]:
     >>> unpack_remotedata(rd, byte_keys=True)
     ("('x', 1)", {WrappedKey('('x', 1)')})
     """
-    found_keys: set[Any] = set()
-    return _unpack_remotedata_inner(o, byte_keys, found_keys), found_keys
+    found_futures: set[WrappedKey] = set()
+    return _unpack_remotedata_inner(o, byte_keys, found_futures), found_futures
 
 
 def pack_data(o, d, key_types=object):

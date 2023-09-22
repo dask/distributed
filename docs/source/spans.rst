@@ -32,27 +32,19 @@ For example:
     dask.config.set({"optimization.fuse.active": False})
     client = Client()
 
-    @span("ML preprocessing")
-    def preprocess(df):
-        ...
-        return df
-
-    @span("Model training")
-    def train(df):
-        ...
-        return model
-
     with span("Alice's workflow"):
         with span("data load"):
             df = dd.read_parquet(...)
 
-        df = preprocess(df)
-        model = train(df)
+        with span("ML preprocessing"):
+            df = preprocess(df)
+
+        with span("Model training"):
+            model = train(df)
 
     model = model.compute()
 
-In the above example, note how the :func:`span` context manager is used as a decorator
-too, and how it can be nested.
+Note how the :func:`span` context manager can be nested.
 The example will create the following spans on the scheduler:
 
 - ``("Alice's workflow", )``

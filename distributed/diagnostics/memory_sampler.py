@@ -169,7 +169,7 @@ class MemorySampler:
         =======
         Output of :meth:`pandas.DataFrame.plot`
         """
-        df = self.to_pandas(align=align) / 2**30
+        df = self.to_pandas(align=align).resample("1s").nearest() / 2**30
         return df.plot(
             xlabel="time",
             ylabel="Cluster memory (GiB)",
@@ -217,6 +217,7 @@ class MemorySamplerExtension:
 
     def stop(self, key: str) -> list[tuple[float, int]]:
         """Stop sampling and return the samples"""
-        pc = self.scheduler.periodic_callbacks.pop("MemorySampler-" + key)
-        pc.stop()
+        pc = self.scheduler.periodic_callbacks.pop("MemorySampler-" + key, None)
+        if pc is not None:  # Race condition with scheduler shutdown
+            pc.stop()
         return self.samples.pop(key)

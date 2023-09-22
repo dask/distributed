@@ -23,6 +23,7 @@ import zipfile
 from collections import deque, namedtuple
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager, nullcontext
+from dataclasses import dataclass
 from functools import partial
 from operator import add
 from threading import Semaphore
@@ -41,7 +42,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
-from dask.utils import get_default_shuffle_method, parse_timedelta, stringify, tmpfile
+from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
 from distributed import (
     CancelledError,
@@ -85,6 +86,7 @@ from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
+    BlockedGetData,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
     async_poll_for,
@@ -456,21 +458,46 @@ def test_Future_release_sync(c):
     poll_for(lambda: not c.futures, timeout=0.3)
 
 
-def test_short_tracebacks(loop, c):
-    tblib = pytest.importorskip("tblib")
+@pytest.mark.parametrize("method", ["result", "gather"])
+def test_short_tracebacks(c, method):
+    """
+    See also
+    --------
+    test_short_tracebacks_async
+    dask/tests/test_traceback.py
+    """
     future = c.submit(div, 1, 0)
-    try:
-        future.result()
-    except Exception:
-        _, _, tb = sys.exc_info()
-    tb = tblib.Traceback(tb).to_dict()
-    n = 0
+    with pytest.raises(ZeroDivisionError) as e:
+        if method == "result":
+            future.result()
+        else:
+            c.gather(future)
 
-    while tb is not None:
-        n += 1
-        tb = tb["tb_next"]
+    frames = list(traceback.walk_tb(e.value.__traceback__))
+    assert len(frames) < 4
 
-    assert n < 5
+
+@pytest.mark.parametrize("method", ["await", "result", "gather"])
+@gen_cluster(client=True)
+async def test_short_tracebacks_async(c, s, a, b, method):
+    """
+    See also
+    --------
+    test_short_tracebacks
+    dask/tests/test_traceback.py
+    """
+    future = c.submit(div, 1, 0)
+
+    with pytest.raises(ZeroDivisionError) as e:
+        if method == "await":
+            await future
+        elif method == "result":
+            await future.result()
+        else:
+            await c.gather(future)
+
+    frames = list(traceback.walk_tb(e.value.__traceback__))
+    assert len(frames) < 4
 
 
 @gen_cluster(client=True)
@@ -3332,7 +3359,7 @@ def test_default_get(loop_in_thread):
     try:
         check_minimal_arrow_version()
         has_pyarrow = True
-    except RuntimeError:
+    except ImportError:
         pass
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
@@ -3700,7 +3727,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=False)
         await wait(b4)
 
-        assert set(map(stringify, b3.__dask_keys__())).issubset(s.tasks)
+        assert set(b3.__dask_keys__()).issubset(s.tasks)
 
         b = db.range(i, npartitions=2)
         i += 1
@@ -3710,7 +3737,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=True)
         await wait(b4)
 
-        assert not any(stringify(k) in s.tasks for k in b2.__dask_keys__())
+        assert not any(k in s.tasks for k in b2.__dask_keys__())
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -4118,7 +4145,7 @@ async def test_serialize_future(s, a, b):
                 with ci.as_current():
                     future2 = pickle.loads(pickle.dumps(future))
                     assert future2.client is ci
-                    assert stringify(future2.key) in ci.futures
+                    assert future2.key in ci.futures
                     result2 = await future2
                     assert result == result2
                 with temp_default_client(ci):
@@ -4911,7 +4938,7 @@ async def test_recreate_task_collection(c, s, a, b):
     # with persist
     df3 = c.persist(df2)
     # recreate_task_locally only works with futures
-    with pytest.raises(AttributeError):
+    with pytest.raises(TypeError, match="key"):
         function, args, kwargs = await c._get_components_from_future(df3)
 
     f = c.compute(df3)
@@ -5165,17 +5192,19 @@ def test_quiet_client_close(loop):
             sleep(0.200)  # stop part-way
         sleep(0.1)  # let things settle
 
-        out = logger.getvalue()
-        lines = out.strip().split("\n")
-        assert len(lines) <= 2
-        for line in lines:
-            assert (
-                not line
-                or "heartbeat from unregistered worker" in line
-                or "unaware of this worker" in line
-                or "garbage" in line
-                or set(line) == {"-"}
-            ), line
+    out = logger.getvalue()
+    lines = out.strip().split("\n")
+    unexpected_lines = [
+        line
+        for line in lines
+        if line
+        and "heartbeat from unregistered worker" not in line
+        and "unaware of this worker" not in line
+        and "garbage" not in line
+        and "ended with CancelledError" not in line
+        and set(line) != {"-"}
+    ]
+    assert not unexpected_lines, lines
 
 
 @pytest.mark.slow
@@ -6103,7 +6132,7 @@ async def test_nested_prioritization(c, s, w):
     await wait([fx, fy])
 
     assert (o[x.key] < o[y.key]) == (
-        s.tasks[stringify(fx.key)].priority < s.tasks[stringify(fy.key)].priority
+        s.tasks[fx.key].priority < s.tasks[fy.key].priority
     )
 
 
@@ -6203,12 +6232,21 @@ async def test_mixing_clients_different_scheduler(s, a, b):
             await c2.submit(inc, future)
 
 
+@dataclass(frozen=True)
+class MyHashable:
+    x: int
+    y: int
+
+
 @gen_cluster(client=True)
 async def test_tuple_keys(c, s, a, b):
     x = dask.delayed(inc)(1, dask_key_name=("x", 1))
     y = dask.delayed(inc)(x, dask_key_name=("y", 1))
     future = c.compute(y)
     assert (await future) == 3
+    z = dask.delayed(inc)(y, dask_key_name=("z", MyHashable(1, 2)))
+    with pytest.raises(TypeError, match="key"):
+        await c.compute(z)
 
 
 @gen_cluster(client=True)
@@ -6869,7 +6907,7 @@ def test_futures_in_subgraphs(loop_in_thread):
 @gen_cluster(client=True)
 async def test_get_task_metadata(c, s, a, b):
     # Populate task metadata
-    await c.register_worker_plugin(TaskStateMetadataPlugin())
+    await c.register_plugin(TaskStateMetadataPlugin())
 
     async with get_task_metadata() as tasks:
         f = c.submit(slowinc, 1)
@@ -6889,7 +6927,7 @@ async def test_get_task_metadata(c, s, a, b):
 @gen_cluster(client=True)
 async def test_get_task_metadata_multiple(c, s, a, b):
     # Populate task metadata
-    await c.register_worker_plugin(TaskStateMetadataPlugin())
+    await c.register_plugin(TaskStateMetadataPlugin())
 
     # Ensure that get_task_metadata only collects metadata for
     # tasks which are submitted and completed within its context
@@ -6915,12 +6953,12 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_register_worker_plugin_exception(c, s, a, b):
-    class MyPlugin:
+    class MyPlugin(WorkerPlugin):
         def setup(self, worker=None):
             raise ValueError("Setup failed")
 
     with pytest.raises(ValueError, match="Setup failed"):
-        await c.register_worker_plugin(MyPlugin())
+        await c.register_plugin(MyPlugin())
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -7433,7 +7471,6 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
 
     assert len(comp.code[0]) == 2
     assert comp.code[0][-1].code == test_function_code
-    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7456,7 +7493,6 @@ async def test_computation_object_code_client_submit_simple(c, s, a, b):
 
     assert len(comp.code[0]) == 2
     assert comp.code[0][-1].code == test_function_code
-    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7480,7 +7516,6 @@ async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
 
     assert len(comp.code[0]) == 2
     assert comp.code[0][-1].code == test_function_code
-    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7504,7 +7539,6 @@ async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
 
     assert len(comp.code[0]) == 2
     assert comp.code[0][-1].code == test_function_code
-    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7525,7 +7559,6 @@ async def test_computation_object_code_client_map(c, s, a, b):
 
     assert len(comp.code[0]) == 2
     assert comp.code[0][-1].code == test_function_code
-    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
@@ -7545,7 +7578,6 @@ async def test_computation_object_code_client_compute(c, s, a, b):
 
     assert len(comp.code[0]) == 2
     assert comp.code[0][-1].code == test_function_code
-    assert comp.code[0][-2].code == inspect.getsource(sys._getframe(1))
 
 
 @pytest.mark.slow
@@ -7562,7 +7594,7 @@ async def test_upload_directory(c, s, a, b, tmp_path):
         f.write("from foo import x")
 
     plugin = UploadDirectory(tmp_path, restart=True, update_path=True)
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
 
     [name] = a.plugins
     assert os.path.split(tmp_path)[-1] in name
@@ -7582,6 +7614,22 @@ async def test_upload_directory(c, s, a, b, tmp_path):
 
     files_end = {f for f in os.listdir() if not f.startswith(".coverage")}
     assert files_start == files_end  # no change
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_duck_typed_register_plugin_raises(c, s, a):
+    class DuckPlugin:
+        def setup(self, worker):
+            pass
+
+        def teardown(self, worker):
+            pass
+
+    n_existing_plugins = len(a.plugins)
+
+    with pytest.raises(TypeError, match="duck-typed.*inherit from.*Plugin"):
+        await c.register_plugin(DuckPlugin())
+    assert len(a.plugins) == n_existing_plugins
 
 
 @gen_cluster(client=True)
@@ -8339,15 +8387,6 @@ async def test_fast_close_on_aexit_failure(s):
     assert (stop - start) < 2
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_wait_for_workers_no_default(c, s):
-    with pytest.warns(
-        FutureWarning,
-        match="specify the `n_workers` argument when using `Client.wait_for_workers`",
-    ):
-        await c.wait_for_workers()
-
-
 @pytest.mark.parametrize(
     "value, exception",
     [
@@ -8442,3 +8481,28 @@ async def test_resolves_future_in_dict(c, s, a, b):
     outer_future = c.submit(identity, {"x": inner_future, "y": 2})
     result = await outer_future
     assert result == {"x": 1, "y": 2}
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
+async def test_gather_race_vs_AMM(c, s, a, direct):
+    """Test race condition:
+    Client.gather() tries to get a key from a worker, but in the meantime the
+    Active Memory Manager has moved it to another worker
+    """
+    async with BlockedGetData(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        fut = asyncio.create_task(c.gather(x, direct=direct))
+        await b.in_get_data.wait()
+
+        # Simulate AMM replicate from b to a, followed by AMM drop on b
+        # Can't use s.request_acquire_replicas as it would get stuck on b.block_get_data
+        a.update_data({"x": 3})
+        a.batched_send({"op": "add-keys", "keys": ["x"]})
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2, timeout=5)
+        s.request_remove_replicas(b.address, ["x"], stimulus_id="remove")
+        await async_poll_for(lambda: "x" not in b.data, timeout=5)
+
+        b.block_get_data.set()
+
+    assert await fut == 3  # It's from a; it would be 2 if it were from b

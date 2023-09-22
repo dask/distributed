@@ -27,7 +27,7 @@ requires-python = ">=3.9"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 1.5.0",
-    "dask == 2023.8.0",
+    "dask == 2023.9.2",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.0",
@@ -39,7 +39,7 @@ dependencies = [
     "toolz >= 0.10.0",
     "tornado >= 6.0.4",
     "urllib3 >= 1.24.3",
-    "zict >= 2.2.0",
+    "zict >= 3.0.0",
 ]
 dynamic = ["version"]
 
@@ -141,10 +141,12 @@ filterwarnings = [
     '''ignore:notifyAll\(\) is deprecated, use notify_all\(\) instead:DeprecationWarning:paramiko''',
     '''ignore:setDaemon\(\) is deprecated, set the daemon attribute instead:DeprecationWarning:paramiko''',
     '''ignore:`np.bool8` is a deprecated alias for `np.bool_`''',
+    '''ignore:is_sparse is deprecated and will:FutureWarning''',
 ]
 minversion = "6"
 markers = [
     "ci1: marks tests as belonging to 1 out of 2 partitions to run on CI ('-m \"not ci1\"' for second partition)",
+    "extra_packages: marks tests that require a special dependency to run.",
     "slow: marks tests as slow (deselected by default", # select with '--runslow')
     "avoid_ci: marks tests as flaky or broken on CI on all OSs",
     "ipython: marks tests as exercising IPython",

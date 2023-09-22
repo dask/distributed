@@ -21,7 +21,7 @@ from distributed.utils_test import WINDOWS, gen_cluster
 async def test_KillWorker(c, s, w, mode):
     plugin = KillWorker(delay="1ms", mode=mode)
 
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
 
     while s.workers:
         await asyncio.sleep(0.001)

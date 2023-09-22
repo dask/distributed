@@ -53,14 +53,13 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
-from dask.core import get_deps
+from dask.core import get_deps, validate_key
 from dask.utils import (
     format_bytes,
     format_time,
     key_split,
     parse_bytes,
     parse_timedelta,
-    stringify,
     tmpfile,
 )
 from dask.widgets import get_template
@@ -82,7 +81,15 @@ from distributed.comm import (
 )
 from distributed.comm.addressing import addresses_from_user_args
 from distributed.compatibility import PeriodicCallback
-from distributed.core import Status, clean_exception, error_message, rpc, send_recv
+from distributed.core import (
+    ErrorMessage,
+    OKMessage,
+    Status,
+    clean_exception,
+    error_message,
+    rpc,
+    send_recv,
+)
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -115,7 +122,6 @@ from distributed.utils import (
     no_default,
     offload,
     recursive_to_dict,
-    validate_key,
     wait_for,
 )
 from distributed.utils_comm import (
@@ -126,7 +132,7 @@ from distributed.utils_comm import (
 )
 from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
-from distributed.worker import dumps_task
+from distributed.worker import _normalize_task
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -155,6 +161,8 @@ Recs: TypeAlias = dict[str, TaskStateState]
 Msgs: TypeAlias = dict[str, list[dict[str, Any]]]
 # (recommendations, client messages, worker messages)
 RecsMsgs: TypeAlias = tuple[Recs, Msgs, Msgs]
+
+T_runspec: TypeAlias = tuple[Callable, tuple, dict[str, Any]]
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -1176,7 +1184,7 @@ class TaskState:
     #: "pure data" (such as, for example, a piece of data loaded in the scheduler using
     #: :meth:`Client.scatter`).  A "pure data" task cannot be computed again if its
     #: value is lost.
-    run_spec: object
+    run_spec: T_runspec | None
 
     #: The priority provides each task with a relative ranking which is used to break
     #: ties when many tasks are being considered for execution.
@@ -1375,7 +1383,7 @@ class TaskState:
     def __init__(
         self,
         key: str,
-        run_spec: object,
+        run_spec: T_runspec | None,
         state: TaskStateState,
     ):
         self.key = key
@@ -1787,7 +1795,7 @@ class SchedulerState:
     def new_task(
         self,
         key: str,
-        spec: object,
+        spec: T_runspec | None,
         state: TaskStateState,
         computation: Computation | None = None,
     ) -> TaskState:
@@ -2077,7 +2085,6 @@ class SchedulerState:
 
     def transition_no_worker_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
-        worker_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
@@ -2085,10 +2092,10 @@ class SchedulerState:
 
         if ws := self.decide_worker_non_rootish(ts):
             self.unrunnable.discard(ts)
-            worker_msgs = self._add_to_processing(ts, ws)
+            return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
         # If no worker, task just stays in `no-worker`
 
-        return {}, {}, worker_msgs
+        return {}, {}, {}
 
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
@@ -2294,8 +2301,7 @@ class SchedulerState:
             if not (ws := self.decide_worker_non_rootish(ts)):
                 return {ts.key: "no-worker"}, {}, {}
 
-        worker_msgs = self._add_to_processing(ts, ws)
-        return {}, {}, worker_msgs
+        return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
 
     def transition_waiting_memory(
         self,
@@ -2707,14 +2713,10 @@ class SchedulerState:
             assert not ts.waiting_on
 
         self.unrunnable.remove(ts)
-        ts.state = "released"
 
-        for dts in ts.dependencies:
-            dts.waiters.discard(ts)
-
-        ts.waiters.clear()
-
-        return {}, {}, {}
+        recommendations: Recs = {}
+        self._propagate_released(ts, recommendations)
+        return recommendations, {}, {}
 
     def transition_waiting_queued(self, key: str, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
@@ -2754,8 +2756,6 @@ class SchedulerState:
 
     def transition_queued_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        worker_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be queued: {ts}"
@@ -2763,10 +2763,9 @@ class SchedulerState:
 
         if ws := self.decide_worker_rootish_queuing_enabled():
             self.queued.discard(ts)
-            worker_msgs = self._add_to_processing(ts, ws)
+            return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
         # If no worker, task just stays `queued`
-
-        return recommendations, {}, worker_msgs
+        return {}, {}, {}
 
     def _remove_key(self, key: str) -> None:
         ts = self.tasks.pop(key)
@@ -3147,7 +3146,9 @@ class SchedulerState:
         assert ts not in self.queued
         assert all(dts.who_has for dts in ts.dependencies)
 
-    def _add_to_processing(self, ts: TaskState, ws: WorkerState) -> Msgs:
+    def _add_to_processing(
+        self, ts: TaskState, ws: WorkerState, stimulus_id: str
+    ) -> RecsMsgs:
         """Set a task as processing on a worker and return the worker messages to send"""
         if self.validate:
             self._validate_ready(ts)
@@ -3164,7 +3165,45 @@ class SchedulerState:
         if ts.actor:
             ws.actors.add(ts)
 
-        return {ws.address: [self._task_to_msg(ts)]}
+        ndep_bytes = sum(dts.nbytes for dts in ts.dependencies)
+        if (
+            ws.memory_limit
+            and ndep_bytes > ws.memory_limit
+            and dask.config.get("distributed.worker.memory.terminate")
+        ):
+            # Note
+            # ----
+            # This is a crude safety system, only meant to prevent order-of-magnitude
+            # fat-finger errors.
+            #
+            # For collection finalizers and in general most concat operations, it takes
+            # a lot less to kill off the worker; you'll just need
+            # ndep_bytes * 2 > ws.memory_limit * terminate threshold.
+            #
+            # In heterogeneous clusters with workers mounting different amounts of
+            # memory, the user is expected to manually set host/worker/resource
+            # restrictions.
+            msg = (
+                f"Task {ts.key} has {format_bytes(ndep_bytes)} worth of input "
+                f"dependencies, but worker {ws.address} has memory_limit set to "
+                f"{format_bytes(ws.memory_limit)}."
+            )
+            if ts.prefix.name == "finalize":
+                msg += (
+                    " It seems like you called client.compute() on a huge collection. "
+                    "Consider writing to distributed storage or slicing/reducing first."
+                )
+            logger.error(msg)
+            return self._transition(
+                ts.key,
+                "erred",
+                exception=pickle.dumps(MemoryError(msg)),
+                cause=ts.key,
+                stimulus_id=stimulus_id,
+                worker=ws.address,
+            )
+
+        return {}, {}, {ws.address: [self._task_to_msg(ts)]}
 
     def _exit_processing_common(self, ts: TaskState) -> WorkerState | None:
         """Remove *ts* from the set of processing tasks.
@@ -3343,10 +3382,7 @@ class SchedulerState:
                 dts.key: [ws.address for ws in dts.who_has] for dts in ts.dependencies
             },
             "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
-            "run_spec": None,
-            "function": None,
-            "args": None,
-            "kwargs": None,
+            "run_spec": ToPickle(ts.run_spec),
             "resource_restrictions": ts.resource_restrictions,
             "actor": ts.actor,
             "annotations": ts.annotations,
@@ -3354,11 +3390,6 @@ class SchedulerState:
         }
         if self.validate:
             assert all(msg["who_has"].values())
-
-        if isinstance(ts.run_spec, dict):
-            msg.update(ts.run_spec)
-        else:
-            msg["run_spec"] = ts.run_spec
 
         return msg
 
@@ -3635,6 +3666,8 @@ class Scheduler(SchedulerState, ServerNode):
         self.event_subscriber = defaultdict(set)
         self.worker_plugins = {}
         self.nanny_plugins = {}
+        self._starting_nannies = set()
+        self._starting_nannies_cond = asyncio.Condition()
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -3964,11 +3997,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             weakref.finalize(self, del_scheduler_file)
 
-        for preload in self.preloads:
-            try:
-                await preload.start()
-            except Exception:
-                logger.exception("Failed to start preload")
+        await self.preloads.start()
 
         if self.jupyter:
             # Allow insecure communications from local users
@@ -4015,11 +4044,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Scheduler closing due to %s...", reason or "unknown reason")
         setproctitle("dask scheduler [closing]")
 
-        for preload in self.preloads:
-            try:
-                await preload.teardown()
-            except Exception:
-                logger.exception("Failed to tear down preload")
+        await self.preloads.teardown()
 
         await asyncio.gather(
             *[log_errors(plugin.close) for plugin in list(self.plugins.values())]
@@ -4315,12 +4340,20 @@ class Scheduler(SchedulerState, ServerNode):
         # This will keep running until the worker is removed
         await self.handle_worker(comm, address)
 
-    async def add_nanny(self) -> dict[str, Any]:
-        msg = {
-            "status": "OK",
-            "nanny-plugins": self.nanny_plugins,
-        }
-        return msg
+    async def add_nanny(self, comm: Comm, address: str) -> None:
+        async with self._starting_nannies_cond:
+            self._starting_nannies.add(address)
+        try:
+            msg = {
+                "status": "OK",
+                "nanny-plugins": self.nanny_plugins,
+            }
+            await comm.write(msg)
+            await comm.read()
+        finally:
+            async with self._starting_nannies_cond:
+                self._starting_nannies.discard(address)
+                self._starting_nannies_cond.notify_all()
 
     def _match_graph_with_tasks(
         self, dsk: dict[str, Any], dependencies: dict[str, set[str]], keys: set[str]
@@ -4607,7 +4640,11 @@ class Scheduler(SchedulerState, ServerNode):
         self.digest_metric("update-graph-duration", end - start)
 
     def _generate_taskstates(
-        self, keys: set[str], dsk: dict, dependencies: dict, computation: Computation
+        self,
+        keys: set[str],
+        dsk: dict[str, T_runspec],
+        dependencies: dict[str, set[str]],
+        computation: Computation,
     ) -> tuple:
         # Get or create task states
         runnable = []
@@ -4809,7 +4846,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
-        if ts is None or ts.state in ("released", "queued"):
+        if ts is None or ts.state in ("released", "queued", "no-worker"):
             logger.debug(
                 "Received already computed task, worker: %s, state: %s"
                 ", key: %s, who_has: %s",
@@ -5528,7 +5565,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         if worker not in self.workers:
             return
-        validate_key(key)
+        self.validate_key(key)
 
         r: tuple = self.stimulus_task_finished(
             key=key, worker=worker, stimulus_id=stimulus_id, **msg
@@ -5890,54 +5927,47 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return keys
 
-    async def gather(self, keys, serializers=None):
+    async def gather(
+        self, keys: Collection[str], serializers: list[str] | None = None
+    ) -> dict[str, Any]:
         """Collect data from workers to the scheduler"""
-        stimulus_id = f"gather-{time()}"
-        keys = list(keys)
-        who_has = {}
-        for key in keys:
-            ts: TaskState = self.tasks.get(key)
-            if ts is not None:
-                who_has[key] = [ws.address for ws in ts.who_has]
-            else:
-                who_has[key] = []
+        data = {}
+        missing_keys = list(keys)
+        failed_keys: list[str] = []
+        missing_workers: set[str] = set()
 
-        data, missing_keys, missing_workers = await gather_from_workers(
-            who_has, rpc=self.rpc, close=False, serializers=serializers
-        )
-        if not missing_keys:
-            result = {"status": "OK", "data": data}
-        else:
-            missing_states = [
-                (self.tasks[key].state if key in self.tasks else None)
-                for key in missing_keys
-            ]
-            logger.exception(
-                "Couldn't gather keys %s state: %s workers: %s",
+        while missing_keys:
+            who_has = {}
+            for key, workers in self.get_who_has(missing_keys).items():
+                valid_workers = set(workers) - missing_workers
+                if valid_workers:
+                    who_has[key] = valid_workers
+                else:
+                    failed_keys.append(key)
+
+            (
+                new_data,
                 missing_keys,
-                missing_states,
-                missing_workers,
+                new_failed_keys,
+                new_missing_workers,
+            ) = await gather_from_workers(
+                who_has, rpc=self.rpc, serializers=serializers
             )
-            result = {"status": "error", "keys": missing_keys}
-            with log_errors():
-                # Remove suspicious workers from the scheduler and shut them down.
-                await asyncio.gather(
-                    *(
-                        self.remove_worker(
-                            address=worker, close=True, stimulus_id=stimulus_id
-                        )
-                        for worker in missing_workers
-                    )
-                )
-                for key, workers in missing_keys.items():
-                    logger.exception(
-                        "Shut down workers that don't have promised key: %s, %s",
-                        str(workers),
-                        str(key),
-                    )
+            data.update(new_data)
+            failed_keys += new_failed_keys
+            missing_workers.update(new_missing_workers)
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
-        return result
+
+        if not failed_keys:
+            return {"status": "OK", "data": data}
+
+        failed_states = {
+            key: self.tasks[key].state if key in self.tasks else "forgotten"
+            for key in failed_keys
+        }
+        logger.error("Couldn't gather keys: %s", failed_states)
+        return {"status": "error", "keys": list(failed_keys)}
 
     @log_errors
     async def restart(self, client=None, timeout=30, wait_for_workers=True):
@@ -7495,8 +7525,14 @@ class Scheduler(SchedulerState, ServerNode):
         self.remove_plugin(name=plugin.name)
         return {"metadata": plugin.metadata, "state": plugin.state}
 
-    async def register_worker_plugin(self, comm, plugin, name=None):
+    async def register_worker_plugin(
+        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
+    ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
+        logger.info("Registering Worker plugin %s", name)
+        if name in self.worker_plugins and idempotent:
+            return {}
+
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
@@ -7504,7 +7540,9 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return responses
 
-    async def unregister_worker_plugin(self, comm, name):
+    async def unregister_worker_plugin(
+        self, comm: None, name: str
+    ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
             self.worker_plugins.pop(name)
@@ -7514,17 +7552,30 @@ class Scheduler(SchedulerState, ServerNode):
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
 
-    async def register_nanny_plugin(self, comm, plugin, name=None):
-        """Registers a setup function, and call it on every worker"""
+    async def register_nanny_plugin(
+        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
+    ) -> dict[str, OKMessage]:
+        """Registers a nanny plugin on all running and future nannies"""
+        logger.info("Registering Nanny plugin %s", name)
+        if name in self.nanny_plugins and idempotent:
+            return {}
+
         self.nanny_plugins[name] = plugin
+        async with self._starting_nannies_cond:
+            if self._starting_nannies:
+                logger.info("Waiting for Nannies to start %s", self._starting_nannies)
+            await self._starting_nannies_cond.wait_for(
+                lambda: not self._starting_nannies
+            )
+            responses = await self.broadcast(
+                msg=dict(op="plugin_add", plugin=plugin, name=name),
+                nanny=True,
+            )
+            return responses
 
-        responses = await self.broadcast(
-            msg=dict(op="plugin_add", plugin=plugin, name=name),
-            nanny=True,
-        )
-        return responses
-
-    async def unregister_nanny_plugin(self, comm, name):
+    async def unregister_nanny_plugin(
+        self, comm: None, name: str
+    ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
             self.nanny_plugins.pop(name)
@@ -8513,13 +8564,15 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 
 def _materialize_graph(
-    graph: HighLevelGraph, global_annotations: dict
-) -> tuple[dict, dict, dict]:
+    graph: HighLevelGraph, global_annotations: dict[str, Any]
+) -> tuple[dict[str, T_runspec], dict[str, set[str]], dict[str, Any]]:
     dsk = dask.utils.ensure_dict(graph)
+    for k in dsk:
+        validate_key(k)
     annotations_by_type: defaultdict[str, dict[str, Any]] = defaultdict(dict)
     for annotations_type, value in global_annotations.items():
         annotations_by_type[annotations_type].update(
-            {stringify(k): (value(k) if callable(value) else value) for k in dsk}
+            {k: (value(k) if callable(value) else value) for k in dsk}
         )
 
     for layer in graph.layers.values():
@@ -8527,10 +8580,7 @@ def _materialize_graph(
             annot = layer.annotations
             for annot_type, value in annot.items():
                 annotations_by_type[annot_type].update(
-                    {
-                        stringify(k): (value(k) if callable(value) else value)
-                        for k in layer
-                    }
+                    {k: (value(k) if callable(value) else value) for k in layer}
                 )
     dependencies, _ = get_deps(dsk)
 
@@ -8546,18 +8596,6 @@ def _materialize_graph(
     # - Add in deps for any tasks that depend on futures
     for k, futures in fut_deps.items():
         dependencies[k].update(f.key for f in futures)
-    new_dsk = {}
-    # Annotation callables are evaluated on the non-stringified version of
-    # the keys
-    exclusive = set(graph)
-    for k, v in dsk.items():
-        new_k = stringify(k)
-        new_dsk[new_k] = stringify(v, exclusive=exclusive)
-    dsk = new_dsk
-    dependencies = {
-        stringify(k): {stringify(dep) for dep in deps}
-        for k, deps in dependencies.items()
-    }
 
     # Remove any self-dependencies (happens on test_publish_bag() and others)
     for k, v in dependencies.items():
@@ -8570,6 +8608,6 @@ def _materialize_graph(
     for k in list(dsk):
         if dsk[k] is k:
             del dsk[k]
-    dsk = valmap(dumps_task, dsk)
+    dsk = valmap(_normalize_task, dsk)
 
     return dsk, dependencies, annotations_by_type
