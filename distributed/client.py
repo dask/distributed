@@ -35,6 +35,7 @@ from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
+from dask.typing import no_default
 from dask.utils import (
     apply,
     ensure_dict,
@@ -101,7 +102,6 @@ from distributed.utils import (
     import_term,
     is_python_shutting_down,
     log_errors,
-    no_default,
     sync,
     thread_state,
 )
@@ -854,7 +854,7 @@ class Client(SyncMethodMixin):
         connection_limit=512,
         **kwargs,
     ):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = dask.config.get("distributed.comm.timeouts.connect")
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
@@ -1248,7 +1248,7 @@ class Client(SyncMethodMixin):
 
         await self.rpc.start()
 
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
@@ -1753,7 +1753,7 @@ class Client(SyncMethodMixin):
         --------
         Client.restart
         """
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout * 2
         # XXX handling of self.status here is not thread-safe
         if self.status in ["closed", "newly-created"]:
@@ -2399,7 +2399,7 @@ class Client(SyncMethodMixin):
         timeout=no_default,
         hash=True,
     ):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -2588,7 +2588,7 @@ class Client(SyncMethodMixin):
         --------
         Client.gather : Gather data back to local process
         """
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if isinstance(data, pyQueue) or isinstance(data, Iterator):
             raise TypeError(
@@ -3595,7 +3595,7 @@ class Client(SyncMethodMixin):
             return result
 
     async def _restart(self, timeout=no_default, wait_for_workers=True):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout * 4
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
