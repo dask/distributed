@@ -40,8 +40,6 @@ gpuci_logger "Activate conda env"
 . /opt/conda/etc/profile.d/conda.sh
 conda activate dask
 
-mamba install -y 'aws-sdk-cpp<1.11'
-
 gpuci_logger "Install distributed"
 python -m pip install -e .
 
