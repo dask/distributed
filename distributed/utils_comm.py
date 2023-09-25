@@ -67,7 +67,6 @@ async def gather_from_workers(
             ready_addresses = addresses - busy_workers
             if ready_addresses:
                 d[random.choice(list(ready_addresses))].append(key)
-
         if not d:
             if busy_workers:
                 await asyncio.sleep(0.15)
