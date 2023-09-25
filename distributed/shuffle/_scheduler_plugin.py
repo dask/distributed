@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from distributed.diagnostics.plugin import SchedulerPlugin
@@ -131,7 +130,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             # that the shuffle works as intended and should fail instead.
             self._raise_if_barrier_unknown(spec.id)
             self._raise_if_task_not_processing(key)
-            state = spec.create_new_run(self)
+            worker_for = self._calculate_worker_for(spec)
+            state = spec.create_new_run(worker_for)
             self.active_shuffles[spec.id] = state
             self._shuffles[spec.id].add(state)
             state.participating_workers.add(worker)
@@ -153,12 +153,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if task.state != "processing":
             raise RuntimeError(f"Expected {task} to be processing, is {task.state}.")
 
-    def _pin_output_workers(
-        self,
-        id: ShuffleId,
-        output_partitions: Iterable[Any],
-        pick: Callable[[Any, Sequence[str]], str],
-    ) -> dict[Any, str]:
+    def _calculate_worker_for(self, spec: ShuffleSpec) -> dict[Any, str]:
         """Pin the outputs of a P2P shuffle to specific workers.
 
         Parameters
@@ -172,15 +167,16 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             the same worker restrictions.
         """
         mapping = {}
-        barrier = self.scheduler.tasks[barrier_key(id)]
+        shuffle_id = spec.id
+        barrier = self.scheduler.tasks[barrier_key(shuffle_id)]
 
         if barrier.worker_restrictions:
             workers = list(barrier.worker_restrictions)
         else:
             workers = list(self.scheduler.workers)
 
-        for partition in output_partitions:
-            worker = pick(partition, workers)
+        for partition in spec.output_partitions:
+            worker = spec.pick_worker(partition, workers)
             mapping[partition] = worker
 
         for dt in barrier.dependents:
@@ -190,7 +186,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 continue
 
             if dt.worker_restrictions:
-                worker = pick(partition, list(dt.worker_restrictions))
+                worker = spec.pick_worker(partition, list(dt.worker_restrictions))
                 mapping[partition] = worker
             else:
                 worker = mapping[partition]

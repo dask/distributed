@@ -99,7 +99,7 @@ from __future__ import annotations
 import os
 import pickle
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import product
@@ -121,7 +121,6 @@ from distributed.shuffle._core import (
     handle_unpack_errors,
 )
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -474,10 +473,12 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
     new: ChunkedAxes
     old: ChunkedAxes
 
-    def _pin_output_workers(self, plugin: ShuffleSchedulerPlugin) -> dict[NDIndex, str]:
-        all_output_partitions = list(product(*(range(len(c)) for c in self.new)))
-        pick_worker = _calculate_worker_for(self.new)
-        return plugin._pin_output_workers(self.id, all_output_partitions, pick_worker)
+    @property
+    def output_partitions(self) -> Generator[NDIndex, None, None]:
+        yield from product(*(range(len(c)) for c in self.new))
+
+    def pick_worker(self, partition: NDIndex, workers: Sequence[str]) -> str:
+        return _calculate_worker_for(self.new)(partition, workers)
 
     def create_run_on_worker(
         self,
