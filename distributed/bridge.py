@@ -122,21 +122,6 @@ class SourceCode(NamedTuple):
     lineno_relative: int
     filename: str
 
-async def done_callback(future, callback):
-    """Coroutine that waits on the future, then calls the callback
-
-    Parameters
-    ----------
-    future : asyncio.Future
-        The future
-    callback : callable
-        The callback
-    """
-    while future.status == "pending":
-        await future._state.wait()
-    callback(future)
-
-
 def _handle_print(event):
     _, msg = event
     if not isinstance(msg, dict):
@@ -216,97 +201,7 @@ class VersionsDict(TypedDict):
 
 
 class Bridge(SyncMethodMixin):
-    """Connect to and submit computation to a Dask cluster
-
-    The Client connects users to a Dask cluster.  It provides an asynchronous
-    user interface around functions and futures.  This class resembles
-    executors in ``concurrent.futures`` but also allows ``Future`` objects
-    within ``submit/map`` calls.  When a Client is instantiated it takes over
-    all ``dask.compute`` and ``dask.persist`` calls by default.
-
-    It is also common to create a Client without specifying the scheduler
-    address , like ``Client()``.  In this case the Client creates a
-    :class:`LocalCluster` in the background and connects to that.  Any extra
-    keywords are passed from Client to LocalCluster in this case.  See the
-    LocalCluster documentation for more information.
-
-    Parameters
-    ----------
-    address: string, or Cluster
-        This can be the address of a ``Scheduler`` server like a string
-        ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
-    loop
-        The event loop
-    timeout: int (defaults to configuration ``distributed.comm.timeouts.connect``)
-        Timeout duration for initial connection to the scheduler
-    set_as_default: bool (True)
-        Use this Client as the global dask scheduler
-    scheduler_file: string (optional)
-        Path to a file with scheduler information if available
-    security: Security or bool, optional
-        Optional security information. If creating a local cluster can also
-        pass in ``True``, in which case temporary self-signed credentials will
-        be created automatically.
-    asynchronous: bool (False by default)
-        Set to True if using this client within async/await functions or within
-        Tornado gen.coroutines.  Otherwise this should remain False for normal
-        use.
-    name: string (optional)
-        Gives the client a name that will be included in logs generated on
-        the scheduler for matters relating to this client
-    heartbeat_interval: int (optional)
-        Time in milliseconds between heartbeats to scheduler
-    serializers
-        Iterable of approaches to use when serializing the object.
-        See :ref:`serialization` for more.
-    deserializers
-        Iterable of approaches to use when deserializing the object.
-        See :ref:`serialization` for more.
-    extensions : list
-        The extensions
-    direct_to_workers: bool (optional)
-        Whether or not to connect directly to the workers, or to ask
-        the scheduler to serve as intermediary.
-    connection_limit : int
-        The number of open comms to maintain at once in the connection pool
-
-    **kwargs:
-        If you do not pass a scheduler address, Client will create a
-        ``LocalCluster`` object, passing any extra keyword arguments.
-
-    Examples
-    --------
-    Provide cluster's scheduler node address on initialization:
-
-    >>> client = Client('127.0.0.1:8786')  # doctest: +SKIP
-
-    Use ``submit`` method to send individual computations to the cluster
-
-    >>> a = client.submit(add, 1, 2)  # doctest: +SKIP
-    >>> b = client.submit(add, 10, 20)  # doctest: +SKIP
-
-    Continue using submit or map on results to build up larger computations
-
-    >>> c = client.submit(add, a, b)  # doctest: +SKIP
-
-    Gather results with the ``gather`` method.
-
-    >>> client.gather(c)  # doctest: +SKIP
-    33
-
-    You can also call Client with no arguments in order to create your own
-    local cluster.
-
-    >>> client = Client()  # makes your own local "cluster" # doctest: +SKIP
-
-    Extra keywords will be passed directly to LocalCluster
-
-    >>> client = Client(n_workers=2, threads_per_worker=4)  # doctest: +SKIP
-
-    See Also
-    --------
-    distributed.scheduler.Scheduler: Internal scheduler
-    distributed.LocalCluster:
+    """Connect to and scatter data to a worker
     """
 
     _instances: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
@@ -327,7 +222,6 @@ class Bridge(SyncMethodMixin):
         timeout=no_default,
         serializers=None,
         deserializers=None,
-        direct_to_workers=True,
         **kwargs,
     ):
         if timeout == no_default:
@@ -346,11 +240,9 @@ class Bridge(SyncMethodMixin):
         if deserializers is None:
             deserializers = serializers
         self._deserializers = deserializers
-        self.direct_to_workers = direct_to_workers
-        self._previous_as_current = None
 
         self.name = "bridge" if name is None else name
-
+        self._gather_semaphore = asyncio.Semaphore(5)
         if security is None:
             security = Security()
         elif isinstance(security, dict):
@@ -373,7 +265,6 @@ class Bridge(SyncMethodMixin):
 
 
         self._stream_handlers = {}
-
         self._state_handlers = {}
 
         self.rpc = ConnectionPool(
@@ -420,27 +311,6 @@ class Bridge(SyncMethodMixin):
         )
         self.__loop = value
 
-    def _get_scheduler_info(self):
-        from distributed.scheduler import Scheduler
-
-        if (
-            self.cluster
-            and hasattr(self.cluster, "scheduler")
-            and isinstance(self.cluster.scheduler, Scheduler)
-        ):
-            info = self.cluster.scheduler.identity()
-            scheduler = self.cluster.scheduler
-        elif (
-            self._loop_runner.is_started() and self.scheduler and not self.asynchronous
-        ):
-            info = sync(self.loop, self.scheduler.identity)
-            scheduler = self.scheduler
-        else:
-            info = self._scheduler_identity
-            scheduler = self.scheduler
-
-        return scheduler, SchedulerInfo(info)
-
  
     def start(self, **kwargs):
         """Start scheduler running in separate thread"""
@@ -473,7 +343,6 @@ class Bridge(SyncMethodMixin):
             self.close()
 
     async def _gather(self, keys,  errors="raise"):
-        data = {}
         results = await self._gather_remote(keys)
         if results["status"] !=  "OK":
             raise TypeError(
@@ -495,9 +364,10 @@ class Bridge(SyncMethodMixin):
                 who_has, rpc=self.rpc
             )
             response: dict[str, Any] = {"status": "OK", "data": data}
+            print("data, missing_keys, failed_keys" ,data, missing_keys, failed_keys  , flush=True)
             return response
 
-    def gather(self, keys, errors="raise",asynchronous=None):
+    def gather(self, keys, errors="raise", asynchronous=None):
         """Gather data associated with keys from distributed memory
         """
         if isinstance(keys, pyQueue):
@@ -507,15 +377,13 @@ class Bridge(SyncMethodMixin):
             )
 
         if isinstance(keys, Iterator):
-            return (self.gather(f, errors=errors, direct=direct) for f in futures)
+            return (self.gather(k, errors=errors) for k in keys)
 
         with shorten_traceback():
             return self.sync(
                 self._gather,
-                futures,
+                keys,
                 errors=errors,
-                direct=direct,
-                local_worker=local_worker,
                 asynchronous=asynchronous,
             )
 
@@ -612,10 +480,6 @@ class Bridge(SyncMethodMixin):
                Setting this flag to True is incompatible with the Active Memory
                Manager's :ref:`ReduceReplicas` policy. If you wish to use it, you must
                first disable the policy or disable the AMM entirely.
-        direct : bool (defaults to automatically check)
-            Whether or not to connect directly to the workers, or to ask
-            the scheduler to serve as intermediary.  This can also be set when
-            creating the Client.
         hash : bool (optional)
             Whether or not to hash data to determine key.
             If False then this uses a random key
@@ -626,54 +490,6 @@ class Bridge(SyncMethodMixin):
             If True the client is in asynchronous mode
         external: bool 
             If True the data has been generated from an external application
-
-        Returns
-        -------
-        List, dict, iterator, or queue of futures matching the type of input.
-
-        Examples
-        --------
-        >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
-        >>> c.scatter(1) # doctest: +SKIP
-        <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>
-
-        >>> c.scatter([1, 2, 3])  # doctest: +SKIP
-        [<Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
-         <Future: status: finished, key: 58e78e1b34eb49a68c65b54815d1b158>,
-         <Future: status: finished, key: d3395e15f605bc35ab1bac6341a285e2>]
-
-        >>> c.scatter({'x': 1, 'y': 2, 'z': 3})  # doctest: +SKIP
-        {'x': <Future: status: finished, key: x>,
-         'y': <Future: status: finished, key: y>,
-         'z': <Future: status: finished, key: z>}
-
-        Constrain location of data to subset of workers
-
-        >>> c.scatter([1, 2, 3], workers=[('hostname', 8788)])   # doctest: +SKIP
-
-        Broadcast data to all workers
-
-        >>> [future] = c.scatter([element], broadcast=True)  # doctest: +SKIP
-
-        Send scattered data to parallelized function using client futures
-        interface
-
-        >>> data = c.scatter(data, broadcast=True)  # doctest: +SKIP
-        >>> res = [c.submit(func, data, i) for i in range(100)]
-
-        Notes
-        -----
-        Scattering a dictionary uses ``dict`` keys to create ``Future`` keys.
-        The current implementation of a task graph resolution searches for occurrences of ``key``
-        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
-        substitution of strings passed as arguments to a task if these strings match some ``key``
-        that already exists on a cluster. To avoid these situations it is required to use unique
-        values if a ``key`` is set manually.
-        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
-
-        See Also
-        --------
-        Client.gather : Gather data back to local process
         """
         if timeout == no_default:
             timeout = self._timeout
