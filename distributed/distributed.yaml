@@ -283,7 +283,6 @@ distributed:
         - cudf
         - cuml
         - prefect
-        - pytest
         - rechunker
         - xarray
         - xgboost
