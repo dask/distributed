@@ -22,7 +22,7 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import (
     ArrayRechunkRun,
     Split,
-    _get_worker_for_hash_sharding,
+    _calculate_worker_for,
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
@@ -93,9 +93,10 @@ async def test_lowlevel_rechunk(
 
     worker_for_mapping = {}
 
+    pick_worker = _calculate_worker_for(new)
     new_indices = list(product(*(range(len(dim)) for dim in new)))
-    for i, idx in enumerate(new_indices):
-        worker_for_mapping[idx] = _get_worker_for_hash_sharding(i, workers)
+    for idx in new_indices:
+        worker_for_mapping[idx] = pick_worker(idx, workers)
 
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
 

@@ -442,16 +442,42 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         return self.worker_for[id]
 
 
+def _get_worker_for_range_sharding(
+    npartitions: int, output_partition: int, workers: Sequence[str]
+) -> str:
+    """Get address of target worker for this output partition using range sharding"""
+    i = len(workers) * output_partition // npartitions
+    return workers[i]
+
+
+def _calculate_worker_for(
+    input_chunks: ChunkedAxes,
+) -> Callable[[NDIndex, Sequence[str]], str]:
+    n_partitions = 1
+    for c in input_chunks:
+        n_partitions *= len(c)
+
+    def pick_worker(partition: NDIndex, workers: Sequence[str]) -> str:
+        ix = 0
+        for dim, pos in enumerate(partition):
+            if dim > 0:
+                ix += len(input_chunks[dim - 1]) * pos
+            else:
+                ix += pos
+        return _get_worker_for_range_sharding(n_partitions, ix, workers)
+
+    return pick_worker
+
+
 @dataclass(frozen=True)
 class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
     new: ChunkedAxes
     old: ChunkedAxes
 
     def _pin_output_workers(self, plugin: ShuffleSchedulerPlugin) -> dict[NDIndex, str]:
-        parts_out = product(*(range(len(c)) for c in self.new))
-        return plugin._pin_output_workers(
-            self.id, parts_out, _get_worker_for_hash_sharding
-        )
+        all_output_partitions = list(product(*(range(len(c)) for c in self.new)))
+        pick_worker = _calculate_worker_for(self.new)
+        return plugin._pin_output_workers(self.id, all_output_partitions, pick_worker)
 
     def create_run_on_worker(
         self,
@@ -476,11 +502,3 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
             memory_limiter_disk=plugin.memory_limiter_disk,
             memory_limiter_comms=plugin.memory_limiter_comms,
         )
-
-
-def _get_worker_for_hash_sharding(
-    output_partition: NDIndex, workers: Sequence[str]
-) -> str:
-    """Get address of target worker for this output partition using hash sharding"""
-    i = hash(output_partition) % len(workers)
-    return workers[i]
