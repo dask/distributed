@@ -441,33 +441,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         return self.worker_for[id]
 
 
-def _get_worker_for_range_sharding(
-    npartitions: int, output_partition: int, workers: Sequence[str]
-) -> str:
-    """Get address of target worker for this output partition using range sharding"""
-    i = len(workers) * output_partition // npartitions
-    return workers[i]
-
-
-def _calculate_worker_for(
-    input_chunks: ChunkedAxes,
-) -> Callable[[NDIndex, Sequence[str]], str]:
-    n_partitions = 1
-    for c in input_chunks:
-        n_partitions *= len(c)
-
-    def pick_worker(partition: NDIndex, workers: Sequence[str]) -> str:
-        ix = 0
-        for dim, pos in enumerate(partition):
-            if dim > 0:
-                ix += len(input_chunks[dim - 1]) * pos
-            else:
-                ix += pos
-        return _get_worker_for_range_sharding(n_partitions, ix, workers)
-
-    return pick_worker
-
-
 @dataclass(frozen=True)
 class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
     new: ChunkedAxes
@@ -478,7 +451,17 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
         yield from product(*(range(len(c)) for c in self.new))
 
     def pick_worker(self, partition: NDIndex, workers: Sequence[str]) -> str:
-        return _calculate_worker_for(self.new)(partition, workers)
+        npartitions = 1
+        for c in self.new:
+            npartitions *= len(c)
+        ix = 0
+        for dim, pos in enumerate(partition):
+            if dim > 0:
+                ix += len(self.new[dim - 1]) * pos
+            else:
+                ix += pos
+        i = len(workers) * ix // npartitions
+        return workers[i]
 
     def create_run_on_worker(
         self,

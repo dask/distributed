@@ -21,8 +21,8 @@ from distributed.shuffle._core import ShuffleId
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import (
     ArrayRechunkRun,
+    ArrayRechunkSpec,
     Split,
-    _calculate_worker_for,
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
@@ -93,12 +93,12 @@ async def test_lowlevel_rechunk(
 
     worker_for_mapping = {}
 
-    pick_worker = _calculate_worker_for(new)
+    spec = ArrayRechunkSpec(id=ShuffleId("foo"), new=new, old=old)
     new_indices = list(product(*(range(len(dim)) for dim in new)))
     for idx in new_indices:
-        worker_for_mapping[idx] = pick_worker(idx, workers)
-
+        worker_for_mapping[idx] = spec.pick_worker(idx, workers)
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
+    # scheduler_state = spec.create_new_run(worker_for_mapping)
 
     with ArrayRechunkTestPool() as local_shuffle_pool:
         shuffles = []
@@ -1129,3 +1129,18 @@ def test_split_axes_with_zero():
         [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
     ]
     assert result == expected
+
+
+@pytest.mark.parametrize("nworkers", [1, 2, 41, 50])
+def test_worker_for_homogeneous_distribution(nworkers):
+    old = ((1, 2, 3, 4), (5,) * 6)
+    new = ((5, 5), (12, 18))
+    workers = [str(i) for i in range(nworkers)]
+    spec = ArrayRechunkSpec(ShuffleId("foo"), new, old)
+    count = {w: 0 for w in workers}
+    for nidx in spec.output_partitions:
+        count[spec.pick_worker(nidx, workers)] += 1
+
+    assert sum(count.values()) > 0
+    assert sum(count.values()) == len(list(spec.output_partitions))
+    assert abs(max(count.values()) - min(count.values())) <= 1
