@@ -39,6 +39,8 @@ from typing import Any
 
 import tlz as toolz
 
+import dask.config
+from dask.typing import NoDefault, no_default
 from dask.utils import format_time, parse_timedelta
 
 from distributed.metrics import time
@@ -353,7 +355,7 @@ def watch(
     thread_id: int | None = None,
     interval: str = "20ms",
     cycle: str = "2s",
-    maxlen: int = 1000,
+    maxlen: int | None | NoDefault = no_default,
     omit: Collection[str] = (),
     stop: Callable[[], bool] = lambda: False,
 ) -> deque[tuple[float, dict[str, Any]]]:
@@ -386,6 +388,9 @@ def watch(
     - timestamp
     - dict[str, Any] (output of ``create()``)
     """
+    if maxlen is no_default:
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
+        assert isinstance(maxlen, int) or maxlen is None
     log: deque[tuple[float, dict[str, Any]]] = deque(maxlen=maxlen)
 
     thread = threading.Thread(

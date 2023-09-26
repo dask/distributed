@@ -78,31 +78,6 @@ properties:
 
               This can be helpful to reduce costs and stop zombie processes from roaming the earth.
 
-          transition-log-length:
-            type: integer
-            minimum: 0
-            description: |
-              How long should we keep the transition log
-
-              Every time a task transitions states (like "waiting", "processing", "memory", "released")
-              we record that transition in a log.
-
-              To make sure that we don't run out of memory
-              we will clear out old entries after a certain length.
-              This is that length.
-
-          events-log-length:
-            type: integer
-            minimum: 0
-            description: |
-              How long should we keep the events log
-
-              All events (e.g. worker heartbeat) are stored in the events log.
-
-              To make sure that we don't run out of memory
-              we will clear out old entries after a certain length.
-              This is that length.
-
           work-stealing:
             type: boolean
             description: |
@@ -860,11 +835,6 @@ properties:
             type: string
             description: The default protocol to use, like tcp or tls
 
-          recent-messages-log-length:
-            type: integer
-            minimum: 0
-            description: number of messages to keep for debugging
-
           tls:
             type: object
             properties:
@@ -1126,12 +1096,12 @@ properties:
               If the traceback is larger than this size (in bytes) then we truncate it.
 
           log-length:
-            type: integer
+            type: [integer, 'null']
             minimum: 0
             description: |
-              Default length of logs to keep in memory
-
-              The scheduler and workers keep the last 10000 or so log entries in memory.
+              Maximum length of worker/scheduler logs to keep in memory.
+              They can be retrieved with get_scheduler_logs() / get_worker_logs().
+              Set to null for unlimited.
 
           log-format:
             type: string
@@ -1139,6 +1109,14 @@ properties:
               The log format to emit.
 
               See https://docs.python.org/3/library/logging.html#logrecord-attributes
+
+          low-level-log-length:
+            type: [integer, 'null']
+            minimum: 0
+            description: |
+              Maximum length of various event logs for developers.
+              Set to null for unlimited.
+
           event-loop:
             type: string
             description: |
@@ -1158,6 +1136,13 @@ properties:
               interval:
                 type: string
                 description: Polling time to query cpu/memory statistics default 500ms
+              log-length:
+                type: [ integer, 'null' ]
+                minimum: 0
+                description: |
+                  Maximum number of samples to keep in memory.
+                  Multiply by `interval` to obtain log duration.
+                  Set to null for unlimited.
               disk:
                 type: boolean
                 description: Should we include disk metrics?  (they can cause issues in some systems)
