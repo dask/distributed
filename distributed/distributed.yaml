@@ -276,7 +276,9 @@ distributed:
       ignore-modules:
         - asyncio
         - functools
+        - datashader
         - dask
+        - debugpy
         - distributed
         - coiled
         - cudf
@@ -293,6 +295,8 @@ distributed:
         - pytest-script\.py  # `pytest` shell command in Windows
         - _pytest  # pytest implementation
         - pycharm  # Run pytest from PyCharm GUI
+        - vscode_pytest
+        - get_output_via_markers\.py
     erred-tasks:
       max-history: 100
 
