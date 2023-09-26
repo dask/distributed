@@ -21,6 +21,7 @@ from dask.config import config  # type: ignore
 
 from distributed._version import get_versions
 from distributed.actor import Actor, ActorFuture, BaseActorFuture
+from distributed.bridge import Bridge
 from distributed.client import (
     Client,
     CompatibleExecutor,
@@ -34,7 +35,6 @@ from distributed.client import (
     performance_report,
     wait,
 )
-from distributed.bridge import Bridge
 from distributed.core import Status, connect, rpc
 from distributed.deploy import (
     Adaptive,

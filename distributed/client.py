@@ -219,7 +219,7 @@ class Future(WrappedKey):
         self._inform = inform
         self._external = external
         self._state = None
-        self._bind_late()        
+        self._bind_late()
 
     @property
     def client(self):
@@ -240,7 +240,9 @@ class Future(WrappedKey):
             if self.key in self._client.futures:
                 self._state = self._client.futures[self.key]
             else:
-                self._state = self._client.futures[self.key] = FutureState(external=self._external)
+                self._state = self._client.futures[self.key] = FutureState(
+                    external=self._external
+                )
 
             if self._inform:
                 self._client._send_to_scheduler(
@@ -321,7 +323,7 @@ class Future(WrappedKey):
             The result of the computation. Or a coroutine if the client is asynchronous.
         """
         self._verify_initialized()
-        #with shorten_traceback(): #st.traceback
+        # with shorten_traceback(): #st.traceback
         return self.client.sync(self._result, callback_timeout=timeout)
 
     async def _result(self, raiseit=True):
@@ -2425,7 +2427,7 @@ class Client(SyncMethodMixin):
             data = [data]
         if isinstance(data, (list, tuple)):
             if keys:
-                names=[k for k in keys]
+                names = [k for k in keys]
             else:
                 if hash:
                     names = [type(x).__name__ + "-" + tokenize(x) for x in data]
@@ -2473,7 +2475,10 @@ class Client(SyncMethodMixin):
                     raise ValueError("No valid workers found")
 
                 _, who_has, nbytes = await scatter_to_workers(
-                    nthreads, data2, rpc=self.rpc, external=external,
+                    nthreads,
+                    data2,
+                    rpc=self.rpc,
+                    external=external,
                 )
                 if not external:
                     await self.scheduler.update_data(
@@ -2515,7 +2520,6 @@ class Client(SyncMethodMixin):
         timeout=no_default,
         asynchronous=None,
         external=False,
-
     ):
         """Scatter data into distributed memory
 
@@ -2554,7 +2558,7 @@ class Client(SyncMethodMixin):
             ``dask.distributed.TimeoutError``
         asynchronous: bool
             If True the client is in asynchronous mode
-        external: bool 
+        external: bool
             If True the data has been generated from an external application
 
         Returns

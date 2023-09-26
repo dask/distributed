@@ -130,6 +130,7 @@ from distributed.worker_state_machine import (
     DeprecatedWorkerStateAttribute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
+    ExternalTaskEvent,
     FindMissingEvent,
     FreeKeysEvent,
     GatherDepBusyEvent,
@@ -148,7 +149,6 @@ from distributed.worker_state_machine import (
     TaskState,
     UnpauseEvent,
     UpdateDataEvent,
-    ExternalTaskEvent,
     WorkerState,
 )
 
@@ -1822,10 +1822,8 @@ class Worker(BaseWorker, ServerNode):
         self,
         data: dict[str, object],
         stimulus_id: str | None = None,
-        external: True | None = None, 
-
+        external: bool = False,
     ) -> dict[str, Any]:
-
         if external:
             stimulus_id = f"external-task-{time()}"
             self.handle_stimulus(ExternalTaskEvent(data=data, stimulus_id=stimulus_id))
