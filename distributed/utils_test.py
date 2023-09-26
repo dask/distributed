@@ -995,9 +995,10 @@ def gen_cluster(
             async def async_fn():
                 result = None
                 with dask.config.set(config):
-                    async with _cluster_factory() as (s, workers), _client_factory(
-                        s
-                    ) as c:
+                    async with (
+                        _cluster_factory() as (s, workers),
+                        _client_factory(s) as c,
+                    ):
                         args = [s] + workers
                         if c is not None:
                             args = [c] + args

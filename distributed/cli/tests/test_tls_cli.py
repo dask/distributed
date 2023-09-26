@@ -31,14 +31,12 @@ def wait_for_cores(c, nthreads=1):
 
 
 def test_basic(loop, requires_default_ports):
-    with popen(["dask", "scheduler", "--no-dashboard"] + tls_args) as s:
-        with popen(
-            ["dask", "worker", "--no-dashboard", "tls://127.0.0.1:8786"] + tls_args
-        ) as w:
-            with Client(
-                "tls://127.0.0.1:8786", loop=loop, security=tls_security()
-            ) as c:
-                wait_for_cores(c)
+    with (
+        popen(["dask", "scheduler", "--no-dashboard"] + tls_args),
+        popen(["dask", "worker", "--no-dashboard", "tls://127.0.0.1:8786"] + tls_args),
+        Client("tls://127.0.0.1:8786", loop=loop, security=tls_security()) as c,
+    ):
+        wait_for_cores(c)
 
 
 def test_sni(loop):
