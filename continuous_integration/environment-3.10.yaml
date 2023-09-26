@@ -19,7 +19,7 @@ dependencies:
   - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
   - jinja2 >=2.10.3
   - locket >=1.0
-  - msgpack-python
+  - msgpack-python <1.0.6  # https://github.com/dask/distributed/issues/8212
   - netcdf4
   - paramiko
   - pre-commit

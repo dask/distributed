@@ -22,7 +22,7 @@ dependencies:
   - jinja2 >=2.10.3
   - locket >=1.0
   - lz4 >=0.23.1  # Only tested here
-  - msgpack-python
+  - msgpack-python <1.0.6  # https://github.com/dask/distributed/issues/8212
   - netcdf4
   - paramiko
   - pre-commit
