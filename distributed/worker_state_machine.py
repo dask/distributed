@@ -456,6 +456,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
         d["status"] = "OK"
         return d
 
+
 @dataclass
 class ExternalTaskFinishedMsg(SendMessageToScheduler):
     op = "external-task-finished"
@@ -1044,6 +1045,7 @@ class UpdateDataEvent(StateMachineEvent):
         out.data = dict.fromkeys(self.data)
         return out
 
+
 @dataclass
 class ExternalTaskEvent(StateMachineEvent):
     __slots__ = ("data",)
@@ -1054,6 +1056,7 @@ class ExternalTaskEvent(StateMachineEvent):
         out.handled = handled
         out.data = dict.fromkeys(self.data)
         return out
+
 
 @dataclass
 class SecedeEvent(StateMachineEvent):
@@ -1825,7 +1828,6 @@ class WorkerState:
             stimulus_id=stimulus_id,
         )
 
-        
     def _get_external_task_finished_msg(
         self,
         ts: TaskState,
@@ -2406,8 +2408,12 @@ class WorkerState:
         scheduler does know this key exists.
         """
         return self._transition_to_memory(
-            ts, value, "external-task-finished", run_id=RUN_ID_SENTINEL, stimulus_id=stimulus_id
-        )   
+            ts,
+            value,
+            "external-task-finished",
+            run_id=RUN_ID_SENTINEL,
+            stimulus_id=stimulus_id,
+        )
 
     def _transition_flight_memory(
         self, ts: TaskState, value: object, run_id: int, *, stimulus_id: str
@@ -2536,7 +2542,7 @@ class WorkerState:
             )
         # NOTE: this will trigger transitions
         elif msg_type == "external-task-finished":
-            #assert run_id != RUN_ID_SENTINEL
+            # assert run_id != RUN_ID_SENTINEL
             instructions.append(
                 self._get_external_task_finished_msg(
                     ts,
@@ -2661,7 +2667,7 @@ class WorkerState:
 
         if ts.state == finish:
             return {}, []
-        
+
         start = ts.state
         func = self._TRANSITIONS_TABLE.get((start, finish))
 
@@ -2677,10 +2683,6 @@ class WorkerState:
             raise TransitionCounterMaxExceeded(ts.key, start, finish, self.story(ts))
 
         if func is not None:
-            recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
-            self._notify_plugins("transition", ts.key, start, finish)
-
-        elif "external" in (start, finish) and "memory" in (start, finish):
             recs, instructions = func(self, ts, *args, stimulus_id=stimulus_id)
             self._notify_plugins("transition", ts.key, start, finish)
 
@@ -2821,13 +2823,11 @@ class WorkerState:
     def _handle_external_task(self, ev: ExternalTaskEvent) -> RecsInstrs:
         recommendations: Recs = {}
         for key, value in ev.data.items():
-            self.tasks[key] = ts = TaskState(key, state = "external")
+            self.tasks[key] = ts = TaskState(key, state="external")
             self.task_counter.new_task(ts)
 
             recommendations[ts] = ("memory", value, RUN_ID_SENTINEL)
-            self.log.append(
-                (key, "external-task", ts.state, ev.stimulus_id, time())
-            )
+            self.log.append((key, "external-task", ts.state, ev.stimulus_id, time()))
         return recommendations, []
 
     @_handle_event.register

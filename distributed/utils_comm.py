@@ -175,9 +175,7 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, external=False):
     try:
         out = await All(
             [
-                rpcs[address].update_data(
-                    data=v, external=external
-                ) 
+                rpcs[address].update_data(data=v, external=external)
                 for address, v in d.items()
             ]
         )
@@ -188,7 +186,7 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, external=False):
     nbytes = merge(o["nbytes"] for o in out)
 
     who_has = {k: [w for w, _, _ in v] for k, v in groupby(1, L).items()}
-    
+
     return (names, who_has, nbytes)
 
 
