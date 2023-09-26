@@ -26,7 +26,6 @@ deprecations = {
     "allowed-failures": "distributed.scheduler.allowed-failures",
     "bandwidth": "distributed.scheduler.bandwidth",
     "default-data-size": "distributed.scheduler.default-data-size",
-    "transition-log-length": "distributed.scheduler.transition-log-length",
     "work-stealing": "distributed.scheduler.work-stealing",
     "worker-ttl": "distributed.scheduler.worker-ttl",
     "multiprocessing-method": "distributed.worker.multiprocessing-method",
@@ -43,7 +42,6 @@ deprecations = {
     "tcp-timeout": "distributed.comm.timeouts.tcp",
     "default-scheme": "distributed.comm.default-scheme",
     "socket-backlog": "distributed.comm.socket-backlog",
-    "recent-messages-log-length": "distributed.comm.recent-messages-log-length",
     "diagnostics-link": "distributed.dashboard.link",
     "bokeh-export-tool": "distributed.dashboard.export-tool",
     "tick-time": "distributed.admin.tick.interval",
@@ -53,6 +51,12 @@ deprecations = {
     "pdb-on-err": "distributed.admin.pdb-on-err",
     "ucx": "distributed.comm.ucx",
     "rmm": "distributed.rmm",
+    # low-level-log-length aliases
+    "transition-log-length": "distributed.admin.low-level-log-length",
+    "distributed.scheduler.transition-log-length": "distributed.admin.low-level-log-length",
+    "distributed.scheduler.events-log-length": "distributed.admin.low-level-log-length",
+    "recent-messages-log-length": "distributed.admin.low-level-log-length",
+    "distributed.comm.recent-messages-log-length": "distributed.admin.low-level-log-length",
 }
 
 # Affects yaml and env variables configs, as well as calls to dask.config.set()

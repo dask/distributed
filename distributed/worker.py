@@ -567,15 +567,16 @@ class Worker(BaseWorker, ServerNode):
         self.active_threads = {}
         self.active_keys = set()
         self.profile_keys = defaultdict(profile.create)
-        self.profile_keys_history = deque(maxlen=3600)
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
+        self.profile_keys_history = deque(maxlen=maxlen)
+        self.profile_history = deque(maxlen=maxlen)
         self.profile_recent = profile.create()
-        self.profile_history = deque(maxlen=3600)
 
         if validate is None:
             validate = dask.config.get("distributed.worker.validate")
 
-        self.transfer_incoming_log = deque(maxlen=100000)
-        self.transfer_outgoing_log = deque(maxlen=100000)
+        self.transfer_incoming_log = deque(maxlen=maxlen)
+        self.transfer_outgoing_log = deque(maxlen=maxlen)
         self.transfer_outgoing_count_total = 0
         self.transfer_outgoing_bytes_total = 0
         self.transfer_outgoing_bytes = 0
