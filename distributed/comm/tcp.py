@@ -239,7 +239,7 @@ class TCP(Comm):
             if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
         except BaseException:
-            # Some OSError, CancelledError or a another "low-level" exception.
+            # Some OSError, CancelledError or another "low-level" exception.
             # We do not really know what was already read from the underlying
             # socket, so it is not even safe to retry here using the same stream.
             # The only safe thing to do is to abort.
