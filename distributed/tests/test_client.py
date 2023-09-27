@@ -3359,7 +3359,7 @@ def test_default_get(loop_in_thread):
     try:
         check_minimal_arrow_version()
         has_pyarrow = True
-    except RuntimeError:
+    except ImportError:
         pass
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
@@ -7314,7 +7314,10 @@ def test_computation_code_walk_frames():
             code = Client._get_computation_code()
 
     with dask.config.set(
-        {"distributed.diagnostics.computations.ignore-modules": ["test_client"]}
+        {
+            "distributed.diagnostics.computations.ignore-modules": ["test_client"],
+            "distributed.diagnostics.computations.ignore-files": [],
+        }
     ):
         import sys
 
@@ -7413,10 +7416,8 @@ def test_computation_object_code_dask_compute(client):
         return comp.code[0]
 
     code = client.run_on_scheduler(fetch_comp_code)
-
-    assert len(code) == 2
-    assert code[-1].code == test_function_code
-    assert code[-2].code == inspect.getsource(sys._getframe(1))
+    assert len(code) == 1
+    assert code[0].code == test_function_code
 
 
 def test_computation_object_code_dask_compute_no_frames_default(client):
@@ -8385,15 +8386,6 @@ async def test_fast_close_on_aexit_failure(s):
     assert _close_proxy.mock_calls == [mock.call(fast=True)]
     assert c.status == "closed"
     assert (stop - start) < 2
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_wait_for_workers_no_default(c, s):
-    with pytest.warns(
-        FutureWarning,
-        match="specify the `n_workers` argument when using `Client.wait_for_workers`",
-    ):
-        await c.wait_for_workers()
 
 
 @pytest.mark.parametrize(

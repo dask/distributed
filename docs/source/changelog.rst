@@ -1,6 +1,81 @@
 Changelog
 =========
 
+.. _v2023.9.2:
+
+2023.9.2
+--------
+
+Released on September 15, 2023
+
+Highlights
+^^^^^^^^^^
+
+Reduce memory footprint of P2P shuffling
+""""""""""""""""""""""""""""""""""""""""
+Significantly reduced the peak and average memory used by P2P shuffling
+(up to a factor of 2x reduction). This change also increases the P2P
+minimum supported verions of ``pyarrow`` to ``pyarrow=12``.
+
+See :pr:`8157` from `Hendrik Makait`_ for details.
+
+Improved plugin API
+"""""""""""""""""""
+
+Two plugin changes have been introduced to provide a more consistent
+and convienent plugin UX:
+
+.. currentmodule:: distributed
+
+1. Plugins must now inherit from :class:`~distributed.diagnostics.plugin.WorkerPlugin`,
+   :class:`~distributed.diagnostics.plugin.SchedulerPlugin`,
+   or :class:`~distributed.diagnostics.plugin.NannyPlugin` base classes.
+   Old-style plugins that don't inherit from a base class will still work,
+   but with a deprecation warning.
+
+2. A new :meth:`Client.register_plugin` method has been introduced in favor
+   of the previous :meth:`Client.register_worker_plugin` and
+   :meth:`Client.register_scheduler_plugin` methods.
+   All plugins should now be registered using the centralized
+   :meth:`Client.register_plugin` method.
+
+.. code-block:: python
+
+    from dask.distributed import WorkerPlugin, SchedulerPlugin
+
+    class MySchedulerPlugin(SchedulerPlugin):      # Inherits from SchedulerPlugin
+        def start(self, scheduler):
+            print("Hello from the scheduler!")
+
+    class MyWorkerPlugin(WorkerPlugin):            # Inherits from WorkerPlugin
+        def setup(self, worker):
+            print(f"Hello from Worker {worker}!")
+
+    client.register_plugin(MySchedulerPlugin())    # Single method to register both types of plugins
+    client.register_plugin(MyWorkerPlugin())
+
+See :pr:`8169` and :pr:`8150` from `Hendrik Makait`_ for details.
+
+
+Emit deprecation warnings for configuration option renames
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+When a Dask configuration option that has been renamed is used,
+users will now get a deprecation warning pointing them to the new
+name.
+
+See :pr:`8179` from `crusaderky`_ for details.
+
+.. dropdown:: Additional changes
+
+    - Skip ``rechunker`` in code samples (:pr:`8178`) `Matthew Rocklin`_
+    - Ensure an error during ``ShuffleRun.close`` cannot block worker shutdown (:pr:`8184`) `Florian Jetter`_
+    - Fix race condition between ``MemorySampler`` and scheduler shutdown (:pr:`8172`) `crusaderky`_
+    - Fix post-stringification info pages (:pr:`8161`) `Florian Jetter`_
+    - Fix validation in unpack phase of P2P shuffle (:pr:`8160`) `Hendrik Makait`_
+    - Use ``config_for_cluster_tests`` in sync fixture (:pr:`8180`) `crusaderky`_
+    - Simplify boilerplate for P2P shuffles (:pr:`8174`) `Hendrik Makait`_
+
+
 .. _v2023.9.1:
 
 2023.9.1

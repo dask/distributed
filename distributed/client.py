@@ -35,6 +35,7 @@ from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
+from dask.typing import no_default
 from dask.utils import (
     apply,
     ensure_dict,
@@ -101,7 +102,6 @@ from distributed.utils import (
     import_term,
     is_python_shutting_down,
     log_errors,
-    no_default,
     sync,
     thread_state,
 )
@@ -854,7 +854,7 @@ class Client(SyncMethodMixin):
         connection_limit=512,
         **kwargs,
     ):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = dask.config.get("distributed.comm.timeouts.connect")
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
@@ -1248,7 +1248,7 @@ class Client(SyncMethodMixin):
 
         await self.rpc.start()
 
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
@@ -1437,11 +1437,7 @@ class Client(SyncMethodMixin):
             info = await self.scheduler.identity()
             self._scheduler_identity = SchedulerInfo(info)
 
-    def wait_for_workers(
-        self,
-        n_workers: int | str = no_default,
-        timeout: float | None = None,
-    ) -> None:
+    def wait_for_workers(self, n_workers: int, timeout: float | None = None) -> None:
         """Blocking call to wait for n workers before continuing
 
         Parameters
@@ -1452,13 +1448,7 @@ class Client(SyncMethodMixin):
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
         """
-        if n_workers is no_default:
-            warnings.warn(
-                "Please specify the `n_workers` argument when using `Client.wait_for_workers`. Not specifying `n_workers` will no longer be supported in future versions.",
-                FutureWarning,
-            )
-            n_workers = 0
-        elif not isinstance(n_workers, int) or n_workers < 1:
+        if not isinstance(n_workers, int) or n_workers < 1:
             raise ValueError(
                 f"`n_workers` must be a positive integer. Instead got {n_workers}."
             )
@@ -1763,7 +1753,7 @@ class Client(SyncMethodMixin):
         --------
         Client.restart
         """
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout * 2
         # XXX handling of self.status here is not thread-safe
         if self.status in ["closed", "newly-created"]:
@@ -2409,7 +2399,7 @@ class Client(SyncMethodMixin):
         timeout=no_default,
         hash=True,
     ):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -2598,7 +2588,7 @@ class Client(SyncMethodMixin):
         --------
         Client.gather : Gather data back to local process
         """
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if isinstance(data, pyQueue) or isinstance(data, Iterator):
             raise TypeError(
@@ -3032,6 +3022,7 @@ class Client(SyncMethodMixin):
         """
         if nframes <= 0:
             return ()
+
         ignore_modules = dask.config.get(
             "distributed.diagnostics.computations.ignore-modules"
         )
@@ -3040,10 +3031,26 @@ class Client(SyncMethodMixin):
                 "Ignored modules must be a list. Instead got "
                 f"({type(ignore_modules)}, {ignore_modules})"
             )
-        pattern: re.Pattern | None = None
+        ignore_files = dask.config.get(
+            "distributed.diagnostics.computations.ignore-files"
+        )
+        if not isinstance(ignore_files, list):
+            raise TypeError(
+                "Ignored files must be a list. Instead got "
+                f"({type(ignore_files)}, {ignore_files})"
+            )
+
+        mod_pattern: re.Pattern | None = None
+        fname_pattern: re.Pattern | None = None
         if stacklevel is None:
             if ignore_modules:
-                pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
+                mod_pattern = re.compile(
+                    "|".join([f"(?:{mod})" for mod in ignore_modules])
+                )
+            if ignore_files:
+                fname_pattern = re.compile(
+                    r".*[\\/](" + "|".join(mod for mod in ignore_files) + r")([\\/]|$)"
+                )
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
@@ -3054,12 +3061,13 @@ class Client(SyncMethodMixin):
         ):
             if len(code) >= nframes:
                 break
-            elif stacklevel is not None and i != stacklevel:
+            if stacklevel is not None and i != stacklevel:
                 continue
-            elif pattern is not None and (
-                pattern.match(fr.f_globals.get("__name__", ""))
-                or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
-            ):
+            if fr.f_code.co_name in ("<listcomp>", "<dictcomp>"):
+                continue
+            if mod_pattern and mod_pattern.match(fr.f_globals.get("__name__", "")):
+                continue
+            if fname_pattern and fname_pattern.match(fr.f_code.co_filename):
                 continue
 
             kwargs = dict(
@@ -3587,7 +3595,7 @@ class Client(SyncMethodMixin):
             return result
 
     async def _restart(self, timeout=no_default, wait_for_workers=True):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout * 4
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")

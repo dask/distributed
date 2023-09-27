@@ -54,6 +54,7 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.utils
 from dask.core import get_deps, validate_key
+from dask.typing import no_default
 from dask.utils import (
     format_bytes,
     format_time,
@@ -119,7 +120,6 @@ from distributed.utils import (
     get_fileno_limit,
     key_split_group,
     log_errors,
-    no_default,
     offload,
     recursive_to_dict,
     wait_for,
@@ -1629,7 +1629,7 @@ class SchedulerState:
 
     #: History of task state transitions.
     #: The length can be tweaked through
-    #: distributed.scheduler.transition-log-length
+    #: distributed.admin.low-level-log-length
     transition_log: deque[Transition]
 
     #: Total number of transitions since the cluster was started
@@ -1721,7 +1721,7 @@ class SchedulerState:
         self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
 
         self.transition_log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
+            maxlen=dask.config.get("distributed.admin.low-level-log-length")
         )
         self.transition_counter = 0
         self._idle_transition_counter = 0
@@ -3656,11 +3656,8 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.events = defaultdict(
-            partial(
-                deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
-            )
-        )
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
+        self.events = defaultdict(partial(deque, maxlen=maxlen))
         self.event_counts = defaultdict(int)
         self.event_subscriber = defaultdict(set)
         self.worker_plugins = {}
@@ -7419,7 +7416,7 @@ class Scheduler(SchedulerState, ServerNode):
                 metadata = metadata[key]
             return metadata
         except KeyError:
-            if default != no_default:
+            if default is not no_default:
                 return default
             else:
                 raise
@@ -7492,7 +7489,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(
-        self, plugin: bytes, name: str, idempotent: bool = False
+        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
     ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
@@ -7507,7 +7504,7 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def unregister_worker_plugin(
-        self, name: str
+        self, comm: None, name: str
     ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
@@ -7519,7 +7516,7 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def register_nanny_plugin(
-        self, plugin: bytes, name: str, idempotent: bool = False
+        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
     ) -> dict[str, OKMessage]:
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
@@ -7540,7 +7537,7 @@ class Scheduler(SchedulerState, ServerNode):
             return responses
 
     async def unregister_nanny_plugin(
-        self, name: str
+        self, comm: None, name: str
     ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
@@ -8449,8 +8446,8 @@ class KilledWorker(Exception):
 
     def __str__(self) -> str:
         return (
-            f"Attempted to run task {self.task} on {self.allowed_failures} different "
-            "workers, but all those workers died while running it. "
+            f"Attempted to run task {self.task} on {self.allowed_failures + 1} "
+            "different workers, but all those workers died while running it. "
             f"The last worker that attempt to run the task was {self.last_worker.address}. "
             "Inspecting worker logs is often a good next step to diagnose what went wrong. "
             "For more information see https://distributed.dask.org/en/stable/killed.html."

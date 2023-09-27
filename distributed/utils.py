@@ -95,8 +95,6 @@ if TYPE_CHECKING:
     P = ParamSpec("P")
     T = TypeVar("T")
 
-no_default = "__no_default__"
-
 _forkserver_preload_set = False
 
 
@@ -1605,15 +1603,7 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
 
 
 _deprecations = {
-    "deserialize_for_cli": "dask.config.deserialize",
-    "serialize_for_cli": "dask.config.serialize",
-    "format_bytes": "dask.utils.format_bytes",
-    "format_time": "dask.utils.format_time",
-    "funcname": "dask.utils.funcname",
-    "parse_bytes": "dask.utils.parse_bytes",
-    "parse_timedelta": "dask.utils.parse_timedelta",
-    "typename": "dask.utils.typename",
-    "tmpfile": "dask.utils.tmpfile",
+    "no_default": "dask.typing.no_default",
 }
 
 
