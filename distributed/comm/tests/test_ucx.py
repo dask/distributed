@@ -426,9 +426,9 @@ async def test_embedded_cupy_array(
     async with LocalCluster(
         protocol="ucx", n_workers=1, threads_per_worker=1, asynchronous=True
     ) as cluster:
-        async with Client(cluster, asynchronous=True):
+        async with Client(cluster, asynchronous=True) as client:
             assert cluster.scheduler_address.startswith("ucx://")
             a = cupy.arange(10000)
             x = da.from_array(a, chunks=(10000,))
-            await x
-            np.testing.assert_array_equal(a, x.compute())
+            b = await client.compute(x)
+            cupy.testing.assert_array_equal(a, b)
