@@ -69,6 +69,7 @@ from distributed.client import (
     ensure_default_client,
     futures_of,
     get_task_metadata,
+    results_in_order,
     temp_default_client,
     tokenize,
     wait,
@@ -8507,3 +8508,71 @@ async def test_gather_race_vs_AMM(c, s, a, direct):
         b.block_get_data.set()
 
     assert await fut == 3  # It's from a; it would be 2 if it were from b
+
+
+def test_results_in_order(c, s, a, b):
+    f1 = c.submit(inc, 0)
+    f2 = c.submit(inc, 1)
+    f3 = c.submit(inc, 2)
+
+    assert list(results_in_order([f1, f2, f3])) == [1, 2, 3]
+    assert list(results_in_order([f3, f2, f1])) == [3, 2, 1]
+
+
+@gen_cluster(client=True)
+async def test_results_in_order_async_error(c, s, a, b):
+    f = c.submit(inc, 0)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"Got asynchronous Future running on current event loop these "
+        "must be awaited",
+    ):
+        next(results_in_order([f]))
+
+
+def test_results_in_order_non_future():
+    with pytest.raises(TypeError, match=r"Input must be a future, got <class 'int'>"):
+        next(results_in_order([1]))
+
+
+def test_results_in_order_actor(c, s, a, b):
+    class Counter:
+        n = 0
+
+        def increment(self):
+            self.n += 1
+            return self.n
+
+    class UsesCounter:
+        def do_inc(self, ac):
+            f1 = ac.increment()
+            f2 = ac.increment()
+            f3 = ac.increment()
+            return list(results_in_order([f1, f2, f3]))
+
+    ac = c.submit(Counter, actor=True, workers=[a["address"]]).result()
+    ac2 = c.submit(UsesCounter, actor=True, workers=[b["address"]]).result()
+
+    assert ac2.do_inc(ac).result() == [1, 2, 3]
+
+
+def test_results_in_order_eager_actor(c, s, a):
+    class Counter:
+        n = 0
+
+        def increment(self):
+            self.n += 1
+            return self.n
+
+    class UsesCounter:
+        def do_inc(self, ac):
+            f1 = ac.increment()
+            f2 = ac.increment()
+            f3 = ac.increment()
+            return list(results_in_order([f1, f2, f3]))
+
+    ac = c.submit(Counter, actor=True, workers=[a["address"]]).result()
+    ac2 = c.submit(UsesCounter, actor=True, workers=[a["address"]]).result()
+
+    assert ac2.do_inc(ac).result() == [1, 2, 3]

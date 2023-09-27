@@ -32,6 +32,7 @@ from distributed.client import (
     get_task_metadata,
     get_task_stream,
     performance_report,
+    results_in_order,
     wait,
 )
 from distributed.core import Status, connect, rpc
