@@ -406,14 +406,14 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
                 self.installer, self.restart_workers, self.name
             )
             await scheduler.register_worker_plugin(
-                plugin=dumps(worker_plugin), name=self.name
+                comm=None, plugin=dumps(worker_plugin), name=self.name
             )
 
     async def close(self) -> None:
         assert PackageInstall._lock is not None
 
         async with PackageInstall._lock:
-            await self._scheduler.unregister_worker_plugin(name=self.name)
+            await self._scheduler.unregister_worker_plugin(comm=None, name=self.name)
 
     def _is_installed(self, scheduler: Scheduler) -> bool:
         return scheduler.get_metadata(self._compose_installed_key(), default=False)
