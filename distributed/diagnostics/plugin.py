@@ -394,8 +394,8 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
                     self.installer.INSTALLER,
                     self.installer.packages,
                 )
-                self._set_installed(scheduler)
                 self.installer.install()
+                self._set_installed(scheduler)
             else:
                 logger.info(
                     "The following packages have already been installed on the scheduler: %s",
