@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+import warnings
 from threading import Lock
 from time import sleep
 from unittest import mock
@@ -1269,3 +1270,61 @@ def test_localcluster_get_client(loop):
             with Client(cluster) as client2:
                 assert client1 != client2
                 assert client2 == cluster.get_client()
+
+
+def test_dashboard_bound_port_fail(loop):
+    try:
+        c = LocalCluster(
+            n_workers=2, silence_logs=False, dashboard_address=":8787", loop=loop
+        )
+
+        with pytest.warns(UserWarning, match="Port 8787 is already in use."):
+            c2 = LocalCluster(
+                n_workers=2,
+                silence_logs=False,
+                dashboard_address=":8787",
+                loop=loop,
+            )
+            c2.close()
+
+        c.close()
+    except RuntimeError:
+        # `c` might have failed to spawn with `RuntimeError` if port 8787 is already in use
+        with pytest.warns(UserWarning, match="Port 8787 is already in use."):
+            c2 = LocalCluster(
+                n_workers=2,
+                silence_logs=False,
+                dashboard_address=":8787",
+                loop=loop,
+            )
+            c2.close()
+
+
+def test_disable_dashboard(loop):
+    try:
+        c = LocalCluster(
+            n_workers=2, silence_logs=False, dashboard_address=":8787", loop=loop
+        )
+
+        with warnings.catch_warnings(record=True) as record:
+            c2 = LocalCluster(
+                n_workers=2,
+                silence_logs=False,
+                dashboard_address=None,
+                loop=loop,
+            )
+            c2.close()
+
+        c.close()
+    except RuntimeError:
+        # `c` might have failed to spawn with `RuntimeError` if port 8787 is already in use
+        with warnings.catch_warnings(record=True) as record:
+            c2 = LocalCluster(
+                n_workers=2,
+                silence_logs=False,
+                dashboard_address=None,
+                loop=loop,
+            )
+            c2.close()
+    finally:
+        assert not record

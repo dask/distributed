@@ -919,7 +919,7 @@ def gen_cluster(
         timeout = 3600
     scheduler_kwargs = merge(
         dict(
-            dashboard=False,
+            dashboard=True,
             dashboard_address=":0",
             transition_counter_max=50_000,
         ),

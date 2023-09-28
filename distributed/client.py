@@ -1119,7 +1119,7 @@ class Client(SyncMethodMixin):
             return self.cluster.dashboard_link
         except AttributeError:
             scheduler, info = self._get_scheduler_info()
-            if scheduler is None:
+            if scheduler is None or "dashboard" not in info["services"]:
                 return None
             else:
                 protocol, rest = scheduler.address.split("://")
