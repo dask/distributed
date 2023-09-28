@@ -1026,6 +1026,12 @@ properties:
                   A list of modules which are ignored when trying to collect the
                   code context when submitting a computation. Accepts regular
                   expressions.
+              ignore-files:
+                type: array
+                description: |
+                  A list of files and directories which are ignored when trying to
+                  collect the code context when submitting a computation. Accepts
+                  regular expressions.
           erred-tasks:
             type: object
             properties:
