@@ -1,26 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import subprocess
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
 import pytest
-
-from distributed.core import Status
-
-pytest.importorskip("requests")
-
-import requests
-
-from distributed import Client
-
-pytest.importorskip("jupyter_server")
-
 from tornado.httpclient import AsyncHTTPClient
 
-from distributed import Scheduler
+from distributed import Client, Scheduler
+from distributed.core import Status
 from distributed.utils import open_port
 from distributed.utils_test import gen_test, popen
+
+pytest.importorskip("requests")
+import requests
+
+pytest.importorskip("jupyter_server")
 
 pytestmark = pytest.mark.filterwarnings("ignore:Jupyter is migrating its paths")
 
@@ -100,3 +97,44 @@ async def test_jupyter_idle_timeout_returned():
         assert s.check_idle() is None
         # ^ NOTE: this probably should be `== next_idle`;
         # see discussion in https://github.com/dask/distributed/pull/7687#discussion_r1145095196
+
+
+@pytest.mark.slow
+def test_shutsdown_cleanly(loop):
+    port = open_port()
+    with concurrent.futures.ThreadPoolExecutor() as tpe:
+        subprocess_fut = tpe.submit(
+            subprocess.run,
+            [
+                "dask",
+                "scheduler",
+                "--jupyter",
+                "--no-dashboard",
+                "--host",
+                f"127.0.0.1:{port}",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=10,
+            encoding="utf8",
+        )
+
+        # wait until scheduler is running
+        with Client(f"127.0.0.1:{port}", loop=loop):
+            pass
+
+        with requests.Session() as session:
+            session.get("http://127.0.0.1:8787/jupyter/lab").raise_for_status()
+            session.post(
+                "http://127.0.0.1:8787/jupyter/api/shutdown",
+                headers={"X-XSRFToken": session.cookies["_xsrf"]},
+            ).raise_for_status()
+
+        stderr = subprocess_fut.result().stderr
+        assert "Traceback" not in stderr
+        assert "Shutting down on /api/shutdown request.\n" in stderr
+        assert (
+            f"distributed.scheduler - INFO - Stopped scheduler at 'tcp://127.0.0.1:{port}'"
+            in stderr
+        )
+        assert stderr.endswith("distributed.scheduler - INFO - End scheduler\n")
