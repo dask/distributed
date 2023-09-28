@@ -26,9 +26,11 @@ export CUDA_REL=${CUDA_VERSION%.*}
 # FIXME - monitoring GIL contention causes UCX teardown issues
 export DASK_DISTRIBUTED__ADMIN__SYSTEM_MONITOR__GIL__ENABLED=False
 
-# enable cuDF spilling to host
+# enable monitoring of cuDF spilling
 export CUDF_SPILL=on
 export CUDF_SPILL_STATS=1
+export DASK_DISTRIBUTED__DIAGNOSTICS__CUDF=1
+
 
 ################################################################################
 # SETUP - Check environment

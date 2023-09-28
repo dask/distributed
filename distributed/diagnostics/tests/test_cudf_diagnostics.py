@@ -29,7 +29,11 @@ def force_spill():
 async def test_cudf_metrics(c, s, *workers):
     w = list(s.workers.values())[0]
     assert "cudf" in w.metrics
-    assert w.metrics["cudf"]["cudf-spilled"] == 0
+
+    if spill_initial := w.metrics["cudf"]["cudf-spilled"] is None:
+        pytest.xfail("cuDF spilling & spilling statistics must be enabled")
+
+    assert spill_initial == 0
 
     try:
         await c.run(force_spill)
