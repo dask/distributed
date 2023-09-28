@@ -132,9 +132,13 @@ def test_shutsdown_cleanly(loop):
 
         stderr = subprocess_fut.result().stderr
         assert "Traceback" not in stderr
+        assert (
+            "distributed.scheduler - INFO - Scheduler closing due to shutdown "
+            "requested via Jupyter...\n" in stderr
+        )
         assert "Shutting down on /api/shutdown request.\n" in stderr
         assert (
-            f"distributed.scheduler - INFO - Stopped scheduler at 'tcp://127.0.0.1:{port}'"
-            in stderr
+            "distributed.scheduler - INFO - Stopped scheduler at "
+            f"'tcp://127.0.0.1:{port}'\n" in stderr
         )
         assert stderr.endswith("distributed.scheduler - INFO - End scheduler\n")
