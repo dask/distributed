@@ -267,6 +267,7 @@ distributed:
 
   diagnostics:
     nvml: True
+    cudf: False
     computations:
       max-history: 100
       nframes: 0

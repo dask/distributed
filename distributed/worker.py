@@ -78,7 +78,7 @@ from distributed.core import (
 )
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
-from distributed.diagnostics import cudf, nvml, rmm
+from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
@@ -3221,19 +3221,21 @@ else:
     DEFAULT_METRICS["rmm"] = rmm_metric
     del _rmm
 
+# avoid importing cuDF unless explicitly enabled
+if dask.config.get("distributed.diagnostics.cudf"):
+    try:
+        import cudf as _cudf  # noqa: F401
+    except Exception:
+        pass
+    else:
+        from distributed.diagnostics import cudf
 
-try:
-    import cudf as _cudf
-except Exception:
-    pass
-else:
+        async def cudf_metric(worker):
+            result = await offload(cudf.real_time)
+            return result
 
-    async def cudf_metric(worker):
-        result = await offload(cudf.real_time)
-        return result
-
-    DEFAULT_METRICS["cudf"] = cudf_metric
-    del _cudf
+        DEFAULT_METRICS["cudf"] = cudf_metric
+        del _cudf
 
 
 def print(

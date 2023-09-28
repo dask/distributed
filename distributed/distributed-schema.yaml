@@ -1001,6 +1001,12 @@ properties:
               not a problem and will be automatically disabled if no GPUs are found in the
               system, but in certain cases it may be desirable to completely disable NVML
               diagnostics.
+          cudf:
+            type: boolean
+            description: |
+              If ``True``, enables tracking of GPU spilling and unspilling managed by cuDF (if it is enabled).
+              Note that this forces a cuDF import at worker startup, which may be undesirable for performance
+              and memory footprint.
           computations:
             type: object
             properties:
@@ -1008,7 +1014,7 @@ properties:
                 type: integer
                 minimum: 0
                 description: |
-                  The maximum number of Computations to remember.
+                  The maximum number of computations to remember.
               nframes:
                 type: integer
                 minimum: 0
