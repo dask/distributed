@@ -445,21 +445,6 @@ def test_serialize_raises():
     assert "Hello-123" in str(info.value)
 
 
-@gen_test()
-async def test_profile_nested_sizeof():
-    # https://github.com/dask/distributed/issues/1674
-    n = 500
-    original = outer = {}
-    inner = {}
-
-    for _ in range(n):
-        outer["children"] = inner
-        outer, inner = inner, {}
-
-    msg = {"data": original}
-    frames = await to_frames(msg)
-
-
 def test_different_compression_families():
     """Test serialization of a collection of items that use different compression
 

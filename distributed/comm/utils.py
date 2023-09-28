@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import socket
 
 import dask
@@ -58,15 +57,10 @@ async def to_frames(
             logger.exception(e)
             raise
 
-    if OFFLOAD_THRESHOLD and allow_offload:
-        try:
-            msg_size = sizeof(msg)
-        except RecursionError:
-            msg_size = math.inf
-    else:
-        msg_size = 0
-
-    if allow_offload and OFFLOAD_THRESHOLD and msg_size > OFFLOAD_THRESHOLD:
+    # sizeof(msg) can raise RecursionError; _to_frames() can cause msgpack to
+    # raise ValueError (improperly; should be RecursionError).
+    # The two are not necessarily going to happen at the same depth.
+    if allow_offload and OFFLOAD_THRESHOLD and sizeof(msg) > OFFLOAD_THRESHOLD:
         return await offload(_to_frames)
     else:
         return _to_frames()
