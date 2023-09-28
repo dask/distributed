@@ -9,6 +9,7 @@ from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 import dask.config
+from dask.typing import Key
 
 from distributed.collections import sum_mappings
 from distributed.itertools import ffill
@@ -473,7 +474,7 @@ class SpansSchedulerExtension:
 
     def observe_tasks(
         self, tss: Iterable[scheduler_module.TaskState], code: tuple[SourceCode, ...]
-    ) -> dict[str, dict]:
+    ) -> dict[Key, dict]:
         """Acknowledge the existence of runnable tasks on the scheduler. These may
         either be new tasks, tasks that were previously unrunnable, or tasks that were
         already fed into this method already.

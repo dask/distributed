@@ -36,6 +36,7 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.typing import Key
 
 from distributed import Event, Scheduler, system
 from distributed import versions as version_module
@@ -2283,7 +2284,7 @@ class BlockedExecute(Worker):
 
         super().__init__(*args, **kwargs)
 
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: Key, *, stimulus_id: str) -> StateMachineEvent:
         self.in_execute.set()
         await self.block_execute.wait()
         try:
@@ -2381,7 +2382,7 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
 
 
 async def wait_for_state(
-    key: str,
+    key: Key,
     state: str | Collection[str],
     dask_worker: Worker | Scheduler,
     *,
@@ -2390,7 +2391,7 @@ async def wait_for_state(
     """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
     state or one of a set of possible states.
     """
-    tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
+    tasks: Mapping[Key, SchedulerTaskState | WorkerTaskState]
 
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
@@ -2409,11 +2410,11 @@ async def wait_for_state(
     except (asyncio.CancelledError, asyncio.TimeoutError):
         if key in tasks:
             msg = (
-                f"tasks[{key}].state={tasks[key].state!r} on {dask_worker.address}; "
+                f"tasks[{key!r}].state={tasks[key].state!r} on {dask_worker.address}; "
                 f"expected state={state_str}"
             )
         else:
-            msg = f"tasks[{key}] not found on {dask_worker.address}"
+            msg = f"tasks[{key!r}] not found on {dask_worker.address}"
         # 99% of the times this is triggered by @gen_cluster timeout, so raising the
         # message as an exception wouldn't work.
         print(msg)

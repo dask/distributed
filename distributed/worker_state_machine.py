@@ -20,7 +20,6 @@ from collections.abc import (
     Iterator,
     Mapping,
     MutableMapping,
-    Sequence,
     Set,
 )
 from copy import copy
@@ -32,6 +31,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, Union, cast
 from tlz import peekn
 
 import dask
+from dask.typing import Key
 from dask.utils import key_split, parse_bytes, typename
 
 from distributed._stories import worker_story
@@ -114,7 +114,7 @@ class StartStop(TypedDict):
 class InvalidTransition(Exception):
     def __init__(
         self,
-        key: str,
+        key: Key,
         start: TaskStateState,
         finish: TaskStateState,
         story: list[tuple],
@@ -129,7 +129,7 @@ class InvalidTransition(Exception):
 
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}: {self.key} :: {self.start}->{self.finish}"
+            f"{self.__class__.__name__}: {self.key!r} :: {self.start}->{self.finish}"
             + "\n"
             + "  Story:\n    "
             + "\n    ".join(map(str, self.story))
@@ -158,7 +158,7 @@ class TransitionCounterMaxExceeded(InvalidTransition):
 class InvalidTaskState(Exception):
     def __init__(
         self,
-        key: str,
+        key: Key,
         state: TaskStateState,
         story: list[tuple],
     ):
@@ -171,7 +171,7 @@ class InvalidTaskState(Exception):
 
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}: {self.key} :: {self.state}"
+            f"{self.__class__.__name__}: {self.key!r} :: {self.state}"
             + "\n"
             + "  Story:\n    "
             + "\n    ".join(map(str, self.story))
@@ -213,7 +213,7 @@ class TaskState:
     """
 
     #: Task key. Mandatory.
-    key: str
+    key: Key
     #: Task prefix (leftmost part of the key)
     prefix: str = field(init=False)
     #: Task run ID.
@@ -407,14 +407,14 @@ class _InstructionMatch:
 class GatherDep(Instruction):
     __slots__ = ("worker", "to_gather", "total_nbytes")
     worker: str
-    to_gather: set[str]
+    to_gather: set[Key]
     total_nbytes: int
 
 
 @dataclass
 class Execute(Instruction):
     __slots__ = ("key",)
-    key: str
+    key: Key
 
 
 @dataclass
@@ -440,7 +440,7 @@ class SendMessageToScheduler(Instruction):
 class TaskFinishedMsg(SendMessageToScheduler):
     op = "task-finished"
 
-    key: str
+    key: Key
     run_id: int
     nbytes: int | None
     type: bytes  # serialized class
@@ -460,7 +460,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
 class TaskErredMsg(SendMessageToScheduler):
     op = "task-erred"
 
-    key: str
+    key: Key
     run_id: int
     exception: Serialize
     traceback: Serialize | None
@@ -498,7 +498,7 @@ class ReleaseWorkerDataMsg(SendMessageToScheduler):
     op = "release-worker-data"
 
     __slots__ = ("key",)
-    key: str
+    key: Key
 
 
 # Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
@@ -507,7 +507,7 @@ class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
     __slots__ = ("key",)
-    key: str
+    key: Key
 
 
 @dataclass
@@ -515,7 +515,7 @@ class LongRunningMsg(SendMessageToScheduler):
     op = "long-running"
 
     __slots__ = ("key", "compute_duration")
-    key: str
+    key: Key
     compute_duration: float | None
 
 
@@ -524,7 +524,7 @@ class AddKeysMsg(SendMessageToScheduler):
     op = "add-keys"
 
     __slots__ = ("keys",)
-    keys: Collection[str]
+    keys: Collection[Key]
 
 
 @dataclass
@@ -544,7 +544,7 @@ class RequestRefreshWhoHasMsg(SendMessageToScheduler):
     op = "request-refresh-who-has"
 
     __slots__ = ("keys",)
-    keys: Collection[str]
+    keys: Collection[Key]
 
 
 @dataclass
@@ -559,7 +559,7 @@ class StealResponseMsg(SendMessageToScheduler):
     op = "steal-response"
 
     __slots__ = ("key", "state")
-    key: str
+    key: Key
     state: TaskStateState | None
 
 
@@ -661,7 +661,7 @@ class GatherDepSuccessEvent(GatherDepDoneEvent):
 
     __slots__ = ("data",)
 
-    data: dict[str, object]  # There may be fewer keys than in GatherDep
+    data: dict[Key, object]  # There may be fewer keys than in GatherDep
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -736,10 +736,10 @@ class RemoveWorkerEvent(StateMachineEvent):
 
 @dataclass
 class ComputeTaskEvent(StateMachineEvent):
-    key: str
+    key: Key
     run_id: int
-    who_has: dict[str, Collection[str]]
-    nbytes: dict[str, int]
+    who_has: dict[Key, Collection[str]]
+    nbytes: dict[Key, int]
     priority: tuple[int, ...]
     duration: float
     run_spec: T_runspec | None
@@ -785,11 +785,11 @@ class ComputeTaskEvent(StateMachineEvent):
 
     @staticmethod
     def dummy(
-        key: str,
+        key: Key,
         *,
         run_id: int = 0,
-        who_has: dict[str, Collection[str]] | None = None,
-        nbytes: dict[str, int] | None = None,
+        who_has: dict[Key, Collection[str]] | None = None,
+        nbytes: dict[Key, int] | None = None,
         priority: tuple[int, ...] = (0,),
         duration: float = 1.0,
         resource_restrictions: dict[str, float] | None = None,
@@ -822,7 +822,7 @@ class ExecuteDoneEvent(StateMachineEvent):
     instruction
     """
 
-    key: str
+    key: Key
     __slots__ = ("key",)
 
 
@@ -855,7 +855,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
 
     @staticmethod
     def dummy(
-        key: str,
+        key: Key,
         value: object = None,
         *,
         run_id: int = 1,
@@ -897,7 +897,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
         cls,
         err_or_msg: BaseException | ErrorMessage,
         *,
-        key: str,
+        key: Key,
         run_id: int,
         start: float | None = None,
         stop: float | None = None,
@@ -922,7 +922,7 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
 
     @staticmethod
     def dummy(
-        key: str,
+        key: Key,
         *,
         run_id: int = 1,
         stimulus_id: str,
@@ -949,7 +949,7 @@ class RescheduleEvent(ExecuteDoneEvent):
     __slots__ = ()
 
     @staticmethod
-    def dummy(key: str, *, stimulus_id: str) -> RescheduleEvent:
+    def dummy(key: Key, *, stimulus_id: str) -> RescheduleEvent:
         """Build an event. This method exists for compatibility with the other
         ExecuteDoneEvent subclasses.
         """
@@ -959,7 +959,7 @@ class RescheduleEvent(ExecuteDoneEvent):
 @dataclass
 class CancelComputeEvent(StateMachineEvent):
     __slots__ = ("key",)
-    key: str
+    key: Key
 
 
 @dataclass
@@ -978,26 +978,26 @@ class RefreshWhoHasEvent(StateMachineEvent):
 
     __slots__ = ("who_has",)
     # {key: [worker address, ...]}
-    who_has: dict[str, Collection[str]]
+    who_has: dict[Key, Collection[str]]
 
 
 @dataclass
 class AcquireReplicasEvent(StateMachineEvent):
     __slots__ = ("who_has", "nbytes")
-    who_has: dict[str, Collection[str]]
-    nbytes: dict[str, int]
+    who_has: dict[Key, Collection[str]]
+    nbytes: dict[Key, int]
 
 
 @dataclass
 class RemoveReplicasEvent(StateMachineEvent):
     __slots__ = ("keys",)
-    keys: Collection[str]
+    keys: Collection[Key]
 
 
 @dataclass
 class FreeKeysEvent(StateMachineEvent):
     __slots__ = ("keys",)
-    keys: Sequence[str]
+    keys: Collection[Key]
 
 
 @dataclass
@@ -1011,13 +1011,13 @@ class StealRequestEvent(StateMachineEvent):
     """
 
     __slots__ = ("key",)
-    key: str
+    key: Key
 
 
 @dataclass
 class UpdateDataEvent(StateMachineEvent):
     __slots__ = ("data",)
-    data: dict[str, object]
+    data: dict[Key, object]
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -1029,7 +1029,7 @@ class UpdateDataEvent(StateMachineEvent):
 @dataclass
 class SecedeEvent(StateMachineEvent):
     __slots__ = ("key", "compute_duration")
-    key: str
+    key: Key
     compute_duration: float
 
 
@@ -1050,7 +1050,7 @@ def merge_recs_instructions(*args: RecsInstrs) -> RecsInstrs:
         for ts, finish in recs_i.items():
             if ts in recs and recs[ts] != finish:
                 raise RecommendationsConflict(
-                    f"Mismatched recommendations for {ts.key}: {recs[ts]} vs. {finish}"
+                    f"Mismatched recommendations for {ts.key!r}: {recs[ts]} vs. {finish}"
                 )
             recs[ts] = finish
         instr += instr_i
@@ -1082,19 +1082,19 @@ class WorkerState:
 
     #: ``{key: TaskState}``. The tasks currently executing on this worker (and any
     #: dependencies of those tasks)
-    tasks: dict[str, TaskState]
+    tasks: dict[Key, TaskState]
 
     #: ``{ts.key: thread ID}``. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker` and this class. While the WorkerState is
     #: thread-agnostic, it still needs access to this information in some cases.
     #: This collection is populated by :meth:`distributed.worker.Worker.execute`.
     #: It does not *need* to be populated for the WorkerState to work.
-    threads: dict[str, int]
+    threads: dict[Key, int]
 
     #: In-memory tasks data. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker`,
     #: :class:`~distributed.worker_memory.WorkerMemoryManager`, and this class.
-    data: MutableMapping[str, object]
+    data: MutableMapping[Key, object]
 
     #: ``{name: worker plugin}``. This collection is shared by reference between
     #: :class:`~distributed.worker.Worker` and this class. The Worker managed adding and
@@ -1125,7 +1125,7 @@ class WorkerState:
 
     #: ``{worker address: {ts.key, ...}``.
     #: The data that we care about that we think a worker has
-    has_what: defaultdict[str, set[str]]
+    has_what: defaultdict[str, set[Key]]
 
     #: The tasks which still require data in order to execute and are in memory on at
     #: least another worker, prioritized as per-worker heaps. All and only tasks with
@@ -1141,7 +1141,8 @@ class WorkerState:
     #: :meth:`BaseWorker.gather_dep`. Multiple small tasks that can be gathered from the
     #: same worker will be batched in a single instruction as long as their combined
     #: size doesn't exceed this value. If the first task to be gathered exceeds this
-    # limit, it will still be gathered to ensure progress. Hence, this limit is not absolute.
+    #: limit, it will still be gathered to ensure progress. Hence, this limit is not
+    #: absolute.
     transfer_message_bytes_limit: float
 
     #: All and only tasks with ``TaskState.state == 'missing'``.
@@ -1160,7 +1161,7 @@ class WorkerState:
     #: The workers from which we are currently gathering data and the dependencies we
     #: expect from those connections. Workers in this dict won't be asked for additional
     #: dependencies until the current query returns.
-    in_flight_workers: dict[str, set[str]]
+    in_flight_workers: dict[str, set[Key]]
 
     #: Current total size of open data transfers from other workers
     transfer_incoming_bytes: int
@@ -1223,7 +1224,7 @@ class WorkerState:
     nbytes: int
 
     #: Actor tasks. See :doc:`actors`.
-    actors: dict[str, object]
+    actors: dict[Key, object]
 
     #: Transition log: ``[(..., stimulus_id: str | None, timestamp: float), ...]``
     #: The number of stimuli logged is capped.
@@ -1266,8 +1267,8 @@ class WorkerState:
         *,
         nthreads: int = 1,
         address: str | None = None,
-        data: MutableMapping[str, object] | None = None,
-        threads: dict[str, int] | None = None,
+        data: MutableMapping[Key, object] | None = None,
+        threads: dict[Key, int] | None = None,
         plugins: dict[str, WorkerPlugin] | None = None,
         resources: Mapping[str, float] | None = None,
         transfer_incoming_count_limit: int = 9999,
@@ -1407,7 +1408,7 @@ class WorkerState:
     #########################
 
     def _ensure_task_exists(
-        self, key: str, *, priority: tuple[int, ...], stimulus_id: str
+        self, key: Key, *, priority: tuple[int, ...], stimulus_id: str
     ) -> TaskState:
         try:
             ts = self.tasks[key]
@@ -1422,7 +1423,7 @@ class WorkerState:
         self.log.append((key, "ensure-task-exists", ts.state, stimulus_id, time()))
         return ts
 
-    def _update_who_has(self, who_has: Mapping[str, Collection[str]]) -> None:
+    def _update_who_has(self, who_has: Mapping[Key, Collection[str]]) -> None:
         for key, workers in who_has.items():
             ts = self.tasks.get(key)
             if not ts:
@@ -3221,7 +3222,7 @@ class WorkerState:
     # Diagnostics #
     ###############
 
-    def story(self, *keys_or_tasks_or_stimuli: str | TaskState) -> list[tuple]:
+    def story(self, *keys_or_tasks_or_stimuli: str | Key | TaskState) -> list[tuple]:
         """Return all records from the transitions log involving one or more tasks or
         stimulus_id's
         """
@@ -3231,7 +3232,7 @@ class WorkerState:
         return worker_story(keys_or_stimuli, self.log)
 
     def stimulus_story(
-        self, *keys_or_tasks: str | TaskState
+        self, *keys_or_tasks: Key | TaskState
     ) -> list[StateMachineEvent]:
         """Return all state machine events involving one or more tasks"""
         keys = {e.key if isinstance(e, TaskState) else e for e in keys_or_tasks}
@@ -3737,7 +3738,7 @@ class BaseWorker(abc.ABC):
             elif isinstance(inst, Execute):
                 ts = self.state.tasks[inst.key]
                 self._start_async_instruction(
-                    f"execute({inst.key})",
+                    f"execute({inst.key!r})",
                     self.execute,
                     inst.key,
                     span_id=ts.span_id,
@@ -3783,7 +3784,7 @@ class BaseWorker(abc.ABC):
     async def gather_dep(
         self,
         worker: str,
-        to_gather: Collection[str],
+        to_gather: Collection[Key],
         total_nbytes: int,
         *,
         stimulus_id: str,
@@ -3803,7 +3804,7 @@ class BaseWorker(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: Key, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task"""
 
     @abc.abstractmethod

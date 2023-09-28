@@ -1022,9 +1022,9 @@ async def test_wait_for_state(c, s, a, capsys):
     with pytest.raises(asyncio.TimeoutError):
         await wait_for(wait_for_state("y", "memory", s), timeout=0.1)
     assert capsys.readouterr().out == (
-        f"tasks[x].state='memory' on {s.address}; expected state='bad_state'\n"
-        f"tasks[x].state='memory' on {s.address}; expected state=('this', 'that')\n"
-        f"tasks[y] not found on {s.address}\n"
+        f"tasks['x'].state='memory' on {s.address}; expected state='bad_state'\n"
+        f"tasks['x'].state='memory' on {s.address}; expected state=('this', 'that')\n"
+        f"tasks['y'] not found on {s.address}\n"
     )
 
 

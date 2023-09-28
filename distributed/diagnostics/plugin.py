@@ -13,10 +13,15 @@ import zipfile
 from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from dask.typing import Key
 from dask.utils import funcname, tmpfile
 
 if TYPE_CHECKING:
-    from distributed.scheduler import Scheduler, TaskStateState  # circular imports
+    # circular imports
+    from distributed.scheduler import Scheduler
+    from distributed.scheduler import TaskStateState as SchedulerTaskStateState
+    from distributed.worker import Worker
+    from distributed.worker_state_machine import TaskStateState as WorkerTaskStateState
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +81,11 @@ class SchedulerPlugin:
         scheduler: Scheduler,
         *,
         client: str,
-        keys: set[str],
-        tasks: list[str],
-        annotations: dict[str, dict[str, Any]],
-        priority: dict[str, tuple[int | float, ...]],
-        dependencies: dict[str, set],
+        keys: set[Key],
+        tasks: list[Key],
+        annotations: dict[str, dict[Key, Any]],
+        priority: dict[Key, tuple[int | float, ...]],
+        dependencies: dict[Key, set[Key]],
         **kwargs: Any,
     ) -> None:
         """Run when a new graph / tasks enter the scheduler
@@ -119,9 +124,9 @@ class SchedulerPlugin:
 
     def transition(
         self,
-        key: str,
-        start: TaskStateState,
-        finish: TaskStateState,
+        key: Key,
+        start: SchedulerTaskStateState,
+        finish: SchedulerTaskStateState,
         *args: Any,
         stimulus_id: str,
         **kwargs: Any,
@@ -138,13 +143,13 @@ class SchedulerPlugin:
 
         Parameters
         ----------
-        key : string
-        start : string
+        key : Key
+        start : TaskStateState
             Start state of the transition.
             One of released, waiting, processing, memory, error.
-        finish : string
+        finish : TaskStateState
             Final state of the transition.
-        stimulus_id: string
+        stimulus_id: str
             ID of stimulus causing the transition.
         *args, **kwargs :
             More options passed when transitioning
@@ -232,18 +237,24 @@ class WorkerPlugin:
     >>> client.register_plugin(plugin)  # doctest: +SKIP
     """
 
-    def setup(self, worker):
+    def setup(self, worker: Worker) -> None | Awaitable[None]:
         """
         Run when the plugin is attached to a worker. This happens when the plugin is registered
         and attached to existing workers, or when a worker is created after the plugin has been
         registered.
         """
 
-    def teardown(self, worker):
+    def teardown(self, worker: Worker) -> None | Awaitable[None]:
         """Run when the worker to which the plugin is attached is closed, or
         when the plugin is removed."""
 
-    def transition(self, key, start, finish, **kwargs):
+    def transition(
+        self,
+        key: Key,
+        start: WorkerTaskStateState,
+        finish: WorkerTaskStateState,
+        **kwargs: Any,
+    ) -> None:
         """
         Throughout the lifecycle of a task (see :doc:`Worker State
         <worker-state>`), Workers are instructed by the scheduler to compute
@@ -259,11 +270,11 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        key : string
-        start : string
+        key : Key
+        start : TaskStateState
             Start state of the transition.
             One of waiting, ready, executing, long-running, memory, error.
-        finish : string
+        finish : TaskStateState
             Final state of the transition.
         kwargs : More options passed when transitioning
         """

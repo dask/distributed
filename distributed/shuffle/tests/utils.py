@@ -4,6 +4,8 @@ import itertools
 import random
 from typing import Any
 
+from dask.typing import Key
+
 from distributed.client import Client
 from distributed.core import PooledRPCCall
 from distributed.diagnostics.plugin import SchedulerPlugin
@@ -64,7 +66,7 @@ class ShuffleAnnotationChaosPlugin(SchedulerPlugin):
 
     def transition(
         self,
-        key: str,
+        key: Key,
         start: TaskStateState,
         finish: TaskStateState,
         *args: Any,
