@@ -3091,11 +3091,15 @@ class Client(SyncMethodMixin):
 
                 break
 
-            # Ignore IPython related wrapping functions to user code
             if hasattr(fr.f_back, "f_globals"):
-                module_name = sys.modules[fr.f_back.f_globals["__name__"]].__name__  # type: ignore
+                module_name = fr.f_back.f_globals["__name__"]  # type: ignore
+                if module_name == "__channelexec__":
+                    break  # execnet; pytest-xdist  # pragma: nocover
+                # Ignore IPython related wrapping functions to user code
+                module_name = sys.modules[module_name].__name__
                 if module_name.endswith("interactiveshell"):
                     break
+
         return tuple(reversed(code))
 
     def _graph_to_futures(
