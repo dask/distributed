@@ -35,6 +35,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
+import tornado.web
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
     concat,
@@ -3589,6 +3590,7 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        scheduler = self
         if self.jupyter:
             try:
                 from jupyter_server.serverapp import ServerApp
@@ -3598,6 +3600,30 @@ class Scheduler(SchedulerState, ServerNode):
                     "need to have jupyterlab installed"
                 )
             from traitlets.config import Config
+
+            """HTTP handler to shut down the Jupyter server.
+            """
+            try:
+                from jupyter_server.auth import authorized
+            except ImportError:
+
+                def authorized(c):
+                    return c
+
+            from jupyter_server.base.handlers import JupyterHandler
+
+            class ShutdownHandler(JupyterHandler):
+                """A shutdown API handler."""
+
+                auth_resource = "server"
+
+                @tornado.web.authenticated
+                @authorized
+                async def post(self):
+                    """Shut down the server."""
+                    self.log.info("Shutting down on /api/shutdown request.")
+
+                    await scheduler.close(reason="shutdown requested via Jupyter")
 
             j = ServerApp.instance(
                 config=Config(
@@ -3620,6 +3646,11 @@ class Scheduler(SchedulerState, ServerNode):
                 argv=[],
             )
             self._jupyter_server_application = j
+            shutdown_app = tornado.web.Application(
+                [(r"/jupyter/api/shutdown", ShutdownHandler)]
+            )
+            shutdown_app.settings = j.web_app.settings
+            self.http_application.add_application(shutdown_app)
             self.http_application.add_application(j.web_app)
 
         # Communication state
