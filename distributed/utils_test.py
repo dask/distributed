@@ -2632,8 +2632,8 @@ def no_time_resync():
         yield
 
 
-async def padded_time(before=0.01, after=0.01):
-    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
+async def padded_time(before=0.05, after=0.05):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock
     from disrupting monotonicity tests (t0 < t1 < t2 < ...).
     This prevents frequent flakiness on Windows and, more rarely, in Linux and
     MacOSX.
