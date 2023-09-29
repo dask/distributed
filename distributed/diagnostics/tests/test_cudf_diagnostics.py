@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from distributed.utils_test import gen_cluster
 
-pytestmark = pytest.mark.gpu
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        os.environ.get("CUDF_SPILL", "off") != "on"
+        or os.environ.get("CUDF_SPILL_STATS", "0") != "1"
+        or os.environ.get("DASK_DISTRIBUTED__DIAGNOSTICS__CUDF", "0") != "1",
+        reason="cuDF spill stats monitoring must be enabled manually",
+    ),
+]
 
 cudf = pytest.importorskip("cudf")
 dask_cuda = pytest.importorskip("dask_cuda")
@@ -29,15 +39,8 @@ def force_spill():
 async def test_cudf_metrics(c, s, *workers):
     w = list(s.workers.values())[0]
     assert "cudf" in w.metrics
+    assert w.metrics["cudf"]["cudf-spilled"] == 0
 
-    if spill_initial := w.metrics["cudf"]["cudf-spilled"] is None:
-        pytest.xfail("cuDF spilling & spilling statistics must be enabled")
-
-    assert spill_initial == 0
-
-    try:
-        await c.run(force_spill)
-    except AttributeError:
-        pytest.xfail("cuDF spilling & spilling statistics must be enabled")
+    await c.run(force_spill)
 
     assert w.metrics["cudf"]["cudf-spilled"] == 24

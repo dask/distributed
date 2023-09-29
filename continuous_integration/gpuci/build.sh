@@ -62,3 +62,7 @@ conda list --show-channel-urls
 
 gpuci_logger "Python py.test for distributed"
 py.test distributed -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"
+
+# cuDF spill stats monitoring must be enabled for this test
+CUDF_SPILL=on CUDF_SPILL_STATS=1 DASK_DISTRIBUTED__DIAGNOSTICS__CUDF=1 \
+    py.test distributed/diagnostics/tests/test_cudf_diagnostics.py -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"
