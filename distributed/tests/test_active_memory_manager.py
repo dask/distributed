@@ -1250,12 +1250,7 @@ async def test_RetireWorker_stress(c, s, *workers, use_ReduceReplicas):
 
     addrs = list(s.workers)
     random.shuffle(addrs)
-    print(f"Removing all workers except {addrs[-1]}")
-
-    # Note: Scheduler._lock effectively prevents multiple calls to retire_workers from
-    # running at the same time. However, the lock only exists for the benefit of legacy
-    # (non-AMM) rebalance() and replicate() methods. Once the lock is removed, these
-    # calls will become parallel and the test *should* continue working.
+    print(f"Removing all workers except {addrs[9]}")
 
     tasks = [asyncio.create_task(tensordot_stress(c))]
     await asyncio.sleep(1)

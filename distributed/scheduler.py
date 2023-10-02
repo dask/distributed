@@ -68,6 +68,7 @@ from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
 from distributed import versions as version_module
+from distributed._asyncio import RLock
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
@@ -116,7 +117,6 @@ from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
     TimeoutError,
-    empty_context,
     format_dashboard_link,
     get_fileno_limit,
     key_split_group,
@@ -3542,7 +3542,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_timeout = None
         self.idle_since = time()
         self.time_started = self.idle_since  # compatibility for dask-gateway
-        self._lock = asyncio.Lock()
+        self._replica_lock = RLock()
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
 
@@ -6404,7 +6404,8 @@ class Scheduler(SchedulerState, ServerNode):
         if not msgs:
             return {"status": "OK"}
 
-        async with self._lock:
+        # Downgrade reentrant lock to non-reentrant
+        async with self._replica_lock(("rebalance", object())):
             result = await self._rebalance_move_data(msgs, stimulus_id)
             if result["status"] == "partial-fail" and keys is None:
                 # Only return failed keys if the client explicitly asked for them
@@ -6667,7 +6668,6 @@ class Scheduler(SchedulerState, ServerNode):
         workers=None,
         branching_factor=2,
         delete=True,
-        lock=True,
         stimulus_id=None,
     ):
         """Replicate data throughout cluster
@@ -6693,7 +6693,8 @@ class Scheduler(SchedulerState, ServerNode):
         """
         stimulus_id = stimulus_id or f"replicate-{time()}"
         assert branching_factor > 0
-        async with self._lock if lock else empty_context:
+        # Downgrade reentrant lock to non-reentrant
+        async with self._replica_lock(("replicate", object())):
             if workers is not None:
                 workers = {self.workers[w] for w in self.workers_list(workers)}
                 workers = {ws for ws in workers if ws.status == Status.running}
@@ -6968,9 +6969,8 @@ class Scheduler(SchedulerState, ServerNode):
         # This lock makes retire_workers, rebalance, and replicate mutually
         # exclusive and will no longer be necessary once rebalance and replicate are
         # migrated to the Active Memory Manager.
-        # Note that, incidentally, it also prevents multiple calls to retire_workers
-        # from running in parallel - this is unnecessary.
-        async with self._lock:
+        # However, it allows multiple instances of retire_workers to run in parallel.
+        async with self._replica_lock("retire-workers"):
             if names is not None:
                 if workers is not None:
                     raise TypeError("names and workers are mutually exclusive")
