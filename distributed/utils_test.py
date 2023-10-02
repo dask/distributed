@@ -398,7 +398,7 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
 
 
 def run_worker(q, scheduler_q, config, **kwargs):
-    with dask.config.set(config):
+    with config_for_cluster_tests(**config):
         from distributed import Worker
 
         reset_logger_locks()
@@ -422,7 +422,7 @@ def run_worker(q, scheduler_q, config, **kwargs):
 
 @log_errors
 def run_nanny(q, scheduler_q, config, **kwargs):
-    with dask.config.set(config):
+    with config_for_cluster_tests(**config):
         scheduler_addr = scheduler_q.get()
 
         async def _():
@@ -617,7 +617,7 @@ def cluster(
 
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), config_for_cluster_tests():
+    with check_process_leak(check=True), check_instances():
         if nanny:
             _run_worker = run_nanny
         else:
@@ -995,9 +995,10 @@ def gen_cluster(
             async def async_fn():
                 result = None
                 with dask.config.set(config):
-                    async with _cluster_factory() as (s, workers), _client_factory(
-                        s
-                    ) as c:
+                    async with (
+                        _cluster_factory() as (s, workers),
+                        _client_factory(s) as c,
+                    ):
                         args = [s] + workers
                         if c is not None:
                             args = [c] + args
@@ -1796,6 +1797,8 @@ def config_for_cluster_tests(**extra_config):
         {
             "local_directory": tempfile.gettempdir(),
             "distributed.admin.tick.interval": "500 ms",
+            "distributed.admin.log-length": None,
+            "distributed.admin.low-level-log-length": None,
             "distributed.scheduler.validate": True,
             "distributed.worker.validate": True,
             "distributed.worker.profile.enabled": False,
@@ -2156,17 +2159,6 @@ def ucx_loop():
     import distributed.comm.ucx
 
     distributed.comm.ucx.ucp = None
-    # If the test created a context, clean it up.
-    # TODO: should we check if there's already a context _before_ the test runs?
-    # I think that would be useful.
-    from distributed.diagnostics.nvml import has_cuda_context
-
-    ctx = has_cuda_context()
-    if ctx.has_context:
-        import numba.cuda
-
-        ctx = numba.cuda.current_context()
-        ctx.device.reset()
 
 
 def wait_for_log_line(
@@ -2452,10 +2444,11 @@ async def wait_for_stimulus(
 @pytest.fixture
 def ws():
     """An empty WorkerState"""
-    state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
-    yield state
-    if state.validate:
-        state.validate_state()
+    with dask.config.set({"distributed.admin.low-level-log-length": None}):
+        state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
+        yield state
+        if state.validate:
+            state.validate_state()
 
 
 @pytest.fixture(params=["executing", "long-running"])
@@ -2639,8 +2632,8 @@ def no_time_resync():
         yield
 
 
-async def padded_time(before=0.01, after=0.01):
-    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
+async def padded_time(before=0.05, after=0.05):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock
     from disrupting monotonicity tests (t0 < t1 < t2 < ...).
     This prevents frequent flakiness on Windows and, more rarely, in Linux and
     MacOSX.

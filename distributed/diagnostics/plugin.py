@@ -34,9 +34,9 @@ class SchedulerPlugin:
 
     To implement a plugin:
 
-    1. subclass this class
+    1. inherit from this class
     2. override some of its methods
-    3. add the plugin to the scheduler with ``Scheduler.add_plugin(myplugin)``.
+    3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
     Examples
     --------
@@ -203,9 +203,11 @@ class WorkerPlugin:
     an event happens, the corresponding method on this class will be called. Note that the
     user code always runs within the Worker's main thread.
 
-    To implement a plugin implement some of the methods of this class and register
-    the plugin to your client in order to have it attached to every existing and
-    future workers with ``Client.register_worker_plugin``.
+    To implement a plugin:
+
+    1. inherit from this class
+    2. override some of its methods
+    3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
     Examples
     --------
@@ -227,7 +229,7 @@ class WorkerPlugin:
 
     >>> import logging
     >>> plugin = ErrorLogger(logging)
-    >>> client.register_worker_plugin(plugin)  # doctest: +SKIP
+    >>> client.register_plugin(plugin)  # doctest: +SKIP
     """
 
     def setup(self, worker):
@@ -275,10 +277,11 @@ class NannyPlugin:
     to run code before the worker is started, or to restart the worker if
     necessary.
 
-    To implement a plugin implement some of the methods of this class and register
-    the plugin to your client in order to have it attached to every existing and
-    future nanny by passing ``nanny=True`` to
-    :meth:`Client.register_worker_plugin<distributed.Client.register_worker_plugin>`.
+    To implement a plugin:
+
+    1. inherit from this class
+    2. override some of its methods
+    3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
     The ``restart`` attribute is used to control whether or not a running ``Worker``
     needs to be restarted when registering the plugin.
@@ -474,7 +477,7 @@ class CondaInstall(PackageInstall):
     >>> from dask.distributed import CondaInstall
     >>> plugin = CondaInstall(packages=["scikit-learn"], conda_options=["--update-deps"])
 
-    >>> client.register_worker_plugin(plugin)
+    >>> client.register_plugin(plugin)
 
     See Also
     --------
@@ -550,7 +553,7 @@ class PipInstall(PackageInstall):
     >>> from dask.distributed import PipInstall
     >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
 
-    >>> client.register_worker_plugin(plugin)
+    >>> client.register_plugin(plugin)
 
     See Also
     --------
@@ -598,7 +601,7 @@ class UploadFile(WorkerPlugin):
     --------
     >>> from distributed.diagnostics.plugin import UploadFile
 
-    >>> client.register_worker_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
+    >>> client.register_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
     """
 
     name = "upload_file"
@@ -722,7 +725,7 @@ class UploadDirectory(NannyPlugin):
     Examples
     --------
     >>> from distributed.diagnostics.plugin import UploadDirectory
-    >>> client.register_worker_plugin(UploadDirectory("/path/to/directory"), nanny=True)  # doctest: +SKIP
+    >>> client.register_plugin(UploadDirectory("/path/to/directory"), nanny=True)  # doctest: +SKIP
     """
 
     def __init__(
@@ -859,7 +862,7 @@ class ForwardOutput(WorkerPlugin):
     >>> from dask.distributed import ForwardOutput
     >>> plugin = ForwardOutput()
 
-    >>> client.register_worker_plugin(plugin)
+    >>> client.register_plugin(plugin)
     """
 
     def setup(self, worker):

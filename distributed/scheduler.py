@@ -35,6 +35,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
+import tornado.web
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
     concat,
@@ -53,7 +54,8 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
-from dask.core import get_deps
+from dask.core import get_deps, validate_key
+from dask.typing import no_default
 from dask.utils import (
     format_bytes,
     format_time,
@@ -66,6 +68,7 @@ from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
 from distributed import versions as version_module
+from distributed._asyncio import RLock
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
@@ -81,7 +84,15 @@ from distributed.comm import (
 )
 from distributed.comm.addressing import addresses_from_user_args
 from distributed.compatibility import PeriodicCallback
-from distributed.core import Status, clean_exception, error_message, rpc, send_recv
+from distributed.core import (
+    ErrorMessage,
+    OKMessage,
+    Status,
+    clean_exception,
+    error_message,
+    rpc,
+    send_recv,
+)
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
@@ -106,15 +117,12 @@ from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
     TimeoutError,
-    empty_context,
     format_dashboard_link,
     get_fileno_limit,
     key_split_group,
     log_errors,
-    no_default,
     offload,
     recursive_to_dict,
-    validate_key,
     wait_for,
 )
 from distributed.utils_comm import (
@@ -1463,7 +1471,7 @@ class TaskState:
         return get_template("task_state.html.j2").render(
             state=self.state,
             nbytes=self.nbytes,
-            key=self.key,
+            key=str(self.key),
         )
 
     def validate(self) -> None:
@@ -1622,7 +1630,7 @@ class SchedulerState:
 
     #: History of task state transitions.
     #: The length can be tweaked through
-    #: distributed.scheduler.transition-log-length
+    #: distributed.admin.low-level-log-length
     transition_log: deque[Transition]
 
     #: Total number of transitions since the cluster was started
@@ -1714,7 +1722,7 @@ class SchedulerState:
         self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
 
         self.transition_log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
+            maxlen=dask.config.get("distributed.admin.low-level-log-length")
         )
         self.transition_counter = 0
         self._idle_transition_counter = 0
@@ -2078,7 +2086,6 @@ class SchedulerState:
 
     def transition_no_worker_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
-        worker_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
@@ -2086,10 +2093,10 @@ class SchedulerState:
 
         if ws := self.decide_worker_non_rootish(ts):
             self.unrunnable.discard(ts)
-            worker_msgs = self._add_to_processing(ts, ws)
+            return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
         # If no worker, task just stays in `no-worker`
 
-        return {}, {}, worker_msgs
+        return {}, {}, {}
 
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
@@ -2295,8 +2302,7 @@ class SchedulerState:
             if not (ws := self.decide_worker_non_rootish(ts)):
                 return {ts.key: "no-worker"}, {}, {}
 
-        worker_msgs = self._add_to_processing(ts, ws)
-        return {}, {}, worker_msgs
+        return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
 
     def transition_waiting_memory(
         self,
@@ -2751,8 +2757,6 @@ class SchedulerState:
 
     def transition_queued_processing(self, key: str, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        worker_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be queued: {ts}"
@@ -2760,10 +2764,9 @@ class SchedulerState:
 
         if ws := self.decide_worker_rootish_queuing_enabled():
             self.queued.discard(ts)
-            worker_msgs = self._add_to_processing(ts, ws)
+            return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
         # If no worker, task just stays `queued`
-
-        return recommendations, {}, worker_msgs
+        return {}, {}, {}
 
     def _remove_key(self, key: str) -> None:
         ts = self.tasks.pop(key)
@@ -3144,7 +3147,9 @@ class SchedulerState:
         assert ts not in self.queued
         assert all(dts.who_has for dts in ts.dependencies)
 
-    def _add_to_processing(self, ts: TaskState, ws: WorkerState) -> Msgs:
+    def _add_to_processing(
+        self, ts: TaskState, ws: WorkerState, stimulus_id: str
+    ) -> RecsMsgs:
         """Set a task as processing on a worker and return the worker messages to send"""
         if self.validate:
             self._validate_ready(ts)
@@ -3161,7 +3166,45 @@ class SchedulerState:
         if ts.actor:
             ws.actors.add(ts)
 
-        return {ws.address: [self._task_to_msg(ts)]}
+        ndep_bytes = sum(dts.nbytes for dts in ts.dependencies)
+        if (
+            ws.memory_limit
+            and ndep_bytes > ws.memory_limit
+            and dask.config.get("distributed.worker.memory.terminate")
+        ):
+            # Note
+            # ----
+            # This is a crude safety system, only meant to prevent order-of-magnitude
+            # fat-finger errors.
+            #
+            # For collection finalizers and in general most concat operations, it takes
+            # a lot less to kill off the worker; you'll just need
+            # ndep_bytes * 2 > ws.memory_limit * terminate threshold.
+            #
+            # In heterogeneous clusters with workers mounting different amounts of
+            # memory, the user is expected to manually set host/worker/resource
+            # restrictions.
+            msg = (
+                f"Task {ts.key} has {format_bytes(ndep_bytes)} worth of input "
+                f"dependencies, but worker {ws.address} has memory_limit set to "
+                f"{format_bytes(ws.memory_limit)}."
+            )
+            if ts.prefix.name == "finalize":
+                msg += (
+                    " It seems like you called client.compute() on a huge collection. "
+                    "Consider writing to distributed storage or slicing/reducing first."
+                )
+            logger.error(msg)
+            return self._transition(
+                ts.key,
+                "erred",
+                exception=pickle.dumps(MemoryError(msg)),
+                cause=ts.key,
+                stimulus_id=stimulus_id,
+                worker=ws.address,
+            )
+
+        return {}, {}, {ws.address: [self._task_to_msg(ts)]}
 
     def _exit_processing_common(self, ts: TaskState) -> WorkerState | None:
         """Remove *ts* from the set of processing tasks.
@@ -3499,7 +3542,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_timeout = None
         self.idle_since = time()
         self.time_started = self.idle_since  # compatibility for dask-gateway
-        self._lock = asyncio.Lock()
+        self._replica_lock = RLock()
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
 
@@ -3547,6 +3590,7 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        scheduler = self
         if self.jupyter:
             try:
                 from jupyter_server.serverapp import ServerApp
@@ -3556,6 +3600,30 @@ class Scheduler(SchedulerState, ServerNode):
                     "need to have jupyterlab installed"
                 )
             from traitlets.config import Config
+
+            """HTTP handler to shut down the Jupyter server.
+            """
+            try:
+                from jupyter_server.auth import authorized
+            except ImportError:
+
+                def authorized(c):
+                    return c
+
+            from jupyter_server.base.handlers import JupyterHandler
+
+            class ShutdownHandler(JupyterHandler):
+                """A shutdown API handler."""
+
+                auth_resource = "server"
+
+                @tornado.web.authenticated
+                @authorized
+                async def post(self):
+                    """Shut down the server."""
+                    self.log.info("Shutting down on /api/shutdown request.")
+
+                    await scheduler.close(reason="shutdown requested via Jupyter")
 
             j = ServerApp.instance(
                 config=Config(
@@ -3578,6 +3646,11 @@ class Scheduler(SchedulerState, ServerNode):
                 argv=[],
             )
             self._jupyter_server_application = j
+            shutdown_app = tornado.web.Application(
+                [(r"/jupyter/api/shutdown", ShutdownHandler)]
+            )
+            shutdown_app.settings = j.web_app.settings
+            self.http_application.add_application(shutdown_app)
             self.http_application.add_application(j.web_app)
 
         # Communication state
@@ -3614,11 +3687,8 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.events = defaultdict(
-            partial(
-                deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
-            )
-        )
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
+        self.events = defaultdict(partial(deque, maxlen=maxlen))
         self.event_counts = defaultdict(int)
         self.event_subscriber = defaultdict(set)
         self.worker_plugins = {}
@@ -6334,7 +6404,8 @@ class Scheduler(SchedulerState, ServerNode):
         if not msgs:
             return {"status": "OK"}
 
-        async with self._lock:
+        # Downgrade reentrant lock to non-reentrant
+        async with self._replica_lock(("rebalance", object())):
             result = await self._rebalance_move_data(msgs, stimulus_id)
             if result["status"] == "partial-fail" and keys is None:
                 # Only return failed keys if the client explicitly asked for them
@@ -6597,7 +6668,6 @@ class Scheduler(SchedulerState, ServerNode):
         workers=None,
         branching_factor=2,
         delete=True,
-        lock=True,
         stimulus_id=None,
     ):
         """Replicate data throughout cluster
@@ -6623,7 +6693,8 @@ class Scheduler(SchedulerState, ServerNode):
         """
         stimulus_id = stimulus_id or f"replicate-{time()}"
         assert branching_factor > 0
-        async with self._lock if lock else empty_context:
+        # Downgrade reentrant lock to non-reentrant
+        async with self._replica_lock(("replicate", object())):
             if workers is not None:
                 workers = {self.workers[w] for w in self.workers_list(workers)}
                 workers = {ws for ws in workers if ws.status == Status.running}
@@ -6898,9 +6969,8 @@ class Scheduler(SchedulerState, ServerNode):
         # This lock makes retire_workers, rebalance, and replicate mutually
         # exclusive and will no longer be necessary once rebalance and replicate are
         # migrated to the Active Memory Manager.
-        # Note that, incidentally, it also prevents multiple calls to retire_workers
-        # from running in parallel - this is unnecessary.
-        async with self._lock:
+        # However, it allows multiple instances of retire_workers to run in parallel.
+        async with self._replica_lock("retire-workers"):
             if names is not None:
                 if workers is not None:
                     raise TypeError("names and workers are mutually exclusive")
@@ -7377,7 +7447,7 @@ class Scheduler(SchedulerState, ServerNode):
                 metadata = metadata[key]
             return metadata
         except KeyError:
-            if default != no_default:
+            if default is not no_default:
                 return default
             else:
                 raise
@@ -7449,9 +7519,14 @@ class Scheduler(SchedulerState, ServerNode):
         self.remove_plugin(name=plugin.name)
         return {"metadata": plugin.metadata, "state": plugin.state}
 
-    async def register_worker_plugin(self, comm, plugin, name=None):
+    async def register_worker_plugin(
+        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
+    ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
+        if name in self.worker_plugins and idempotent:
+            return {}
+
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
@@ -7459,7 +7534,9 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return responses
 
-    async def unregister_worker_plugin(self, comm, name):
+    async def unregister_worker_plugin(
+        self, comm: None, name: str
+    ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
             self.worker_plugins.pop(name)
@@ -7469,9 +7546,14 @@ class Scheduler(SchedulerState, ServerNode):
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
 
-    async def register_nanny_plugin(self, comm, plugin, name):
-        """Registers a setup function, and call it on every worker"""
+    async def register_nanny_plugin(
+        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
+    ) -> dict[str, OKMessage]:
+        """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
+        if name in self.nanny_plugins and idempotent:
+            return {}
+
         self.nanny_plugins[name] = plugin
         async with self._starting_nannies_cond:
             if self._starting_nannies:
@@ -7485,7 +7567,9 @@ class Scheduler(SchedulerState, ServerNode):
             )
             return responses
 
-    async def unregister_nanny_plugin(self, comm, name):
+    async def unregister_nanny_plugin(
+        self, comm: None, name: str
+    ) -> dict[str, ErrorMessage | OKMessage]:
         """Unregisters a worker plugin"""
         try:
             self.nanny_plugins.pop(name)
@@ -8393,8 +8477,8 @@ class KilledWorker(Exception):
 
     def __str__(self) -> str:
         return (
-            f"Attempted to run task {self.task} on {self.allowed_failures} different "
-            "workers, but all those workers died while running it. "
+            f"Attempted to run task {self.task} on {self.allowed_failures + 1} "
+            "different workers, but all those workers died while running it. "
             f"The last worker that attempt to run the task was {self.last_worker.address}. "
             "Inspecting worker logs is often a good next step to diagnose what went wrong. "
             "For more information see https://distributed.dask.org/en/stable/killed.html."

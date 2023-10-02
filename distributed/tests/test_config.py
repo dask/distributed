@@ -12,6 +12,8 @@ import textwrap
 import pytest
 import yaml
 
+import dask.config
+
 from distributed.config import initialize_logging
 from distributed.utils_test import captured_handler, new_config, new_config_file
 
@@ -360,3 +362,40 @@ def test_uvloop_event_loop():
         [sys.executable, "-c", script],
         env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
     )
+
+
+@pytest.mark.parametrize(
+    "args,kwargs",
+    [
+        ((), {"allowed_failures": 123}),
+        (({"allowed_failures": 123},), {}),
+        (({"allowed-failures": 123},), {}),
+    ],
+)
+def test_deprecations_on_set(args, kwargs):
+    with pytest.warns(FutureWarning) as info:
+        with dask.config.set(*args, **kwargs):
+            assert dask.config.get("distributed.scheduler.allowed-failures") == 123
+
+    assert "distributed.scheduler.allowed-failures" in str(info[0].message)
+
+
+def test_deprecations_on_env_variables(monkeypatch):
+    d = {}
+    monkeypatch.setenv("DASK_ALLOWED_FAILURES", "123")
+    with pytest.warns(FutureWarning) as info:
+        dask.config.refresh(config=d)
+    assert "distributed.scheduler.allowed-failures" in str(info[0].message)
+    assert dask.config.get("distributed.scheduler.allowed-failures", config=d) == 123
+
+
+@pytest.mark.parametrize("key", ["allowed-failures", "allowed_failures"])
+def test_deprecations_on_yaml(tmp_path, key):
+    d = {}
+    with open(tmp_path / "dask.yaml", "w") as fh:
+        yaml.dump({key: 123}, fh)
+
+    with pytest.warns(FutureWarning) as info:
+        dask.config.refresh(config=d, paths=[tmp_path])
+    assert "distributed.scheduler.allowed-failures" in str(info[0].message)
+    assert dask.config.get("distributed.scheduler.allowed-failures", config=d) == 123

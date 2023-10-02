@@ -42,7 +42,7 @@ class MyPlugin(WorkerPlugin):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_create_with_client(c, s):
-    await c.register_worker_plugin(MyPlugin(123))
+    await c.register_plugin(MyPlugin(123))
 
     async with Worker(s.address) as worker:
         assert worker._my_plugin_status == "setup"
@@ -55,8 +55,8 @@ async def test_create_with_client(c, s):
 async def test_remove_with_client(c, s):
     existing_plugins = s.worker_plugins.copy()
     n_existing_plugins = len(existing_plugins)
-    await c.register_worker_plugin(MyPlugin(123), name="foo")
-    await c.register_worker_plugin(MyPlugin(546), name="bar")
+    await c.register_plugin(MyPlugin(123), name="foo")
+    await c.register_plugin(MyPlugin(546), name="bar")
 
     async with Worker(s.address) as worker:
         # remove the 'foo' plugin
@@ -80,7 +80,7 @@ async def test_remove_with_client(c, s):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_remove_with_client_raises(c, s):
-    await c.register_worker_plugin(MyPlugin(123), name="foo")
+    await c.register_plugin(MyPlugin(123), name="foo")
 
     async with Worker(s.address):
         with pytest.raises(ValueError, match="bar"):
@@ -109,7 +109,7 @@ async def test_normal_task_transitions_called(c, s, w):
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
 
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
     await async_poll_for(lambda: not w.state.tasks, timeout=10)
 
@@ -133,7 +133,7 @@ async def test_failing_task_transitions_called(c, s, w):
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
 
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
 
     with pytest.raises(CustomError):
         await c.submit(failing, 1, key="task")
@@ -155,7 +155,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
 
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
     await async_poll_for(lambda: not w.state.tasks, timeout=10)
 
@@ -181,17 +181,17 @@ async def test_dependent_tasks(c, s, w):
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
 
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
     await c.get(dsk, "task", sync=False)
     await async_poll_for(lambda: not w.state.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_empty_plugin(c, s, w):
-    class EmptyPlugin:
+    class EmptyPlugin(WorkerPlugin):
         pass
 
-    await c.register_worker_plugin(EmptyPlugin())
+    await c.register_plugin(EmptyPlugin())
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -200,7 +200,7 @@ async def test_default_name(c, s, w):
         pass
 
     n_existing_plugins = len(w.plugins)
-    await c.register_worker_plugin(MyCustomPlugin())
+    await c.register_plugin(MyCustomPlugin())
     assert len(w.plugins) == n_existing_plugins + 1
     assert any(name.startswith("MyCustomPlugin-") for name in w.plugins)
 
@@ -215,7 +215,7 @@ async def test_assert_no_warning_no_overload(c, s, a):
         pass
 
     with warnings.catch_warnings(record=True) as record:
-        await c.register_worker_plugin(Dummy())
+        await c.register_plugin(Dummy())
         assert await c.submit(inc, 1, key="x") == 2
         while "x" in a.state.tasks:
             await asyncio.sleep(0.01)
@@ -238,7 +238,7 @@ async def test_WorkerPlugin_overwrite(c, s, w):
         def teardown(self, worker):
             del self.worker.foo
 
-    await c.register_worker_plugin(MyCustomPlugin())
+    await c.register_plugin(MyCustomPlugin())
 
     assert w.foo == 0
 
@@ -261,10 +261,101 @@ async def test_WorkerPlugin_overwrite(c, s, w):
         def teardown(self, worker):
             del self.worker.bar
 
-    await c.register_worker_plugin(MyCustomPlugin())
+    await c.register_plugin(MyCustomPlugin())
 
     assert not hasattr(w, "foo")
     assert w.bar == 0
 
     await c.submit(inc, 0)
     assert w.bar == 456
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_register_worker_plugin_is_deprecated(c, s, a):
+    class DuckPlugin(WorkerPlugin):
+        def setup(self, worker):
+            worker.foo = 123
+
+        def teardown(self, worker):
+            pass
+
+    n_existing_plugins = len(a.plugins)
+    assert not hasattr(a, "foo")
+    with pytest.warns(DeprecationWarning, match="register_worker_plugin.*deprecated"):
+        await c.register_worker_plugin(DuckPlugin())
+    assert len(a.plugins) == n_existing_plugins + 1
+    assert a.foo == 123
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_register_worker_plugin_typing_over_nanny_keyword(c, s, a):
+    class DuckPlugin(WorkerPlugin):
+        def setup(self, worker):
+            worker.foo = 123
+
+        def teardown(self, worker):
+            pass
+
+    n_existing_plugins = len(a.plugins)
+    assert not hasattr(a, "foo")
+    with pytest.warns(UserWarning, match="`WorkerPlugin` as a nanny plugin"):
+        await c.register_worker_plugin(DuckPlugin(), nanny=True)
+    assert len(a.plugins) == n_existing_plugins + 1
+    assert a.foo == 123
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_duck_typed_register_worker_plugin_is_deprecated(c, s, a):
+    class DuckPlugin:
+        def setup(self, worker):
+            worker.foo = 123
+
+        def teardown(self, worker):
+            pass
+
+    n_existing_plugins = len(a.plugins)
+    assert not hasattr(a, "foo")
+    with pytest.warns(DeprecationWarning, match="duck-typed.*WorkerPlugin"):
+        await c.register_worker_plugin(DuckPlugin())
+    assert len(a.plugins) == n_existing_plugins + 1
+    assert a.foo == 123
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_register_idempotent_plugins(c, s, a):
+    class IdempotentPlugin(WorkerPlugin):
+        def __init__(self, instance=None):
+            self.name = "idempotentplugin"
+            self.instance = instance
+
+        def setup(self, worker):
+            if self.instance != "first":
+                raise RuntimeError(
+                    "Only the first plugin should be started when idempotent is set"
+                )
+
+    first = IdempotentPlugin(instance="first")
+    await c.register_plugin(first, idempotent=True)
+    assert "idempotentplugin" in a.plugins
+
+    second = IdempotentPlugin(instance="second")
+    await c.register_plugin(second, idempotent=True)
+    assert "idempotentplugin" in a.plugins
+    assert a.plugins["idempotentplugin"].instance == "first"
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_register_non_idempotent_plugins(c, s, a):
+    class NonIdempotentPlugin(WorkerPlugin):
+        def __init__(self, instance=None):
+            self.name = "nonidempotentplugin"
+            self.instance = instance
+
+    first = NonIdempotentPlugin(instance="first")
+    await c.register_plugin(first, idempotent=False)
+    assert "nonidempotentplugin" in a.plugins
+
+    second = NonIdempotentPlugin(instance="second")
+    await c.register_plugin(second, idempotent=False)
+    assert "nonidempotentplugin" in a.plugins
+    assert a.plugins["nonidempotentplugin"].instance == "second"

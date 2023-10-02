@@ -95,8 +95,6 @@ if TYPE_CHECKING:
     P = ParamSpec("P")
     T = TypeVar("T")
 
-no_default = "__no_default__"
-
 _forkserver_preload_set = False
 
 
@@ -939,15 +937,6 @@ def truncate_exception(e, n=10000):
         return e
 
 
-def validate_key(k):
-    """Validate a key as received on a stream."""
-    if isinstance(k, tuple):
-        for e in k:
-            validate_key(e)
-    elif not isinstance(k, (bytes, int, float, str)):
-        raise TypeError(f"Unexpected key type {type(k)} (value: {k!r})")
-
-
 def _maybe_complex(task):
     """Possibly contains a nested task"""
     return (
@@ -1614,15 +1603,7 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
 
 
 _deprecations = {
-    "deserialize_for_cli": "dask.config.deserialize",
-    "serialize_for_cli": "dask.config.serialize",
-    "format_bytes": "dask.utils.format_bytes",
-    "format_time": "dask.utils.format_time",
-    "funcname": "dask.utils.funcname",
-    "parse_bytes": "dask.utils.parse_bytes",
-    "parse_timedelta": "dask.utils.parse_timedelta",
-    "typename": "dask.utils.typename",
-    "tmpfile": "dask.utils.tmpfile",
+    "no_default": "dask.typing.no_default",
 }
 
 

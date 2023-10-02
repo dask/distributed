@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import pickle
+import random
 import re
 import sys
 from collections.abc import Collection
@@ -22,7 +23,7 @@ from tlz import concat, first, merge
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import delayed
+from dask import bag, delayed
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import parse_timedelta, tmpfile, typename
@@ -51,6 +52,7 @@ from distributed.utils import TimeoutError, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
+    BlockedGetData,
     BrokenComm,
     NoSchedulerDelayWorker,
     assert_story,
@@ -391,9 +393,7 @@ async def test_graph_execution_width(c, s, *workers):
     passthrough1 = [delayed(slowidentity)(r, delay=0) for r in roots]
     passthrough2 = [delayed(slowidentity)(r, delay=0) for r in passthrough1]
     done = [delayed(lambda r: None)(r) for r in passthrough2]
-    await c.register_worker_plugin(
-        CountData(keys=[f.key for f in roots]), name="count-roots"
-    )
+    await c.register_plugin(CountData(keys=[f.key for f in roots]), name="count-roots")
     fs = c.compute(done)
     await wait(fs)
 
@@ -736,6 +736,64 @@ async def test_no_workers(client, s, queue):
 @gen_cluster(nthreads=[])
 async def test_retire_workers_empty(s):
     await s.retire_workers(workers=[])
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_retire_workers_lock(c, s, *workers):
+    """Test that replicate(), rebalance(), and retire_workers() can be called at the
+    same time
+
+    See also
+    --------
+    test_retire_workers_concurrently
+    test_active_memory_manager.py::test_RetireWorker_stress
+    """
+    futs = c.map(inc, range(100))
+    await wait(futs)
+    before = s.transition_counter
+    await asyncio.gather(
+        *(
+            s.replicate(keys=[fut.key for fut in futs], n=2),
+            s.rebalance(),
+            s.retire_workers(workers=[workers[0].address]),
+            s.retire_workers(workers=[workers[1].address]),
+        )
+    )
+    await c.gather(futs)
+    assert s.transition_counter == before
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.active-memory-manager.measure": "managed"},
+)
+async def test_retire_workers_concurrently(c, s, w1, w2):
+    """Test that multiple calls to retire_workers can run at the same time
+
+    See also
+    --------
+    test_retire_workers_lock
+    test_active_memory_manager.py::test_RetireWorker_stress
+    """
+    async with BlockedGetData(s.address) as w3:
+        x = c.submit(inc, 1, key="x", workers=[w2.address])
+        y = c.submit(inc, 2, key="y", workers=[w3.address])
+        await wait([x, y])
+
+        # AMM will choose w1 as it's emptier than w2
+        w3_fut = asyncio.create_task(c.retire_workers([w3.address]))
+        await w3.in_get_data.wait()
+
+        # Test that we can retire w2 even if w3 has not finished retiring yet
+        await c.retire_workers([w2.address])
+        assert set(s.workers) == {w1.address, w3.address}
+        assert dict(w1.data) == {"x": 2}
+
+        w3.block_get_data.set()
+        await w3_fut
+
+        assert set(s.workers) == {w1.address}
+        assert dict(w1.data) == {"x": 2, "y": 3}
 
 
 @gen_cluster()
@@ -3013,7 +3071,7 @@ async def test_retire_state_change(c, s, a, b):
     await asyncio.gather(*coros)
 
 
-@gen_cluster(client=True, config={"distributed.scheduler.events-log-length": 3})
+@gen_cluster(client=True, config={"distributed.admin.low-level-log-length": 3})
 async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 1")
     assert len(s.events["test"]) == 1
@@ -3021,7 +3079,7 @@ async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 3")
     assert len(s.events["test"]) == 3
 
-    # adding a forth message will drop the first one and length stays at 3
+    # adding a fourth message will drop the first one and length stays at 3
     s.log_event("test", "dummy message 4")
     assert len(s.events["test"]) == 3
     assert s.events["test"][0][1] == "dummy message 2"
@@ -4245,8 +4303,8 @@ async def test_KilledWorker_informative_message(s, a, b):
     with pytest.raises(KilledWorker) as excinfo:
         raise ex
     msg = str(excinfo.value)
-    assert "Attempted to run task foo-bar" in msg
-    assert str(s.allowed_failures) in msg
+    assert "Attempted to run task foo-bar on 667 different workers" in msg
+    assert a.address in msg
     assert "worker logs" in msg
     assert "https://distributed.dask.org/en/stable/killed.html" in msg
 
@@ -4472,3 +4530,55 @@ async def test_scatter_creates_ts(c, s, a, b):
         await a.close()
         assert await x2 == 2
     assert s.tasks["x"].run_spec is not None
+
+
+@pytest.mark.parametrize("finalize", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 4,
+    worker_kwargs={"memory_limit": "100 kB"},
+    config={
+        "distributed.worker.memory.target": False,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+)
+async def test_refuse_to_schedule_huge_task(c, s, *workers, finalize):
+    """If the total size of a task's input grossly exceed the memory available on the
+    worker, the scheduler must refuse to compute it
+    """
+    bg = bag.from_sequence(
+        [random.randbytes(30_000) for _ in range(4)],
+        npartitions=4,
+    )
+    match = r"worth of input dependencies, but worker .* has memory_limit set to"
+    if finalize:
+        fut = c.compute(bg)
+        match += r".* you called client.compute()"
+    else:
+        bg = bg.repartition(npartitions=1).persist()
+        fut = list(c.futures_of(bg))[0]
+
+    with pytest.raises(MemoryError, match=match):
+        await fut
+
+    # The task never reached the workers
+    for w in workers:
+        for ev in w.state.log:
+            assert fut.key not in ev
+
+
+@gen_cluster(client=True)
+async def test_html_repr(c, s, a, b):
+    futs = c.map(slowinc, range(10), delay=0.1, key=[("slowinc", i) for i in range(10)])
+    f = c.submit(sum, futs)
+
+    while not f.done():
+        assert isinstance(s._repr_html_(), str)
+        assert isinstance(s.workers[a.address]._repr_html_(), str)
+        assert isinstance(s.workers[b.address]._repr_html_(), str)
+        for ts in s.tasks.values():
+            assert isinstance(ts._repr_html_(), str)
+        await asyncio.sleep(0.01)
+
+    await f

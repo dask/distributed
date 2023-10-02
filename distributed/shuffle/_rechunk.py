@@ -102,8 +102,8 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from io import BytesIO
 from itertools import product
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import dask
@@ -111,13 +111,14 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 
 from distributed.core import PooledRPCCall
-from distributed.exceptions import Reschedule
 from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
     get_worker_plugin,
+    handle_transfer_errors,
+    handle_unpack_errors,
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
@@ -143,27 +144,21 @@ def rechunk_transfer(
     new: ChunkedAxes,
     old: ChunkedAxes,
 ) -> int:
-    try:
+    with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
             spec=ArrayRechunkSpec(id=id, new=new, old=old),
         )
-    except Exception as e:
-        raise RuntimeError(f"rechunk_transfer failed during shuffle {id}") from e
 
 
 def rechunk_unpack(
     id: ShuffleId, output_chunk: NDIndex, barrier_run_id: int
 ) -> np.ndarray:
-    try:
+    with handle_unpack_errors(id):
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_chunk
         )
-    except Reschedule as e:
-        raise e
-    except Exception as e:
-        raise RuntimeError(f"rechunk_unpack failed during shuffle {id}") from e
 
 
 def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
@@ -263,26 +258,22 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     return axes
 
 
-def convert_chunk(data: bytes) -> np.ndarray:
+def convert_chunk(shards: list[tuple[NDIndex, np.ndarray]]) -> np.ndarray:
     import numpy as np
 
     from dask.array.core import concatenate3
 
-    file = BytesIO(data)
-    shards: dict[NDIndex, np.ndarray] = {}
+    indexed: dict[NDIndex, np.ndarray] = {}
+    for index, shard in shards:
+        indexed[index] = shard
+    del shards
 
-    while file.tell() < len(data):
-        for index, shard in pickle.load(file):
-            shards[index] = shard
-
-    subshape = [max(dim) + 1 for dim in zip(*shards.keys())]
-    assert len(shards) == np.prod(subshape)
+    subshape = [max(dim) + 1 for dim in zip(*indexed.keys())]
+    assert len(indexed) == np.prod(subshape)
 
     rec_cat_arg = np.empty(subshape, dtype="O")
-    for index, shard in shards.items():
+    for index, shard in indexed.items():
         rec_cat_arg[tuple(index)] = shard
-    del data
-    del file
     arrs = rec_cat_arg.tolist()
     return concatenate3(arrs)
 
@@ -394,13 +385,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
                 repartitioned[id].append(shard)
         return {k: pickle.dumps(v) for k, v in repartitioned.items()}
 
-    async def add_partition(
+    async def _add_partition(
         self, data: np.ndarray, partition_id: NDIndex, **kwargs: Any
     ) -> int:
-        self.raise_if_closed()
-        if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to {self}")
-
         def _() -> dict[str, tuple[NDIndex, bytes]]:
             """Return a mapping of worker addresses to a tuple of input partition
             IDs and shard data.
@@ -433,17 +420,23 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(
+    async def _get_output_partition(
         self, partition_id: NDIndex, key: str, **kwargs: Any
     ) -> np.ndarray:
-        self.raise_if_closed()
-        if not self.transferred:
-            raise RuntimeError("`get_output_partition` called before barrier task")
+        def _(partition_id: NDIndex) -> np.ndarray:
+            data = self._read_from_disk(partition_id)
+            return convert_chunk(data)
 
-        await self._ensure_output_worker(partition_id, key)
-        await self.flush_receive()
-        data = self._read_from_disk(partition_id)
-        return await self.offload(convert_chunk, data)
+        return await self.offload(_, partition_id)
+
+    def read(self, path: Path) -> tuple[Any, int]:
+        shards: list[tuple[NDIndex, np.ndarray]] = []
+        with path.open(mode="rb") as f:
+            size = f.seek(0, os.SEEK_END)
+            f.seek(0)
+            while f.tell() < size:
+                shards.extend(pickle.load(f))
+        return shards, size
 
     def _get_assigned_worker(self, id: NDIndex) -> str:
         return self.worker_for[id]

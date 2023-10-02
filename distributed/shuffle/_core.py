@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
 import dask.config
@@ -66,6 +67,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
         self._disk_buffer = DiskShardsBuffer(
             directory=directory,
+            read=self.read,
             memory_limiter=memory_limiter_disk,
         )
 
@@ -202,10 +204,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if not self.closed:
             self._exception = exception
 
-    def _read_from_disk(self, id: NDIndex) -> bytes:
+    def _read_from_disk(self, id: NDIndex) -> list[Any]:  # TODO: Typing
         self.raise_if_closed()
-        data: bytes = self._disk_buffer.read("_".join(str(i) for i in id))
-        return data
+        return self._disk_buffer.read("_".join(str(i) for i in id))
 
     async def receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
         await self._receive(data)
@@ -230,17 +231,39 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     async def _receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
-    @abc.abstractmethod
     async def add_partition(
+        self, data: _T_partition_type, partition_id: _T_partition_id
+    ) -> int:
+        self.raise_if_closed()
+        if self.transferred:
+            raise RuntimeError(f"Cannot add more partitions to {self}")
+        return await self._add_partition(data, partition_id)
+
+    @abc.abstractmethod
+    async def _add_partition(
         self, data: _T_partition_type, partition_id: _T_partition_id
     ) -> int:
         """Add an input partition to the shuffle run"""
 
-    @abc.abstractmethod
     async def get_output_partition(
         self, partition_id: _T_partition_id, key: str, **kwargs: Any
     ) -> _T_partition_type:
+        self.raise_if_closed()
+        await self._ensure_output_worker(partition_id, key)
+        if not self.transferred:
+            raise RuntimeError("`get_output_partition` called before barrier task")
+        await self.flush_receive()
+        return await self._get_output_partition(partition_id, key, **kwargs)
+
+    @abc.abstractmethod
+    async def _get_output_partition(
+        self, partition_id: _T_partition_id, key: str, **kwargs: Any
+    ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
+
+    @abc.abstractmethod
+    def read(self, path: Path) -> tuple[Any, int]:
+        """Read shards from disk"""
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:
@@ -338,3 +361,25 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
 
     def __hash__(self) -> int:
         return hash(self.run_id)
+
+
+@contextlib.contextmanager
+def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
+    try:
+        yield
+    except ShuffleClosedError:
+        raise Reschedule()
+    except Exception as e:
+        raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
+
+
+@contextlib.contextmanager
+def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
+    try:
+        yield
+    except Reschedule as e:
+        raise e
+    except ShuffleClosedError:
+        raise Reschedule()
+    except Exception as e:
+        raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e

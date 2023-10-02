@@ -1051,7 +1051,7 @@ async def test_tick_logging(s, a, b):
 @pytest.mark.parametrize("serialize", [echo_serialize, echo_no_serialize])
 @gen_test()
 async def test_compression(compression, serialize):
-    with dask.config.set(compression=compression):
+    with dask.config.set({"distributed.comm.compression": compression}):
         async with Server({"echo": serialize}) as server:
             await server.listen("tcp://")
 
@@ -1402,7 +1402,7 @@ class TCPAsyncListenerBackend(TCPBackend):
 @gen_test()
 async def test_async_listener_stop(monkeypatch):
     monkeypatch.setitem(backends, "tcp", TCPAsyncListenerBackend())
-    with pytest.warns(PendingDeprecationWarning):
+    with pytest.warns(DeprecationWarning):
         async with Server({}) as s:
             await s.listen(0)
             assert s.listeners

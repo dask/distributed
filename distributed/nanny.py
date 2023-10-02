@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import ClassVar, Literal, cast
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -33,12 +33,13 @@ from distributed.core import (
     AsyncTaskGroupClosedError,
     CommClosedError,
     ErrorMessage,
+    OKMessage,
     RPCClosed,
     Status,
     coerce_to_address,
     error_message,
 )
-from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diagnostics.plugin import NannyPlugin, _get_plugin_name
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -61,9 +62,6 @@ from distributed.worker_memory import (
     DeprecatedMemoryMonitor,
     NannyMemoryManager,
 )
-
-if TYPE_CHECKING:
-    from distributed.diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -455,13 +453,22 @@ class Nanny(ServerNode):
         return result
 
     @log_errors
-    async def plugin_add(self, plugin=None, name=None):
+    async def plugin_add(
+        self, plugin: NannyPlugin | bytes, name: str | None = None
+    ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
+        if not isinstance(plugin, NannyPlugin):
+            warnings.warn(
+                "Registering duck-typed plugins has been deprecated. "
+                "Please make sure your plugin inherits from `NannyPlugin`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        plugin = cast(NannyPlugin, plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
-
         assert name
 
         self.plugins[name] = plugin
@@ -473,15 +480,14 @@ class Nanny(ServerNode):
                 if isawaitable(result):
                     result = await result
             except Exception as e:
-                msg = error_message(e)
-                return msg
+                return error_message(e)
         if getattr(plugin, "restart", False):
             await self.restart(reason=f"nanny-plugin-{name}-restart")
 
         return {"status": "OK"}
 
     @log_errors
-    async def plugin_remove(self, name=None):
+    async def plugin_remove(self, name: str) -> ErrorMessage | OKMessage:
         logger.info(f"Removing Nanny plugin {name}")
         try:
             plugin = self.plugins.pop(name)
@@ -1008,5 +1014,6 @@ def _get_env_variables(config_key: str) -> dict[str, str]:
             f"{config_key} configuration must be of type dict. Instead got {type(cfg)}"
         )
     # Override dask config with explicitly defined env variables from the OS
-    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items()}
+    # Allow unsetting a variable in a config override by setting its value to None.
+    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items() if v is not None}
     return cfg

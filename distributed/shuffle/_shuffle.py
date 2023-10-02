@@ -3,25 +3,27 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Any, Union
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import toolz
 
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
+from dask.typing import Key
 
 from distributed.core import PooledRPCCall
-from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
-    convert_partition,
+    convert_shards,
     list_of_buffers_to_table,
+    read_from_disk,
     serialize_table,
 )
 from distributed.shuffle._core import (
@@ -31,8 +33,9 @@ from distributed.shuffle._core import (
     ShuffleSpec,
     barrier_key,
     get_worker_plugin,
+    handle_transfer_errors,
+    handle_unpack_errors,
 )
-from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
@@ -58,7 +61,7 @@ def shuffle_transfer(
     meta: pd.DataFrame,
     parts_out: set[int],
 ) -> int:
-    try:
+    with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             input_partition,
@@ -70,25 +73,15 @@ def shuffle_transfer(
                 parts_out=parts_out,
             ),
         )
-    except ShuffleClosedError:
-        raise Reschedule()
-    except Exception as e:
-        raise RuntimeError(f"shuffle_transfer failed during shuffle {id}") from e
 
 
 def shuffle_unpack(
     id: ShuffleId, output_partition: int, barrier_run_id: int
 ) -> pd.DataFrame:
-    try:
+    with handle_unpack_errors(id):
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_partition
         )
-    except Reschedule as e:
-        raise e
-    except ShuffleClosedError:
-        raise Reschedule()
-    except Exception as e:
-        raise RuntimeError(f"shuffle_unpack failed during shuffle {id}") from e
 
 
 def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
@@ -103,9 +96,15 @@ def rearrange_by_column_p2p(
     column: str,
     npartitions: int | None = None,
 ) -> DataFrame:
+    import pandas as pd
+
     from dask.dataframe.core import new_dd_object
 
     meta = df._meta
+    if not pd.api.types.is_integer_dtype(meta[column].dtype):
+        raise TypeError(
+            f"Expected meta {column=} to be an integer column, is {meta[column].dtype}."
+        )
     check_dtype_support(meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
@@ -133,8 +132,7 @@ def rearrange_by_column_p2p(
     )
 
 
-_T_Key: TypeAlias = Union[tuple[str, int], str]
-_T_LowLevelGraph: TypeAlias = dict[_T_Key, tuple]
+_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
 
 
 class P2PShuffleLayer(Layer):
@@ -169,7 +167,7 @@ class P2PShuffleLayer(Layer):
             f"{type(self).__name__}<name='{self.name}', npartitions={self.npartitions}>"
         )
 
-    def get_output_keys(self) -> set[_T_Key]:
+    def get_output_keys(self) -> set[Key]:
         return {(self.name, part) for part in self.parts_out}
 
     def is_materialized(self) -> bool:
@@ -187,10 +185,10 @@ class P2PShuffleLayer(Layer):
             self._cached_dict = dsk
         return self._cached_dict
 
-    def __getitem__(self, key: _T_Key) -> tuple:
+    def __getitem__(self, key: Key) -> tuple:
         return self._dict[key]
 
-    def __iter__(self) -> Iterator[_T_Key]:
+    def __iter__(self) -> Iterator[Key]:
         return iter(self._dict)
 
     def __len__(self) -> int:
@@ -207,19 +205,19 @@ class P2PShuffleLayer(Layer):
             parts_out=parts_out,
         )
 
-    def _keys_to_parts(self, keys: Iterable[_T_Key]) -> set[int]:
+    def _keys_to_parts(self, keys: Iterable[Key]) -> set[int]:
         """Simple utility to convert keys to partition indices."""
         parts = set()
         for key in keys:
             if isinstance(key, tuple) and len(key) == 2:
-                _name, _part = key
-                if _name != self.name:
-                    continue
-                parts.add(_part)
+                name, part = key
+                if name == self.name:
+                    assert isinstance(part, int)
+                    parts.add(part)
         return parts
 
     def cull(
-        self, keys: Iterable[_T_Key], all_keys: Any
+        self, keys: set[Key], all_keys: Collection[Key]
     ) -> tuple[P2PShuffleLayer, dict]:
         """Cull a P2PShuffleLayer HighLevelGraph layer.
 
@@ -229,8 +227,11 @@ class P2PShuffleLayer(Layer):
         parameter.
         """
         parts_out = self._keys_to_parts(keys)
-        input_parts = {(self.name_input, i) for i in range(self.npartitions_input)}
-        culled_deps = {(self.name, part): input_parts.copy() for part in parts_out}
+        # Protect against mutations later on with frozenset
+        input_parts = frozenset(
+            {(self.name_input, i) for i in range(self.npartitions_input)}
+        )
+        culled_deps = {(self.name, part): input_parts for part in parts_out}
 
         if parts_out != set(self.parts_out):
             culled_layer = self._cull(parts_out)
@@ -325,7 +326,7 @@ def split_by_worker(
     return out
 
 
-def split_by_partition(t: pa.Table, column: str) -> dict[Any, pa.Table]:
+def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
     """
     Split data into many arrow batches, partitioned by final partition
     """
@@ -386,6 +387,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         A ``ResourceLimiter`` limiting the total amount of memory used in either
         buffer.
     """
+
+    column: str
+    meta: pd.DataFrame
+    partitions_of: dict[str, list[int]]
+    worker_for: pd.Series
 
     def __init__(
         self,
@@ -453,16 +459,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         del data
         return {(k,): serialize_table(v) for k, v in groups.items()}
 
-    async def add_partition(
+    async def _add_partition(
         self,
         data: pd.DataFrame,
         partition_id: int,
         **kwargs: Any,
     ) -> int:
-        self.raise_if_closed()
-        if self.transferred:
-            raise RuntimeError(f"Cannot add more partitions to {self}")
-
         def _() -> dict[str, tuple[int, bytes]]:
             out = split_by_worker(
                 data,
@@ -477,29 +479,28 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def get_output_partition(
+    async def _get_output_partition(
         self,
         partition_id: int,
         key: str,
         **kwargs: Any,
     ) -> pd.DataFrame:
-        self.raise_if_closed()
-        if not self.transferred:
-            raise RuntimeError("`get_output_partition` called before barrier task")
-
-        await self._ensure_output_worker(partition_id, key)
-
-        await self.flush_receive()
         try:
-            data = self._read_from_disk((partition_id,))
 
-            out = await self.offload(convert_partition, data, self.meta)
+            def _(partition_id: int, meta: pd.DataFrame) -> pd.DataFrame:
+                data = self._read_from_disk((partition_id,))
+                return convert_shards(data, meta)
+
+            out = await self.offload(_, partition_id, self.meta)
         except KeyError:
             out = self.meta.copy()
         return out
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
+
+    def read(self, path: Path) -> tuple[Any, int]:
+        return read_from_disk(path, self.meta)
 
 
 @dataclass(frozen=True)

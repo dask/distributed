@@ -1,15 +1,155 @@
 Changelog
 =========
 
+.. _v2023.9.3:
+
+2023.9.3
+--------
+
+Released on September 29, 2023
+
+Highlights
+^^^^^^^^^^
+
+Reduce memory consumption during merge and shuffle graph optimizations
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Previously there would be a large memory spike when optimizing task graphs 
+for shuffling and merge operations (see :issue:`8196` for an example).
+This release removes that memory spike.
+
+See :pr:`8197` from `Patrick Hoefler`_ for more details.
+
+Quiet JupyterLab shutdown
+"""""""""""""""""""""""""
+Previously when running Jupyter on a scheduler (e.g. ``--jupyter`` CLI flag),
+an error would be raised when the notebook server was shutdown from the
+web application. This release ensures an error isn't raised and the shutdown
+process is clean. 
+
+See :pr:`8220` from `Thomas Grainger`_ for details.
+
+.. dropdown:: Additional changes
+
+    - Decompress pickled messages (:pr:`8216`) `Mads R. B. Kristensen`_
+    - Fix regression in ``pytest-xdist`` (:pr:`8221`) `crusaderky`_
+    - Hide pytest from code snippets (:pr:`8198`) `crusaderky`_
+    - Python 3.9-style multi-line with statements (:pr:`8211`) `crusaderky`_
+    - Bump ``actions/checkout`` from 4.0.0 to 4.1.0 (:pr:`8209`)
+    - Update gpuCI ``RAPIDS_VER`` to ``23.12`` (:pr:`8206`)
+    - Do not reset CUDA context after UCX tests (:pr:`8201`) `Peter Andreas Entschev`_
+    - Centralize and type ``no_default`` (:pr:`8171`) `crusaderky`_
+    - Off-by-one in the retries count in ``KilledWorker`` (:pr:`8203`) `crusaderky`_
+    - Remove deprecated aliases in ``distributed.utils`` (:pr:`8193`) `crusaderky`_
+    - Remove unspecified ``n_workers`` deprecation in ``wait_for_workers`` (:pr:`8192`) `crusaderky`_
+    - Review log-length configuration (:pr:`8173`) `crusaderky`_
+
+
+.. _v2023.9.2:
+
+2023.9.2
+--------
+
+Released on September 15, 2023
+
+Highlights
+^^^^^^^^^^
+
+Reduce memory footprint of P2P shuffling
+""""""""""""""""""""""""""""""""""""""""
+Significantly reduced the peak and average memory used by P2P shuffling
+(up to a factor of 2x reduction). This change also increases the P2P
+minimum supported verions of ``pyarrow`` to ``pyarrow=12``.
+
+See :pr:`8157` from `Hendrik Makait`_ for details.
+
+Improved plugin API
+"""""""""""""""""""
+
+Two plugin changes have been introduced to provide a more consistent
+and convienent plugin UX:
+
+.. currentmodule:: distributed
+
+1. Plugins must now inherit from :class:`~distributed.diagnostics.plugin.WorkerPlugin`,
+   :class:`~distributed.diagnostics.plugin.SchedulerPlugin`,
+   or :class:`~distributed.diagnostics.plugin.NannyPlugin` base classes.
+   Old-style plugins that don't inherit from a base class will still work,
+   but with a deprecation warning.
+
+2. A new :meth:`Client.register_plugin` method has been introduced in favor
+   of the previous :meth:`Client.register_worker_plugin` and
+   :meth:`Client.register_scheduler_plugin` methods.
+   All plugins should now be registered using the centralized
+   :meth:`Client.register_plugin` method.
+
+.. code-block:: python
+
+    from dask.distributed import WorkerPlugin, SchedulerPlugin
+
+    class MySchedulerPlugin(SchedulerPlugin):      # Inherits from SchedulerPlugin
+        def start(self, scheduler):
+            print("Hello from the scheduler!")
+
+    class MyWorkerPlugin(WorkerPlugin):            # Inherits from WorkerPlugin
+        def setup(self, worker):
+            print(f"Hello from Worker {worker}!")
+
+    client.register_plugin(MySchedulerPlugin())    # Single method to register both types of plugins
+    client.register_plugin(MyWorkerPlugin())
+
+See :pr:`8169` and :pr:`8150` from `Hendrik Makait`_ for details.
+
+
+Emit deprecation warnings for configuration option renames
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+When a Dask configuration option that has been renamed is used,
+users will now get a deprecation warning pointing them to the new
+name.
+
+See :pr:`8179` from `crusaderky`_ for details.
+
+.. dropdown:: Additional changes
+
+    - Skip ``rechunker`` in code samples (:pr:`8178`) `Matthew Rocklin`_
+    - Ensure an error during ``ShuffleRun.close`` cannot block worker shutdown (:pr:`8184`) `Florian Jetter`_
+    - Fix race condition between ``MemorySampler`` and scheduler shutdown (:pr:`8172`) `crusaderky`_
+    - Fix post-stringification info pages (:pr:`8161`) `Florian Jetter`_
+    - Fix validation in unpack phase of P2P shuffle (:pr:`8160`) `Hendrik Makait`_
+    - Use ``config_for_cluster_tests`` in sync fixture (:pr:`8180`) `crusaderky`_
+    - Simplify boilerplate for P2P shuffles (:pr:`8174`) `Hendrik Makait`_
+
+
+.. _v2023.9.1:
+
+2023.9.1
+--------
+
+Released on September 6, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Raise in P2P if ``column`` ``dtype`` is wrong  (:pr:`8167`) `Hendrik Makait`_
+- Auto-fail tasks with deps larger than the worker memory (:pr:`8135`) `crusaderky`_
+- Make workers table sortable (:pr:`8153`) `Jacob Tomlinson`_
+- Support for unsetting environment variables (:pr:`8144`) `crusaderky`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate asynchronous ``Listener.stop()`` (:pr:`8151`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Initial tweaks after Dask key type changes (:pr:`8162`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.6.0 to 4.0.0 (:pr:`8159`)
+- Fix flaky ``test_worker_metrics`` (:pr:`8154`) `crusaderky`_
+
+
 .. _v2023.9.0:
 
 2023.9.0
 --------
 
 Released on September 1, 2023
-
-New Features
-^^^^^^^^^^^^
 
 Enhancements
 ^^^^^^^^^^^^

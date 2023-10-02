@@ -18,8 +18,6 @@ distributed:
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
     idle-timeout: null      # Shut down after this duration, like "1h" or "30 minutes"
-    transition-log-length: 100000
-    events-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
     worker-saturation: 1.1 # Send this fraction of nthreads root tasks to workers
@@ -224,7 +222,6 @@ distributed:
     offload: 10MiB # Size after which we choose to offload serialization to another thread
     default-scheme: tcp
     socket-backlog: 2048
-    recent-messages-log-length: 0  # number of messages to keep for debugging
     ucx:
       cuda-copy: null  # enable cuda-copy
       tcp: null  # enable tcp
@@ -276,14 +273,27 @@ distributed:
       ignore-modules:
         - asyncio
         - functools
+        - datashader
         - dask
+        - debugpy
         - distributed
         - coiled
         - cudf
         - cuml
+        - pluggy  # part of pytest
         - prefect
+        - rechunker
         - xarray
         - xgboost
+      ignore-files:
+        - runpy\.py  # `python -m pytest` (or other module) shell command
+        - pytest  # `pytest` shell command
+        - py\.test  # `py.test` shell command
+        - pytest-script\.py  # `pytest` shell command in Windows
+        - _pytest  # pytest implementation
+        - pycharm  # Run pytest from PyCharm GUI
+        - vscode_pytest
+        - get_output_via_markers\.py
     erred-tasks:
       max-history: 100
 
@@ -317,11 +327,13 @@ distributed:
       cycle: 1s       # time between checking event loop speed
 
     max-error-length: 10000 # Maximum size traceback after error to return
-    log-length: 10000  # default length of logs to keep in memory
+    log-length: 10000  # Maximum length of worker/scheduler logs to keep in memory
     log-format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    low-level-log-length: 1000  # Maximum length of various logs for developers
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:
       interval: 500ms
+      log-length: 7200  # Maximum number of samples to keep in memory
       disk: true  # Monitor host-wide disk I/O
       host-cpu: false  # Monitor host-wide CPU usage, with very granular breakdown
       gil:

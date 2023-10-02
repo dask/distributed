@@ -39,6 +39,8 @@ from typing import Any
 
 import tlz as toolz
 
+import dask.config
+from dask.typing import NoDefault, no_default
 from dask.utils import format_time, parse_timedelta
 
 from distributed.metrics import time
@@ -56,13 +58,20 @@ def identifier(frame: FrameType | None) -> str:
     if frame is None:
         return "None"
     else:
-        return ";".join(
-            (
-                frame.f_code.co_name,
-                frame.f_code.co_filename,
-                str(frame.f_code.co_firstlineno),
+        co = frame.f_code
+        try:
+            return ";".join(
+                (
+                    co.co_name,
+                    co.co_filename,
+                    str(co.co_firstlineno),
+                )
             )
-        )
+        except AttributeError:
+            if co.__module__:
+                return f"{co.__module__}.{co.__qualname__}:{_f_lineno(frame)}"  # type: ignore[attr-defined]
+            else:
+                return f"{co.__qualname__}:{_f_lineno(frame)}"  # type: ignore[attr-defined]
 
 
 def _f_lineno(frame: FrameType) -> int:
@@ -75,14 +84,17 @@ def _f_lineno(frame: FrameType) -> int:
 
     f_lasti = frame.f_lasti
     code = frame.f_code
-    prev_line = code.co_firstlineno
+    try:
+        prev_line = code.co_firstlineno
 
-    for start, next_line in dis.findlinestarts(code):
-        if f_lasti < start:
-            return prev_line
-        prev_line = next_line
+        for start, next_line in dis.findlinestarts(code):
+            if f_lasti < start:
+                return prev_line
+            prev_line = next_line
 
-    return prev_line
+        return prev_line
+    except Exception:
+        return -1
 
 
 def repr_frame(frame: FrameType) -> str:
@@ -97,10 +109,17 @@ def repr_frame(frame: FrameType) -> str:
 def info_frame(frame: FrameType) -> dict[str, Any]:
     co = frame.f_code
     f_lineno = _f_lineno(frame)
-    line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
+    try:
+        name = co.co_name
+        filename = co.co_filename
+        line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
+    except (AttributeError, IndexError):
+        line = ""
+        name = co.__qualname__  # type: ignore[attr-defined]
+        filename = "<built-in>"
     return {
-        "filename": co.co_filename,
-        "name": co.co_name,
+        "filename": filename,
+        "name": name,
         "line_number": f_lineno,
         "line": line,
     }
@@ -353,7 +372,7 @@ def watch(
     thread_id: int | None = None,
     interval: str = "20ms",
     cycle: str = "2s",
-    maxlen: int = 1000,
+    maxlen: int | None | NoDefault = no_default,
     omit: Collection[str] = (),
     stop: Callable[[], bool] = lambda: False,
 ) -> deque[tuple[float, dict[str, Any]]]:
@@ -386,6 +405,9 @@ def watch(
     - timestamp
     - dict[str, Any] (output of ``create()``)
     """
+    if maxlen is no_default:
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
+        assert isinstance(maxlen, int) or maxlen is None
     log: deque[tuple[float, dict[str, Any]]] = deque(maxlen=maxlen)
 
     thread = threading.Thread(

@@ -3359,7 +3359,7 @@ def test_default_get(loop_in_thread):
     try:
         check_minimal_arrow_version()
         has_pyarrow = True
-    except RuntimeError:
+    except ImportError:
         pass
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
@@ -6907,7 +6907,7 @@ def test_futures_in_subgraphs(loop_in_thread):
 @gen_cluster(client=True)
 async def test_get_task_metadata(c, s, a, b):
     # Populate task metadata
-    await c.register_worker_plugin(TaskStateMetadataPlugin())
+    await c.register_plugin(TaskStateMetadataPlugin())
 
     async with get_task_metadata() as tasks:
         f = c.submit(slowinc, 1)
@@ -6927,7 +6927,7 @@ async def test_get_task_metadata(c, s, a, b):
 @gen_cluster(client=True)
 async def test_get_task_metadata_multiple(c, s, a, b):
     # Populate task metadata
-    await c.register_worker_plugin(TaskStateMetadataPlugin())
+    await c.register_plugin(TaskStateMetadataPlugin())
 
     # Ensure that get_task_metadata only collects metadata for
     # tasks which are submitted and completed within its context
@@ -6953,12 +6953,12 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_register_worker_plugin_exception(c, s, a, b):
-    class MyPlugin:
+    class MyPlugin(WorkerPlugin):
         def setup(self, worker=None):
             raise ValueError("Setup failed")
 
     with pytest.raises(ValueError, match="Setup failed"):
-        await c.register_worker_plugin(MyPlugin())
+        await c.register_plugin(MyPlugin())
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -7314,7 +7314,10 @@ def test_computation_code_walk_frames():
             code = Client._get_computation_code()
 
     with dask.config.set(
-        {"distributed.diagnostics.computations.ignore-modules": ["test_client"]}
+        {
+            "distributed.diagnostics.computations.ignore-modules": ["test_client"],
+            "distributed.diagnostics.computations.ignore-files": [],
+        }
     ):
         import sys
 
@@ -7413,10 +7416,8 @@ def test_computation_object_code_dask_compute(client):
         return comp.code[0]
 
     code = client.run_on_scheduler(fetch_comp_code)
-
-    assert len(code) == 2
-    assert code[-1].code == test_function_code
-    assert code[-2].code == inspect.getsource(sys._getframe(1))
+    assert len(code) == 1
+    assert code[0].code == test_function_code
 
 
 def test_computation_object_code_dask_compute_no_frames_default(client):
@@ -7594,7 +7595,7 @@ async def test_upload_directory(c, s, a, b, tmp_path):
         f.write("from foo import x")
 
     plugin = UploadDirectory(tmp_path, restart=True, update_path=True)
-    await c.register_worker_plugin(plugin)
+    await c.register_plugin(plugin)
 
     [name] = a.plugins
     assert os.path.split(tmp_path)[-1] in name
@@ -7614,6 +7615,22 @@ async def test_upload_directory(c, s, a, b, tmp_path):
 
     files_end = {f for f in os.listdir() if not f.startswith(".coverage")}
     assert files_start == files_end  # no change
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_duck_typed_register_plugin_raises(c, s, a):
+    class DuckPlugin:
+        def setup(self, worker):
+            pass
+
+        def teardown(self, worker):
+            pass
+
+    n_existing_plugins = len(a.plugins)
+
+    with pytest.raises(TypeError, match="duck-typed.*inherit from.*Plugin"):
+        await c.register_plugin(DuckPlugin())
+    assert len(a.plugins) == n_existing_plugins
 
 
 @gen_cluster(client=True)
@@ -8369,15 +8386,6 @@ async def test_fast_close_on_aexit_failure(s):
     assert _close_proxy.mock_calls == [mock.call(fast=True)]
     assert c.status == "closed"
     assert (stop - start) < 2
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_wait_for_workers_no_default(c, s):
-    with pytest.warns(
-        FutureWarning,
-        match="specify the `n_workers` argument when using `Client.wait_for_workers`",
-    ):
-        await c.wait_for_workers()
 
 
 @pytest.mark.parametrize(

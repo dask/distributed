@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -243,15 +242,14 @@ class HashJoinP2PLayer(Layer):
         all input partitions. This method does not require graph
         materialization.
         """
-        deps = defaultdict(set)
+        deps = {}
         parts_out = parts_out or self._keys_to_parts(keys)
+        keys = {(self.name_input_left, i) for i in range(self.npartitions)}
+        keys |= {(self.name_input_right, i) for i in range(self.npartitions)}
+        # Protect against mutations later on with frozenset
+        keys = frozenset(keys)
         for part in parts_out:
-            deps[(self.name, part)] |= {
-                (self.name_input_left, i) for i in range(self.npartitions)
-            }
-            deps[(self.name, part)] |= {
-                (self.name_input_right, i) for i in range(self.npartitions)
-            }
+            deps[(self.name, part)] = keys
         return deps
 
     def _keys_to_parts(self, keys: Iterable[str]) -> set[str]:
