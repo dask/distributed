@@ -52,6 +52,7 @@ from distributed.utils import TimeoutError, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
+    BlockedGetData,
     BrokenComm,
     NoSchedulerDelayWorker,
     assert_story,
@@ -737,14 +738,14 @@ async def test_retire_workers_empty(s):
     await s.retire_workers(workers=[])
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 10)
-async def test_retire_workers_concurrently(c, s, *workers):
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_retire_workers_lock(c, s, *workers):
     """Test that replicate(), rebalance(), and retire_workers() can be called at the
-    same time. Note how these three activities are mutually exclusive with each other,
-    but you can have multiple instances of retire_workers running at the same time.
+    same time
 
     See also
     --------
+    test_retire_workers_concurrently
     test_active_memory_manager.py::test_RetireWorker_stress
     """
     futs = c.map(inc, range(100))
@@ -760,6 +761,39 @@ async def test_retire_workers_concurrently(c, s, *workers):
     )
     await c.gather(futs)
     assert s.transition_counter == before
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.active-memory-manager.measure": "managed"},
+)
+async def test_retire_workers_concurrently(c, s, w1, w2):
+    """Test that multiple calls to retire_workers can run at the same time
+
+    See also
+    --------
+    test_retire_workers_lock
+    test_active_memory_manager.py::test_RetireWorker_stress
+    """
+    async with BlockedGetData(s.address) as w3:
+        x = c.submit(inc, 1, key="x", workers=[w2.address])
+        y = c.submit(inc, 2, key="y", workers=[w3.address])
+        await wait([x, y])
+
+        # AMM will choose w1 as it's emptier than w2
+        w3_fut = asyncio.create_task(c.retire_workers([w3.address]))
+        await w3.in_get_data.wait()
+
+        # Test that we can retire w2 even if w3 has not finished retiring yet
+        await c.retire_workers([w2.address])
+        assert set(s.workers) == {w1.address, w3.address}
+        assert dict(w1.data) == {"x": 2}
+
+        w3.block_get_data.set()
+        await w3_fut
+
+        assert set(s.workers) == {w1.address}
+        assert dict(w1.data) == {"x": 2, "y": 3}
 
 
 @gen_cluster()
