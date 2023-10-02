@@ -68,9 +68,9 @@ from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
 from distributed import versions as version_module
+from distributed._asyncio import RLock
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
-from distributed.asyncio import RLock
 from distributed.batched import BatchedSend
 from distributed.client import SourceCode
 from distributed.collections import HeapSet

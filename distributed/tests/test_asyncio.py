@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from distributed.asyncio import RLock
+from distributed._asyncio import RLock
 from distributed.utils_test import gen_test
 
 

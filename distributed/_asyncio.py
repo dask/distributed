@@ -6,12 +6,12 @@ from contextlib import asynccontextmanager
 
 
 class RLock:
-    """Asyncio reentrant lock, which allows the same owner (or two owners that compare
+    """asyncio reentrant lock, which allows the same owner (or two owners that compare
     as equal) to be inside the critical section at the same time.
 
     Note that here the owner is an explicit, generic object, whereas in
     :func:`threading.RLock` and :func:`multiprocessing.RLock` it's hardcoded
-    respectively to the thread ID and process ID .
+    respectively to the thread ID and process ID.
 
     **Usage**::
 
