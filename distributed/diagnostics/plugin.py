@@ -143,13 +143,13 @@ class SchedulerPlugin:
 
         Parameters
         ----------
-        key : Key
-        start : TaskStateState
+        key :
+        start :
             Start state of the transition.
             One of released, waiting, processing, memory, error.
-        finish : TaskStateState
+        finish :
             Final state of the transition.
-        stimulus_id: str
+        stimulus_id :
             ID of stimulus causing the transition.
         *args, **kwargs :
             More options passed when transitioning
@@ -270,13 +270,14 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        key : Key
-        start : TaskStateState
+        key :
+        start :
             Start state of the transition.
             One of waiting, ready, executing, long-running, memory, error.
-        finish : TaskStateState
+        finish :
             Final state of the transition.
-        kwargs : More options passed when transitioning
+        kwargs :
+            More options passed when transitioning
         """
 
 
