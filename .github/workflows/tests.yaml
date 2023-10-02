@@ -90,6 +90,7 @@ jobs:
       - name: Set AIOHTTP_NO_EXTENSIONS=1 on 3.12
         if: matrix.environment == '3.12'
         run: echo AIOHTTP_NO_EXTENSIONS=1 >> $GITHUB_ENV
+        shell: bash
 
       - name: Setup Conda Environment
         uses: conda-incubator/setup-miniconda@v2.2.0
