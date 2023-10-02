@@ -1471,7 +1471,7 @@ class TaskState:
         return get_template("task_state.html.j2").render(
             state=self.state,
             nbytes=self.nbytes,
-            key=self.key,
+            key=str(self.key),
         )
 
     def validate(self) -> None:
