@@ -1,6 +1,49 @@
 Changelog
 =========
 
+.. _v2023.9.3:
+
+2023.9.3
+--------
+
+Released on September 29, 2023
+
+Highlights
+^^^^^^^^^^
+
+Reduce memory consumption during merge and shuffle graph optimizations
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Previously there would be a large memory spike when optimizing task graphs 
+for shuffling and merge operations (see :issue:`8196` for an example).
+This release removes that memory spike.
+
+See :pr:`8197` from `Patrick Hoefler`_ for more details.
+
+Quiet JupyterLab shutdown
+"""""""""""""""""""""""""
+Previously when running Jupyter on a scheduler (e.g. ``--jupyter`` CLI flag),
+an error would be raised when the notebook server was shutdown from the
+web application. This release ensures an error isn't raised and the shutdown
+process is clean. 
+
+See :pr:`8220` from `Thomas Grainger`_ for details.
+
+.. dropdown:: Additional changes
+
+    - Decompress pickled messages (:pr:`8216`) `Mads R. B. Kristensen`_
+    - Fix regression in ``pytest-xdist`` (:pr:`8221`) `crusaderky`_
+    - Hide pytest from code snippets (:pr:`8198`) `crusaderky`_
+    - Python 3.9-style multi-line with statements (:pr:`8211`) `crusaderky`_
+    - Bump ``actions/checkout`` from 4.0.0 to 4.1.0 (:pr:`8209`)
+    - Update gpuCI ``RAPIDS_VER`` to ``23.12`` (:pr:`8206`)
+    - Do not reset CUDA context after UCX tests (:pr:`8201`) `Peter Andreas Entschev`_
+    - Centralize and type ``no_default`` (:pr:`8171`) `crusaderky`_
+    - Off-by-one in the retries count in ``KilledWorker`` (:pr:`8203`) `crusaderky`_
+    - Remove deprecated aliases in ``distributed.utils`` (:pr:`8193`) `crusaderky`_
+    - Remove unspecified ``n_workers`` deprecation in ``wait_for_workers`` (:pr:`8192`) `crusaderky`_
+    - Review log-length configuration (:pr:`8173`) `crusaderky`_
+
+
 .. _v2023.9.2:
 
 2023.9.2
