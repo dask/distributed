@@ -185,7 +185,7 @@ class Security:
             [x509.NameAttribute(NameOID.COMMON_NAME, "dask-internal")]
         )
         altnames = x509.SubjectAlternativeName([x509.DNSName("dask-internal")])
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(tz=datetime.timezone.utc).replace(tzinfo=None)
         cert = (
             x509.CertificateBuilder()
             .subject_name(dask_internal)
