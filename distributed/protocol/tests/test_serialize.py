@@ -38,7 +38,7 @@ from distributed.protocol.serialize import (
     check_dask_serializable,
 )
 from distributed.utils import ensure_memoryview, nbytes
-from distributed.utils_test import NO_AMM, gen_test, inc
+from distributed.utils_test import NO_AMM, captured_logger, gen_test, inc
 
 
 class MyObj:
@@ -443,6 +443,26 @@ def test_serialize_raises():
         deserialize(*serialize(Foo()))
 
     assert "Hello-123" in str(info.value)
+
+
+@gen_test()
+async def test_deeply_nested_structures():
+    """sizeof() raises RecursionError at ~140 recursion depth.
+    msgpack doesn't raise until 512 (sometimes 256 depending on compile options).
+
+    Test special case handling of this 140~511 range in to_frames().
+    """
+    n = 200
+    original = outer = {}
+    inner = {}
+
+    for _ in range(n):
+        outer["children"] = inner
+        outer, inner = inner, {}
+
+    with captured_logger("distributed.sizeof") as logs:
+        await to_frames(original)
+    assert "Sizeof calculation failed" in logs.getvalue()
 
 
 def test_different_compression_families():
