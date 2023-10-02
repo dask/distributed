@@ -3296,11 +3296,7 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a)
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    config={"distributed.comm.recent-messages-log-length": 1000},
-)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
     async with BlockedGatherDep(s.address) as b:
         fut1 = c.submit(inc, 1, workers=[a.address], key="f1")

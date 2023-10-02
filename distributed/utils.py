@@ -95,8 +95,6 @@ if TYPE_CHECKING:
     P = ParamSpec("P")
     T = TypeVar("T")
 
-no_default = "__no_default__"
-
 _forkserver_preload_set = False
 
 
@@ -1604,7 +1602,9 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
     return addresses
 
 
-_deprecations: dict[str, str] = {}
+_deprecations = {
+    "no_default": "dask.typing.no_default",
+}
 
 
 def __getattr__(name):

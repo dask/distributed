@@ -146,6 +146,8 @@ def loads(frames, deserialize=True, deserializers=None):
                 sub_header = msgpack.loads(frames[offset])
                 offset += 1
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
+                if "compression" in sub_header:
+                    sub_frames = decompress(sub_header, sub_frames)
                 if allow_pickle:
                     return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
                 else:

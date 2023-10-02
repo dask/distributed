@@ -35,6 +35,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
+import tornado.web
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
     concat,
@@ -54,6 +55,7 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.utils
 from dask.core import get_deps, validate_key
+from dask.typing import no_default
 from dask.utils import (
     format_bytes,
     format_time,
@@ -119,7 +121,6 @@ from distributed.utils import (
     get_fileno_limit,
     key_split_group,
     log_errors,
-    no_default,
     offload,
     recursive_to_dict,
     wait_for,
@@ -1629,7 +1630,7 @@ class SchedulerState:
 
     #: History of task state transitions.
     #: The length can be tweaked through
-    #: distributed.scheduler.transition-log-length
+    #: distributed.admin.low-level-log-length
     transition_log: deque[Transition]
 
     #: Total number of transitions since the cluster was started
@@ -1721,7 +1722,7 @@ class SchedulerState:
         self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
 
         self.transition_log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
+            maxlen=dask.config.get("distributed.admin.low-level-log-length")
         )
         self.transition_counter = 0
         self._idle_transition_counter = 0
@@ -3589,6 +3590,7 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        scheduler = self
         if self.jupyter:
             try:
                 from jupyter_server.serverapp import ServerApp
@@ -3598,6 +3600,30 @@ class Scheduler(SchedulerState, ServerNode):
                     "need to have jupyterlab installed"
                 )
             from traitlets.config import Config
+
+            """HTTP handler to shut down the Jupyter server.
+            """
+            try:
+                from jupyter_server.auth import authorized
+            except ImportError:
+
+                def authorized(c):
+                    return c
+
+            from jupyter_server.base.handlers import JupyterHandler
+
+            class ShutdownHandler(JupyterHandler):
+                """A shutdown API handler."""
+
+                auth_resource = "server"
+
+                @tornado.web.authenticated
+                @authorized
+                async def post(self):
+                    """Shut down the server."""
+                    self.log.info("Shutting down on /api/shutdown request.")
+
+                    await scheduler.close(reason="shutdown requested via Jupyter")
 
             j = ServerApp.instance(
                 config=Config(
@@ -3620,6 +3646,11 @@ class Scheduler(SchedulerState, ServerNode):
                 argv=[],
             )
             self._jupyter_server_application = j
+            shutdown_app = tornado.web.Application(
+                [(r"/jupyter/api/shutdown", ShutdownHandler)]
+            )
+            shutdown_app.settings = j.web_app.settings
+            self.http_application.add_application(shutdown_app)
             self.http_application.add_application(j.web_app)
 
         # Communication state
@@ -3656,11 +3687,8 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.events = defaultdict(
-            partial(
-                deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
-            )
-        )
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
+        self.events = defaultdict(partial(deque, maxlen=maxlen))
         self.event_counts = defaultdict(int)
         self.event_subscriber = defaultdict(set)
         self.worker_plugins = {}
@@ -7419,7 +7447,7 @@ class Scheduler(SchedulerState, ServerNode):
                 metadata = metadata[key]
             return metadata
         except KeyError:
-            if default != no_default:
+            if default is not no_default:
                 return default
             else:
                 raise
@@ -8449,8 +8477,8 @@ class KilledWorker(Exception):
 
     def __str__(self) -> str:
         return (
-            f"Attempted to run task {self.task} on {self.allowed_failures} different "
-            "workers, but all those workers died while running it. "
+            f"Attempted to run task {self.task} on {self.allowed_failures + 1} "
+            "different workers, but all those workers died while running it. "
             f"The last worker that attempt to run the task was {self.last_worker.address}. "
             "Inspecting worker logs is often a good next step to diagnose what went wrong. "
             "For more information see https://distributed.dask.org/en/stable/killed.html."

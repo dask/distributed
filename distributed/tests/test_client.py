@@ -7314,7 +7314,10 @@ def test_computation_code_walk_frames():
             code = Client._get_computation_code()
 
     with dask.config.set(
-        {"distributed.diagnostics.computations.ignore-modules": ["test_client"]}
+        {
+            "distributed.diagnostics.computations.ignore-modules": ["test_client"],
+            "distributed.diagnostics.computations.ignore-files": [],
+        }
     ):
         import sys
 
@@ -7413,10 +7416,8 @@ def test_computation_object_code_dask_compute(client):
         return comp.code[0]
 
     code = client.run_on_scheduler(fetch_comp_code)
-
-    assert len(code) == 2
-    assert code[-1].code == test_function_code
-    assert code[-2].code == inspect.getsource(sys._getframe(1))
+    assert len(code) == 1
+    assert code[0].code == test_function_code
 
 
 def test_computation_object_code_dask_compute_no_frames_default(client):
