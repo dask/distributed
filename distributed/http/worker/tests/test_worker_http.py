@@ -32,7 +32,6 @@ async def test_prometheus(c, s, a):
     )
     expected_metrics = {
         "dask_worker_concurrent_fetch_requests",
-        "dask_worker_gil_contention_total",
         "dask_worker_latency_seconds",
         "dask_worker_memory_bytes",
         "dask_worker_spill_bytes_total",
@@ -50,6 +49,13 @@ async def test_prometheus(c, s, a):
         "dask_worker_transfer_outgoing_count_total",
         "dask_worker_transfer_outgoing_bytes_total",
     }
+
+    try:
+        import gilknocker  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        expected_metrics.add("dask_worker_gil_contention_total")
 
     try:
         import crick  # noqa: F401

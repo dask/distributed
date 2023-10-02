@@ -107,7 +107,6 @@ async def test_prometheus(c, s, a, b):
     expected_metrics = {
         "dask_scheduler_clients",
         "dask_scheduler_desired_workers",
-        "dask_scheduler_gil_contention",
         "dask_scheduler_workers",
         "dask_scheduler_last_time",
         "dask_scheduler_tasks",
@@ -120,6 +119,13 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tick_count",
         "dask_scheduler_tick_duration_maximum_seconds",
     }
+
+    try:
+        import gilknocker  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        expected_metrics.add("dask_scheduler_gil_contention")
 
     assert set(active_metrics.keys()) == expected_metrics
     assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
