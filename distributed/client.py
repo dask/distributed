@@ -3156,7 +3156,17 @@ class Client(SyncMethodMixin):
             from distributed.protocol.serialize import ToPickle
 
             header, frames = serialize(ToPickle(dsk), on_error="raise")
-            nbytes = len(header) + sum(map(len, frames))
+
+            def safelen(o):
+                try:
+                    return len(o)
+                except TypeError:
+                    # https://github.com/python/cpython/pull/18463/files
+                    if isinstance(o, memoryview) and o.ndim == 0:
+                        return 1
+                    raise
+
+            nbytes = len(header) + sum(map(safelen, frames))
             if nbytes > 10_000_000:
                 warnings.warn(
                     f"Sending large graph of size {format_bytes(nbytes)}.\n"
