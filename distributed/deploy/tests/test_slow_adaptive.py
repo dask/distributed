@@ -6,6 +6,7 @@ import pytest
 
 from dask.distributed import Client, Scheduler, SpecCluster, Worker
 
+from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils_test import gen_test, slowinc
 
@@ -22,16 +23,16 @@ class SlowWorker:
 
     def __await__(self):
         async def now():
-            if self.status != "running":
+            if self.status is not Status.running:
                 self.worker.loop.call_later(self.delay, self.worker.start)
-                self.status = "running"
+                self.status = Status.running
             return self
 
         return now().__await__()
 
     async def close(self):
         await self.worker.close()
-        self.status = "closed"
+        self.status = Status.closed
 
 
 scheduler = {"cls": Scheduler, "options": {"dashboard_address": ":0"}}
