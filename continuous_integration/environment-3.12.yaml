@@ -8,7 +8,7 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  # - bokeh
+  # - bokeh  depends on pillow with no support for 3.12
   - click
   - cloudpickle
   - coverage
@@ -35,8 +35,8 @@ dependencies:
   - pytest-timeout
   - requests
   - s3fs  # overridden by git tip below
-  # - scikit-learn
-  # - scipy
+  # - scikit-learn  no support for 3.12
+  # - scipy  no support for 3.12
   - sortedcollections
   - tblib
   - toolz
