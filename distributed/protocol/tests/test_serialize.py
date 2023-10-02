@@ -38,7 +38,7 @@ from distributed.protocol.serialize import (
     check_dask_serializable,
 )
 from distributed.utils import ensure_memoryview, nbytes
-from distributed.utils_test import NO_AMM, captured_logger, gen_test, inc
+from distributed.utils_test import NO_AMM, gen_test, inc
 
 
 class MyObj:
@@ -446,13 +446,15 @@ def test_serialize_raises():
 
 
 @gen_test()
-async def test_deeply_nested_structures():
+@pytest.mark.parametrize("n", range(100, 600, 50))
+async def test_deeply_nested_structures(n):
     """sizeof() raises RecursionError at ~140 recursion depth.
     msgpack doesn't raise until 512 (sometimes 256 depending on compile options).
+    These thresholds change substantially between python versions, msgpack versions, and
+    platforms.
 
-    Test special case handling of this 140~511 range in to_frames().
+    Test that when sizeof() starts failing, things keep working until msgpack fails.
     """
-    n = 200
     original = outer = {}
     inner = {}
 
@@ -460,9 +462,11 @@ async def test_deeply_nested_structures():
         outer["children"] = inner
         outer, inner = inner, {}
 
-    with captured_logger("distributed.sizeof") as logs:
+    try:
         await to_frames(original)
-    assert "Sizeof calculation failed" in logs.getvalue()
+    except ValueError as e:
+        # msgpack failed
+        assert "recursion limit exceeded" in str(e)
 
 
 def test_different_compression_families():
