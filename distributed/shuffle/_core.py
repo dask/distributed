@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 import dask.config
 from dask.utils import parse_timedelta
 
-from distributed.core import CommClosedError, PooledRPCCall
+from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
@@ -132,7 +132,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             count=retry_count,
             delay_min=retry_delay_min,
             delay_max=retry_delay_max,
-            retry_on_exceptions=CommClosedError,
         )
 
     async def offload(self, func: Callable[..., _T], *args: Any) -> _T:

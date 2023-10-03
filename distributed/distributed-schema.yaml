@@ -1048,7 +1048,7 @@ properties:
               retry:
                 type: object
                 description: |
-                  Some operations (such as gathering data) are subject to re-tries with the below parameters
+                  Sending data during P2P is subject to re-tries with the below parameters
                 properties:
 
                   count:
