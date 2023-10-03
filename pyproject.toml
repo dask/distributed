@@ -142,6 +142,8 @@ filterwarnings = [
     '''ignore:setDaemon\(\) is deprecated, set the daemon attribute instead:DeprecationWarning:paramiko''',
     '''ignore:`np.bool8` is a deprecated alias for `np.bool_`''',
     '''ignore:is_sparse is deprecated and will:FutureWarning''',
+    # Need bokeh >= 3.3 for https://github.com/bokeh/bokeh/pull/13147
+    '''ignore:datetime\.datetime\.utcfromtimestamp\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:bokeh''',
 ]
 minversion = "6"
 markers = [
