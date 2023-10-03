@@ -711,6 +711,10 @@ class WorkerProcess:
         mp_ctx = get_mp_context()
         self.init_result_q = mp_ctx.Queue()
         self.child_stop_q = mp_ctx.Queue()
+        # put a noop message to start the background self._child_stop_q._thread
+        # otherwise calling .put({"op": "stop"}) later in an atexit handler
+        # results in a RuntimeError starting the thread
+        self.child_stop_q.put({"op": "noop"})
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
@@ -921,7 +925,10 @@ class WorkerProcess:
             worker cleanly.
             """
             try:
-                msg = child_stop_q.get()
+                while True:
+                    msg = child_stop_q.get()
+                    if msg["op"] != "noop":
+                        break
             except (TypeError, OSError, EOFError):
                 logger.error("Worker process died unexpectedly")
                 msg = {"op": "stop"}
