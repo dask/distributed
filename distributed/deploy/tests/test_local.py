@@ -747,7 +747,6 @@ def test_adapt(loop):
             assert time() < start + 5
 
 
-@pytest.mark.repeat(100)  # DNM
 @gen_test()
 async def test_adapt_then_manual():
     """We can revert from adaptive, back to manual"""
@@ -782,8 +781,6 @@ async def test_adapt_then_manual():
             tasks = {t for t in asyncio.all_tasks() if "PeriodicCallback" in str(t)}
             if tasks:
                 await asyncio.wait(tasks)
-
-            print(asyncio.all_tasks())  # DNM
 
             cluster.scale(2)
             await wait_workers(2)

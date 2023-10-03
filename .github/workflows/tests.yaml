@@ -203,9 +203,8 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          # DNM
-          pytest distributed/deploy/tests/test_local.py::test_adapt_then_manual \
-            --runslow \
+          pytest distributed \
+            -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
             --cov=distributed --cov-report=xml \
