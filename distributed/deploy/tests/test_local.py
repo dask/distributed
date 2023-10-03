@@ -25,6 +25,7 @@ from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
     assert_cannot_connect,
+    async_poll_for,
     captured_logger,
     gen_test,
     inc,
@@ -746,37 +747,46 @@ def test_adapt(loop):
             assert time() < start + 5
 
 
-def test_adapt_then_manual(loop):
+@pytest.mark.repeat(100)  # DNM
+@gen_test()
+async def test_adapt_then_manual():
     """We can revert from adaptive, back to manual"""
-    with LocalCluster(
-        silence_logs=False,
-        loop=loop,
+    async with LocalCluster(
+        asynchronous=True,
         dashboard_address=":0",
         processes=False,
         n_workers=8,
+        threads_per_worker=1,
     ) as cluster:
+
+        def wait_workers(n):
+            return async_poll_for(
+                lambda: len(cluster.scheduler.workers) == n
+                and len(cluster.workers) == n,
+                timeout=5,
+            )
+
+        await wait_workers(8)
         cluster.adapt(minimum=0, maximum=4, interval="10ms")
+        await wait_workers(0)
 
-        start = time()
-        while cluster.scheduler.workers or cluster.workers:
-            sleep(0.01)
-            assert time() < start + 30
-
-        assert not cluster.workers
-
-        with Client(cluster) as client:
+        async with Client(cluster, asynchronous=True) as client:
             futures = client.map(slowinc, range(1000), delay=0.1)
-            sleep(0.2)
+            await wait_workers(4)
 
             cluster._adaptive.stop()
-            sleep(0.2)
+            # stop() disables a PeriodicCallback. However, sometimes the callback has
+            # already been scheduled or is halfway through (it's asynchronous).
+            # Wait for it to finish, otherwise you'd get a race condition with
+            # scale() below and flakiness in the test.
+            tasks = {t for t in asyncio.all_tasks() if "PeriodicCallback" in str(t)}
+            if tasks:
+                await asyncio.wait(tasks)
+
+            print(asyncio.all_tasks())  # DNM
 
             cluster.scale(2)
-
-            start = time()
-            while len(cluster.scheduler.workers) != 2:
-                sleep(0.01)
-                assert time() < start + 30
+            await wait_workers(2)
 
 
 @pytest.mark.parametrize("temporary", [True, False])
