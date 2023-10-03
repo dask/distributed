@@ -907,7 +907,6 @@ def test_popen_write_during_terminate_deadlock():
     # `subprocess.TimeoutExpired` if this test breaks.
 
 
-@pytest.mark.repeat(100)  # DNM
 def test_popen_timeout(capsys):
     with pytest.raises(subprocess.TimeoutExpired):
         with popen(
