@@ -8,7 +8,7 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  # - bokeh  depends on pillow with no support for 3.12
+  - bokeh
   - click
   - cloudpickle
   - coverage
