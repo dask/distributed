@@ -106,14 +106,15 @@ async def check_scheduler_cleanup(
 @gen_cluster(client=True)
 async def test_minimal_version(c, s, a, b):
     pytest.importorskip("pyarrow")
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-10",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
-    )
-    with pytest.raises(ImportError, match="requires pyarrow"):
-        await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
+    with mock.patch("pyarrow.__version__", "11.0.0"):
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        with pytest.raises(ImportError, match="requires pyarrow"):
+            await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
 @pytest.mark.gpu
