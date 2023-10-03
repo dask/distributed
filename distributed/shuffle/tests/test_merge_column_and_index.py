@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("pyarrow")
 np = pytest.importorskip("numpy")
 dd = pytest.importorskip("dask.dataframe")
 import pandas as pd
