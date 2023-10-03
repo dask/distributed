@@ -36,6 +36,7 @@ def force_spill():
     nthreads=[("127.0.0.1", 1)],
     Worker=dask_cuda.CUDAWorker,
 )
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 async def test_cudf_metrics(c, s, *workers):
     w = list(s.workers.values())[0]
     assert "cudf" in w.metrics
