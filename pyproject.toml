@@ -144,6 +144,8 @@ filterwarnings = [
     '''ignore:is_sparse is deprecated and will:FutureWarning''',
     # Need bokeh >= 3.3 for https://github.com/bokeh/bokeh/pull/13147
     '''ignore:datetime\.datetime\.utc(fromtimestamp|now)\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:bokeh''',
+    # https://github.com/tornadoweb/tornado/issues/3334
+    '''ignore:datetime\.datetime\.utc(fromtimestamp|now)\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:tornado''',
 ]
 minversion = "6"
 markers = [
