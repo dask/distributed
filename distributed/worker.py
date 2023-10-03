@@ -2365,7 +2365,18 @@ class Worker(BaseWorker, ServerNode):
             )
 
         except Exception as exc:
-            logger.error("Exception during execution of task %s.", key, exc_info=True)
+            # Some legitimate use cases that will make us reach this point:
+            # - User specified an invalid executor;
+            # - Task transitioned to cancelled or resumed(fetch) before the start of
+            #   execute() and its dependencies were released. This caused
+            #   _prepare_args_for_execution() to raise KeyError;
+            # - A dependency was unspilled but failed to deserialize due to a bug in
+            #   user-defined or third party classes.
+            if ts.state == "executing":
+                logger.error(
+                    f"Exception during execution of task {key!r}",
+                    exc_info=True,
+                )
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
