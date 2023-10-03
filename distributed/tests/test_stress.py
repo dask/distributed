@@ -229,8 +229,7 @@ async def test_stress_steal(c, s, *workers):
             break
 
 
-# @pytest.mark.slow
-@pytest.mark.repeat(50)
+@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 10)
 async def test_close_connections(c, s, *workers):
     # Schedule 600 slowinc's interleaved by worker-to-worker data transfers
