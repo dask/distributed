@@ -6,6 +6,7 @@ from distributed.shuffle._merge import hash_join
 from distributed.shuffle.tests.utils import invoke_annotation_chaos
 from distributed.utils_test import gen_cluster
 
+pytest.importorskip("pyarrow")
 dd = pytest.importorskip("dask.dataframe")
 import pandas as pd
 
