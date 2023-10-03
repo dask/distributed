@@ -146,6 +146,8 @@ filterwarnings = [
     '''ignore:datetime\.datetime\.utc(fromtimestamp|now)\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:bokeh''',
     # https://github.com/tornadoweb/tornado/issues/3334
     '''ignore:datetime\.datetime\.utc(fromtimestamp|now)\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:tornado''',
+    # https://github.com/dateutil/dateutil/issues/1284
+    '''ignore:datetime\.datetime\.utc(fromtimestamp|now)\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:dateutil''',
 ]
 minversion = "6"
 markers = [
