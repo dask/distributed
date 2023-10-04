@@ -388,8 +388,6 @@ class SpecCluster(Cluster):
                 # *other* workers have finished initialising, so that we can have a
                 # proper teardown.
                 await asyncio.gather(*worker_futs)
-                for w in workers:
-                    await w  # for tornado gen.coroutine support
 
     def _update_worker_status(self, op, msg):
         if op == "remove":
@@ -686,8 +684,6 @@ async def run_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny
 
     if workers:
         await asyncio.gather(*workers.values())
-        for w in workers.values():
-            await w  # for tornado gen.coroutine support
     return workers
 
 
