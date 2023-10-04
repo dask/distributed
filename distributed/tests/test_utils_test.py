@@ -919,17 +919,13 @@ def test_popen_timeout(capsys):
                     import sys
                     import time
 
-                    if sys.platform == "win32":
-                        signal.signal(signal.SIGBREAK, signal.default_int_handler)
-                        # ^ Cause `CTRL_BREAK_EVENT` on Windows to raise `KeyboardInterrupt`
+                    signum = signal.SIGBREAK if sys.platform == "win32" else signal.SIGINT
+                    signal.signal(signum, signal.SIG_IGN)
+                    print("ready", flush=True)
 
-                    print('ready', flush=True)
                     while True:
-                        try:
-                            time.sleep(0.1)
-                            print("slept", flush=True)
-                        except KeyboardInterrupt:
-                            print("interrupted", flush=True)
+                        time.sleep(0.1)
+                        print("slept", flush=True)
                     """
                 ),
             ],
@@ -938,13 +934,12 @@ def test_popen_timeout(capsys):
         ) as proc:
             assert proc.stdout
             assert proc.stdout.readline().strip() == b"ready"
-    # Exiting contextmanager sends SIGINT, waits 1s for shutdown.
-    # Our script ignores SIGINT, so after 1s it sends SIGKILL.
+    # Exiting contextmanager sends SIGINT/SIGBREAK, waits 1s for shutdown.
+    # Our script ignores SIGINT/SIGBREAK, so after 1s it sends SIGKILL.
     # The contextmanager raises `TimeoutExpired` once the process is killed,
     # because it failed the 1s timeout
     captured = capsys.readouterr()
     assert "stdout: returncode" in captured.out
-    assert "interrupted" in captured.out
     assert "slept" in captured.out
 
 
