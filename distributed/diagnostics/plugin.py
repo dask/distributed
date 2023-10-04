@@ -436,7 +436,7 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
             True,
         )
 
-    def _compose_installed_key(self) -> list[str]:
+    def _compose_installed_key(self) -> list[Key]:
         return [
             self.name,
             "installed",
