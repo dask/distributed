@@ -2280,6 +2280,7 @@ async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
 class FlakyConnectionPool(ConnectionPool):
     def __init__(self, *args, failing_connects=0, **kwargs):
         self.attempts = 0
+        self.failed_attempts = 0
         self.failing_connects = failing_connects
         super().__init__(*args, **kwargs)
 
@@ -2289,9 +2290,11 @@ class FlakyConnectionPool(ConnectionPool):
             return await super().connect(*args, **kwargs)
 
         with dask.config.set({"distributed.comm.timeouts.connect": "0 ms"}):
-            return await super().connect(*args, **kwargs)
-
-        raise RuntimeError("This should not happen, connecting should fail!")
+            try:
+                _ = await super().connect(*args, **kwargs)
+            except Exception:
+                self.failed_attempts += 1
+                raise
 
 
 @gen_cluster(
@@ -2341,6 +2344,7 @@ async def test_p2p_flaky_connect_recover_with_retry(c, s, a, b):
 
     with mock.patch.object(a, "rpc", rpc):
         await c.compute(x)
+    assert rpc.failed_attempts == 1
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
