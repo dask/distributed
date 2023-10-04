@@ -1596,7 +1596,7 @@ async def test_close_while_executing(c, s, a, sync):
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
     task = next(
-        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+        task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
     )
     await a.close()
     assert task.done()
@@ -1618,7 +1618,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
     task = next(
-        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+        task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
     )
     with captured_logger(
         "distributed.worker.state_machine", level=logging.ERROR

@@ -13,6 +13,7 @@ from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Union
 
 import dask
+from dask.typing import Key
 from dask.utils import parse_timedelta
 
 # Needed to avoid Sphinx WARNING: more than one target found for cross-reference
@@ -389,10 +390,10 @@ class ActiveMemoryManagerExtension:
 
         validate = self.scheduler.validate
         drop_by_worker: (
-            defaultdict[scheduler_module.WorkerState, list[str]]
+            defaultdict[scheduler_module.WorkerState, list[Key]]
         ) = defaultdict(list)
         repl_by_worker: (
-            defaultdict[scheduler_module.WorkerState, list[str]]
+            defaultdict[scheduler_module.WorkerState, list[Key]]
         ) = defaultdict(list)
 
         for ts, (pending_repl, pending_drop) in self.pending.items():

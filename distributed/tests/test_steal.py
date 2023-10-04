@@ -1878,7 +1878,7 @@ def _get_task_placement(
             [
                 list(key_split(key[5:]))  # Remove "task-" prefix
                 for key in w.data
-                if key.startswith("task-")
+                if isinstance(key, str) and key.startswith("task-")
             ]
         )
     return _deterministic_placement(actual)

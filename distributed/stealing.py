@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 from tlz import topk
 
 import dask
+from dask.typing import Key
 from dask.utils import parse_timedelta
 
 from distributed.compatibility import PeriodicCallback
@@ -173,7 +174,7 @@ class WorkStealing(SchedulerPlugin):
 
     def transition(
         self,
-        key: str,
+        key: Key,
         start: TaskStateState,
         finish: TaskStateState,
         *args: Any,

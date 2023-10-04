@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from typing import TYPE_CHECKING
+
+from dask.typing import Key
 
 if TYPE_CHECKING:
     # Circular import
@@ -9,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def scheduler_story(
-    keys_or_stimuli: set[str], transition_log: Iterable[Transition]
+    keys_or_stimuli: set[Key | str], transition_log: Iterable[Transition]
 ) -> list[Transition]:
     """Creates a story from the scheduler transition log given a set of keys
     describing tasks or stimuli.
@@ -32,7 +34,7 @@ def scheduler_story(
     ]
 
 
-def worker_story(keys_or_stimuli: set[str], log: Iterable[tuple]) -> list:
+def worker_story(keys_or_stimuli: Collection[Key | str], log: Iterable[tuple]) -> list:
     """Creates a story from the worker log given a set of keys
     describing tasks or stimuli.
 
