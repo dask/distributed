@@ -13,6 +13,7 @@ from tlz import concat, drop, groupby, merge
 
 import dask.config
 from dask.optimization import SubgraphCallable
+from dask.typing import Key
 from dask.utils import is_namedtuple_instance, parse_timedelta
 
 from distributed.core import ConnectionPool, rpc
@@ -22,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 async def gather_from_workers(
-    who_has: Mapping[str, Collection[str]],
+    who_has: Mapping[Key, Collection[str]],
     rpc: ConnectionPool,
     *,
     serializers: list[str] | None = None,
     who: str | None = None,
-) -> tuple[dict[str, object], list[str], list[str], list[str]]:
+) -> tuple[dict[Key, object], list[Key], list[Key], list[str]]:
     """Gather data directly from peers
 
     Parameters
@@ -55,8 +56,8 @@ async def gather_from_workers(
     from distributed.worker import get_data_from_worker
 
     to_gather = {k: set(v) for k, v in who_has.items()}
-    data: dict[str, object] = {}
-    failed_keys: list[str] = []
+    data: dict[Key, object] = {}
+    failed_keys: list[Key] = []
     missing_workers: set[str] = set()
     busy_workers: set[str] = set()
 
