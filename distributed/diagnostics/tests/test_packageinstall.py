@@ -176,6 +176,29 @@ async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
             assert "already been installed" in logs
 
 
+@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
+async def test_package_install_installs_once_when_reregistered(c, s, a, b):
+    stub_install = StubInstall(
+        packages=["requests"],
+    )
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.INFO
+    ) as logger:
+        install_mock = mock.Mock(name="install")
+        with mock.patch.object(_StubInstaller, "install", install_mock):
+            await c.register_plugin(stub_install)
+            with pytest.warns(
+                UserWarning,
+                match=r"Scheduler already contains a plugin with name stub-install-.*; overwriting.",
+            ):
+                await c.register_plugin(stub_install)
+            assert install_mock.call_count == 1
+            logs = logger.getvalue()
+            assert "already been installed on the scheduler" in logs
+            # doesn't re-regsiter install on workers
+            assert logs.count("already been installed") == 3
+
+
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_package_install_restarts_on_nanny(c, s, a):

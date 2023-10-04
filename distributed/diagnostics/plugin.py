@@ -396,18 +396,18 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
                 )
                 self.installer.install()
                 self._set_installed(scheduler)
+
+                worker_plugin = _PackageInstallWorker(
+                    self.installer, self.restart_workers, self.name
+                )
+                await scheduler.register_worker_plugin(
+                    comm=None, plugin=dumps(worker_plugin), name=self.name
+                )
             else:
                 logger.info(
                     "The following packages have already been installed on the scheduler: %s",
                     self.installer.packages,
                 )
-
-            worker_plugin = _PackageInstallWorker(
-                self.installer, self.restart_workers, self.name
-            )
-            await scheduler.register_worker_plugin(
-                comm=None, plugin=dumps(worker_plugin), name=self.name
-            )
 
     async def close(self) -> None:
         assert PackageInstall._lock is not None
