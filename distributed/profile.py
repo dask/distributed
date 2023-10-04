@@ -178,7 +178,7 @@ def process(
         # sometimes need to be recursed into as well, e.g. for serialization
         # which can cause recursion errors later on since this can generate
         # deeply nested dictionaries
-        depth = min(250, sys.getrecursionlimit() // 4)
+        depth = min(100, sys.getrecursionlimit() // 4)
 
     if any(frame.f_code.co_filename.endswith(o) for o in omit):
         return None

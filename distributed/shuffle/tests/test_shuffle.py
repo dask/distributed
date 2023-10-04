@@ -25,11 +25,18 @@ pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
 import dask
-from dask.distributed import Event, LocalCluster, Nanny, Worker
+from dask.typing import Key
 
-from distributed.client import Client
+from distributed import (
+    Client,
+    Event,
+    KilledWorker,
+    LocalCluster,
+    Nanny,
+    Scheduler,
+    Worker,
+)
 from distributed.core import ConnectionPool
-from distributed.scheduler import KilledWorker, Scheduler
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
     convert_shards,
@@ -322,7 +329,7 @@ async def wait_for_tasks_in_state(
     dask_worker: Worker | Scheduler,
     interval: float = 0.01,
 ) -> None:
-    tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
+    tasks: Mapping[Key, SchedulerTaskState | WorkerTaskState]
 
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
