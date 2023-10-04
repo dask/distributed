@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import logging
-import math
 import socket
 
 import dask
 from dask.utils import parse_bytes
 
 from distributed import protocol
-from distributed.sizeof import safe_sizeof as sizeof
+from distributed.sizeof import safe_sizeof
 from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
 logger = logging.getLogger(__name__)
@@ -59,17 +58,16 @@ async def to_frames(
             raise
 
     if OFFLOAD_THRESHOLD and allow_offload:
-        try:
-            msg_size = sizeof(msg)
-        except RecursionError:
-            msg_size = math.inf
-    else:
-        msg_size = 0
+        # dask.sizeof.sizeof() starts raising RecursionError at ~140 recursion depth,
+        # whereas msgpack can go on for quite a bit longer, until 512 (sometimes 256,
+        # depending on compilation flags). The default default_size of
+        # distributed.sizeof.safe_sizeof() is 1MB, which is less than the
+        # OFFLOAD_THRESHOLD.
+        msg_size = safe_sizeof(msg, default_size=-1)
+        if msg_size == -1 or msg_size > OFFLOAD_THRESHOLD:
+            return await offload(_to_frames)
 
-    if allow_offload and OFFLOAD_THRESHOLD and msg_size > OFFLOAD_THRESHOLD:
-        return await offload(_to_frames)
-    else:
-        return _to_frames()
+    return _to_frames()
 
 
 async def from_frames(frames, deserialize=True, deserializers=None, allow_offload=True):

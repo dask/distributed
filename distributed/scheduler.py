@@ -35,6 +35,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
+import tornado.web
 from sortedcontainers import SortedDict, SortedSet
 from tlz import (
     concat,
@@ -67,6 +68,7 @@ from dask.widgets import get_template
 
 from distributed import cluster_dump, preloading, profile
 from distributed import versions as version_module
+from distributed._asyncio import RLock
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
@@ -115,7 +117,6 @@ from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
     TimeoutError,
-    empty_context,
     format_dashboard_link,
     get_fileno_limit,
     key_split_group,
@@ -1470,7 +1471,7 @@ class TaskState:
         return get_template("task_state.html.j2").render(
             state=self.state,
             nbytes=self.nbytes,
-            key=self.key,
+            key=str(self.key),
         )
 
     def validate(self) -> None:
@@ -3541,7 +3542,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_timeout = None
         self.idle_since = time()
         self.time_started = self.idle_since  # compatibility for dask-gateway
-        self._lock = asyncio.Lock()
+        self._replica_lock = RLock()
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
 
@@ -3589,6 +3590,7 @@ class Scheduler(SchedulerState, ServerNode):
             distributed.dashboard.scheduler.connect(
                 self.http_application, self.http_server, self, prefix=http_prefix
             )
+        scheduler = self
         if self.jupyter:
             try:
                 from jupyter_server.serverapp import ServerApp
@@ -3598,6 +3600,30 @@ class Scheduler(SchedulerState, ServerNode):
                     "need to have jupyterlab installed"
                 )
             from traitlets.config import Config
+
+            """HTTP handler to shut down the Jupyter server.
+            """
+            try:
+                from jupyter_server.auth import authorized
+            except ImportError:
+
+                def authorized(c):
+                    return c
+
+            from jupyter_server.base.handlers import JupyterHandler
+
+            class ShutdownHandler(JupyterHandler):
+                """A shutdown API handler."""
+
+                auth_resource = "server"
+
+                @tornado.web.authenticated
+                @authorized
+                async def post(self):
+                    """Shut down the server."""
+                    self.log.info("Shutting down on /api/shutdown request.")
+
+                    await scheduler.close(reason="shutdown requested via Jupyter")
 
             j = ServerApp.instance(
                 config=Config(
@@ -3620,6 +3646,11 @@ class Scheduler(SchedulerState, ServerNode):
                 argv=[],
             )
             self._jupyter_server_application = j
+            shutdown_app = tornado.web.Application(
+                [(r"/jupyter/api/shutdown", ShutdownHandler)]
+            )
+            shutdown_app.settings = j.web_app.settings
+            self.http_application.add_application(shutdown_app)
             self.http_application.add_application(j.web_app)
 
         # Communication state
@@ -6373,7 +6404,8 @@ class Scheduler(SchedulerState, ServerNode):
         if not msgs:
             return {"status": "OK"}
 
-        async with self._lock:
+        # Downgrade reentrant lock to non-reentrant
+        async with self._replica_lock(("rebalance", object())):
             result = await self._rebalance_move_data(msgs, stimulus_id)
             if result["status"] == "partial-fail" and keys is None:
                 # Only return failed keys if the client explicitly asked for them
@@ -6636,7 +6668,6 @@ class Scheduler(SchedulerState, ServerNode):
         workers=None,
         branching_factor=2,
         delete=True,
-        lock=True,
         stimulus_id=None,
     ):
         """Replicate data throughout cluster
@@ -6662,7 +6693,8 @@ class Scheduler(SchedulerState, ServerNode):
         """
         stimulus_id = stimulus_id or f"replicate-{time()}"
         assert branching_factor > 0
-        async with self._lock if lock else empty_context:
+        # Downgrade reentrant lock to non-reentrant
+        async with self._replica_lock(("replicate", object())):
             if workers is not None:
                 workers = {self.workers[w] for w in self.workers_list(workers)}
                 workers = {ws for ws in workers if ws.status == Status.running}
@@ -6937,9 +6969,8 @@ class Scheduler(SchedulerState, ServerNode):
         # This lock makes retire_workers, rebalance, and replicate mutually
         # exclusive and will no longer be necessary once rebalance and replicate are
         # migrated to the Active Memory Manager.
-        # Note that, incidentally, it also prevents multiple calls to retire_workers
-        # from running in parallel - this is unnecessary.
-        async with self._lock:
+        # However, it allows multiple instances of retire_workers to run in parallel.
+        async with self._replica_lock("retire-workers"):
             if names is not None:
                 if workers is not None:
                     raise TypeError("names and workers are mutually exclusive")
