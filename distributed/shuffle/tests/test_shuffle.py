@@ -1129,7 +1129,7 @@ def test_processing_chain(tmp_path):
 
     out = {}
     for k in range(npartitions):
-        shards, _ = read_from_disk(tmp_path / str(k), meta)
+        shards, _ = read_from_disk(tmp_path / str(k))
         out[k] = convert_shards(shards, meta)
 
     shuffled_df = pd.concat(df for df in out.values())
