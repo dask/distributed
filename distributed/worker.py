@@ -1173,8 +1173,8 @@ class Worker(BaseWorker, ServerNode):
         logger.info("-" * 49)
 
         # Worker reconnection is not supported
-        assert not self.data
-        assert not self.state.tasks
+        assert not self.data, "data must be empty on connection"
+        assert not self.state.tasks, "tasks must be empty on connection"
 
         while True:
             try:

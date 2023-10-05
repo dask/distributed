@@ -682,11 +682,7 @@ def test_check_process_leak_post_cleanup(ignore_sigterm):
 
 @pytest.mark.parametrize("nanny", [True, False])
 def test_start_failure_worker(nanny):
-    if nanny:
-        ctx = raises_with_cause(RuntimeError, None, TypeError, None)
-    else:
-        ctx = pytest.raises(TypeError)
-    with ctx:
+    with pytest.raises(TypeError):
         with cluster(nanny=nanny, worker_kwargs={"foo": "bar"}):
             return
 

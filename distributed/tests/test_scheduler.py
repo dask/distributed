@@ -69,7 +69,6 @@ from distributed.utils_test import (
     inc,
     nodebug,
     padded_time,
-    raises_with_cause,
     slowadd,
     slowdec,
     slowidentity,
@@ -1333,7 +1332,7 @@ async def test_worker_name(s):
         assert s.workers[w.address].name == "alice"
         assert s.aliases["alice"] == w.address
 
-        with raises_with_cause(RuntimeError, None, ValueError, None):
+        with pytest.raises(ValueError, match="name taken, alice"):
             async with Worker(s.address, name="alice"):
                 pass
 
@@ -1767,7 +1766,7 @@ async def test_worker_arrives_with_data_is_rejected(c, s, a, b):
     assert w.state.tasks[y.key].state == "memory"
     assert w.data == {y.key: 3}
 
-    with pytest.raises(RuntimeError, match="Worker failed to start"):
+    with pytest.raises(AssertionError, match="data must be empty on connection"):
         await w
     assert w.status == Status.failed
     assert len(s.workers) == 2
@@ -3025,9 +3024,7 @@ async def test_worker_name_collision(s, a):
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
     with captured_logger("distributed.scheduler") as log:
-        with raises_with_cause(
-            RuntimeError, None, ValueError, f"name taken, {a.name!r}"
-        ):
+        with pytest.raises(ValueError, match=f"name taken, {a.name!r}"):
             await Worker(s.address, name=a.name, host="127.0.0.1")
 
     s.validate_state()

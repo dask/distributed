@@ -29,7 +29,6 @@ from distributed.utils_test import (
     captured_logger,
     gen_test,
     inc,
-    raises_with_cause,
     slowinc,
     tls_only_security,
     xfail_ssl_issue5601,
@@ -1255,7 +1254,7 @@ class MyPlugin:
 
 @pytest.mark.slow
 def test_localcluster_start_exception(loop):
-    with raises_with_cause(RuntimeError, None, ImportError, "my_nonexistent_library"):
+    with pytest.raises(ModuleNotFoundError, match="my_nonexistent_library"):
         with LocalCluster(
             n_workers=1,
             threads_per_worker=1,

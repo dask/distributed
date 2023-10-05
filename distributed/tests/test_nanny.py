@@ -33,7 +33,6 @@ from distributed.utils_test import (
     captured_logger,
     gen_cluster,
     gen_test,
-    raises_with_cause,
 )
 
 pytestmark = [pytest.mark.ci1, pytest.mark.gpu]
@@ -511,11 +510,8 @@ async def test_nanny_port_range(c, s):
         assert n1.port == 9867  # Selects first port in range
         async with Nanny(s.address, port=nanny_port, worker_port=worker_port) as n2:
             assert n2.port == 9868  # Selects next port in range
-            with raises_with_cause(
-                RuntimeError,
-                "Nanny failed to start.",
-                ValueError,
-                "with port 9867:9868",
+            with pytest.raises(
+                ValueError, match="with port 9867:9868"
             ):  # No more ports left
                 async with Nanny(s.address, port=nanny_port, worker_port=worker_port):
                     pass
@@ -562,26 +558,23 @@ class BrokenWorker(worker.Worker):
 async def test_worker_start_exception(s):
     nanny = Nanny(s.address, worker_class=BrokenWorker)
     with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with raises_with_cause(
-            RuntimeError,
-            "Nanny failed to start",
-            RuntimeError,
-            "BrokenWorker failed to start",
-        ):
+        with pytest.raises(ValueError, match="broken"):
             async with nanny:
                 pass
     assert nanny.status == Status.failed
-    # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
+    # NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure`
+    # sets it to `failed`
     assert nanny.process is None
     assert "Restarting worker" not in logs.getvalue()
-    # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
+    # Avoid excessive spewing. (It's also printed once extra within the subprocess,
+    # which is okay.)
     assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
 
 
 @gen_cluster(nthreads=[])
 async def test_failure_during_worker_initialization(s):
     with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'foo'"):
             await Nanny(s.address, foo="bar")
     assert "Restarting worker" not in logs.getvalue()
 
