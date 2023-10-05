@@ -342,8 +342,9 @@ async def test_worker_port_range(s):
         assert w1.port == 9867  # Selects first port in range
         async with Worker(s.address, port=port) as w2:
             assert w2.port == 9868  # Selects next port in range
-            with pytest.raises(ValueError, match="Could not start Worker"):
-                # No more ports left
+            with raises_with_cause(
+                RuntimeError, None, ValueError, match_cause="Could not start Worker"
+            ):  # No more ports left
                 async with Worker(s.address, port=port):
                     pass
 
@@ -468,7 +469,9 @@ async def test_plugin_exception():
             raise ValueError("Setup failed")
 
     async with Scheduler(port=0, dashboard_address=":0") as s:
-        with pytest.raises(ValueError, match="Setup failed"):
+        with raises_with_cause(
+            RuntimeError, "Worker failed to start", ValueError, "Setup failed"
+        ):
             async with Worker(s.address, plugins={MyPlugin()}):
                 pass
 
@@ -481,13 +484,24 @@ async def test_plugin_multiple_exceptions():
 
     class MyPlugin2(WorkerPlugin):
         def setup(self, worker=None):
-            raise ValueError("MyPlugin2 Error")
+            raise RuntimeError("MyPlugin2 Error")
 
     async with Scheduler(port=0, dashboard_address=":0") as s:
         # There's no guarantee on the order of which exception is raised first
-        with pytest.raises(ValueError, match="MyPlugin.* Error"):
+        with raises_with_cause(
+            RuntimeError,
+            None,
+            (ValueError, RuntimeError),
+            match_cause="MyPlugin.* Error",
+        ):
             with captured_logger("distributed.worker") as logger:
-                async with Worker(s.address, plugins={MyPlugin1(), MyPlugin2()}) as w:
+                async with Worker(
+                    s.address,
+                    plugins={
+                        MyPlugin1(),
+                        MyPlugin2(),
+                    },
+                ) as w:
                     pass
 
             text = logger.getvalue()
