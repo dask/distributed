@@ -1129,7 +1129,7 @@ def test_processing_chain(tmp_path):
 
     out = {}
     for k in range(npartitions):
-        shards, _ = read_from_disk(tmp_path / str(k), meta)
+        shards, _ = read_from_disk(tmp_path / str(k))
         out[k] = convert_shards(shards, meta)
 
     shuffled_df = pd.concat(df for df in out.values())
@@ -2100,7 +2100,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
+async def test_handle_null_partitions_p2p_shuffling(c, s, a, b):
     data = [
         {"companies": [], "id": "a", "x": None},
         {"companies": [{"id": 3}, {"id": 5}], "id": "b", "x": None},
@@ -2113,8 +2113,8 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, *workers):
     result = await c.compute(ddf)
     dd.assert_eq(result, df)
 
-    await c.close()
-    await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
 
 
@@ -2133,7 +2133,35 @@ async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
     result = await result
     expected = await expected
     dd.assert_eq(result, expected)
-    del result
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_handle_object_columns_p2p(c, s, a, b):
+    with dask.config.set({"dataframe.convert-string": False}):
+        df = pd.DataFrame(
+            {
+                "a": [1, 2, 3],
+                "b": [
+                    np.asarray([1, 2, 3]),
+                    np.asarray([4, 5, 6]),
+                    np.asarray([7, 8, 9]),
+                ],
+                "c": ["foo", "bar", "baz"],
+            }
+        )
+
+        ddf = dd.from_pandas(
+            df,
+            npartitions=2,
+        )
+        shuffled = ddf.shuffle(on="a")
+
+        result = await c.compute(shuffled)
+    dd.assert_eq(result, df)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
