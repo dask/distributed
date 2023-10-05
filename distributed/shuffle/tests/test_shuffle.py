@@ -2140,7 +2140,7 @@ async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_handle_array_columns_p2p(c, s, a, b):
+async def test_handle_object_columns_p2p(c, s, a, b):
     with dask.config.set({"dataframe.convert-string": False}):
         df = pd.DataFrame(
             {
@@ -2150,6 +2150,7 @@ async def test_handle_array_columns_p2p(c, s, a, b):
                     np.asarray([4, 5, 6]),
                     np.asarray([7, 8, 9]),
                 ],
+                "c": ["foo", "bar", "baz"],
             }
         )
 
