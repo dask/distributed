@@ -469,15 +469,14 @@ class SpecCluster(Cluster):
         await super()._close()
 
     async def __aenter__(self):
-        await self
         try:
+            await self
             await self._correct_state()
+            assert self.status == Status.running
+            return self
         except Exception:
-            # One or more Servers failed to start. Close the healthy workers and reraise
             await self.close()
             raise
-        assert self.status == Status.running
-        return self
 
     def _threads_per_worker(self) -> int:
         """Return the number of threads per worker for new workers"""
