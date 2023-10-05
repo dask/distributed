@@ -34,6 +34,7 @@ import psutil
 
 import dask.config
 from dask.system import CPU_COUNT
+from dask.typing import Key
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
@@ -54,13 +55,13 @@ if TYPE_CHECKING:
 
 WorkerDataParameter: TypeAlias = Union[
     # pre-initialized
-    MutableMapping[str, object],
+    MutableMapping[Key, object],
     # constructor
-    Callable[[], MutableMapping[str, object]],
+    Callable[[], MutableMapping[Key, object]],
     # constructor, passed worker.local_directory
-    Callable[[str], MutableMapping[str, object]],
+    Callable[[str], MutableMapping[Key, object]],
     # (constructor, kwargs to constructor)
-    tuple[Callable[..., MutableMapping[str, object]], dict[str, Any]],
+    tuple[Callable[..., MutableMapping[Key, object]], dict[str, Any]],
     # initialize internally
     None,
 ]
@@ -89,7 +90,7 @@ class WorkerMemoryManager:
 
     """
 
-    data: MutableMapping[str, object]  # {task key: task payload}
+    data: MutableMapping[Key, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
@@ -138,10 +139,10 @@ class WorkerMemoryManager:
             self.data = data
         elif callable(data):
             if has_arg(data, "worker_local_directory"):
-                data = cast("Callable[[str], MutableMapping[str, object]]", data)
+                data = cast("Callable[[str], MutableMapping[Key, object]]", data)
                 self.data = data(worker.local_directory)
             else:
-                data = cast("Callable[[], MutableMapping[str, object]]", data)
+                data = cast("Callable[[], MutableMapping[Key, object]]", data)
                 self.data = data()
         elif isinstance(data, tuple):
             func, kwargs = data
