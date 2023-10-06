@@ -4812,8 +4812,7 @@ class Scheduler(SchedulerState, ServerNode):
         so any tasks that became runnable are already in ``processing``. Otherwise,
         overproduction can occur if queued tasks get scheduled before downstream tasks.
 
-        Must be called after `check_idle_saturated`; i.e. `idle_task_count` must be up
-        to date.
+        Must be called after `check_idle_saturated`; i.e. `idle_task_count` must be up to date.
         """
         if not self.queued:
             return
@@ -4825,6 +4824,8 @@ class Scheduler(SchedulerState, ServerNode):
             return
 
         for _ in range(slots_available):
+            if not self.queued:
+                return
             # Ideally, we'd be popping it here already but this would break
             # certain state invariants since the task is not transitioned, yet
             qts = self.queued.peek()
