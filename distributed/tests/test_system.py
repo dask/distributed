@@ -105,7 +105,6 @@ def test_softest_memory_limit_cgroups2(monkeypatch):
     limit = memory_limit()
     assert limit == 10
 
-
 @pytest.mark.xfail(
     MACOS,
     reason="Mac OS raises 'ValueError: current limit exceeds maximum limit' "
