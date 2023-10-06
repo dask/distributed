@@ -170,6 +170,7 @@ class WorkerMetricCollector(PrometheusCollector):
         # The following metrics will export NaN, if the corresponding digests are None
         if not self.crick_available:
             return
+        assert self.server.digests
 
         yield GaugeMetricFamily(
             self.build_name("tick_duration_median"),

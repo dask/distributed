@@ -5863,7 +5863,7 @@ class Scheduler(SchedulerState, ServerNode):
             stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
             self._ongoing_background_tasks.call_soon(
-                self.remove_worker,
+                self.remove_worker,  # type: ignore[arg-type]
                 address=worker,
                 stimulus_id=f"worker-send-comm-fail-{time()}",
             )
@@ -5909,7 +5909,7 @@ class Scheduler(SchedulerState, ServerNode):
                 pass
             except (CommClosedError, AttributeError):
                 self._ongoing_background_tasks.call_soon(
-                    self.remove_worker,
+                    self.remove_worker,  # type: ignore[arg-type]
                     address=worker,
                     stimulus_id=f"send-all-comm-fail-{time()}",
                 )
