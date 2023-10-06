@@ -87,6 +87,7 @@ def test_soft_memory_limit_cgroups2(monkeypatch):
     limit = memory_limit()
     assert limit == 10
 
+
 def test_softest_memory_limit_cgroups2(monkeypatch):
     builtin_open = builtins.open
 
@@ -104,6 +105,7 @@ def test_softest_memory_limit_cgroups2(monkeypatch):
 
     limit = memory_limit()
     assert limit == 10
+
 
 @pytest.mark.xfail(
     MACOS,
