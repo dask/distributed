@@ -553,7 +553,7 @@ class _PackageInstaller(abc.ABC):
     INSTALLER: ClassVar[str]
     packages: list[str]
 
-    def __init__(self, packages: list[str]) -> None:
+    def __init__(self, packages: list[str]):
         self.packages = packages
 
     @abc.abstractmethod
@@ -614,11 +614,7 @@ class _CondaInstaller(_PackageInstaller):
 
     conda_options: list[str]
 
-    def __init__(
-        self,
-        packages: list[str],
-        conda_options: list[str] | None = None,
-    ) -> None:
+    def __init__(self, packages: list[str], conda_options: list[str] | None = None):
         super().__init__(packages)
         self.conda_options = conda_options or []
 
@@ -700,11 +696,7 @@ class _PipInstaller(_PackageInstaller):
 
     pip_options: list[str]
 
-    def __init__(
-        self,
-        packages: list[str],
-        pip_options: list[str] | None = None,
-    ) -> None:
+    def __init__(self, packages: list[str], pip_options: list[str] | None = None):
         super().__init__(packages)
         self.pip_options = pip_options or []
 
