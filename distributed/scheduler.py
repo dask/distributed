@@ -4824,16 +4824,17 @@ class Scheduler(SchedulerState, ServerNode):
         if slots_available == 0:
             return
 
-        recommendations: Recs = {}
-        for qts in self.queued.peekn(slots_available):
+        for _ in range(slots_available):
+            # Ideally, we'd be popping it here already but this would break
+            # certain state invariants since the task is not transitioned, yet
+            qts = self.queued.peek()
             if self.validate:
                 assert qts.state == "queued", qts.state
                 assert not qts.processing_on, (qts, qts.processing_on)
                 assert not qts.waiting_on, (qts, qts.processing_on)
                 assert qts.who_wants or qts.waiters, qts
-            recommendations[qts.key] = "processing"
 
-        self.transitions(recommendations, stimulus_id)
+            self.transitions({qts.key: "processing"}, stimulus_id)
 
     def stimulus_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
