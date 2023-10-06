@@ -22,7 +22,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Iterator, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
@@ -2100,7 +2100,7 @@ def raises_with_cause(
     expected_cause: type[BaseException] | tuple[type[BaseException], ...],
     match_cause: str | None,
     *more_causes: type[BaseException] | tuple[type[BaseException], ...] | str | None,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Contextmanager to assert that a certain exception with cause was raised.
     It can travel the causes recursively by adding more expected, match pairs at the end.
 
