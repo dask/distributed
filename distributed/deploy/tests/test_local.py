@@ -1141,16 +1141,18 @@ async def test_local_cluster_redundant_kwarg(nanny):
         dashboard_address=":0",
         asynchronous=True,
     )
-    try:
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
-            # Extra arguments are forwarded to the worker class. Depending on
-            # whether we use the nanny or not, the error treatment is quite
-            # different and we should assert that an exception is raised
-            async with cluster:
-                pass
-    finally:
-        # FIXME: LocalCluster leaks if LocalCluster.__aenter__ raises
-        await cluster.close()
+    if nanny:
+        ctx = raises_with_cause(
+            RuntimeError, None, TypeError, "unexpected keyword argument"
+        )
+    else:
+        ctx = pytest.raises(TypeError, match="unexpected keyword argument")
+    with ctx:
+        # Extra arguments are forwarded to the worker class. Depending on
+        # whether we use the nanny or not, the error treatment is quite
+        # different and we should assert that an exception is raised
+        async with cluster:
+            pass
 
 
 @gen_test()
@@ -1255,7 +1257,14 @@ class MyPlugin:
 
 @pytest.mark.slow
 def test_localcluster_start_exception(loop):
-    with raises_with_cause(RuntimeError, None, ImportError, "my_nonexistent_library"):
+    with raises_with_cause(
+        RuntimeError,
+        "Nanny failed to start",
+        RuntimeError,
+        "Worker failed to start",
+        ImportError,
+        "my_nonexistent_library",
+    ):
         with LocalCluster(
             n_workers=1,
             threads_per_worker=1,

@@ -533,11 +533,17 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
         for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
 
-            # If a dependent task has not been assigned to a worker yet, err on the side
-            # of caution and preserve an additional replica for it.
-            # However, if two dependent tasks have been already assigned to the same
-            # worker, don't double count them.
-            nwaiters = len({waiter.processing_on or waiter for waiter in ts.waiters})
+            nwaiters = len(ts.waiters)
+            if desired_replicas < nwaiters < 20:
+                # If a dependent task has not been assigned to a worker yet, err on the
+                # side of caution and preserve an additional replica for it.
+                # However, if two dependent tasks have been already assigned to the same
+                # worker, don't double count them.
+                # This calculation is quite CPU-intensive, so it's disabled for tasks
+                # with lots of waiters.
+                nwaiters = len(
+                    {waiter.processing_on or waiter for waiter in ts.waiters}
+                )
 
             ndrop_key = len(ts.who_has) - max(desired_replicas, nwaiters)
             if ts in self.manager.pending:

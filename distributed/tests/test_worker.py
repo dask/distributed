@@ -3586,3 +3586,31 @@ async def test_startstops(c, s, a, b):
         < ss[1]["stop"]
         < t1 + b.scheduler_delay
     )
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+@pytest.mark.parametrize("state", ["cancelled", "resumed"])
+async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
+    async with BlockedExecute(s.address) as b:
+        with captured_logger("distributed.worker", level=logging.ERROR) as log:
+            x = (await c.scatter({"x": 1}))["x"]
+            y = c.submit(inc, x, key="y", workers=[b.address])
+            await b.in_execute.wait()
+            del x, y
+            await async_poll_for(lambda: "x" not in b.data, timeout=5)
+
+            if state == "resumed":
+                y = c.submit(inc, 1, key="y", workers=[a.address])
+                z = c.submit(inc, y, key="z", workers=[b.address])
+                await wait_for_state("y", "resumed", b)
+
+            b.block_execute.set()
+            b.block_execute_exit.set()
+
+            if state == "resumed":
+                assert await z == 3
+                del y, z
+
+            await async_poll_for(lambda: not b.state.tasks, timeout=5)
+
+    assert not log.getvalue()
