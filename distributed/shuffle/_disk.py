@@ -3,11 +3,57 @@ from __future__ import annotations
 import contextlib
 import pathlib
 import shutil
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any, Callable
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
+
+
+class SharedExclusiveLock:
+    _condition: threading.Condition
+    _readers: int
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._readers = 0
+
+    def acquire(self) -> None:
+        self._condition.acquire()
+        while self._readers > 0:
+            self._condition.wait()
+
+    def release(self) -> None:
+        self._condition.release()
+
+    def acquire_shared(self) -> None:
+        with self._condition:
+            self._readers += 1
+
+    def release_shared(self) -> None:
+        with self._condition:
+            self._readers -= 1
+            if not self._readers:
+                self._condition.notify_all()
+
+    @contextmanager
+    def exclusive(self) -> Generator[None, None, None]:
+        self.acquire()
+        try:
+            yield
+        finally:
+            self.release()
+
+    @contextmanager
+    def shared(self) -> Generator[None, None, None]:
+        self.acquire_shared()
+        try:
+            yield
+        finally:
+            self.release_shared()
 
 
 class DiskShardsBuffer(ShardsBuffer):
@@ -52,7 +98,9 @@ class DiskShardsBuffer(ShardsBuffer):
         )
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
+        self._closed = False
         self._read = read
+        self._sxlock = SharedExclusiveLock()
 
     async def _process(self, id: str, shards: list[bytes]) -> None:
         """Write one buffer to file
@@ -71,11 +119,14 @@ class DiskShardsBuffer(ShardsBuffer):
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication
             with self.time("write"):
-                with open(
-                    self.directory / str(id), mode="ab", buffering=100_000_000
-                ) as f:
-                    for shard in shards:
-                        f.write(shard)
+                with self._sxlock.shared():
+                    if self._closed:
+                        raise RuntimeError("Already closed")
+                    with open(
+                        self.directory / str(id), mode="ab", buffering=100_000_000
+                    ) as f:
+                        for shard in shards:
+                            f.write(shard)
 
     def read(self, id: int | str) -> Any:
         """Read a complete file back into memory"""
@@ -85,7 +136,10 @@ class DiskShardsBuffer(ShardsBuffer):
 
         try:
             with self.time("read"):
-                data, size = self._read((self.directory / str(id)).resolve())
+                with self._sxlock.shared():
+                    if self._closed:
+                        raise RuntimeError("Already closed")
+                    data, size = self._read((self.directory / str(id)).resolve())
         except FileNotFoundError:
             raise KeyError(id)
 
@@ -97,5 +151,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
     async def close(self) -> None:
         await super().close()
-        with contextlib.suppress(FileNotFoundError):
-            shutil.rmtree(self.directory)
+        with self._sxlock.exclusive():
+            self._closed = True
+            with contextlib.suppress(FileNotFoundError):
+                shutil.rmtree(self.directory)
