@@ -109,7 +109,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
                 await shuffle.close()
             finally:
                 async with self._runs_cleanup_condition:
-                    self._runs.remove(shuffle)
+                    self._runs.remove(shuffle)  # TODO: Discard?
                     self._runs_cleanup_condition.notify_all()
 
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
@@ -197,6 +197,8 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         elif shuffle.run_id < run_id:
             raise RuntimeError(f"{run_id=} invalid, got {shuffle}")
 
+        if self.closed:
+            raise ShuffleClosedError(f"{self} has already been closed")
         if shuffle._exception:
             raise shuffle._exception
         return shuffle
@@ -275,14 +277,12 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             if existing.run_id >= result.run_id:
                 return existing
             else:
-                self.shuffles.pop(shuffle_id)
-                existing.fail(
-                    RuntimeError("{existing!r} stale, expected run_id=={run_id}")
+                self.shuffle_fail(
+                    shuffle_id,
+                    existing.run_id,
+                    "{existing!r} stale, expected run_id=={run_id}",
                 )
 
-                self.worker._ongoing_background_tasks.call_soon(
-                    ShuffleWorkerPlugin._close_shuffle_run, self, existing
-                )
         shuffle: ShuffleRun = result.spec.create_run_on_worker(
             result.run_id, result.worker_for, self
         )
