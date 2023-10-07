@@ -15,28 +15,27 @@ from distributed.utils import log_errors
 
 class SharedExclusiveLock:
     _condition: threading.Condition
-    _readers: int
+    _n_readers: int
 
     def __init__(self) -> None:
         self._condition = threading.Condition()
-        self._readers = 0
+        self._n_readers = 0
 
     def acquire(self) -> None:
         self._condition.acquire()
-        while self._readers > 0:
-            self._condition.wait()
+        self._condition.wait_for(lambda: self._n_readers == 0)
 
     def release(self) -> None:
         self._condition.release()
 
     def acquire_shared(self) -> None:
         with self._condition:
-            self._readers += 1
+            self._n_readers += 1
 
     def release_shared(self) -> None:
         with self._condition:
-            self._readers -= 1
-            if not self._readers:
+            self._n_readers -= 1
+            if self._n_readers == 0:
                 self._condition.notify_all()
 
     @contextmanager
