@@ -152,6 +152,8 @@ class DiskShardsBuffer(ShardsBuffer):
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication
             with self.time("write"):
+                # We only need shared (i.e., read) access to the directory to write
+                # to a file inside of it.
                 with self._directory_lock.read():
                     if self._closed:
                         raise RuntimeError("Already closed")
