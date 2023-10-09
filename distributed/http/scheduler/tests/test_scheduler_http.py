@@ -415,7 +415,7 @@ async def test_api(c, s, a, b):
             "http://localhost:%d/api/v1" % s.http_server.port
         ) as resp:
             assert resp.status == 200
-            assert resp.headers["Content-Type"] == "text/plain"
+            assert resp.headers["Content-Type"] == "text/plain; charset=ISO-8859-1"
             assert (await resp.text()) == "API V1"
 
 
