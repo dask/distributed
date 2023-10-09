@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from distributed.shuffle._disk import ReadWriteLock
 
 
@@ -38,6 +40,12 @@ def test_basic():
     # Write lock after read
     with lock.write():
         pass
+
+    with pytest.raises(RuntimeError, match="unlocked read lock"):
+        lock.release_read()
+
+    with pytest.raises(RuntimeError, match="unlocked write lock"):
+        lock.release_write()
 
 
 def test_lock_timeout():
