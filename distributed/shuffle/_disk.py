@@ -13,46 +13,53 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
 
 
-class SharedExclusiveLock:
+class ReadWriteLock:
     _condition: threading.Condition
-    _n_readers: int
+    _n_reads: int
+    _write_pending: bool
 
     def __init__(self) -> None:
         self._condition = threading.Condition()
-        self._n_readers = 0
+        self._n_reads = 0
+        self._write_pending = False
 
-    def acquire(self) -> None:
-        self._condition.acquire()
-        self._condition.wait_for(lambda: self._n_readers == 0)
-
-    def release(self) -> None:
-        self._condition.release()
-
-    def acquire_shared(self) -> None:
+    def acquire_write(self) -> None:
         with self._condition:
-            self._n_readers += 1
+            self._condition.wait_for(lambda: not self._write_pending)
+            self._write_pending = True
+            self._condition.wait_for(lambda: self._n_reads == 0)
 
-    def release_shared(self) -> None:
+    def release_write(self) -> None:
         with self._condition:
-            self._n_readers -= 1
-            if self._n_readers == 0:
+            self._write_pending = False
+            self._condition.notify_all()
+
+    def acquire_read(self) -> None:
+        with self._condition:
+            self._condition.wait_for(lambda: not self._write_pending)
+            self._n_reads += 1
+
+    def release_read(self) -> None:
+        with self._condition:
+            self._n_reads -= 1
+            if self._n_reads == 0:
                 self._condition.notify_all()
 
     @contextmanager
-    def exclusive(self) -> Generator[None, None, None]:
-        self.acquire()
+    def write(self) -> Generator[None, None, None]:
+        self.acquire_write()
         try:
             yield
         finally:
-            self.release()
+            self.release_write()
 
     @contextmanager
-    def shared(self) -> Generator[None, None, None]:
-        self.acquire_shared()
+    def read(self) -> Generator[None, None, None]:
+        self.acquire_read()
         try:
             yield
         finally:
-            self.release_shared()
+            self.release_read()
 
 
 class DiskShardsBuffer(ShardsBuffer):
@@ -99,7 +106,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self.directory.mkdir(exist_ok=True)
         self._closed = False
         self._read = read
-        self._sxlock = SharedExclusiveLock()
+        self._directory_lock = ReadWriteLock()
 
     async def _process(self, id: str, shards: list[bytes]) -> None:
         """Write one buffer to file
@@ -118,7 +125,7 @@ class DiskShardsBuffer(ShardsBuffer):
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication
             with self.time("write"):
-                with self._sxlock.shared():
+                with self._directory_lock.read():
                     if self._closed:
                         raise RuntimeError("Already closed")
                     with open(
@@ -135,7 +142,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
         try:
             with self.time("read"):
-                with self._sxlock.shared():
+                with self._directory_lock.read():
                     if self._closed:
                         raise RuntimeError("Already closed")
                     data, size = self._read((self.directory / str(id)).resolve())
@@ -150,7 +157,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
     async def close(self) -> None:
         await super().close()
-        with self._sxlock.exclusive():
+        with self._directory_lock.write():
             self._closed = True
             with contextlib.suppress(FileNotFoundError):
                 shutil.rmtree(self.directory)
