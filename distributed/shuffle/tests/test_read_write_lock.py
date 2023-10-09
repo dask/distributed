@@ -49,6 +49,10 @@ def test_lock_timeout():
     result = lock.acquire_write(timeout=0.1)
     assert result is False
 
+    # Timed out write does not prevent read
+    with lock.read():
+        pass
+
     lock.release_read()
     result = lock.acquire_write(timeout=0.1)
     assert result is True
