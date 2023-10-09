@@ -4848,8 +4848,7 @@ class Scheduler(SchedulerState, ServerNode):
         so any tasks that became runnable are already in ``processing``. Otherwise,
         overproduction can occur if queued tasks get scheduled before downstream tasks.
 
-        Must be called after `check_idle_saturated`; i.e. `idle_task_count` must be up
-        to date.
+        Must be called after `check_idle_saturated`; i.e. `idle_task_count` must be up to date.
         """
         if not self.queued:
             return
@@ -4860,16 +4859,23 @@ class Scheduler(SchedulerState, ServerNode):
         if slots_available == 0:
             return
 
-        recommendations: Recs = {}
-        for qts in self.queued.peekn(slots_available):
+        for _ in range(slots_available):
+            if not self.queued:
+                return
+            # Ideally, we'd be popping it here already but this would break
+            # certain state invariants since the task is not transitioned, yet
+            qts = self.queued.peek()
             if self.validate:
                 assert qts.state == "queued", qts.state
                 assert not qts.processing_on, (qts, qts.processing_on)
                 assert not qts.waiting_on, (qts, qts.processing_on)
                 assert qts.who_wants or qts.waiters, qts
-            recommendations[qts.key] = "processing"
 
-        self.transitions(recommendations, stimulus_id)
+            # This removes the task from the top of the self.queued heap
+            self.transitions({qts.key: "processing"}, stimulus_id)
+            if self.validate:
+                assert qts.state == "processing"
+                assert not self.queued or self.queued.peek() != qts
 
     def stimulus_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
