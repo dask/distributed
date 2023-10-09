@@ -4835,7 +4835,11 @@ class Scheduler(SchedulerState, ServerNode):
                 assert not qts.waiting_on, (qts, qts.processing_on)
                 assert qts.who_wants or qts.waiters, qts
 
+            # This removes the task from the top of the self.queued heap
             self.transitions({qts.key: "processing"}, stimulus_id)
+            if self.validate:
+                assert qts.state == "processing"
+                assert not self.queued or self.queued.peek() != qts
 
     def stimulus_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
         """Mark that a task has finished execution on a particular worker"""
