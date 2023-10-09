@@ -109,7 +109,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
                 await shuffle.close()
             finally:
                 async with self._runs_cleanup_condition:
-                    self._runs.remove(shuffle)  # TODO: Discard?
+                    self._runs.remove(shuffle)
                     self._runs_cleanup_condition.notify_all()
 
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
