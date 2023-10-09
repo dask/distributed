@@ -33,11 +33,11 @@ def test_basic():
     with lock.write():
         pass
 
-    # Read lock after write
+    # Read after write
     with lock.read():
         pass
 
-    # Write lock after read
+    # Write after read
     with lock.write():
         pass
 
