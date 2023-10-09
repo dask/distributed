@@ -2203,14 +2203,11 @@ class SchedulerState:
             key=lambda ws: len(ws.processing) / ws.nthreads,
         )
         if self.validate:
+            assert self.workers.get(ws.address) is ws
             assert not _worker_full(ws, self.WORKER_SATURATION), (
                 ws,
                 _task_slots_available(ws, self.WORKER_SATURATION),
             )
-            assert ws in self.running, (ws, self.running)
-
-        if self.validate and ws is not None:
-            assert self.workers.get(ws.address) is ws
             assert ws in self.running, (ws, self.running)
 
         return ws
