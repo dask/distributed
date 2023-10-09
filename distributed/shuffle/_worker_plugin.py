@@ -272,15 +272,14 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             result = result.data
         if self.closed:
             raise ShuffleClosedError(f"{self} has already been closed")
-        if shuffle_id in self.shuffles:
-            existing = self.shuffles[shuffle_id]
+        if existing := self.shuffles.get(shuffle_id, None):
             if existing.run_id >= result.run_id:
                 return existing
             else:
                 self.shuffle_fail(
                     shuffle_id,
                     existing.run_id,
-                    "{existing!r} stale, expected run_id=={run_id}",
+                    f"{existing!r} stale, expected run_id=={result.run_id}",
                 )
 
         shuffle: ShuffleRun = result.spec.create_run_on_worker(

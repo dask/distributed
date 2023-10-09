@@ -2071,6 +2071,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
     assert shuffle_id in ext_B.shuffles
     assert not stale_shuffle_run.closed
     ext_B.finished_get_shuffle_run.clear()
+    ext_B.allow_fail = True
 
     # Initialize second shuffle execution
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
