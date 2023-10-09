@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.utils import log_errors
+from distributed.utils import Deadline, log_errors
 
 
 class ReadWriteLock:
@@ -22,25 +22,52 @@ class ReadWriteLock:
         self._condition = threading.Condition(threading.Lock())
         self._n_reads = 0
         self._write_pending = False
+        self._write_active = False
 
-    def acquire_write(self) -> None:
+    def acquire_write(self, timeout: float = -1) -> bool:
+        deadline = Deadline.after(timeout if timeout >= 0 else None)
         with self._condition:
-            self._condition.wait_for(lambda: not self._write_pending)
+            result = self._condition.wait_for(
+                lambda: not self._write_pending, timeout=deadline.remaining
+            )
+            if result is False:
+                return False
+
             self._write_pending = True
-            self._condition.wait_for(lambda: self._n_reads == 0)
+            result = self._condition.wait_for(
+                lambda: self._n_reads == 0, timeout=deadline.remaining
+            )
+
+            if result is False:
+                self._write_pending = False
+                self._condition.notify_all()
+                return False
+            self._write_active = True
+            return True
 
     def release_write(self) -> None:
         with self._condition:
+            if self._write_active is False:
+                raise RuntimeError("Tried releasing unlocked write lock")
             self._write_pending = False
+            self._write_active = False
             self._condition.notify_all()
 
-    def acquire_read(self) -> None:
+    def acquire_read(self, timeout: float = -1) -> bool:
+        deadline = Deadline.after(timeout if timeout >= 0 else None)
         with self._condition:
-            self._condition.wait_for(lambda: not self._write_pending)
+            result = self._condition.wait_for(
+                lambda: not self._write_pending, timeout=deadline.remaining
+            )
+            if result is False:
+                return False
             self._n_reads += 1
+            return True
 
     def release_read(self) -> None:
         with self._condition:
+            if self._n_reads == 0:
+                raise RuntimeError("Tired releasing unlocked read lock")
             self._n_reads -= 1
             if self._n_reads == 0:
                 self._condition.notify_all()
