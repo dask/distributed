@@ -1050,7 +1050,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.digests_total_since_heartbeat.clear()
 
-        out = dict(
+        out: dict = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
             bandwidth={
                 "total": self.bandwidth,
@@ -1348,9 +1348,8 @@ class Worker(BaseWorker, ServerNode):
         else:
             return {"status": "OK"}
 
-    def get_monitor_info(
-        self, recent: bool = False, start: int = 0
-    ) -> dict[str, float]:
+    # FIXME: Improve typing
+    def get_monitor_info(self, recent: bool = False, start: int = 0) -> dict[str, Any]:
         result = dict(
             range_query=(
                 self.monitor.recent()
@@ -2457,7 +2456,7 @@ class Worker(BaseWorker, ServerNode):
     ):
         now = time() + self.scheduler_delay
         if server:
-            history = self.io_loop.profile
+            history = self.io_loop.profile  # type: ignore[attr-defined]
         elif key is None:
             history = self.profile_history
         else:
