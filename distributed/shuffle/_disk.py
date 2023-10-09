@@ -19,7 +19,7 @@ class ReadWriteLock:
     _write_pending: bool
 
     def __init__(self) -> None:
-        self._condition = threading.Condition()
+        self._condition = threading.Condition(threading.Lock())
         self._n_reads = 0
         self._write_pending = False
 
