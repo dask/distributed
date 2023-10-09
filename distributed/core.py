@@ -821,7 +821,7 @@ class Server:
     def identity(self) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -831,8 +831,7 @@ class Server:
         Client.dump_cluster_state
         distributed.utils.recursive_to_dict
         """
-        info: dict = {}
-        info.update(self.identity())
+        info: dict[str, Any] = self.identity()
         extra = {
             "address": self.address,
             "status": self.status.name,
@@ -1012,7 +1011,7 @@ class Server:
                     )
 
     async def handle_stream(
-        self, comm: Comm, extra: dict[str, str] | None = None
+        self, comm: Comm, extra: dict[str, Any] | None = None
     ) -> None:
         extra = extra or {}
         logger.info("Starting established connection to %s", comm.peer_address)
