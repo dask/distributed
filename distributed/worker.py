@@ -1348,7 +1348,6 @@ class Worker(BaseWorker, ServerNode):
         else:
             return {"status": "OK"}
 
-    # FIXME: Improve typing
     def get_monitor_info(self, recent: bool = False, start: int = 0) -> dict[str, Any]:
         result = dict(
             range_query=(
