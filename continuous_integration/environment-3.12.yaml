@@ -34,8 +34,8 @@ dependencies:
   - pytest-timeout
   - requests
   - s3fs  # overridden by git tip below
-  # - scikit-learn  no support for 3.12
-  # - scipy  no support for 3.12
+  - scikit-learn
+  - scipy
   - sortedcollections
   - tblib
   - toolz
