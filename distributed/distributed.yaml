@@ -297,6 +297,14 @@ distributed:
     erred-tasks:
       max-history: 100
 
+  p2p:
+    comm:
+      retry:
+        count: 10
+        delay:
+          min: 1s  # the first non-zero delay between re-tries
+          max: 30s  # the maximum delay between re-tries
+
   ###################
   # Bokeh dashboard #
   ###################

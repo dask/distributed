@@ -36,6 +36,7 @@ from distributed import (
     Scheduler,
     Worker,
 )
+from distributed.core import ConnectionPool
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
     convert_shards,
@@ -2310,3 +2311,77 @@ async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
         shuffleA.block_barrier.set()
         result = await fut
         dd.assert_eq(result, expected)
+
+
+class FlakyConnectionPool(ConnectionPool):
+    def __init__(self, *args, failing_connects=0, **kwargs):
+        self.attempts = 0
+        self.failed_attempts = 0
+        self.failing_connects = failing_connects
+        super().__init__(*args, **kwargs)
+
+    async def connect(self, *args, **kwargs):
+        self.attempts += 1
+        if self.attempts > self.failing_connects:
+            return await super().connect(*args, **kwargs)
+
+        with dask.config.set({"distributed.comm.timeouts.connect": "0 ms"}):
+            try:
+                _ = await super().connect(*args, **kwargs)
+            except Exception:
+                self.failed_attempts += 1
+                raise
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 0},
+)
+async def test_p2p_flaky_connect_fails_without_retry(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+
+    rpc = await FlakyConnectionPool(failing_connects=1)
+
+    with mock.patch.object(a, "rpc", rpc):
+        with raises_with_cause(
+            expected_exception=RuntimeError,
+            match="P2P shuffling.*transfer",
+            expected_cause=OSError,
+            match_cause=None,
+        ):
+            await c.compute(x)
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await c.close()
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 1},
+)
+async def test_p2p_flaky_connect_recover_with_retry(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+
+    rpc = await FlakyConnectionPool(failing_connects=1)
+
+    with mock.patch.object(a, "rpc", rpc):
+        await c.compute(x)
+    assert rpc.failed_attempts == 1
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
