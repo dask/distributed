@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
 import dask.config
+from dask.typing import Key
 from dask.utils import parse_timedelta
 
 from distributed.core import PooledRPCCall
@@ -290,9 +291,10 @@ def barrier_key(shuffle_id: ShuffleId) -> str:
     return _BARRIER_PREFIX + shuffle_id
 
 
-def id_from_key(key: str) -> ShuffleId:
-    assert key.startswith(_BARRIER_PREFIX)
-    return ShuffleId(key.replace(_BARRIER_PREFIX, ""))
+def id_from_key(key: Key) -> ShuffleId | None:
+    if not isinstance(key, str) or not key.startswith(_BARRIER_PREFIX):
+        return None
+    return ShuffleId(key[len(_BARRIER_PREFIX) :])
 
 
 class ShuffleType(Enum):

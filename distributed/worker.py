@@ -1050,7 +1050,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.digests_total_since_heartbeat.clear()
 
-        out = dict(
+        out: dict = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
             bandwidth={
                 "total": self.bandwidth,
@@ -1348,9 +1348,7 @@ class Worker(BaseWorker, ServerNode):
         else:
             return {"status": "OK"}
 
-    def get_monitor_info(
-        self, recent: bool = False, start: int = 0
-    ) -> dict[str, float]:
+    def get_monitor_info(self, recent: bool = False, start: int = 0) -> dict[str, Any]:
         result = dict(
             range_query=(
                 self.monitor.recent()
@@ -2365,7 +2363,18 @@ class Worker(BaseWorker, ServerNode):
             )
 
         except Exception as exc:
-            logger.error("Exception during execution of task %s.", key, exc_info=True)
+            # Some legitimate use cases that will make us reach this point:
+            # - User specified an invalid executor;
+            # - Task transitioned to cancelled or resumed(fetch) before the start of
+            #   execute() and its dependencies were released. This caused
+            #   _prepare_args_for_execution() to raise KeyError;
+            # - A dependency was unspilled but failed to deserialize due to a bug in
+            #   user-defined or third party classes.
+            if ts.state == "executing":
+                logger.error(
+                    f"Exception during execution of task {key!r}",
+                    exc_info=True,
+                )
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
@@ -2446,7 +2455,7 @@ class Worker(BaseWorker, ServerNode):
     ):
         now = time() + self.scheduler_delay
         if server:
-            history = self.io_loop.profile
+            history = self.io_loop.profile  # type: ignore[attr-defined]
         elif key is None:
             history = self.profile_history
         else:

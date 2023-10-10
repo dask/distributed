@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from packaging.version import parse
 
@@ -80,15 +80,12 @@ def deserialize_table(buffer: bytes) -> pa.Table:
         return reader.read_all()
 
 
-def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
+def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
     import pyarrow as pa
-
-    from dask.dataframe.dispatch import pyarrow_schema_dispatch
 
     batch_size = parse_bytes("1 MiB")
     batch = []
     shards = []
-    schema = pyarrow_schema_dispatch(meta, preserve_index=True)
 
     with pa.OSFile(str(path), mode="rb") as f:
         size = f.seek(0, whence=2)
@@ -103,17 +100,17 @@ def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
 
             if offset - prev >= batch_size:
                 table = pa.concat_tables(batch)
-                shards.append(_copy_table(table, schema))
+                shards.append(_copy_table(table))
                 batch = []
                 prev = offset
     if batch:
         table = pa.concat_tables(batch)
-        shards.append(_copy_table(table, schema))
+        shards.append(_copy_table(table))
     return shards, size
 
 
-def _copy_table(table: pa.Table, schema: pa.Schema) -> pa.Table:
+def _copy_table(table: pa.Table) -> pa.Table:
     import pyarrow as pa
 
     arrs = [pa.concat_arrays(column.chunks) for column in table.columns]
-    return pa.table(data=arrs, schema=schema)
+    return pa.table(data=arrs, schema=table.schema)

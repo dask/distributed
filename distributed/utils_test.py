@@ -12,7 +12,6 @@ import logging
 import logging.config
 import multiprocessing
 import os
-import re
 import signal
 import socket
 import ssl
@@ -2100,8 +2099,10 @@ def raises_with_cause(
     match: str | None,
     expected_cause: type[BaseException] | tuple[type[BaseException], ...],
     match_cause: str | None,
+    *more_causes: type[BaseException] | tuple[type[BaseException], ...] | str | None,
 ) -> Generator[None, None, None]:
-    """Contextmanager to assert that a certain exception with cause was raised
+    """Contextmanager to assert that a certain exception with cause was raised.
+    It can travel the causes recursively by adding more expected, match pairs at the end.
 
     Parameters
     ----------
@@ -2111,13 +2112,14 @@ def raises_with_cause(
         yield
 
     exc = exc_info.value
-    assert exc.__cause__
-    if not isinstance(exc.__cause__, expected_cause):
-        raise exc
-    if match_cause:
-        assert re.search(
-            match_cause, str(exc.__cause__)
-        ), f"Pattern ``{match_cause}`` not found in ``{exc.__cause__}``"
+    causes = [expected_cause, *more_causes[::2]]
+    match_causes = [match_cause, *more_causes[1::2]]
+    assert len(causes) == len(match_causes)
+    for expected_cause, match_cause in zip(causes, match_causes):  # type: ignore
+        assert exc.__cause__
+        exc = exc.__cause__
+        with pytest.raises(expected_cause, match=match_cause):
+            raise exc
 
 
 def ucx_exception_handler(loop, context):

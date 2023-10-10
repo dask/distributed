@@ -291,9 +291,9 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         """Clean up scheduler and worker state once a shuffle becomes inactive."""
         if finish not in ("released", "forgotten"):
             return
-        if not isinstance(key, str) or not key.startswith("shuffle-barrier-"):
-            return
         shuffle_id = id_from_key(key)
+        if not shuffle_id:
+            return
 
         if shuffle := self.active_shuffles.get(shuffle_id):
             self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
