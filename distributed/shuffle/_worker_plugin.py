@@ -78,7 +78,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     ##########
     # NOTE: handlers are not threadsafe, but they're called from async comms, so that's okay
 
-    def heartbeat(self) -> dict:
+    def heartbeat(self) -> dict[ShuffleId, Any]:
         return {
             id: shuffle_run.heartbeat() for id, shuffle_run in self._active_runs.items()
         }
