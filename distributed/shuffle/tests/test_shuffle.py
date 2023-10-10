@@ -10,7 +10,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from itertools import count
-from typing import Any
+from typing import Any, cast
 from unittest import mock
 
 import pytest
@@ -164,10 +164,16 @@ async def test_basic_cudf_support(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
-def get_shuffle_run_from_worker(shuffle_id: ShuffleId, worker: Worker) -> ShuffleRun:
-    plugin = worker.plugins["shuffle"]
-    assert isinstance(plugin, ShuffleWorkerPlugin)
-    return plugin.shuffle_runs._active_runs[shuffle_id]
+def get_active_shuffle_run(shuffle_id: ShuffleId, worker: Worker) -> ShuffleRun:
+    return get_active_shuffle_runs(worker)[shuffle_id]
+
+
+def get_shuffle_run_manager(worker: Worker) -> ShuffleRunManager:
+    return cast(ShuffleWorkerPlugin, worker.plugins["shuffle"]).shuffle_runs
+
+
+def get_active_shuffle_runs(worker: Worker) -> dict[ShuffleId, ShuffleRun]:
+    return get_shuffle_run_manager(worker)._active_runs
 
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
@@ -286,11 +292,11 @@ async def test_bad_disk(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    while not a.plugins["shuffle"].shuffle_runs._active_runs:
+    while not get_active_shuffle_runs(a):
         await asyncio.sleep(0.01)
     shutil.rmtree(a.local_directory)
 
-    while not b.plugins["shuffle"].shuffle_runs._active_runs:
+    while not get_active_shuffle_runs(b):
         await asyncio.sleep(0.01)
     shutil.rmtree(b.local_directory)
     with pytest.raises(RuntimeError, match=f"{shuffle_id} failed during transfer"):
@@ -412,7 +418,7 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
 
 
 class BlockedGetOrCreateShuffleRunManager(ShuffleRunManager):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.in_get_or_create = asyncio.Event()
         self.block_get_or_create = asyncio.Event()
@@ -678,8 +684,8 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
-    shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
-    shuffleB = get_shuffle_run_from_worker(shuffle_id, b)
+    shuffleA = get_active_shuffle_run(shuffle_id, a)
+    shuffleB = get_active_shuffle_run(shuffle_id, b)
     await shuffleA.in_inputs_done.wait()
     await shuffleB.in_inputs_done.wait()
 
@@ -695,7 +701,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     await close_worker.close()
 
     alive_shuffle.block_inputs_done.set()
-    alive_shuffles = alive_worker.extensions["shuffle"].shuffle_runs._active_runs
+    alive_shuffles = get_active_shuffle_runs(alive_worker)
 
     def shuffle_restarted():
         try:
@@ -740,8 +746,8 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
-    shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
-    shuffleB = get_shuffle_run_from_worker(shuffle_id, b)
+    shuffleA = get_active_shuffle_run(shuffle_id, a)
+    shuffleB = get_active_shuffle_run(shuffle_id, b)
     await shuffleA.in_inputs_done.wait()
     await shuffleB.in_inputs_done.wait()
 
@@ -786,8 +792,8 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s, interval=0)
 
-    shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
-    shuffleB = get_shuffle_run_from_worker(shuffle_id, b)
+    shuffleA = get_active_shuffle_run(shuffle_id, a)
+    shuffleB = get_active_shuffle_run(shuffle_id, b)
     await shuffleA.in_inputs_done.wait()
     await shuffleB.in_inputs_done.wait()
 
@@ -803,7 +809,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     await close_worker.close()
 
     alive_shuffle.block_inputs_done.set()
-    alive_shuffles = alive_worker.extensions["shuffle"].shuffle_runs._active_runs
+    alive_shuffles = get_active_shuffle_runs(alive_worker)
 
     def shuffle_restarted():
         try:
@@ -848,8 +854,8 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         # Ensure that barrier is not executed on the nanny
         s.set_restrictions({key: {a.address}})
         await wait_for_state(key, "processing", s, interval=0)
-        shuffles = a.extensions["shuffle"].shuffle_runs._active_runs
-        shuffle = get_shuffle_run_from_worker(shuffle_id, a)
+        shuffles = get_active_shuffle_runs(a)
+        shuffle = get_active_shuffle_run(shuffle_id, a)
         await shuffle.in_inputs_done.wait()
         await n.process.process.kill()
         shuffle.block_inputs_done.set()
@@ -864,7 +870,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
             shuffle_restarted,
             timeout=5,
         )
-        restarted_shuffle = get_shuffle_run_from_worker(shuffle_id, a)
+        restarted_shuffle = get_active_shuffle_run(shuffle_id, a)
         restarted_shuffle.block_inputs_done.set()
 
         result, expected = await fut
@@ -1841,11 +1847,7 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
     del shuffled
 
     if wait_until_forgotten:
-        while (
-            s.tasks
-            or shuffle_extA.shuffle_runs._active_runs
-            or shuffle_extB.shuffle_runs._active_runs
-        ):
+        while s.tasks or get_active_shuffle_runs(a) or get_active_shuffle_runs(b):
             await asyncio.sleep(0)
 
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
@@ -2009,7 +2011,7 @@ async def test_shuffle_run_consistency(c, s, a):
 
 
 class BlockedShuffleAccessAndFailShuffleRunManager(ShuffleRunManager):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.in_get_or_create_shuffle = asyncio.Event()
         self.block_get_or_create_shuffle = asyncio.Event()
@@ -2066,9 +2068,9 @@ async def test_replace_stale_shuffle(c, s, a, b):
 
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
     await ext_B.shuffle_runs.finished_get_shuffle_run.wait()
-    assert shuffle_id in ext_A.shuffle_runs._active_runs
-    assert shuffle_id in ext_B.shuffle_runs._active_runs
-    stale_shuffle_run = ext_B.shuffle_runs._active_runs[shuffle_id]
+    assert shuffle_id in get_active_shuffle_runs(a)
+    assert shuffle_id in get_active_shuffle_runs(b)
+    stale_shuffle_run = get_active_shuffle_run(shuffle_id, b)
 
     del out
     while s.tasks:
@@ -2078,7 +2080,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await check_worker_cleanup(a)
 
     # B is not cleaned
-    assert shuffle_id in ext_B.shuffle_runs._active_runs
+    assert shuffle_id in get_active_shuffle_runs(b)
     assert not stale_shuffle_run.closed
     ext_B.shuffle_runs.finished_get_shuffle_run.clear()
     ext_B.allow_fail = True
@@ -2091,7 +2093,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await ext_B.shuffle_runs.finished_get_shuffle_run.wait()
 
     # Stale shuffle run has been replaced
-    shuffle_run = ext_B.shuffle_runs._active_runs[shuffle_id]
+    shuffle_run = get_active_shuffle_run(shuffle_id, b)
     assert shuffle_run != stale_shuffle_run
     assert shuffle_run.run_id > stale_shuffle_run.run_id
 
@@ -2306,7 +2308,7 @@ async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
-    shuffleA = get_shuffle_run_from_worker(shuffle_id, a)
+    shuffleA = get_active_shuffle_run(shuffle_id, a)
     await shuffleA.in_barrier.wait()
 
     async with Worker(s.address) as b:
