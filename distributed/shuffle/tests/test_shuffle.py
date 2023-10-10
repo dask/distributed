@@ -2043,16 +2043,20 @@ class BlockedShuffleAccessAndFailShuffleRunManager(ShuffleRunManager):
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_replace_stale_shuffle(c, s, a, b):
-    ext_A = a.plugins["shuffle"]
-    ext_B = b.plugins["shuffle"]
+    run_manager_A = cast(
+        BlockedShuffleAccessAndFailShuffleRunManager, get_shuffle_run_manager(a)
+    )
+    run_manager_B = cast(
+        BlockedShuffleAccessAndFailShuffleRunManager, get_shuffle_run_manager(b)
+    )
 
     # Let A behave normal
-    ext_A.shuffle_runs.allow_fail = True
-    ext_A.shuffle_runs.block_get_shuffle_run.set()
-    ext_A.shuffle_runs.block_get_or_create_shuffle.set()
+    run_manager_A.allow_fail = True
+    run_manager_A.block_get_shuffle_run.set()
+    run_manager_A.block_get_or_create_shuffle.set()
 
     # B can accept shuffle transfers
-    ext_B.shuffle_runs.block_get_shuffle_run.set()
+    run_manager_B.block_get_shuffle_run.set()
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -2067,7 +2071,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
 
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
-    await ext_B.shuffle_runs.finished_get_shuffle_run.wait()
+    await run_manager_B.finished_get_shuffle_run.wait()
     assert shuffle_id in get_active_shuffle_runs(a)
     assert shuffle_id in get_active_shuffle_runs(b)
     stale_shuffle_run = get_active_shuffle_run(shuffle_id, b)
@@ -2082,15 +2086,15 @@ async def test_replace_stale_shuffle(c, s, a, b):
     # B is not cleaned
     assert shuffle_id in get_active_shuffle_runs(b)
     assert not stale_shuffle_run.closed
-    ext_B.shuffle_runs.finished_get_shuffle_run.clear()
-    ext_B.allow_fail = True
+    run_manager_B.finished_get_shuffle_run.clear()
+    run_manager_B.allow_fail = True
 
     # Initialize second shuffle execution
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
 
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
-    await ext_B.shuffle_runs.finished_get_shuffle_run.wait()
+    await run_manager_B.finished_get_shuffle_run.wait()
 
     # Stale shuffle run has been replaced
     shuffle_run = get_active_shuffle_run(shuffle_id, b)
@@ -2101,9 +2105,9 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await stale_shuffle_run._closed_event.wait()
 
     # Finish shuffle run
-    ext_B.shuffle_runs.block_get_shuffle_run.set()
-    ext_B.shuffle_runs.block_get_or_create_shuffle.set()
-    ext_B.shuffle_runs.allow_fail = True
+    run_manager_B.block_get_shuffle_run.set()
+    run_manager_B.block_get_or_create_shuffle.set()
+    run_manager_B.allow_fail = True
     await out
     del out
 
