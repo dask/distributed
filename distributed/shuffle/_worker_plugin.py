@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ShuffleRunManager:
+class _ShuffleRunManager:
     closed: bool
     _active_runs: dict[ShuffleId, ShuffleRun]
     _runs: set[ShuffleRun]
@@ -214,7 +214,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     """
 
     worker: Worker
-    shuffle_runs: ShuffleRunManager
+    shuffle_runs: _ShuffleRunManager
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
@@ -228,7 +228,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
         # Initialize
         self.worker = worker
-        self.shuffle_runs = ShuffleRunManager(self)
+        self.shuffle_runs = _ShuffleRunManager(self)
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
         self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
         self.closed = False

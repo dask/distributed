@@ -51,7 +51,7 @@ from distributed.shuffle._shuffle import (
     split_by_partition,
     split_by_worker,
 )
-from distributed.shuffle._worker_plugin import ShuffleRunManager, ShuffleWorkerPlugin
+from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin, _ShuffleRunManager
 from distributed.shuffle.tests.utils import (
     AbstractShuffleTestPool,
     invoke_annotation_chaos,
@@ -168,7 +168,7 @@ def get_active_shuffle_run(shuffle_id: ShuffleId, worker: Worker) -> ShuffleRun:
     return get_active_shuffle_runs(worker)[shuffle_id]
 
 
-def get_shuffle_run_manager(worker: Worker) -> ShuffleRunManager:
+def get_shuffle_run_manager(worker: Worker) -> _ShuffleRunManager:
     return cast(ShuffleWorkerPlugin, worker.plugins["shuffle"]).shuffle_runs
 
 
@@ -417,7 +417,7 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
-class BlockedGetOrCreateShuffleRunManager(ShuffleRunManager):
+class BlockedGetOrCreateShuffleRunManager(_ShuffleRunManager):
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.in_get_or_create = asyncio.Event()
@@ -2010,7 +2010,7 @@ async def test_shuffle_run_consistency(c, s, a):
     await check_scheduler_cleanup(s)
 
 
-class BlockedShuffleAccessAndFailShuffleRunManager(ShuffleRunManager):
+class BlockedShuffleAccessAndFailShuffleRunManager(_ShuffleRunManager):
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.in_get_or_create_shuffle = asyncio.Event()
