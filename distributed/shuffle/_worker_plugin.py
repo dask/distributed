@@ -44,7 +44,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     """
 
     worker: Worker
-    shuffles: dict[ShuffleId, ShuffleRun]
+    _active_runs: dict[ShuffleId, ShuffleRun]
     _runs: set[ShuffleRun]
     _runs_cleanup_condition: asyncio.Condition
     memory_limiter_comms: ResourceLimiter
@@ -60,7 +60,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
         # Initialize
         self.worker = worker
-        self.shuffles = {}
+        self._active_runs = {}
         self._runs = set()
         self._runs_cleanup_condition = asyncio.Condition()
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
@@ -78,8 +78,10 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     ##########
     # NOTE: handlers are not threadsafe, but they're called from async comms, so that's okay
 
-    def heartbeat(self) -> dict:
-        return {id: shuffle.heartbeat() for id, shuffle in self.shuffles.items()}
+    def heartbeat(self) -> dict[ShuffleId, Any]:
+        return {
+            id: shuffle_run.heartbeat() for id, shuffle_run in self._active_runs.items()
+        }
 
     async def shuffle_receive(
         self,
@@ -91,8 +93,8 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         Handler: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        shuffle = await self._get_shuffle_run(shuffle_id, run_id)
-        await shuffle.receive(data)
+        shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
+        await shuffle_run.receive(data)
 
     async def shuffle_inputs_done(self, shuffle_id: ShuffleId, run_id: int) -> None:
         """
@@ -100,16 +102,16 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         Using an unknown ``shuffle_id`` is an error.
         """
         with log_errors():
-            shuffle = await self._get_shuffle_run(shuffle_id, run_id)
-            await shuffle.inputs_done()
+            shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
+            await shuffle_run.inputs_done()
 
-    async def _close_shuffle_run(self, shuffle: ShuffleRun) -> None:
+    async def _close_shuffle_run(self, shuffle_run: ShuffleRun) -> None:
         with log_errors():
             try:
-                await shuffle.close()
+                await shuffle_run.close()
             finally:
                 async with self._runs_cleanup_condition:
-                    self._runs.remove(shuffle)
+                    self._runs.remove(shuffle_run)
                     self._runs_cleanup_condition.notify_all()
 
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
@@ -121,15 +123,15 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             https://github.com/dask/distributed/pull/7486#discussion_r1088857185
             for more details.
         """
-        shuffle = self.shuffles.get(shuffle_id, None)
-        if shuffle is None or shuffle.run_id != run_id:
+        shuffle_run = self._active_runs.get(shuffle_id, None)
+        if shuffle_run is None or shuffle_run.run_id != run_id:
             return
-        self.shuffles.pop(shuffle_id)
+        self._active_runs.pop(shuffle_id)
         exception = RuntimeError(message)
-        shuffle.fail(exception)
+        shuffle_run.fail(exception)
 
         self.worker._ongoing_background_tasks.call_soon(
-            self._close_shuffle_run, shuffle
+            self._close_shuffle_run, shuffle_run
         )
 
     def add_partition(
@@ -139,10 +141,10 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         spec: ShuffleSpec,
         **kwargs: Any,
     ) -> int:
-        shuffle = self.get_or_create_shuffle(spec)
+        shuffle_run = self.get_or_create_shuffle(spec)
         return sync(
             self.worker.loop,
-            shuffle.add_partition,
+            shuffle_run.add_partition,
             data=data,
             partition_id=partition_id,
             **kwargs,
@@ -161,8 +163,8 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             raise RuntimeError(f"Expected all run IDs to match: {run_ids=}")
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
-        shuffle = await self._get_shuffle_run(shuffle_id, run_id)
-        await shuffle.barrier()
+        shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
+        await shuffle_run.barrier()
         return run_id
 
     async def _get_shuffle_run(
@@ -170,7 +172,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         shuffle_id: ShuffleId,
         run_id: int,
     ) -> ShuffleRun:
-        """Get or create the shuffle matching the ID and run ID.
+        """Get the shuffle matching the ID and run ID.
+
+        If necessary, this method fetches the shuffle run from the scheduler plugin.
 
         Parameters
         ----------
@@ -186,20 +190,22 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         RuntimeError
             If the run_id is stale
         """
-        shuffle = self.shuffles.get(shuffle_id, None)
-        if shuffle is None or shuffle.run_id < run_id:
-            shuffle = await self._refresh_shuffle(
+        shuffle_run = self._active_runs.get(shuffle_id, None)
+        if shuffle_run is None or shuffle_run.run_id < run_id:
+            shuffle_run = await self._refresh_shuffle(
                 shuffle_id=shuffle_id,
             )
 
-        if shuffle.run_id > run_id:
-            raise RuntimeError(f"{run_id=} stale, got {shuffle}")
-        elif shuffle.run_id < run_id:
-            raise RuntimeError(f"{run_id=} invalid, got {shuffle}")
+        if shuffle_run.run_id > run_id:
+            raise RuntimeError(f"{run_id=} stale, got {shuffle_run}")
+        elif shuffle_run.run_id < run_id:
+            raise RuntimeError(f"{run_id=} invalid, got {shuffle_run}")
 
-        if shuffle._exception:
-            raise shuffle._exception
-        return shuffle
+        if self.closed:
+            raise ShuffleClosedError(f"{self} has already been closed")
+        if shuffle_run._exception:
+            raise shuffle_run._exception
+        return shuffle_run
 
     async def _get_or_create_shuffle(
         self,
@@ -217,9 +223,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         key:
             Task key triggering the function
         """
-        shuffle = self.shuffles.get(spec.id, None)
-        if shuffle is None:
-            shuffle = await self._refresh_shuffle(
+        shuffle_run = self._active_runs.get(spec.id, None)
+        if shuffle_run is None:
+            shuffle_run = await self._refresh_shuffle(
                 shuffle_id=spec.id,
                 spec=spec,
                 key=key,
@@ -227,9 +233,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
         if self.closed:
             raise ShuffleClosedError(f"{self} has already been closed")
-        if shuffle._exception:
-            raise shuffle._exception
-        return shuffle
+        if shuffle_run._exception:
+            raise shuffle_run._exception
+        return shuffle_run
 
     @overload
     async def _refresh_shuffle(
@@ -270,35 +276,32 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             result = result.data
         if self.closed:
             raise ShuffleClosedError(f"{self} has already been closed")
-        if shuffle_id in self.shuffles:
-            existing = self.shuffles[shuffle_id]
+        if existing := self._active_runs.get(shuffle_id, None):
             if existing.run_id >= result.run_id:
                 return existing
             else:
-                self.shuffles.pop(shuffle_id)
-                existing.fail(
-                    RuntimeError("{existing!r} stale, expected run_id=={run_id}")
+                self.shuffle_fail(
+                    shuffle_id,
+                    existing.run_id,
+                    f"{existing!r} stale, expected run_id=={result.run_id}",
                 )
 
-                self.worker._ongoing_background_tasks.call_soon(
-                    ShuffleWorkerPlugin._close_shuffle_run, self, existing
-                )
-        shuffle: ShuffleRun = result.spec.create_run_on_worker(
+        shuffle_run = result.spec.create_run_on_worker(
             result.run_id, result.worker_for, self
         )
-        self.shuffles[shuffle_id] = shuffle
-        self._runs.add(shuffle)
-        return shuffle
+        self._active_runs[shuffle_id] = shuffle_run
+        self._runs.add(shuffle_run)
+        return shuffle_run
 
     async def teardown(self, worker: Worker) -> None:
         assert not self.closed
 
         self.closed = True
 
-        while self.shuffles:
-            _, shuffle = self.shuffles.popitem()
+        while self._active_runs:
+            _, shuffle_run = self._active_runs.popitem()
             self.worker._ongoing_background_tasks.call_soon(
-                self._close_shuffle_run, shuffle
+                self._close_shuffle_run, shuffle_run
             )
 
         async with self._runs_cleanup_condition:
@@ -353,11 +356,11 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
         Calling this for a ``shuffle_id`` which is unknown or incomplete is an error.
         """
-        shuffle = self.get_shuffle_run(shuffle_id, run_id)
+        shuffle_run = self.get_shuffle_run(shuffle_id, run_id)
         key = thread_state.key
         return sync(
             self.worker.loop,
-            shuffle.get_output_partition,
+            shuffle_run.get_output_partition,
             partition_id=partition_id,
             key=key,
             meta=meta,

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 from unittest import mock
 
 import pytest
-from tornado.httpclient import AsyncHTTPClient
 
 from distributed import Event, Worker, wait
 from distributed.sizeof import sizeof
@@ -133,28 +131,30 @@ async def test_prometheus_collect_task_states(c, s, a):
     await assert_metrics()
 
 
-@gen_cluster(client=True)
-async def test_health(c, s, a, b):
-    http_client = AsyncHTTPClient()
+@gen_cluster(nthreads=[("", 1)])
+async def test_health(s, a):
+    aiohttp = pytest.importorskip("aiohttp")
 
-    response = await http_client.fetch(
-        "http://localhost:%d/health" % a.http_server.port
-    )
-    assert response.code == 200
-    assert response.headers["Content-Type"] == "text/plain"
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(f"http://localhost:{a.http_server.port}/health") as resp,
+    ):
+        assert resp.status == 200
+        assert resp.headers["Content-Type"] == "text/plain; charset=utf-8"
+        assert (await resp.text()) == "ok"
 
-    txt = response.body.decode("utf8")
-    assert txt == "ok"
 
+@gen_cluster(nthreads=[("", 1)])
+async def test_sitemap(s, a):
+    aiohttp = pytest.importorskip("aiohttp")
 
-@gen_cluster()
-async def test_sitemap(s, a, b):
-    http_client = AsyncHTTPClient()
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(f"http://localhost:{a.http_server.port}/sitemap.json") as resp,
+    ):
+        assert resp.status == 200
+        out = await resp.json()
 
-    response = await http_client.fetch(
-        "http://localhost:%d/sitemap.json" % a.http_server.port
-    )
-    out = json.loads(response.body.decode())
     assert "paths" in out
     assert "/sitemap.json" in out["paths"]
     assert "/health" in out["paths"]

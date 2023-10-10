@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import contextlib
 import functools
 import logging
@@ -13,10 +14,17 @@ import zipfile
 from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from dask.typing import Key
 from dask.utils import funcname, tmpfile
 
+from distributed.protocol.pickle import dumps
+
 if TYPE_CHECKING:
-    from distributed.scheduler import Scheduler, TaskStateState  # circular imports
+    # circular imports
+    from distributed.scheduler import Scheduler
+    from distributed.scheduler import TaskStateState as SchedulerTaskStateState
+    from distributed.worker import Worker
+    from distributed.worker_state_machine import TaskStateState as WorkerTaskStateState
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +84,11 @@ class SchedulerPlugin:
         scheduler: Scheduler,
         *,
         client: str,
-        keys: set[str],
-        tasks: list[str],
-        annotations: dict[str, dict[str, Any]],
-        priority: dict[str, tuple[int | float, ...]],
-        dependencies: dict[str, set],
+        keys: set[Key],
+        tasks: list[Key],
+        annotations: dict[str, dict[Key, Any]],
+        priority: dict[Key, tuple[int | float, ...]],
+        dependencies: dict[Key, set[Key]],
         **kwargs: Any,
     ) -> None:
         """Run when a new graph / tasks enter the scheduler
@@ -119,9 +127,9 @@ class SchedulerPlugin:
 
     def transition(
         self,
-        key: str,
-        start: TaskStateState,
-        finish: TaskStateState,
+        key: Key,
+        start: SchedulerTaskStateState,
+        finish: SchedulerTaskStateState,
         *args: Any,
         stimulus_id: str,
         **kwargs: Any,
@@ -138,13 +146,13 @@ class SchedulerPlugin:
 
         Parameters
         ----------
-        key : string
-        start : string
+        key :
+        start :
             Start state of the transition.
             One of released, waiting, processing, memory, error.
-        finish : string
+        finish :
             Final state of the transition.
-        stimulus_id: string
+        stimulus_id :
             ID of stimulus causing the transition.
         *args, **kwargs :
             More options passed when transitioning
@@ -232,18 +240,24 @@ class WorkerPlugin:
     >>> client.register_plugin(plugin)  # doctest: +SKIP
     """
 
-    def setup(self, worker):
+    def setup(self, worker: Worker) -> None | Awaitable[None]:
         """
         Run when the plugin is attached to a worker. This happens when the plugin is registered
         and attached to existing workers, or when a worker is created after the plugin has been
         registered.
         """
 
-    def teardown(self, worker):
+    def teardown(self, worker: Worker) -> None | Awaitable[None]:
         """Run when the worker to which the plugin is attached is closed, or
         when the plugin is removed."""
 
-    def transition(self, key, start, finish, **kwargs):
+    def transition(
+        self,
+        key: Key,
+        start: WorkerTaskStateState,
+        finish: WorkerTaskStateState,
+        **kwargs: Any,
+    ) -> None:
         """
         Throughout the lifecycle of a task (see :doc:`Worker State
         <worker-state>`), Workers are instructed by the scheduler to compute
@@ -259,13 +273,14 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        key : string
-        start : string
+        key :
+        start :
             Start state of the transition.
             One of waiting, ready, executing, long-running, memory, error.
-        finish : string
+        finish :
             Final state of the transition.
-        kwargs : More options passed when transitioning
+        kwargs :
+            More options passed when transitioning
         """
 
 
@@ -333,10 +348,10 @@ class SchedulerUploadFile(SchedulerPlugin):
         await scheduler.upload_file(self.filename, self.data, load=self.load)
 
 
-class PackageInstall(WorkerPlugin, abc.ABC):
-    """Abstract parent class for a worker plugin to install a set of packages
+class PackageInstall(SchedulerPlugin, abc.ABC):
+    """Abstract parent class for a scheduler plugin to install a set of packages
 
-    This accepts a set of packages to install on all workers.
+    This accepts a set of packages to install on the scheduler and all workers.
     You can also optionally ask for the worker to restart itself after
     performing this installation.
 
@@ -351,7 +366,7 @@ class PackageInstall(WorkerPlugin, abc.ABC):
     ----------
     packages
         A list of packages (with optional versions) to install
-    restart
+    restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
 
@@ -361,20 +376,111 @@ class PackageInstall(WorkerPlugin, abc.ABC):
     PipInstall
     """
 
-    INSTALLER: ClassVar[str]
+    _lock: ClassVar[asyncio.Lock | None] = None
+    WORKER_PLUGIN_CLASS: ClassVar[type]
 
+    installer: _PackageInstaller
     name: str
-    packages: list[str]
-    restart: bool
+    restart_workers: bool
+    _scheduler: Scheduler
 
     def __init__(
         self,
-        packages: list[str],
-        restart: bool,
+        installer: _PackageInstaller,
+        restart_workers: bool,
     ):
-        self.packages = packages
+        self.installer = installer
+        self.restart_workers = restart_workers
+        self.name = f"{self.installer.INSTALLER}-install-{uuid.uuid4()}"
+
+    async def start(self, scheduler: Scheduler) -> None:
+        self._scheduler = scheduler
+
+        if PackageInstall._lock is None:
+            PackageInstall._lock = asyncio.Lock()
+
+        async with PackageInstall._lock:
+            if not self._is_installed(scheduler):
+                logger.info(
+                    "%s installing the following packages on the scheduler: %s",
+                    self.installer.INSTALLER,
+                    self.installer.packages,
+                )
+                self.installer.install()
+                self._set_installed(scheduler)
+
+                worker_plugin = _PackageInstallWorker(
+                    self.installer, self.restart_workers, self.name
+                )
+                await scheduler.register_worker_plugin(
+                    comm=None, plugin=dumps(worker_plugin), name=self.name
+                )
+            else:
+                logger.info(
+                    "The following packages have already been installed on the scheduler: %s",
+                    self.installer.packages,
+                )
+
+    async def close(self) -> None:
+        assert PackageInstall._lock is not None
+
+        async with PackageInstall._lock:
+            await self._scheduler.unregister_worker_plugin(comm=None, name=self.name)
+
+    def _is_installed(self, scheduler: Scheduler) -> bool:
+        return scheduler.get_metadata(self._compose_installed_key(), default=False)
+
+    def _set_installed(self, scheduler: Scheduler) -> None:
+        scheduler.set_metadata(
+            self._compose_installed_key(),
+            True,
+        )
+
+    def _compose_installed_key(self) -> list[Key]:
+        return [
+            self.name,
+            "installed",
+            socket.gethostname(),
+        ]
+
+
+class _PackageInstallWorker(WorkerPlugin):
+    """Worker plugin to install a set of packages
+
+    This accepts an installer which will install a set of packages on all workers.
+    You can also optionally ask for the worker to restart itself after
+    performing this installation.
+
+    .. note::
+
+       This will increase the time it takes to start up
+       each worker. If possible, we recommend including the
+       libraries in the worker environment or image. This is
+       primarily intended for experimentation and debugging.
+
+    Parameters
+    ----------
+    installer
+        Installer that installs a set of packages
+    restart
+        Whether or not to restart the worker after installing the packages
+        Only functions if the worker has an attached nanny process
+    name:
+        Name of the plugin
+
+    See Also
+    --------
+    PackageInstall
+    """
+
+    installer: _PackageInstaller
+    name: str
+    restart: bool
+
+    def __init__(self, installer: _PackageInstaller, restart: bool, name: str):
+        self.installer = installer
         self.restart = restart
-        self.name = f"{self.INSTALLER}-install-{uuid.uuid4()}"
+        self.name = name
 
     async def setup(self, worker):
         from distributed.semaphore import Semaphore
@@ -391,15 +497,15 @@ class PackageInstall(WorkerPlugin, abc.ABC):
             if not await self._is_installed(worker):
                 logger.info(
                     "%s installing the following packages: %s",
-                    self.INSTALLER,
-                    self.packages,
+                    self.installer.INSTALLER,
+                    self.installer.packages,
                 )
                 await self._set_installed(worker)
-                self.install()
+                self.installer.install()
             else:
                 logger.info(
                     "The following packages have already been installed: %s",
-                    self.packages,
+                    self.installer.packages,
                 )
 
             if self.restart and worker.nanny and not await self._is_restarted(worker):
@@ -408,10 +514,6 @@ class PackageInstall(WorkerPlugin, abc.ABC):
                 worker.loop.add_callback(
                     worker.close_gracefully, restart=True, reason=f"{self.name}-setup"
                 )
-
-    @abc.abstractmethod
-    def install(self) -> None:
-        """Install the requested packages"""
 
     async def _is_installed(self, worker):
         return await worker.client.get_metadata(
@@ -447,6 +549,18 @@ class PackageInstall(WorkerPlugin, abc.ABC):
         return [self.name, "restarted", worker.nanny]
 
 
+class _PackageInstaller(abc.ABC):
+    INSTALLER: ClassVar[str]
+    packages: list[str]
+
+    def __init__(self, packages: list[str]):
+        self.packages = packages
+
+    @abc.abstractmethod
+    def install(self) -> None:
+        """Install the requested packages"""
+
+
 class CondaInstall(PackageInstall):
     """A Worker Plugin to conda install a set of packages
 
@@ -468,7 +582,7 @@ class CondaInstall(PackageInstall):
         A list of packages (with optional versions) to install using conda
     conda_options
         Additional options to pass to conda
-    restart
+    restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
 
@@ -485,17 +599,23 @@ class CondaInstall(PackageInstall):
     PipInstall
     """
 
-    INSTALLER = "conda"
-
-    conda_options: list[str]
-
     def __init__(
         self,
         packages: list[str],
         conda_options: list[str] | None = None,
-        restart: bool = False,
+        restart_workers: bool = False,
     ):
-        super().__init__(packages, restart=restart)
+        installer = _CondaInstaller(packages, conda_options)
+        super().__init__(installer, restart_workers=restart_workers)
+
+
+class _CondaInstaller(_PackageInstaller):
+    INSTALLER = "conda"
+
+    conda_options: list[str]
+
+    def __init__(self, packages: list[str], conda_options: list[str] | None = None):
+        super().__init__(packages)
         self.conda_options = conda_options or []
 
     def install(self) -> None:
@@ -544,7 +664,7 @@ class PipInstall(PackageInstall):
         A list of packages (with optional versions) to install using pip
     pip_options
         Additional options to pass to pip
-    restart
+    restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
 
@@ -561,17 +681,23 @@ class PipInstall(PackageInstall):
     CondaInstall
     """
 
-    INSTALLER = "pip"
-
-    pip_options: list[str]
-
     def __init__(
         self,
         packages: list[str],
         pip_options: list[str] | None = None,
-        restart: bool = False,
+        restart_workers: bool = False,
     ):
-        super().__init__(packages, restart=restart)
+        installer = _PipInstaller(packages, pip_options)
+        super().__init__(installer, restart_workers=restart_workers)
+
+
+class _PipInstaller(_PackageInstaller):
+    INSTALLER = "pip"
+
+    pip_options: list[str]
+
+    def __init__(self, packages: list[str], pip_options: list[str] | None = None):
+        super().__init__(packages)
         self.pip_options = pip_options or []
 
     def install(self) -> None:

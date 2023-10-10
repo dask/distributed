@@ -764,16 +764,16 @@ def test_raises_with_cause():
         raise RuntimeError("foo") from ValueError("bar")
 
     # we're trying to stick to pytest semantics
-    # If the exception types don't match, raise the original exception
+    # If the exception types don't match, raise the first exception that doesnt' match
     # If the text doesn't match, raise an assert
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(OSError):
         with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
             raise RuntimeError("exception") from OSError("cause")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(OSError):
         with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
-            raise ValueError("exception") from ValueError("cause")
+            raise OSError("exception") from ValueError("cause")
 
     with pytest.raises(AssertionError):
         with raises_with_cause(RuntimeError, "exception", ValueError, "foo"):
@@ -782,6 +782,33 @@ def test_raises_with_cause():
     with pytest.raises(AssertionError):
         with raises_with_cause(RuntimeError, "foo", ValueError, "cause"):
             raise RuntimeError("exception") from ValueError("cause")
+
+    # There can be more than one nested cause
+    with raises_with_cause(
+        RuntimeError, "exception", ValueError, "cause1", OSError, "cause2"
+    ):
+        try:
+            raise ValueError("cause1") from OSError("cause2")
+        except ValueError as e:
+            raise RuntimeError("exception") from e
+
+    with pytest.raises(OSError):
+        with raises_with_cause(
+            RuntimeError, "exception", ValueError, "cause1", TypeError, "cause2"
+        ):
+            try:
+                raise ValueError("cause1") from OSError("cause2")
+            except ValueError as e:
+                raise RuntimeError("exception") from e
+
+    with pytest.raises(AssertionError):
+        with raises_with_cause(
+            RuntimeError, "exception", ValueError, "cause1", OSError, "cause2"
+        ):
+            try:
+                raise ValueError("cause1") from OSError("no match")
+            except ValueError as e:
+                raise RuntimeError("exception") from e
 
 
 @pytest.mark.slow
@@ -919,17 +946,13 @@ def test_popen_timeout(capsys):
                     import sys
                     import time
 
-                    if sys.platform == "win32":
-                        signal.signal(signal.SIGBREAK, signal.default_int_handler)
-                        # ^ Cause `CTRL_BREAK_EVENT` on Windows to raise `KeyboardInterrupt`
+                    signum = signal.SIGBREAK if sys.platform == "win32" else signal.SIGINT
+                    signal.signal(signum, signal.SIG_IGN)
+                    print("ready", flush=True)
 
-                    print('ready', flush=True)
                     while True:
-                        try:
-                            time.sleep(0.1)
-                            print("slept", flush=True)
-                        except KeyboardInterrupt:
-                            print("interrupted", flush=True)
+                        time.sleep(0.1)
+                        print("slept", flush=True)
                     """
                 ),
             ],
@@ -938,13 +961,12 @@ def test_popen_timeout(capsys):
         ) as proc:
             assert proc.stdout
             assert proc.stdout.readline().strip() == b"ready"
-    # Exiting contextmanager sends SIGINT, waits 1s for shutdown.
-    # Our script ignores SIGINT, so after 1s it sends SIGKILL.
+    # Exiting contextmanager sends SIGINT/SIGBREAK, waits 1s for shutdown.
+    # Our script ignores SIGINT/SIGBREAK, so after 1s it sends SIGKILL.
     # The contextmanager raises `TimeoutExpired` once the process is killed,
     # because it failed the 1s timeout
     captured = capsys.readouterr()
     assert "stdout: returncode" in captured.out
-    assert "interrupted" in captured.out
     assert "slept" in captured.out
 
 
@@ -1022,9 +1044,9 @@ async def test_wait_for_state(c, s, a, capsys):
     with pytest.raises(asyncio.TimeoutError):
         await wait_for(wait_for_state("y", "memory", s), timeout=0.1)
     assert capsys.readouterr().out == (
-        f"tasks[x].state='memory' on {s.address}; expected state='bad_state'\n"
-        f"tasks[x].state='memory' on {s.address}; expected state=('this', 'that')\n"
-        f"tasks[y] not found on {s.address}\n"
+        f"tasks['x'].state='memory' on {s.address}; expected state='bad_state'\n"
+        f"tasks['x'].state='memory' on {s.address}; expected state=('this', 'that')\n"
+        f"tasks['y'] not found on {s.address}\n"
     )
 
 

@@ -413,3 +413,22 @@ async def test_comm_closed_on_read_error():
         await wait_for(reader.read(), 0.01)
 
     assert reader.closed()
+
+
+@gen_test()
+async def test_embedded_cupy_array(
+    ucx_loop,
+):
+    cupy = pytest.importorskip("cupy")
+    da = pytest.importorskip("dask.array")
+    np = pytest.importorskip("numpy")
+
+    async with LocalCluster(
+        protocol="ucx", n_workers=1, threads_per_worker=1, asynchronous=True
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            assert cluster.scheduler_address.startswith("ucx://")
+            a = cupy.arange(10000)
+            x = da.from_array(a, chunks=(10000,))
+            b = await client.compute(x)
+            cupy.testing.assert_array_equal(a, b)

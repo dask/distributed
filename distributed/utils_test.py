@@ -12,7 +12,6 @@ import logging
 import logging.config
 import multiprocessing
 import os
-import re
 import signal
 import socket
 import ssl
@@ -36,6 +35,7 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.typing import Key
 
 from distributed import Event, Scheduler, system
 from distributed import versions as version_module
@@ -2099,8 +2099,10 @@ def raises_with_cause(
     match: str | None,
     expected_cause: type[BaseException] | tuple[type[BaseException], ...],
     match_cause: str | None,
+    *more_causes: type[BaseException] | tuple[type[BaseException], ...] | str | None,
 ) -> Generator[None, None, None]:
-    """Contextmanager to assert that a certain exception with cause was raised
+    """Contextmanager to assert that a certain exception with cause was raised.
+    It can travel the causes recursively by adding more expected, match pairs at the end.
 
     Parameters
     ----------
@@ -2110,13 +2112,14 @@ def raises_with_cause(
         yield
 
     exc = exc_info.value
-    assert exc.__cause__
-    if not isinstance(exc.__cause__, expected_cause):
-        raise exc
-    if match_cause:
-        assert re.search(
-            match_cause, str(exc.__cause__)
-        ), f"Pattern ``{match_cause}`` not found in ``{exc.__cause__}``"
+    causes = [expected_cause, *more_causes[::2]]
+    match_causes = [match_cause, *more_causes[1::2]]
+    assert len(causes) == len(match_causes)
+    for expected_cause, match_cause in zip(causes, match_causes):  # type: ignore
+        assert exc.__cause__
+        exc = exc.__cause__
+        with pytest.raises(expected_cause, match=match_cause):
+            raise exc
 
 
 def ucx_exception_handler(loop, context):
@@ -2283,7 +2286,7 @@ class BlockedExecute(Worker):
 
         super().__init__(*args, **kwargs)
 
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: Key, *, stimulus_id: str) -> StateMachineEvent:
         self.in_execute.set()
         await self.block_execute.wait()
         try:
@@ -2381,7 +2384,7 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
 
 
 async def wait_for_state(
-    key: str,
+    key: Key,
     state: str | Collection[str],
     dask_worker: Worker | Scheduler,
     *,
@@ -2390,7 +2393,7 @@ async def wait_for_state(
     """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
     state or one of a set of possible states.
     """
-    tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
+    tasks: Mapping[Key, SchedulerTaskState | WorkerTaskState]
 
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
@@ -2409,11 +2412,11 @@ async def wait_for_state(
     except (asyncio.CancelledError, asyncio.TimeoutError):
         if key in tasks:
             msg = (
-                f"tasks[{key}].state={tasks[key].state!r} on {dask_worker.address}; "
+                f"tasks[{key!r}].state={tasks[key].state!r} on {dask_worker.address}; "
                 f"expected state={state_str}"
             )
         else:
-            msg = f"tasks[{key}] not found on {dask_worker.address}"
+            msg = f"tasks[{key!r}] not found on {dask_worker.address}"
         # 99% of the times this is triggered by @gen_cluster timeout, so raising the
         # message as an exception wouldn't work.
         print(msg)
@@ -2632,8 +2635,8 @@ def no_time_resync():
         yield
 
 
-async def padded_time(before=0.01, after=0.01):
-    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
+async def padded_time(before=0.05, after=0.05):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock
     from disrupting monotonicity tests (t0 < t1 < t2 < ...).
     This prevents frequent flakiness on Windows and, more rarely, in Linux and
     MacOSX.

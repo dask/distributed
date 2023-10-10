@@ -446,9 +446,15 @@ def test_serialize_raises():
 
 
 @gen_test()
-async def test_profile_nested_sizeof():
-    # https://github.com/dask/distributed/issues/1674
-    n = 500
+@pytest.mark.parametrize("n", range(100, 600, 50))
+async def test_deeply_nested_structures(n):
+    """sizeof() raises RecursionError at ~140 recursion depth.
+    msgpack doesn't raise until 512 (sometimes 256 depending on compile options).
+    These thresholds change substantially between python versions, msgpack versions, and
+    platforms.
+
+    Test that when sizeof() starts failing, things keep working until msgpack fails.
+    """
     original = outer = {}
     inner = {}
 
@@ -456,8 +462,11 @@ async def test_profile_nested_sizeof():
         outer["children"] = inner
         outer, inner = inner, {}
 
-    msg = {"data": original}
-    frames = await to_frames(msg)
+    try:
+        await to_frames(original)
+    except ValueError as e:
+        # msgpack failed
+        assert "recursion limit exceeded" in str(e)
 
 
 def test_different_compression_families():

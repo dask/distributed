@@ -3,11 +3,90 @@ from __future__ import annotations
 import contextlib
 import pathlib
 import shutil
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any, Callable
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.utils import log_errors
+from distributed.utils import Deadline, log_errors
+
+
+class ReadWriteLock:
+    _condition: threading.Condition
+    _n_reads: int
+    _write_pending: bool
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition(threading.Lock())
+        self._n_reads = 0
+        self._write_pending = False
+        self._write_active = False
+
+    def acquire_write(self, timeout: float = -1) -> bool:
+        deadline = Deadline.after(timeout if timeout >= 0 else None)
+        with self._condition:
+            result = self._condition.wait_for(
+                lambda: not self._write_pending, timeout=deadline.remaining
+            )
+            if result is False:
+                return False
+
+            self._write_pending = True
+            result = self._condition.wait_for(
+                lambda: self._n_reads == 0, timeout=deadline.remaining
+            )
+
+            if result is False:
+                self._write_pending = False
+                self._condition.notify_all()
+                return False
+            self._write_active = True
+            return True
+
+    def release_write(self) -> None:
+        with self._condition:
+            if self._write_active is False:
+                raise RuntimeError("Tried releasing unlocked write lock")
+            self._write_pending = False
+            self._write_active = False
+            self._condition.notify_all()
+
+    def acquire_read(self, timeout: float = -1) -> bool:
+        deadline = Deadline.after(timeout if timeout >= 0 else None)
+        with self._condition:
+            result = self._condition.wait_for(
+                lambda: not self._write_pending, timeout=deadline.remaining
+            )
+            if result is False:
+                return False
+            self._n_reads += 1
+            return True
+
+    def release_read(self) -> None:
+        with self._condition:
+            if self._n_reads == 0:
+                raise RuntimeError("Tired releasing unlocked read lock")
+            self._n_reads -= 1
+            if self._n_reads == 0:
+                self._condition.notify_all()
+
+    @contextmanager
+    def write(self) -> Generator[None, None, None]:
+        self.acquire_write()
+        try:
+            yield
+        finally:
+            self.release_write()
+
+    @contextmanager
+    def read(self) -> Generator[None, None, None]:
+        self.acquire_read()
+        try:
+            yield
+        finally:
+            self.release_read()
 
 
 class DiskShardsBuffer(ShardsBuffer):
@@ -52,7 +131,9 @@ class DiskShardsBuffer(ShardsBuffer):
         )
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
+        self._closed = False
         self._read = read
+        self._directory_lock = ReadWriteLock()
 
     async def _process(self, id: str, shards: list[bytes]) -> None:
         """Write one buffer to file
@@ -71,11 +152,16 @@ class DiskShardsBuffer(ShardsBuffer):
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication
             with self.time("write"):
-                with open(
-                    self.directory / str(id), mode="ab", buffering=100_000_000
-                ) as f:
-                    for shard in shards:
-                        f.write(shard)
+                # We only need shared (i.e., read) access to the directory to write
+                # to a file inside of it.
+                with self._directory_lock.read():
+                    if self._closed:
+                        raise RuntimeError("Already closed")
+                    with open(
+                        self.directory / str(id), mode="ab", buffering=100_000_000
+                    ) as f:
+                        for shard in shards:
+                            f.write(shard)
 
     def read(self, id: int | str) -> Any:
         """Read a complete file back into memory"""
@@ -85,7 +171,10 @@ class DiskShardsBuffer(ShardsBuffer):
 
         try:
             with self.time("read"):
-                data, size = self._read((self.directory / str(id)).resolve())
+                with self._directory_lock.read():
+                    if self._closed:
+                        raise RuntimeError("Already closed")
+                    data, size = self._read((self.directory / str(id)).resolve())
         except FileNotFoundError:
             raise KeyError(id)
 
@@ -97,5 +186,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
     async def close(self) -> None:
         await super().close()
-        with contextlib.suppress(FileNotFoundError):
-            shutil.rmtree(self.directory)
+        with self._directory_lock.write():
+            self._closed = True
+            with contextlib.suppress(FileNotFoundError):
+                shutil.rmtree(self.directory)

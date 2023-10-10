@@ -13,6 +13,7 @@ from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Union
 
 import dask
+from dask.typing import Key
 from dask.utils import parse_timedelta
 
 # Needed to avoid Sphinx WARNING: more than one target found for cross-reference
@@ -389,10 +390,10 @@ class ActiveMemoryManagerExtension:
 
         validate = self.scheduler.validate
         drop_by_worker: (
-            defaultdict[scheduler_module.WorkerState, list[str]]
+            defaultdict[scheduler_module.WorkerState, list[Key]]
         ) = defaultdict(list)
         repl_by_worker: (
-            defaultdict[scheduler_module.WorkerState, list[str]]
+            defaultdict[scheduler_module.WorkerState, list[Key]]
         ) = defaultdict(list)
 
         for ts, (pending_repl, pending_drop) in self.pending.items():
@@ -532,11 +533,17 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
         for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
 
-            # If a dependent task has not been assigned to a worker yet, err on the side
-            # of caution and preserve an additional replica for it.
-            # However, if two dependent tasks have been already assigned to the same
-            # worker, don't double count them.
-            nwaiters = len({waiter.processing_on or waiter for waiter in ts.waiters})
+            nwaiters = len(ts.waiters)
+            if desired_replicas < nwaiters < 20:
+                # If a dependent task has not been assigned to a worker yet, err on the
+                # side of caution and preserve an additional replica for it.
+                # However, if two dependent tasks have been already assigned to the same
+                # worker, don't double count them.
+                # This calculation is quite CPU-intensive, so it's disabled for tasks
+                # with lots of waiters.
+                nwaiters = len(
+                    {waiter.processing_on or waiter for waiter in ts.waiters}
+                )
 
             ndrop_key = len(ts.who_has) - max(desired_replicas, nwaiters)
             if ts in self.manager.pending:

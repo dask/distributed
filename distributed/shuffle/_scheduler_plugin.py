@@ -6,6 +6,8 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from dask.typing import Key
+
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.protocol.pickle import dumps
 from distributed.protocol.serialize import ToPickle
@@ -82,7 +84,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             workers=list(shuffle.participating_workers),
         )
 
-    def restrict_task(self, id: ShuffleId, run_id: int, key: str, worker: str) -> dict:
+    def restrict_task(self, id: ShuffleId, run_id: int, key: Key, worker: str) -> dict:
         shuffle = self.active_shuffles[id]
         if shuffle.run_id > run_id:
             return {
@@ -117,7 +119,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self,
         # FIXME: This should never be ToPickle[ShuffleSpec]
         spec: ShuffleSpec | ToPickle[ShuffleSpec],
-        key: str,
+        key: Key,
         worker: str,
     ) -> ToPickle[ShuffleRunSpec]:
         # FIXME: Sometimes, this doesn't actually get pickled
@@ -148,7 +150,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 "into this by leaving a comment at distributed#7816."
             )
 
-    def _raise_if_task_not_processing(self, key: str) -> None:
+    def _raise_if_task_not_processing(self, key: Key) -> None:
         task = self.scheduler.tasks[key]
         if task.state != "processing":
             raise RuntimeError(f"Expected {task} to be processing, is {task.state}.")
@@ -279,7 +281,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def transition(
         self,
-        key: str,
+        key: Key,
         start: TaskStateState,
         finish: TaskStateState,
         *args: Any,
@@ -289,9 +291,9 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         """Clean up scheduler and worker state once a shuffle becomes inactive."""
         if finish not in ("released", "forgotten"):
             return
-        if not isinstance(key, str) or not key.startswith("shuffle-barrier-"):
-            return
         shuffle_id = id_from_key(key)
+        if not shuffle_id:
+            return
 
         if shuffle := self.active_shuffles.get(shuffle_id):
             self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")

@@ -10,6 +10,8 @@ from typing import IO, Any, Literal
 
 import msgpack
 
+from dask.typing import Key
+
 from distributed._stories import scheduler_story as _scheduler_story
 from distributed._stories import worker_story as _worker_story
 
@@ -190,7 +192,7 @@ class DumpArtefact(Mapping):
 
         return tasks
 
-    def scheduler_story(self, *key_or_stimulus_id: str) -> dict:
+    def scheduler_story(self, *key_or_stimulus_id: Key | str) -> dict:
         """
         Returns
         -------

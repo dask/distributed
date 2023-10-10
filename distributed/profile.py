@@ -58,13 +58,20 @@ def identifier(frame: FrameType | None) -> str:
     if frame is None:
         return "None"
     else:
-        return ";".join(
-            (
-                frame.f_code.co_name,
-                frame.f_code.co_filename,
-                str(frame.f_code.co_firstlineno),
+        co = frame.f_code
+        try:
+            return ";".join(
+                (
+                    co.co_name,
+                    co.co_filename,
+                    str(co.co_firstlineno),
+                )
             )
-        )
+        except AttributeError:
+            if co.__module__:
+                return f"{co.__module__}.{co.__qualname__}:{_f_lineno(frame)}"  # type: ignore[attr-defined]
+            else:
+                return f"{co.__qualname__}:{_f_lineno(frame)}"  # type: ignore[attr-defined]
 
 
 def _f_lineno(frame: FrameType) -> int:
@@ -77,14 +84,17 @@ def _f_lineno(frame: FrameType) -> int:
 
     f_lasti = frame.f_lasti
     code = frame.f_code
-    prev_line = code.co_firstlineno
+    try:
+        prev_line = code.co_firstlineno
 
-    for start, next_line in dis.findlinestarts(code):
-        if f_lasti < start:
-            return prev_line
-        prev_line = next_line
+        for start, next_line in dis.findlinestarts(code):
+            if f_lasti < start:
+                return prev_line
+            prev_line = next_line
 
-    return prev_line
+        return prev_line
+    except Exception:
+        return -1
 
 
 def repr_frame(frame: FrameType) -> str:
@@ -99,10 +109,17 @@ def repr_frame(frame: FrameType) -> str:
 def info_frame(frame: FrameType) -> dict[str, Any]:
     co = frame.f_code
     f_lineno = _f_lineno(frame)
-    line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
+    try:
+        name = co.co_name
+        filename = co.co_filename
+        line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
+    except (AttributeError, IndexError):
+        line = ""
+        name = co.__qualname__  # type: ignore[attr-defined]
+        filename = "<built-in>"
     return {
-        "filename": co.co_filename,
-        "name": co.co_name,
+        "filename": filename,
+        "name": name,
         "line_number": f_lineno,
         "line": line,
     }
@@ -161,7 +178,7 @@ def process(
         # sometimes need to be recursed into as well, e.g. for serialization
         # which can cause recursion errors later on since this can generate
         # deeply nested dictionaries
-        depth = min(250, sys.getrecursionlimit() // 4)
+        depth = min(100, sys.getrecursionlimit() // 4)
 
     if any(frame.f_code.co_filename.endswith(o) for o in omit):
         return None

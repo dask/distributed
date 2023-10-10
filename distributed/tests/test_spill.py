@@ -454,3 +454,20 @@ def test_compression_settings(tmp_path, compression, minsize, maxsize):
         x = "x" * 20_000
         buf["x"] = x
         assert minsize <= psize(tmp_path, x=x)[1] <= maxsize
+
+
+def test_str_collision(tmp_path):
+    """keys are converted to strings before landing on disk. In dask, 1 and "1" are two
+    different keys; make sure they don't collide.
+    """
+    buf = SpillBuffer(str(tmp_path), target=100_000)
+    buf[1] = 10
+    buf["1"] = 20
+    assert buf.keys() == {1, "1"}
+    assert dict(buf) == {1: 10, "1": 20}
+    assert not buf.slow
+    buf.evict()
+    buf.evict()
+    assert not buf.fast
+    assert buf.keys() == {1, "1"}
+    assert dict(buf) == {1: 10, "1": 20}

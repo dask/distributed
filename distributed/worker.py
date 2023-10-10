@@ -47,6 +47,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.core import istask
 from dask.system import CPU_COUNT
+from dask.typing import Key
 from dask.utils import (
     apply,
     format_bytes,
@@ -189,7 +190,7 @@ class GetDataBusy(TypedDict):
 
 class GetDataSuccess(TypedDict):
     status: Literal["OK"]
-    data: dict[str, object]
+    data: dict[Key, object]
 
 
 def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
@@ -411,10 +412,10 @@ class Worker(BaseWorker, ServerNode):
     nanny: Nanny | None
     _lock: threading.Lock
     transfer_outgoing_count_limit: int
-    threads: dict[str, int]  # {ts.key: thread ID}
+    threads: dict[Key, int]  # {ts.key: thread ID}
     active_threads_lock: threading.Lock
     active_threads: dict[int, str]  # {thread ID: ts.key}
-    active_keys: set[str]
+    active_keys: set[Key]
     profile_keys: defaultdict[str, dict[str, Any]]
     profile_keys_history: deque[tuple[float, dict[str, dict[str, Any]]]]
     profile_recent: dict[str, Any]
@@ -852,7 +853,7 @@ class Worker(BaseWorker, ServerNode):
     memory_manager: WorkerMemoryManager
 
     @property
-    def data(self) -> MutableMapping[str, object]:
+    def data(self) -> MutableMapping[Key, object]:
         """{task key: task payload} of all completed tasks, whether they were computed
         on this Worker or computed somewhere else and then transferred here over the
         network.
@@ -1049,7 +1050,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.digests_total_since_heartbeat.clear()
 
-        out = dict(
+        out: dict = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
             bandwidth={
                 "total": self.bandwidth,
@@ -1302,10 +1303,10 @@ class Worker(BaseWorker, ServerNode):
         finally:
             await self.close(reason="worker-handle-scheduler-connection-broken")
 
-    def keys(self) -> list[str]:
+    def keys(self) -> list[Key]:
         return list(self.data)
 
-    async def gather(self, who_has: dict[str, list[str]]) -> dict[str, Any]:
+    async def gather(self, who_has: dict[Key, list[str]]) -> dict[Key, object]:
         """Endpoint used by Scheduler.rebalance() and Scheduler.replicate()"""
         missing_keys = [k for k in who_has if k not in self.data]
         failed_keys = []
@@ -1347,9 +1348,7 @@ class Worker(BaseWorker, ServerNode):
         else:
             return {"status": "OK"}
 
-    def get_monitor_info(
-        self, recent: bool = False, start: int = 0
-    ) -> dict[str, float]:
+    def get_monitor_info(self, recent: bool = False, start: int = 0) -> dict[str, Any]:
         result = dict(
             range_query=(
                 self.monitor.recent()
@@ -1820,7 +1819,7 @@ class Worker(BaseWorker, ServerNode):
 
     def update_data(
         self,
-        data: dict[str, object],
+        data: dict[Key, object],
         stimulus_id: str | None = None,
     ) -> dict[str, Any]:
         if stimulus_id is None:
@@ -1961,7 +1960,7 @@ class Worker(BaseWorker, ServerNode):
     # Dependencies gathering #
     ##########################
 
-    def _get_cause(self, keys: Iterable[str]) -> TaskState:
+    def _get_cause(self, keys: Iterable[Key]) -> TaskState:
         """For diagnostics, we want to attach a transfer to a single task. This task is
         typically the next to be executed but since we're fetching tasks for potentially
         many dependents, an exact match is not possible. Additionally, if a key was
@@ -1984,7 +1983,7 @@ class Worker(BaseWorker, ServerNode):
         self,
         start: float,
         stop: float,
-        data: dict[str, object],
+        data: dict[Key, object],
         cause: TaskState,
         worker: str,
     ) -> None:
@@ -2031,7 +2030,7 @@ class Worker(BaseWorker, ServerNode):
     async def gather_dep(
         self,
         worker: str,
-        to_gather: Collection[str],
+        to_gather: Collection[Key],
         total_nbytes: int,
         *,
         stimulus_id: str,
@@ -2208,7 +2207,7 @@ class Worker(BaseWorker, ServerNode):
             return {"status": "error", "exception": to_serialize(ex)}
 
     @fail_hard
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: Key, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
@@ -2364,7 +2363,18 @@ class Worker(BaseWorker, ServerNode):
             )
 
         except Exception as exc:
-            logger.error("Exception during execution of task %s.", key, exc_info=True)
+            # Some legitimate use cases that will make us reach this point:
+            # - User specified an invalid executor;
+            # - Task transitioned to cancelled or resumed(fetch) before the start of
+            #   execute() and its dependencies were released. This caused
+            #   _prepare_args_for_execution() to raise KeyError;
+            # - A dependency was unspilled but failed to deserialize due to a bug in
+            #   user-defined or third party classes.
+            if ts.state == "executing":
+                logger.error(
+                    f"Exception during execution of task {key!r}",
+                    exc_info=True,
+                )
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
@@ -2445,7 +2455,7 @@ class Worker(BaseWorker, ServerNode):
     ):
         now = time() + self.scheduler_delay
         if server:
-            history = self.io_loop.profile
+            history = self.io_loop.profile  # type: ignore[attr-defined]
         elif key is None:
             history = self.profile_history
         else:
@@ -2824,7 +2834,7 @@ def secede():
 
 async def get_data_from_worker(
     rpc: ConnectionPool,
-    keys: Collection[str],
+    keys: Collection[Key],
     worker: str,
     *,
     who: str | None = None,
