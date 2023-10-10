@@ -430,7 +430,7 @@ class BlockedGetOrCreateShuffleRunManager(_ShuffleRunManager):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_plugin.ShuffleRunManager",
+    "distributed.shuffle._worker_plugin._ShuffleRunManager",
     BlockedGetOrCreateShuffleRunManager,
 )
 @gen_cluster(
@@ -2038,7 +2038,7 @@ class BlockedShuffleAccessAndFailShuffleRunManager(_ShuffleRunManager):
 
 
 @mock.patch(
-    "distributed.shuffle._worker_plugin.ShuffleRunManager",
+    "distributed.shuffle._worker_plugin._ShuffleRunManager",
     BlockedShuffleAccessAndFailShuffleRunManager,
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
