@@ -83,17 +83,20 @@ async def test_basic_state(c, s, *workers):
 
     exts = [w.extensions["shuffle"] for w in workers]
     for ext in exts:
-        assert not ext._active_runs
+        assert not ext.shuffle_runs._active_runs
 
     f = c.compute(shuffled)
     # TODO this is a bad/pointless test. the `f.done()` is necessary in case the shuffle is really fast.
     # To test state more thoroughly, we'd need a way to 'stop the world' at various stages. Like have the
     # scheduler pause everything when the barrier is reached. Not sure yet how to implement that.
-    while not all(len(ext._active_runs) == 1 for ext in exts) and not f.done():
+    while (
+        not all(len(ext.shuffle_runs._active_runs) == 1 for ext in exts)
+        and not f.done()
+    ):
         await asyncio.sleep(0.1)
 
     await f
-    assert all(not ext._active_runs for ext in exts)
+    assert all(not ext.shuffle_runs._active_runs for ext in exts)
 
 
 def test_multiple_linear(client):
