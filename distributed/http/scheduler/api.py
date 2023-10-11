@@ -8,7 +8,7 @@ from distributed.http.utils import RequestHandler
 class APIHandler(RequestHandler):
     def get(self):
         self.write("API V1")
-        self.set_header("Content-Type", "text/plain")
+        self.set_header("Content-Type", "text/plain; charset=utf-8")
 
 
 class RetireWorkersHandler(RequestHandler):

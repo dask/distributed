@@ -14,6 +14,10 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
+import dask.config
+from dask.typing import Key
+from dask.utils import parse_timedelta
+
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
@@ -21,6 +25,7 @@ from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -103,7 +108,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         # up the comm pool on scheduler side
         await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
 
-    async def send(
+    async def _send(
         self, address: str, shards: list[tuple[_T_partition_id, bytes]]
     ) -> None:
         self.raise_if_closed()
@@ -111,6 +116,23 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             data=to_serialize(shards),
             shuffle_id=self.id,
             run_id=self.run_id,
+        )
+
+    async def send(
+        self, address: str, shards: list[tuple[_T_partition_id, bytes]]
+    ) -> None:
+        retry_count = dask.config.get("distributed.p2p.comm.retry.count")
+        retry_delay_min = parse_timedelta(
+            dask.config.get("distributed.p2p.comm.retry.delay.min"), default="s"
+        )
+        retry_delay_max = parse_timedelta(
+            dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
+        )
+        return await retry(
+            partial(self._send, address, shards),
+            count=retry_count,
+            delay_min=retry_delay_min,
+            delay_max=retry_delay_max,
         )
 
     async def offload(self, func: Callable[..., _T], *args: Any) -> _T:
@@ -269,9 +291,10 @@ def barrier_key(shuffle_id: ShuffleId) -> str:
     return _BARRIER_PREFIX + shuffle_id
 
 
-def id_from_key(key: str) -> ShuffleId:
-    assert key.startswith(_BARRIER_PREFIX)
-    return ShuffleId(key.replace(_BARRIER_PREFIX, ""))
+def id_from_key(key: Key) -> ShuffleId | None:
+    if not isinstance(key, str) or not key.startswith(_BARRIER_PREFIX):
+        return None
+    return ShuffleId(key[len(_BARRIER_PREFIX) :])
 
 
 class ShuffleType(Enum):

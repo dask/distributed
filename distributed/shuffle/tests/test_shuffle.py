@@ -36,6 +36,7 @@ from distributed import (
     Scheduler,
     Worker,
 )
+from distributed.core import ConnectionPool
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
     convert_shards,
@@ -160,7 +161,7 @@ async def test_basic_cudf_support(c, s, a, b):
 def get_shuffle_run_from_worker(shuffle_id: ShuffleId, worker: Worker) -> ShuffleRun:
     plugin = worker.plugins["shuffle"]
     assert isinstance(plugin, ShuffleWorkerPlugin)
-    return plugin.shuffles[shuffle_id]
+    return plugin._active_runs[shuffle_id]
 
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
@@ -285,11 +286,11 @@ async def test_bad_disk(c, s, a, b):
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
     out = out.persist()
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    while not a.plugins["shuffle"].shuffles:
+    while not a.plugins["shuffle"]._active_runs:
         await asyncio.sleep(0.01)
     shutil.rmtree(a.local_directory)
 
-    while not b.plugins["shuffle"].shuffles:
+    while not b.plugins["shuffle"]._active_runs:
         await asyncio.sleep(0.01)
     shutil.rmtree(b.local_directory)
     with pytest.raises(RuntimeError, match=f"{shuffle_id} failed during transfer"):
@@ -703,7 +704,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     await close_worker.close()
 
     alive_shuffle.block_inputs_done.set()
-    alive_shuffles = alive_worker.extensions["shuffle"].shuffles
+    alive_shuffles = alive_worker.extensions["shuffle"]._active_runs
 
     def shuffle_restarted():
         try:
@@ -813,7 +814,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     await close_worker.close()
 
     alive_shuffle.block_inputs_done.set()
-    alive_shuffles = alive_worker.extensions["shuffle"].shuffles
+    alive_shuffles = alive_worker.extensions["shuffle"]._active_runs
 
     def shuffle_restarted():
         try:
@@ -859,7 +860,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         # Ensure that barrier is not executed on the nanny
         s.set_restrictions({key: {a.address}})
         await wait_for_state(key, "processing", s, interval=0)
-        shuffles = a.extensions["shuffle"].shuffles
+        shuffles = a.extensions["shuffle"]._active_runs
         shuffle = get_shuffle_run_from_worker(shuffle_id, a)
         await shuffle.in_inputs_done.wait()
         await n.process.process.kill()
@@ -1871,7 +1872,7 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
     del shuffled
 
     if wait_until_forgotten:
-        while s.tasks or shuffle_extA.shuffles or shuffle_extB.shuffles:
+        while s.tasks or shuffle_extA._active_runs or shuffle_extB._active_runs:
             await asyncio.sleep(0)
 
     shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p")
@@ -2092,9 +2093,9 @@ async def test_replace_stale_shuffle(c, s, a, b):
 
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
     await ext_B.finished_get_shuffle_run.wait()
-    assert shuffle_id in ext_A.shuffles
-    assert shuffle_id in ext_B.shuffles
-    stale_shuffle_run = ext_B.shuffles[shuffle_id]
+    assert shuffle_id in ext_A._active_runs
+    assert shuffle_id in ext_B._active_runs
+    stale_shuffle_run = ext_B._active_runs[shuffle_id]
 
     del out
     while s.tasks:
@@ -2104,9 +2105,10 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await check_worker_cleanup(a)
 
     # B is not cleaned
-    assert shuffle_id in ext_B.shuffles
+    assert shuffle_id in ext_B._active_runs
     assert not stale_shuffle_run.closed
     ext_B.finished_get_shuffle_run.clear()
+    ext_B.allow_fail = True
 
     # Initialize second shuffle execution
     out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
@@ -2116,7 +2118,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await ext_B.finished_get_shuffle_run.wait()
 
     # Stale shuffle run has been replaced
-    shuffle_run = ext_B.shuffles[shuffle_id]
+    shuffle_run = ext_B._active_runs[shuffle_id]
     assert shuffle_run != stale_shuffle_run
     assert shuffle_run.run_id > stale_shuffle_run.run_id
 
@@ -2357,3 +2359,77 @@ async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
         shuffleA.block_barrier.set()
         result = await fut
         dd.assert_eq(result, expected)
+
+
+class FlakyConnectionPool(ConnectionPool):
+    def __init__(self, *args, failing_connects=0, **kwargs):
+        self.attempts = 0
+        self.failed_attempts = 0
+        self.failing_connects = failing_connects
+        super().__init__(*args, **kwargs)
+
+    async def connect(self, *args, **kwargs):
+        self.attempts += 1
+        if self.attempts > self.failing_connects:
+            return await super().connect(*args, **kwargs)
+
+        with dask.config.set({"distributed.comm.timeouts.connect": "0 ms"}):
+            try:
+                _ = await super().connect(*args, **kwargs)
+            except Exception:
+                self.failed_attempts += 1
+                raise
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 0},
+)
+async def test_p2p_flaky_connect_fails_without_retry(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+
+    rpc = await FlakyConnectionPool(failing_connects=1)
+
+    with mock.patch.object(a, "rpc", rpc):
+        with raises_with_cause(
+            expected_exception=RuntimeError,
+            match="P2P shuffling.*transfer",
+            expected_cause=OSError,
+            match_cause=None,
+        ):
+            await c.compute(x)
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await c.close()
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 1},
+)
+async def test_p2p_flaky_connect_recover_with_retry(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    x = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+
+    rpc = await FlakyConnectionPool(failing_connects=1)
+
+    with mock.patch.object(a, "rpc", rpc):
+        await c.compute(x)
+    assert rpc.failed_attempts == 1
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)

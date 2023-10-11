@@ -23,6 +23,7 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     assert_story,
+    async_poll_for,
     captured_logger,
     gen_cluster,
     gen_test,
@@ -739,9 +740,72 @@ async def test_ReduceReplicas(c, s, *workers):
         ],
     ):
         s.extensions["amm"].run_once()
+    await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1, timeout=5)
 
-    while len(s.tasks["x"].who_has) > 1:
-        await asyncio.sleep(0.01)
+
+@pytest.mark.parametrize(
+    "nwaiters_w1,nwaiters_w2,nwaiters_nonproc,nreplicas",
+    [
+        (0, 0, 0, 1),
+        (1, 0, 0, 1),
+        (0, 0, 1, 1),
+        (2, 0, 0, 1),
+        (1, 1, 0, 2),
+        (1, 1, 1, 3),
+        (1, 1, 2, 4),
+        (2, 1, 1, 3),
+        (1, 1, 17, 4),
+        (17, 1, 1, 3),
+        # Fast code path: if there are 20+ waiters, don't check processing_on
+        (18, 1, 1, 4),
+    ],
+)
+@gen_cluster(
+    nthreads=[("", 1)] * 4,
+    client=True,
+    config={
+        "distributed.scheduler.active-memory-manager.start": False,
+        "distributed.scheduler.active-memory-manager.policies": [
+            {"class": "distributed.active_memory_manager.ReduceReplicas"},
+        ],
+    },
+)
+async def test_ReduceReplicas_with_waiters(
+    c, s, w1, w2, w3, w4, nwaiters_w1, nwaiters_w2, nwaiters_nonproc, nreplicas
+):
+    """If there are waiters, even if they are not processing on a worker yet, preserve
+    extra replicas.
+    If there are between 2 and 19 waiters, consider which workers they've been assigned
+    to and don't double count waiters that have been assigned to the same worker.
+    """
+    ev = Event()
+    x = (await c.scatter({"x": 123}, broadcast=True))["x"]
+    y = c.submit(lambda ev: ev.wait(), ev, key="y", workers=[w4.address])
+    waiters_w1 = [
+        c.submit(lambda x, ev: ev.wait(), x, ev, key=("zw1", i), workers=[w1.address])
+        for i in range(nwaiters_w1)
+    ]
+    waiters_w2 = [
+        c.submit(lambda x, ev: ev.wait(), x, ev, key=("zw2", i), workers=[w2.address])
+        for i in range(nwaiters_w2)
+    ]
+    waiters_nonproc = [
+        c.submit(lambda x, y: None, x, y, key=("znp", i))
+        for i in range(nwaiters_nonproc)
+    ]
+    nwaiters = nwaiters_w1 + nwaiters_w2 + nwaiters_nonproc
+    await async_poll_for(lambda: len(s.tasks) == nwaiters + 2, timeout=5)
+    for fut in waiters_w1:
+        assert s.tasks[fut.key].processing_on == s.workers[w1.address]
+    for fut in waiters_w2:
+        assert s.tasks[fut.key].processing_on == s.workers[w2.address]
+    for fut in waiters_nonproc:
+        assert s.tasks[fut.key].processing_on is None
+
+    s.extensions["amm"].run_once()
+    await asyncio.sleep(0.2)  # Test no excessive drops
+    await async_poll_for(lambda: len(s.tasks["x"].who_has) == nreplicas, timeout=5)
+    await ev.set()
 
 
 @pytest.mark.parametrize("start_amm", [False, True])
