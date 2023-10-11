@@ -2386,6 +2386,7 @@ class FlakyConnectionPool(ConnectionPool):
     config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 0},
 )
 async def test_p2p_flaky_connect_fails_without_retry(c, s, a, b):
+    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
