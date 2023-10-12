@@ -817,10 +817,13 @@ class _LogErrors:
         if not exc_type or issubclass(exc_type, (CommClosedError, gen.Return)):
             return
 
-        stack = inspect.stack()
-        frame = stack[self.unroll_stack]
-        mod = inspect.getmodule(frame[0])
-        modname = mod.__name__
+        i = self.unroll_stack
+
+        while traceback.tb_next and i > 0:
+            traceback = traceback.tb_next
+            i -= 1
+
+        modname = traceback.tb_frame.f_globals["__name__"]
 
         try:
             logger = logging.getLogger(modname)
