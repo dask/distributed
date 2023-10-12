@@ -75,9 +75,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     def shuffle_ids(self) -> set[ShuffleId]:
         return set(self.active_shuffles)
 
-    async def barrier(
-        self, id: ShuffleId, run_id: int, consistent: bool = True
-    ) -> None:
+    async def barrier(self, id: ShuffleId, run_id: int, consistent: bool) -> None:
         shuffle = self.active_shuffles[id]
         if shuffle.run_id != run_id:
             raise ValueError(f"{run_id=} does not match {shuffle}")

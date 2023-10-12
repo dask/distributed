@@ -1624,12 +1624,13 @@ async def test_basic_lowlevel_shuffle(
         else:
             barrier_worker = random.sample(shuffles, k=1)[0]
 
+        run_ids = []
         try:
             for ix, df in enumerate(dfs):
                 s = shuffles[ix % len(shuffles)]
-                await s.add_partition(df, ix)
+                run_ids.append(await s.add_partition(df, ix))
 
-            await barrier_worker.barrier()
+            await barrier_worker.barrier(run_ids=run_ids)
 
             total_bytes_sent = 0
             total_bytes_recvd = 0
@@ -1704,7 +1705,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
             await sB.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during deserialization"):
                 await sB.add_partition(dfs[1], 1)
-                await sB.barrier()
+                await sB.barrier(run_ids=[sB.run_id, sB.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
@@ -1757,7 +1758,7 @@ async def test_error_send(tmp_path, loop_in_thread):
         try:
             await sA.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during send"):
-                await sA.barrier()
+                await sA.barrier(run_ids=[sA.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
@@ -1810,7 +1811,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         try:
             await sB.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during receive"):
-                await sB.barrier()
+                await sB.barrier(run_ids=[sB.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
@@ -2291,10 +2292,10 @@ class BlockedBarrierShuffleRun(DataFrameShuffleRun):
         self.in_barrier = asyncio.Event()
         self.block_barrier = asyncio.Event()
 
-    async def barrier(self):
+    async def barrier(self, *args: Any, **kwargs: Any) -> int:
         self.in_barrier.set()
         await self.block_barrier.wait()
-        return await super().barrier()
+        return await super().barrier(*args, **kwargs)
 
 
 @mock.patch(

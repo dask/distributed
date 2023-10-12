@@ -145,6 +145,29 @@ class _ShuffleRunManager:
             raise shuffle_run._exception
         return shuffle_run
 
+    async def get_most_recent(
+        self, shuffle_id: ShuffleId, run_ids: Sequence[int]
+    ) -> ShuffleRun:
+        """Get the shuffle matching the ID and most recent run ID.
+
+        If necessary, this method fetches the shuffle run from the scheduler plugin.
+
+        Parameters
+        ----------
+        shuffle_id
+            Unique identifier of the shuffle
+        run_ids
+            Sequence of possibly different run IDs
+
+        Raises
+        ------
+        KeyError
+            If the shuffle does not exist
+        RuntimeError
+            If the most recent run_id is stale
+        """
+        return await self.get_with_run_id(shuffle_id=shuffle_id, run_id=max(run_ids))
+
     @overload
     async def _refresh(
         self,
@@ -304,9 +327,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         Using an unknown ``shuffle_id`` is an error. Calling this before all partitions have been
         added is undefined.
         """
+        shuffle_run = await self.shuffle_runs.get_most_recent(shuffle_id, run_ids)
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
-        shuffle_run = await self._get_shuffle_run(shuffle_id, max(run_ids))
         return await shuffle_run.barrier(run_ids)
 
     async def _get_shuffle_run(
