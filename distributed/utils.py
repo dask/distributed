@@ -26,6 +26,7 @@ from collections.abc import (
     Callable,
     Collection,
     Container,
+    Coroutine,
     Generator,
     Iterator,
     KeysView,
@@ -371,12 +372,18 @@ def in_async_call(loop, default=False):
         return False
 
 
-def sync(loop, func, *args, callback_timeout=None, **kwargs):
+def sync(
+    loop: IOLoop,
+    func: Callable[..., Coroutine[AnyType, AnyType, T]],
+    *args: AnyType,
+    callback_timeout: str | timedelta | float | None = None,
+    **kwargs: AnyType,
+) -> T:
     """
     Run coroutine in loop running in separate thread.
     """
-    callback_timeout = _parse_timedelta(callback_timeout, "s")
-    if loop.asyncio_loop.is_closed():
+    timeout = _parse_timedelta(callback_timeout, "s")
+    if loop.asyncio_loop.is_closed():  # type: ignore[attr-defined]
         raise RuntimeError("IOLoop is closed")
 
     e = threading.Event()
@@ -384,27 +391,27 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     result = error = future = None  # set up non-locals
 
     @gen.coroutine
-    def f():
+    def f() -> Generator[AnyType, AnyType, None]:
         nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = wait_for(future, callback_timeout)
-            future = asyncio.ensure_future(future)
+            coro = func(*args, **kwargs)
+            if timeout is not None:
+                coro = wait_for(coro, timeout)
+            future = asyncio.ensure_future(coro)
             result = yield future
         except Exception:
             error = sys.exc_info()
         finally:
             e.set()
 
-    def cancel():
+    def cancel() -> None:
         if future is not None:
             future.cancel()
 
-    def wait(timeout):
+    def wait(timeout: float) -> bool:
         try:
             return e.wait(timeout)
         except KeyboardInterrupt:
@@ -412,18 +419,18 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             raise
 
     loop.add_callback(f)
-    if callback_timeout is not None:
-        if not wait(callback_timeout):
-            raise TimeoutError(f"timed out after {callback_timeout} s.")
+    if timeout is not None:
+        if not wait(timeout):
+            raise TimeoutError(f"timed out after {timeout} s.")
     else:
         while not e.is_set():
             wait(10)
 
     if error:
         typ, exc, tb = error
-        raise exc.with_traceback(tb)
+        raise exc.with_traceback(tb)  # type: ignore[union-attr]
     else:
-        return result
+        return result  # type: ignore[return-value]
 
 
 if sys.version_info >= (3, 10):
