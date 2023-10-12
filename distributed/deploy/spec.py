@@ -674,14 +674,18 @@ class SpecCluster(Cluster):
         raise NotImplementedError()
 
 
-async def run_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny]:
+def init_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny]:
     workers = {}
     for k, d in spec.items():
         cls = d["cls"]
         if isinstance(cls, str):
             cls = import_term(cls)
         workers[k] = cls(*args, **d.get("opts", {}))
+    return workers
 
+
+async def run_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny]:
+    workers = init_spec(spec, *args)
     if workers:
         await asyncio.gather(*workers.values())
     return workers
