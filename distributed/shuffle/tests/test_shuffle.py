@@ -1934,6 +1934,7 @@ async def test_shuffle_run_consistency(c, s, a):
         but it is an implementation detail that users should not rely upon.
     """
     await c.register_plugin(BlockedBarrierShuffleWorkerPlugin(), name="shuffle")
+    run_manager = get_shuffle_run_manager(a)
     worker_plugin = a.plugins["shuffle"]
     scheduler_ext = s.plugins["shuffle"]
 
@@ -1950,13 +1951,13 @@ async def test_shuffle_run_consistency(c, s, a):
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     spec = scheduler_ext.get(shuffle_id, a.worker_address).data
 
-    # Worker plugin can fetch the current run
-    assert await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id)
+    # Shuffle run manager can fetch the current run
+    assert await run_manager.get_with_run_id(shuffle_id, spec.run_id)
 
     # This should never occur, but fetching an ID larger than the ID available on
     # the scheduler should result in an error.
     with pytest.raises(RuntimeError, match="invalid"):
-        await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id + 1)
+        await run_manager.get_with_run_id(shuffle_id, spec.run_id + 1)
 
     # Finish first execution
     worker_plugin.block_barrier.set()
@@ -1978,12 +1979,12 @@ async def test_shuffle_run_consistency(c, s, a):
     # Check invariant that the new run ID is larger than the previous
     assert spec.run_id < new_spec.run_id
 
-    # Worker plugin can fetch the new shuffle run
-    assert await worker_plugin._get_shuffle_run(shuffle_id, new_spec.run_id)
+    # Shuffle run manager can fetch the new shuffle run
+    assert await run_manager.get_with_run_id(shuffle_id, new_spec.run_id)
 
     # Fetching a stale run from a worker aware of the new run raises an error
     with pytest.raises(RuntimeError, match="stale"):
-        await worker_plugin._get_shuffle_run(shuffle_id, spec.run_id)
+        await run_manager.get_with_run_id(shuffle_id, spec.run_id)
 
     worker_plugin.block_barrier.set()
     await out
@@ -1992,6 +1993,7 @@ async def test_shuffle_run_consistency(c, s, a):
         await asyncio.sleep(0)
     worker_plugin.block_barrier.clear()
 
+    # Create an unrelated shuffle on a different column
     out = dd.shuffle.shuffle(df, "y", shuffle="p2p")
     out = out.persist()
     independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
@@ -2005,6 +2007,52 @@ async def test_shuffle_run_consistency(c, s, a):
 
     worker_plugin.block_barrier.set()
     await out
+    del out
+
+    await check_worker_cleanup(a)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_fail_fetch_race(c, s, a):
+    """This test manually triggers a race condition where a `shuffle_fail` arrives on
+    the worker before the result of `get` or `get_or_create`.
+
+    TODO: This assumes that there are no ordering guarantees between failing and fetching
+    This test checks the correct creation of shuffle run IDs through the scheduler
+    as well as the correct handling through the workers. It can be removed once ordering
+    is guaranteed.
+    """
+    await c.register_plugin(BlockedBarrierShuffleWorkerPlugin(), name="shuffle")
+    run_manager = get_shuffle_run_manager(a)
+    worker_plugin = a.plugins["shuffle"]
+    scheduler_ext = s.plugins["shuffle"]
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = out.persist()
+
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    await worker_plugin.in_barrier.wait()
+    # Pretend that the fail from the scheduler arrives first
+    run_manager.fail(shuffle_id, spec.run_id, "error")
+    assert shuffle_id not in run_manager._active_runs
+
+    with pytest.raises(RuntimeError, match="Received stale shuffle run"):
+        await run_manager.get_with_run_id(shuffle_id, spec.run_id)
+    assert shuffle_id not in run_manager._active_runs
+
+    with pytest.raises(RuntimeError, match="Received stale shuffle run"):
+        await run_manager.get_or_create(spec.spec, "test-key")
+    assert shuffle_id not in run_manager._active_runs
+
+    worker_plugin.block_barrier.set()
     del out
 
     await check_worker_cleanup(a)
