@@ -2401,3 +2401,48 @@ async def test_p2p_flaky_connect_recover_with_retry(c, s, a, b):
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
+
+
+class BlockedAfterGatherDep(Worker):
+    def __init__(self, *args, **kwargs):
+        self.after_gather_dep = asyncio.Event()
+        self.block_gather_dep = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def gather_dep(self, *args, **kwargs):
+        result = await super().gather_dep(*args, **kwargs)
+        self.after_gather_dep.set()
+        await self.block_gather_dep.wait()
+        return result
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, Worker=BlockedAfterGatherDep)
+async def test_barrier_handles_stale_resumed_transfer(c, s, *workers):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    out = dd.shuffle.shuffle(df, "x", shuffle="p2p")
+    out = c.compute(out)
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    key = barrier_key(shuffle_id)
+    await wait_for_state(key, "processing", s)
+    barrier_worker: BlockedAfterGatherDep | None = None
+    bts = s.tasks[key]
+    workers = list(workers)
+    for w in workers:
+        if w.address == bts.processing_on.address:
+            barrier_worker = w
+            workers.remove(w)
+            break
+    assert barrier_worker
+    closed_worker, remaining_worker = workers
+    remaining_worker.block_gather_dep.set()
+    await wait_for_tasks_in_state("shuffle-transfer", "flight", 1, barrier_worker)
+    await barrier_worker.after_gather_dep.wait()
+    await closed_worker.close()
+    await wait_for_tasks_in_state("shuffle-transfer", "resumed", 1, barrier_worker)
+    barrier_worker.block_gather_dep.set()
+    await out
