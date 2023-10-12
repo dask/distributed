@@ -3893,16 +3893,19 @@ class Scheduler(SchedulerState, ServerNode):
     async def get_cluster_state(
         self,
         exclude: "Collection[str]",
+        workers: "list[str] | None" = None,
     ) -> dict:
         "Produce the state dict used in a cluster state dump"
         # Kick off state-dumping on workers before we block the event loop in `self._to_dict`.
         workers_future = asyncio.gather(
             self.broadcast(
                 msg={"op": "dump_state", "exclude": exclude},
+                workers=workers,
                 on_error="return",
             ),
             self.broadcast(
                 msg={"op": "versions"},
+                workers=workers,
                 on_error="ignore",
             ),
         )
@@ -3932,11 +3935,15 @@ class Scheduler(SchedulerState, ServerNode):
         url: str,
         exclude: "Collection[str]",
         format: Literal["msgpack", "yaml"],
+        workers: "list[str] | None" = None,
         **storage_options: dict[str, Any],
     ) -> None:
         "Write a cluster state dump to an fsspec-compatible URL."
         await cluster_dump.write_state(
-            partial(self.get_cluster_state, exclude), url, format, **storage_options
+            partial(self.get_cluster_state, exclude, workers=workers),
+            url,
+            format,
+            **storage_options,
         )
 
     def get_worker_service_addr(
