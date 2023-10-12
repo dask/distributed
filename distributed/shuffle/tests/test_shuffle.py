@@ -68,6 +68,11 @@ from distributed.utils_test import (
 )
 from distributed.worker_state_machine import TaskState as WorkerTaskState
 
+try:
+    import pyarrow as pa
+except ImportError:
+    pa = None
+
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
 def lose_annotations(request):
@@ -111,18 +116,20 @@ async def check_scheduler_cleanup(
     assert not plugin.heartbeats
 
 
+@pytest.mark.skipif(
+    pa is not None,
+    reason="We don't have a CI job that is installing a very old pyarrow version",
+)
 @gen_cluster(client=True)
 async def test_minimal_version(c, s, a, b):
-    pytest.importorskip("pyarrow")
-    with mock.patch("pyarrow.__version__", "11.0.0"):
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-01-10",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        with pytest.raises(ImportError, match="requires pyarrow"):
-            await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with pytest.raises(RuntimeError, match="requires pyarrow"):
+        await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
 @pytest.mark.gpu
@@ -173,7 +180,6 @@ def get_active_shuffle_runs(worker: Worker) -> dict[ShuffleId, ShuffleRun]:
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
 async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
-    pytest.importorskip("pyarrow")
     await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -197,7 +203,6 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
 @pytest.mark.parametrize("processes", [True, False])
 @gen_test()
 async def test_basic_integration_local_cluster(processes):
-    pytest.importorskip("pyarrow")
     async with LocalCluster(
         n_workers=2,
         processes=processes,
@@ -220,7 +225,6 @@ async def test_basic_integration_local_cluster(processes):
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
 async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npartitions):
-    pytest.importorskip("pyarrow")
     await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -245,7 +249,6 @@ async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npart
 
 
 def test_shuffle_before_categorize(loop_in_thread):
-    pytest.importorskip("pyarrow")
     """Regression test for https://github.com/dask/distributed/issues/7615"""
     with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
         df = dask.datasets.timeseries(
@@ -261,7 +264,6 @@ def test_shuffle_before_categorize(loop_in_thread):
 
 @gen_cluster(client=True)
 async def test_concurrent(c, s, a, b, lose_annotations):
-    pytest.importorskip("pyarrow")
     await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -282,7 +284,6 @@ async def test_concurrent(c, s, a, b, lose_annotations):
 
 @gen_cluster(client=True)
 async def test_bad_disk(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -371,7 +372,6 @@ async def wait_until_new_shuffle_is_initialized(
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_transfer(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -398,7 +398,6 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -441,7 +440,6 @@ class BlockedGetOrCreateShuffleRunManager(_ShuffleRunManager):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_get_or_create_from_dangling_transfer(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -479,7 +477,6 @@ async def test_get_or_create_from_dangling_transfer(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_during_transfer(c, s, a):
-    pytest.importorskip("pyarrow")
     async with Nanny(s.address, nthreads=1) as n:
         killed_worker_address = n.worker_address
         df = dask.datasets.timeseries(
@@ -511,7 +508,6 @@ async def test_crashed_worker_during_transfer(c, s, a):
     config={"distributed.worker.memory.monitor-interval": "60s"},
 )
 async def test_restarting_does_not_deadlock(c, s):
-    pytest.importorskip("pyarrow")
     """Regression test for https://github.com/dask/distributed/issues/8088"""
     async with Worker(s.address) as a:
         async with Nanny(s.address) as b:
@@ -543,8 +539,6 @@ async def test_restarting_does_not_deadlock(c, s):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_input_only_worker_during_transfer(c, s, a, b):
-    pytest.importorskip("pyarrow")
-
     def mock_get_worker_for_range_sharding(
         output_partition: int, workers: list[str], npartitions: int
     ) -> str:
@@ -577,8 +571,6 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], clean_kwargs={"processes": False})
 async def test_crashed_input_only_worker_during_transfer(c, s, a):
-    pytest.importorskip("pyarrow")
-
     def mock_mock_get_worker_for_range_sharding(
         output_partition: int, workers: list[str], npartitions: int
     ) -> str:
@@ -614,7 +606,6 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
-    pytest.importorskip("pyarrow")
     with dask.annotate(workers=[w1.address, w2.address], allow_other_workers=False):
         df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -648,7 +639,6 @@ class RaiseOnCloseShuffleRun(DataFrameShuffleRun):
 )
 @gen_cluster(client=True, nthreads=[])
 async def test_exception_on_close_cleans_up(c, s, caplog):
-    pytest.importorskip("pyarrow")
     # Ensure that everything is cleaned up and does not lock up if an exception
     # is raised during shuffle close.
     with caplog.at_level(logging.ERROR):
@@ -684,7 +674,6 @@ class BlockedInputsDoneShuffle(DataFrameShuffleRun):
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_barrier(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -747,7 +736,6 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -792,7 +780,6 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_other_worker_during_barrier(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -854,7 +841,6 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_other_worker_during_barrier(c, s, a):
-    pytest.importorskip("pyarrow")
     async with Nanny(s.address, nthreads=1) as n:
         df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -898,7 +884,6 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_worker_during_unpack(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -925,7 +910,6 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -949,7 +933,6 @@ async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_during_unpack(c, s, a):
-    pytest.importorskip("pyarrow")
     async with Nanny(s.address, nthreads=2) as n:
         killed_worker_address = n.worker_address
         df = dask.datasets.timeseries(
@@ -975,7 +958,6 @@ async def test_crashed_worker_during_unpack(c, s, a):
 
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
-    pytest.importorskip("pyarrow")
     await a.heartbeat()
     await check_scheduler_cleanup(s)
     df = dask.datasets.timeseries(
@@ -1171,7 +1153,6 @@ def test_processing_chain(tmp_path):
 
 @gen_cluster(client=True)
 async def test_head(c, s, a, b):
-    pytest.importorskip("pyarrow")
     a_files = list(os.walk(a.local_directory))
     b_files = list(os.walk(b.local_directory))
 
@@ -1204,7 +1185,6 @@ def test_split_by_worker():
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_clean_after_forgotten_early(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-03-01",
@@ -1223,7 +1203,6 @@ async def test_clean_after_forgotten_early(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_tail(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1255,7 +1234,6 @@ async def test_repeat_shuffle_instance(c, s, a, b, wait_until_forgotten):
     --------
     test_repeat_shuffle_operation
     """
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1286,7 +1264,6 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
     --------
     test_repeat_shuffle_instance
     """
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1308,7 +1285,6 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_after_shuffle(c, s, a):
-    pytest.importorskip("pyarrow")
     in_event = Event()
     block_event = Event()
 
@@ -1350,7 +1326,6 @@ async def test_crashed_worker_after_shuffle(c, s, a):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_after_shuffle_persisted(c, s, a):
-    pytest.importorskip("pyarrow")
     async with Nanny(s.address, nthreads=1) as n:
         df = df = dask.datasets.timeseries(
             start="2000-01-01",
@@ -1379,7 +1354,6 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1413,7 +1387,6 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
 
 @gen_cluster(client=True)
 async def test_new_worker(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-20",
@@ -1437,7 +1410,6 @@ async def test_new_worker(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_multi(c, s, a, b):
-    pytest.importorskip("pyarrow")
     left = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-20",
@@ -1464,7 +1436,6 @@ async def test_multi(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_restrictions(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1489,7 +1460,6 @@ async def test_restrictions(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_delete_some_results(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1511,7 +1481,6 @@ async def test_delete_some_results(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_add_some_results(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1538,7 +1507,6 @@ async def test_add_some_results(c, s, a, b):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_clean_after_close(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2001-01-01",
@@ -1862,7 +1830,6 @@ class BlockedShuffleReceiveShuffleWorkerPlugin(ShuffleWorkerPlugin):
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
-    pytest.importorskip("pyarrow")
     await c.register_plugin(BlockedShuffleReceiveShuffleWorkerPlugin(), name="shuffle")
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -1914,7 +1881,6 @@ class BlockedBarrierShuffleWorkerPlugin(ShuffleWorkerPlugin):
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
-    pytest.importorskip("pyarrow")
     await c.register_plugin(BlockedBarrierShuffleWorkerPlugin(), name="shuffle")
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -1967,7 +1933,6 @@ async def test_shuffle_run_consistency(c, s, a):
         The P2P implementation relies on the correctness of this behavior,
         but it is an implementation detail that users should not rely upon.
     """
-    pytest.importorskip("pyarrow")
     await c.register_plugin(BlockedBarrierShuffleWorkerPlugin(), name="shuffle")
     worker_plugin = a.plugins["shuffle"]
     scheduler_ext = s.plugins["shuffle"]
@@ -2079,7 +2044,6 @@ class BlockedShuffleAccessAndFailShuffleRunManager(_ShuffleRunManager):
 )
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_replace_stale_shuffle(c, s, a, b):
-    pytest.importorskip("pyarrow")
     run_manager_A = cast(
         BlockedShuffleAccessAndFailShuffleRunManager, get_shuffle_run_manager(a)
     )
@@ -2155,7 +2119,6 @@ async def test_replace_stale_shuffle(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_handle_null_partitions_p2p_shuffling(c, s, a, b):
-    pytest.importorskip("pyarrow")
     data = [
         {"companies": [], "id": "a", "x": None},
         {"companies": [{"id": 3}, {"id": 5}], "id": "b", "x": None},
@@ -2175,8 +2138,6 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
-    pytest.importorskip("pyarrow")
-
     def make_partition(i):
         """Return null column for every other partition"""
         if i % 2 == 1:
@@ -2227,8 +2188,6 @@ async def test_handle_object_columns_p2p(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_reconcile_mismatching_partitions_p2p_shuffling(c, s, a, b):
-    pytest.importorskip("pyarrow")
-
     def make_partition(i):
         """Return mismatched column types for every other partition"""
         if i % 2 == 1:
@@ -2251,8 +2210,6 @@ async def test_reconcile_mismatching_partitions_p2p_shuffling(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
-    pytest.importorskip("pyarrow")
-
     def make_partition(i):
         """Return incompatible column types for every other partition"""
         if i % 2 == 1:
@@ -2274,7 +2231,6 @@ async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_set_index_p2p(c, s, *workers):
-    pytest.importorskip("pyarrow")
     df = pd.DataFrame({"a": [1, 2, 3, 4, 5, 6, 7, 8], "b": 1})
     ddf = dd.from_pandas(df, npartitions=3)
     ddf = ddf.set_index("a", shuffle="p2p", divisions=(1, 3, 8))
@@ -2288,7 +2244,6 @@ async def test_set_index_p2p(c, s, *workers):
 
 
 def test_shuffle_p2p_with_existing_index(client):
-    pytest.importorskip("pyarrow")
     df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
     ddf = dd.from_pandas(
         df,
@@ -2300,7 +2255,6 @@ def test_shuffle_p2p_with_existing_index(client):
 
 
 def test_set_index_p2p_with_existing_index(client):
-    pytest.importorskip("pyarrow")
     df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
     ddf = dd.from_pandas(
         df,
@@ -2313,7 +2267,6 @@ def test_set_index_p2p_with_existing_index(client):
 
 def test_sort_values_p2p_with_existing_divisions(client):
     "Regression test for #8165"
-    pytest.importorskip("pyarrow")
     df = pd.DataFrame(
         {"a": np.random.randint(0, 3, 20), "b": np.random.randint(0, 3, 20)}
     )
@@ -2350,7 +2303,6 @@ class BlockedBarrierShuffleRun(DataFrameShuffleRun):
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
-    pytest.importorskip("pyarrow")
     await invoke_annotation_chaos(1.0, c)
 
     expected = pd.DataFrame({"a": list(range(10))})
@@ -2402,7 +2354,6 @@ class FlakyConnectionPool(ConnectionPool):
     config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 0},
 )
 async def test_p2p_flaky_connect_fails_without_retry(c, s, a, b):
-    pytest.importorskip("pyarrow")
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
