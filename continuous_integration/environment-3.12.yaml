@@ -11,7 +11,7 @@ dependencies:
   - click
   - cloudpickle
   - coverage
-  - dask-core  # overridden by git tip below
+  - dask  # overridden by git tip below
   - filesystem-spec  # overridden by git tip below
   - gilknocker>=0.4.1
   - h5py
@@ -25,7 +25,7 @@ dependencies:
   - pre-commit
   - prometheus_client
   - psutil
-  # - pyarrow>=7 no support for 3.12
+  - pyarrow >=13
   - pytest
   - pytest-cov
   - pytest-faulthandler
