@@ -180,9 +180,9 @@ jobs:
 
       - name: Disable IPv6
         shell: bash -l {0}
-        # FIXME ipv6-related failures on Ubuntu github actions CI
+        # FIXME ipv6-related failures on Ubuntu and MacOS github actions CI
         # https://github.com/dask/distributed/issues/4514
-        if: ${{ matrix.os  == 'ubuntu-latest' }}
+        if: ${{ matrix.os  != 'windows-latest' }}
         run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
 
       - name: Set up dask env for job queuing
