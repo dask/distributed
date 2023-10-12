@@ -8,6 +8,7 @@ from dask.base import is_dask_collection, tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 
+from distributed.shuffle._arrow import check_minimal_arrow_version
 from distributed.shuffle._core import ShuffleId, barrier_key, get_worker_plugin
 from distributed.shuffle._shuffle import shuffle_barrier, shuffle_transfer
 
@@ -212,6 +213,7 @@ class HashJoinP2PLayer(Layer):
         parts_out: Sequence | None = None,
         annotations: dict | None = None,
     ) -> None:
+        check_minimal_arrow_version()
         self.name = name
         self.name_input_left = name_input_left
         self.meta_input_left = meta_input_left
