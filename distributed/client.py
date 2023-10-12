@@ -3164,7 +3164,7 @@ class Client(SyncMethodMixin):
                     # https://github.com/python/cpython/pull/18463/files
                     if isinstance(o, memoryview) and o.ndim == 0:
                         return 1
-                    raise
+                    raise  # pragma: nocover
 
             nbytes = len(header) + sum(map(safelen, frames))
             if nbytes > 10_000_000:
