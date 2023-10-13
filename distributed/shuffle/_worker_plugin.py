@@ -217,7 +217,7 @@ class _ShuffleRunManager:
         if stale_run_id is not None and stale_run_id >= result.run_id:
             raise RuntimeError(
                 f"Received stale shuffle run with run_id={result.run_id};"
-                " expected run_id > {stale_run_id}"
+                f" expected run_id > {stale_run_id}"
             )
         shuffle_run = result.spec.create_run_on_worker(
             result.run_id, result.worker_for, self._plugin
