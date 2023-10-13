@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, overload
 
@@ -153,6 +154,29 @@ class _ShuffleRunManager:
         if shuffle_run._exception:
             raise shuffle_run._exception
         return shuffle_run
+
+    async def get_most_recent(
+        self, shuffle_id: ShuffleId, run_ids: Sequence[int]
+    ) -> ShuffleRun:
+        """Get the shuffle matching the ID and most recent run ID.
+
+        If necessary, this method fetches the shuffle run from the scheduler plugin.
+
+        Parameters
+        ----------
+        shuffle_id
+            Unique identifier of the shuffle
+        run_ids
+            Sequence of possibly different run IDs
+
+        Raises
+        ------
+        KeyError
+            If the shuffle does not exist
+        RuntimeError
+            If the most recent run_id is stale
+        """
+        return await self.get_with_run_id(shuffle_id=shuffle_id, run_id=max(run_ids))
 
     async def _fetch(
         self,
@@ -320,22 +344,17 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             **kwargs,
         )
 
-    async def _barrier(self, shuffle_id: ShuffleId, run_ids: list[int]) -> int:
+    async def _barrier(self, shuffle_id: ShuffleId, run_ids: Sequence[int]) -> int:
         """
         Task: Note that the barrier task has been reached (`add_partition` called for all input partitions)
 
         Using an unknown ``shuffle_id`` is an error. Calling this before all partitions have been
         added is undefined.
         """
-        run_id = run_ids[0]
-        # Assert that all input data has been shuffled using the same run_id
-        if any(run_id != id for id in run_ids):
-            raise RuntimeError(f"Expected all run IDs to match: {run_ids=}")
+        shuffle_run = await self.shuffle_runs.get_most_recent(shuffle_id, run_ids)
         # Tell all peers that we've reached the barrier
         # Note that this will call `shuffle_inputs_done` on our own worker as well
-        shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
-        await shuffle_run.barrier()
-        return run_id
+        return await shuffle_run.barrier(run_ids)
 
     async def _get_shuffle_run(
         self,
@@ -367,7 +386,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     # Methods for worker thread #
     #############################
 
-    def barrier(self, shuffle_id: ShuffleId, run_ids: list[int]) -> int:
+    def barrier(self, shuffle_id: ShuffleId, run_ids: Sequence[int]) -> int:
         result = sync(self.worker.loop, self._barrier, shuffle_id, run_ids)
         return result
 

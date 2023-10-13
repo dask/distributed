@@ -6,7 +6,7 @@ import contextlib
 import itertools
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
@@ -102,11 +102,15 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         stop = time.time()
         self.diagnostics[name] += stop - start
 
-    async def barrier(self) -> None:
+    async def barrier(self, run_ids: Sequence[int]) -> int:
         self.raise_if_closed()
+        consistent = all(run_id == self.run_id for run_id in run_ids)
         # TODO: Consider broadcast pinging once when the shuffle starts to warm
         # up the comm pool on scheduler side
-        await self.scheduler.shuffle_barrier(id=self.id, run_id=self.run_id)
+        await self.scheduler.shuffle_barrier(
+            id=self.id, run_id=self.run_id, consistent=consistent
+        )
+        return self.run_id
 
     async def _send(
         self, address: str, shards: list[tuple[_T_partition_id, bytes]]

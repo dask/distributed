@@ -18,6 +18,7 @@ from dask.layers import Layer
 from dask.typing import Key
 
 from distributed.core import PooledRPCCall
+from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
@@ -87,6 +88,8 @@ def shuffle_unpack(
 def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
     try:
         return get_worker_plugin().barrier(id, run_ids)
+    except Reschedule as e:
+        raise e
     except Exception as e:
         raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
 
