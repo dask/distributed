@@ -14,7 +14,7 @@ from distributed.metrics import context_meter
 from distributed.protocol import deserialize_bytes, serialize_bytelist
 from distributed.protocol.compression import get_compression_settings
 from distributed.sizeof import safe_sizeof
-from distributed.utils import RateLimiterFilter
+from distributed.utils import RateLimiterFilter, nbytes
 
 logger = logging.getLogger(__name__)
 logger.addFilter(RateLimiterFilter("Spill file on disk reached capacity"))
@@ -208,11 +208,11 @@ class SpillBuffer(zict.Buffer[Key, object]):
                 # Note: don't log from self.fast.__getitem__, because that's called
                 # every time a key is evicted, and we don't want to count those events
                 # here.
-                nbytes = cast(int, self.fast.weights[key])
+                memory_size = cast(int, self.fast.weights[key])
                 # This is logged not only by the internal metrics callback but also by
                 # those installed by gather_dep, get_data, and execute
                 context_meter.digest_metric("memory-read", 1, "count")
-                context_meter.digest_metric("memory-read", nbytes, "bytes")
+                context_meter.digest_metric("memory-read", memory_size, "bytes")
 
             return super().__getitem__(key)
 
@@ -326,16 +326,12 @@ class Slow(zict.Func[Key, object, bytes]):
             # which will then unwrap it.
             raise PickleError(key, e)
 
-        pickled_size = sum(
-            frame.nbytes if isinstance(frame, memoryview) else len(frame)
-            # See note in __init__ about serialize_bytelist
-            for frame in cast(list, pickled)
-        )
-
         # Thanks to Buffer.__setitem__, we never update existing
         # keys in slow, but always delete them and reinsert them.
         assert key not in self.d
         assert key not in self.weight_by_key
+
+        pickled_size = sum(map(nbytes, pickled))
 
         if (
             self.max_weight is not False
