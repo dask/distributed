@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import array
 import asyncio
 import concurrent.futures
 import functools
@@ -5964,14 +5965,24 @@ async def test_config_scheduler_address(s, a, b):
     assert sio.getvalue() == f"Config value `scheduler-address` found: {s.address}\n"
 
 
-@pytest.mark.filterwarnings("ignore:Large object:UserWarning")
-@gen_cluster(client=True)
-async def test_warn_when_submitting_large_values(c, s, a, b):
-    with pytest.warns(
-        UserWarning,
-        match="Sending large graph of size",
-    ):
+@gen_cluster(client=True, nthreads=[])
+async def test_warn_when_submitting_large_values(c, s):
+    with pytest.warns(UserWarning, match="Sending large graph of size"):
         future = c.submit(lambda x: x + 1, b"0" * 10_000_000)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_warn_when_submitting_large_values_memoryview(c, s):
+    """When sending numpy or parquet data, len(memoryview(obj)) returns the number of
+    elements, not the number of bytes. Make sure we're reading memoryview.nbytes.
+    """
+    # The threshold is 10MB
+    a = array.array("d", b"0" * 9_500_000)
+    c.submit(lambda: a)
+
+    a = array.array("d", b"0" * 10_000_000)
+    with pytest.warns(UserWarning, match="Sending large graph of size"):
+        c.submit(lambda: a)
 
 
 @gen_cluster(client=True)
