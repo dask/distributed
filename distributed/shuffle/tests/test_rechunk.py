@@ -118,12 +118,13 @@ async def test_lowlevel_rechunk(
         else:
             barrier_worker = random.sample(shuffles, k=1)[0]
 
+        run_ids = []
         try:
             for i, (idx, arr) in enumerate(old_chunks.items()):
                 s = shuffles[i % len(shuffles)]
-                await s.add_partition(arr, idx)
+                run_ids.append(await s.add_partition(arr, idx))
 
-            await barrier_worker.barrier()
+            await barrier_worker.barrier(run_ids)
 
             total_bytes_sent = 0
             total_bytes_recvd = 0

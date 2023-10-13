@@ -43,7 +43,9 @@ class AbstractShuffleTestPool:
     def __call__(self, addr: str, *args: Any, **kwargs: Any) -> PooledRPCShuffle:
         return PooledRPCShuffle(self.shuffles[addr])
 
-    async def shuffle_barrier(self, id: ShuffleId, run_id: int) -> dict[str, None]:
+    async def shuffle_barrier(
+        self, id: ShuffleId, run_id: int, consistent: bool
+    ) -> dict[str, None]:
         out = {}
         for addr, s in self.shuffles.items():
             out[addr] = await s.inputs_done()
