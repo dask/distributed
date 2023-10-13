@@ -406,28 +406,10 @@ class WorkStealing(SchedulerPlugin):
 
         i = 0
         # Paused and closing workers must never become thieves
-        potential_thieves = set(s.idle.values())
-        if not potential_thieves or len(potential_thieves) == len(s.workers):
+        if not (potential_thieves := self.get_potential_thieves()) or not (
+            potential_victims := self.get_potential_victims(potential_thieves)
+        ):
             return
-        victim: WorkerState | None
-        potential_victims: set[WorkerState] | list[WorkerState] = s.saturated
-        if not potential_victims:
-            potential_victims = topk(
-                10, s.workers.values(), key=self._combined_occupancy
-            )
-            potential_victims = [
-                ws
-                for ws in potential_victims
-                if self._combined_occupancy(ws) > 0.2
-                and self._combined_nprocessing(ws) > ws.nthreads
-                and ws not in potential_thieves
-            ]
-            if not potential_victims:
-                return
-        if len(potential_victims) < 20:
-            potential_victims = sorted(
-                potential_victims, key=self._combined_occupancy, reverse=True
-            )
         assert potential_victims
         assert potential_thieves
         for level, _ in enumerate(self.cost_multipliers):
@@ -437,7 +419,6 @@ class WorkStealing(SchedulerPlugin):
                 stealable = self.stealable[victim.address][level]
                 if not stealable or not potential_thieves:
                     continue
-
                 for ts in list(stealable):
                     if not potential_thieves:
                         break
@@ -501,6 +482,37 @@ class WorkStealing(SchedulerPlugin):
         stop = time()
         if s.digests:
             s.digests["steal-duration"].add(stop - start)
+
+    def get_potential_thieves(self) -> set[WorkerState]:
+        s = self.scheduler
+        potential_thieves = set(s.idle.values())
+        if not potential_thieves or len(potential_thieves) == len(s.workers):
+            return set()
+        return potential_thieves
+
+    def get_potential_victims(
+        self, potential_thieves: set[WorkerState]
+    ) -> set[WorkerState]:
+        s = self.scheduler
+        potential_victims: set[WorkerState] | list[WorkerState] = s.saturated
+        if not potential_victims:
+            potential_victims = topk(
+                10, s.workers.values(), key=self._combined_occupancy
+            )
+            potential_victims = [
+                ws
+                for ws in potential_victims
+                if self._combined_occupancy(ws) > 0.2
+                and self._combined_nprocessing(ws) > ws.nthreads
+                and ws not in potential_thieves
+            ]
+            if not potential_victims:
+                return set()
+        if len(potential_victims) < 20:
+            potential_victims = sorted(
+                potential_victims, key=self._combined_occupancy, reverse=True
+            )
+        return set(potential_victims)
 
     def _combined_occupancy(self, ws: WorkerState) -> float:
         return ws.occupancy + self.in_flight_occupancy[ws]
