@@ -57,11 +57,9 @@ class _ShuffleRunManager:
         }
 
     def fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
-        stale_run_id = run_id
-        if shuffle_id in self._stale_run_ids:
-            stale_run_id = max(self._stale_run_ids[shuffle_id], stale_run_id)
-
-        self._stale_run_ids[shuffle_id] = stale_run_id
+        stale_run_id = self._stale_run_ids.setdefault(shuffle_id, run_id)
+        if stale_run_id < run_id:
+            self._stale_run_ids[shuffle_id] = run_id
 
         shuffle_run = self._active_runs.get(shuffle_id, None)
         if shuffle_run is None or shuffle_run.run_id != run_id:
