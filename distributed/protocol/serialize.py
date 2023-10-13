@@ -371,7 +371,11 @@ def serialize(  # type: ignore[no-untyped-def]
 
         return {"serializer": "error"}, frames
     elif on_error == "raise":
-        raise TypeError(msg, str(x)[:10000]) from exc
+        try:
+            str_x = str(x)[:10000]
+        except Exception:
+            raise TypeError(msg) from exc
+        raise TypeError(msg, str_x) from exc
     else:  # pragma: nocover
         raise ValueError(f"{on_error=}; expected 'message' or 'raise'")
 

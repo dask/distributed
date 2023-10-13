@@ -711,6 +711,13 @@ class WorkerProcess:
         mp_ctx = get_mp_context()
         self.init_result_q = mp_ctx.Queue()
         self.child_stop_q = mp_ctx.Queue()
+        # put an empty message to start the background self._child_stop_q._thread
+        # otherwise calling .put({"op": "stop"}) later in an atexit handler
+        # results in a RuntimeError starting the thread
+        # get the message before passing child_stop_q to AsyncProcess to avoid
+        # dealing with it in watch_stop_q
+        self.child_stop_q.put(None)
+        self.child_stop_q.get()
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
