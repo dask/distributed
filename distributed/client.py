@@ -102,6 +102,7 @@ from distributed.utils import (
     import_term,
     is_python_shutting_down,
     log_errors,
+    nbytes,
     sync,
     thread_state,
 )
@@ -3156,10 +3157,11 @@ class Client(SyncMethodMixin):
             from distributed.protocol.serialize import ToPickle
 
             header, frames = serialize(ToPickle(dsk), on_error="raise")
-            nbytes = len(header) + sum(map(len, frames))
-            if nbytes > 10_000_000:
+
+            pickled_size = sum(map(nbytes, [header] + frames))
+            if pickled_size > 10_000_000:
                 warnings.warn(
-                    f"Sending large graph of size {format_bytes(nbytes)}.\n"
+                    f"Sending large graph of size {format_bytes(pickled_size)}.\n"
                     "This may cause some slowdown.\n"
                     "Consider scattering data ahead of time and using futures."
                 )
