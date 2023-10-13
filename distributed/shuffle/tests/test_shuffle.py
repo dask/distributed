@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import logging
 import os
@@ -116,20 +117,22 @@ async def check_scheduler_cleanup(
     assert not plugin.heartbeats
 
 
-@pytest.mark.skipif(
-    pa is not None,
-    reason="We don't have a CI job that is installing a very old pyarrow version",
-)
 @gen_cluster(client=True)
 async def test_minimal_version(c, s, a, b):
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-10",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
+    no_pyarrow_ctx = (
+        mock.patch.dict("sys.modules", {"pyarrow": None})
+        if pa is not None
+        else contextlib.nullcontext()
     )
-    with pytest.raises(RuntimeError, match="requires pyarrow"):
-        await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
+    with no_pyarrow_ctx:
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-01-10",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        with pytest.raises(ModuleNotFoundError, match="requires pyarrow"):
+            await c.compute(dd.shuffle.shuffle(df, "x", shuffle="p2p"))
 
 
 @pytest.mark.gpu

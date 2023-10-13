@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+from unittest import mock
+
 import pytest
 
 from distributed.shuffle._merge import hash_join
@@ -12,6 +15,11 @@ import pandas as pd
 from dask.dataframe._compat import PANDAS_GE_200, tm
 from dask.dataframe.utils import assert_eq
 from dask.utils_test import hlg_layer_topological
+
+try:
+    import pyarrow as pa
+except ImportError:
+    pa = None
 
 pytestmark = pytest.mark.ci1
 
@@ -40,6 +48,24 @@ def list_eq(aa, bb):
         bv = b.sort_values().values
 
     dd._compat.assert_numpy_array_equal(av, bv)
+
+
+@gen_cluster(client=True)
+async def test_minimal_version(c, s, a, b):
+    no_pyarrow_ctx = (
+        mock.patch.dict("sys.modules", {"pyarrow": None})
+        if pa is not None
+        else contextlib.nullcontext()
+    )
+    with no_pyarrow_ctx:
+        A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
+        a = dd.repartition(A, [0, 4, 5])
+
+        B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
+        b = dd.repartition(B, [0, 2, 5])
+
+        with pytest.raises(ModuleNotFoundError, match="requires pyarrow"):
+            await c.compute(dd.merge(a, b, left_on="x", right_on="z", shuffle="p2p"))
 
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
