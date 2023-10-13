@@ -36,6 +36,11 @@ class _ShuffleRunManager:
     closed: bool
     _active_runs: dict[ShuffleId, ShuffleRun]
     _runs: set[ShuffleRun]
+    #: Mapping of shuffle IDs to the largest stale run ID.
+    #: This is used to prevent race conditions between fetching shuffle run data
+    #: from the scheduler and failing a shuffle run.
+    #: TODO: Remove once ordering between fetching and failing is guaranteed.
+    _stale_run_ids: dict[ShuffleId, int]
     _runs_cleanup_condition: asyncio.Condition
     _plugin: ShuffleWorkerPlugin
 
@@ -43,6 +48,7 @@ class _ShuffleRunManager:
         self.closed = False
         self._active_runs = {}
         self._runs = set()
+        self._stale_run_ids = {}
         self._runs_cleanup_condition = asyncio.Condition()
         self._plugin = plugin
 
@@ -52,6 +58,10 @@ class _ShuffleRunManager:
         }
 
     def fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
+        stale_run_id = self._stale_run_ids.setdefault(shuffle_id, run_id)
+        if stale_run_id < run_id:
+            self._stale_run_ids[shuffle_id] = run_id
+
         shuffle_run = self._active_runs.get(shuffle_id, None)
         if shuffle_run is None or shuffle_run.run_id != run_id:
             return
@@ -168,6 +178,29 @@ class _ShuffleRunManager:
         """
         return await self.get_with_run_id(shuffle_id=shuffle_id, run_id=max(run_ids))
 
+    async def _fetch(
+        self,
+        shuffle_id: ShuffleId,
+        spec: ShuffleSpec | None = None,
+        key: str | None = None,
+    ) -> ShuffleRunSpec:
+        # FIXME: This should never be ToPickle[ShuffleRunSpec]
+        result: ShuffleRunSpec | ToPickle[ShuffleRunSpec]
+        if spec is None:
+            result = await self._plugin.worker.scheduler.shuffle_get(
+                id=shuffle_id,
+                worker=self._plugin.worker.address,
+            )
+        else:
+            result = await self._plugin.worker.scheduler.shuffle_get_or_create(
+                spec=ToPickle(spec),
+                key=key,
+                worker=self._plugin.worker.address,
+            )
+        if isinstance(result, ToPickle):
+            result = result.data
+        return result
+
     @overload
     async def _refresh(
         self,
@@ -190,21 +223,7 @@ class _ShuffleRunManager:
         spec: ShuffleSpec | None = None,
         key: str | None = None,
     ) -> ShuffleRun:
-        # FIXME: This should never be ToPickle[ShuffleRunSpec]
-        result: ShuffleRunSpec | ToPickle[ShuffleRunSpec]
-        if spec is None:
-            result = await self._plugin.worker.scheduler.shuffle_get(
-                id=shuffle_id,
-                worker=self._plugin.worker.address,
-            )
-        else:
-            result = await self._plugin.worker.scheduler.shuffle_get_or_create(
-                spec=ToPickle(spec),
-                key=key,
-                worker=self._plugin.worker.address,
-            )
-        if isinstance(result, ToPickle):
-            result = result.data
+        result = await self._fetch(shuffle_id=shuffle_id, spec=spec, key=key)
         if self.closed:
             raise ShuffleClosedError(f"{self} has already been closed")
         if existing := self._active_runs.get(shuffle_id, None):
@@ -216,7 +235,12 @@ class _ShuffleRunManager:
                     existing.run_id,
                     f"{existing!r} stale, expected run_id=={result.run_id}",
                 )
-
+        stale_run_id = self._stale_run_ids.get(shuffle_id, None)
+        if stale_run_id is not None and stale_run_id >= result.run_id:
+            raise RuntimeError(
+                f"Received stale shuffle run with run_id={result.run_id};"
+                f" expected run_id > {stale_run_id}"
+            )
         shuffle_run = result.spec.create_run_on_worker(
             result.run_id, result.worker_for, self._plugin
         )
