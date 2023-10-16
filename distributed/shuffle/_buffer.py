@@ -64,7 +64,7 @@ class ShardsBuffer(Generic[ShardType]):
 
     def __init__(
         self,
-        memory_limiter: ResourceLimiter | None,
+        memory_limiter: ResourceLimiter,
         concurrency_limit: int = 2,
         max_message_size: int = -1,
     ) -> None:
@@ -74,7 +74,7 @@ class ShardsBuffer(Generic[ShardType]):
         self._exception = None
         self.concurrency_limit = concurrency_limit
         self._inputs_done = False
-        self.memory_limiter = memory_limiter or ResourceLimiter()
+        self.memory_limiter = memory_limiter
         self.diagnostics: dict[str, float] = defaultdict(float)
         self._tasks = [
             asyncio.create_task(self._background_task())
