@@ -145,14 +145,9 @@ def get_jobs(run, session):
         .dropna()
         .str.split(", ", expand=True)
     )
-    if len(name_components.columns) == 4:
-        name_components.columns = ["OS", "python_version", "queuing", "partition"]
-    elif len(name_components.columns) == 3:
-        # Migration: handle older jobs without the `queuing` configuration.
-        # This branch can be removed after 2022-12-07.
-        name_components.columns = ["OS", "python_version", "partition"]
-    else:
-        raise ValueError(f"Job names must have 3 or 4 components:\n{name_components!r}")
+    if len(name_components.columns) != 4:
+        raise ValueError(f"Job names must have 4 components:\n{name_components!r}")
+    name_components.columns = ["OS", "environment", "label", "partition"]
 
     # See `Set $TEST_ID` step in `tests.yaml`
     name_components["partition"] = name_components.partition.str.replace(" ", "")

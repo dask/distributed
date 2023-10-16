@@ -6,6 +6,7 @@ import random
 import warnings
 
 import pytest
+from packaging.version import parse as parse_version
 
 np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
@@ -27,6 +28,8 @@ from distributed.shuffle._rechunk import (
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
+
+NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 
 
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
@@ -149,10 +152,11 @@ async def test_lowlevel_rechunk(
         old_cs = np.empty(tuple(len(dim) for dim in old), dtype="O")
         for ix, arr in old_chunks.items():
             old_cs[ix] = arr
+
         np.testing.assert_array_equal(
             concatenate3(old_cs.tolist()),
             concatenate3(all_chunks.tolist()),
-            strict=True,
+            **({"strict": True} if NUMPY_GE_124 else {}),
         )
 
 
