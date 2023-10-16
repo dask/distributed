@@ -9,7 +9,7 @@ class ResourceLimiter:
     """Limit an abstract resource
 
     This allows us to track usage of an abstract resource. If the usage of this
-    resources goes beyond a defined maxvalue, we can block further execution
+    resources goes beyond a defined limit, we can block further execution
 
     Example::
 
@@ -18,12 +18,20 @@ class ResourceLimiter:
         limiter.increase(2)
         limiter.decrease(1)
 
-        # This will block since we're still not below maxvalue
+        # This will block since we're still not below limit
         await limiter.wait_for_available()
     """
 
-    def __init__(self, maxvalue: int) -> None:
-        self._maxvalue = maxvalue
+    limit: int | None
+    time_blocked_total: float
+    time_blocked_avg: float
+
+    _acquired: int
+    _condition: asyncio.Condition
+    _waiters: int
+
+    def __init__(self, limit: int | None = None) -> None:
+        self.limit = limit
         self._acquired = 0
         self._condition = asyncio.Condition()
         self._waiters = 0
@@ -31,26 +39,35 @@ class ResourceLimiter:
         self.time_blocked_avg = 0.0
 
     def __repr__(self) -> str:
-        return f"<ResourceLimiter maxvalue: {self._maxvalue} available: {self.available()}>"
+        return f"<ResourceLimiter limit: {self.limit} available: {self.available}>"
 
-    def available(self) -> int:
+    @property
+    def available(self) -> int | None:
         """How far can the value be increased before blocking"""
-        return max(0, self._maxvalue - self._acquired)
+        if self.limit is None:
+            return None
+        return max(0, self.limit - self._acquired)
 
+    @property
+    def full(self) -> bool:
+        """Return True if the limit has been reached"""
+        return self.available is None or bool(self.available)
+
+    @property
     def free(self) -> bool:
         """Return True if nothing has been acquired / the limiter is in a neutral state"""
         return self._acquired == 0
 
     async def wait_for_available(self) -> None:
-        """Block until the counter drops below maxvalue"""
+        """Block until the counter drops below limit"""
         start = time()
         duration = 0.0
         try:
-            if self.available():
+            if not self.full:
                 return
             async with self._condition:
                 self._waiters += 1
-                await self._condition.wait_for(self.available)
+                await self._condition.wait_for(lambda: not self.full)
                 self._waiters -= 1
                 duration = time() - start
         finally:
