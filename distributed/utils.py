@@ -391,7 +391,7 @@ def sync(
     # set up non-locals
     result: T
     error = None
-    future: asyncio.Task | None = None
+    future: asyncio.Task
 
     @gen.coroutine
     def f():
