@@ -29,11 +29,12 @@ from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
+    from typing_extensions import ParamSpec, TypeAlias
 
-    from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
+    _P = ParamSpec("_P")
 
     # circular dependencies
+    from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
     from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
 ShuffleId = NewType("ShuffleId", str)
@@ -139,13 +140,13 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             delay_max=retry_delay_max,
         )
 
-    async def offload(self, func: Callable[..., _T], *args: Any) -> _T:
+    async def offload(
+        self, func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+    ) -> _T:
         self.raise_if_closed()
         with self.time("cpu"):
             return await asyncio.get_running_loop().run_in_executor(
-                self.executor,
-                func,
-                *args,
+                self.executor, partial(func, *args, **kwargs)
             )
 
     def heartbeat(self) -> dict[str, Any]:
