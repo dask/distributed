@@ -373,7 +373,7 @@ def in_async_call(loop, default=False):
 
 def sync(
     loop: IOLoop,
-    func: Callable[..., Awaitable[T]],
+    func: Callable[..., Awaitable[T] | asyncio.Future[T]],
     *args: AnyType,
     callback_timeout: str | float | timedelta | None = None,
     **kwargs: AnyType,
@@ -391,7 +391,7 @@ def sync(
     # set up non-locals
     result: T
     error = None
-    future: asyncio.Task
+    future: asyncio.Future[T] | asyncio.Task[T]
 
     @gen.coroutine
     def f():
