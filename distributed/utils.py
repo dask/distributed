@@ -430,7 +430,7 @@ def sync(
             wait(10)
 
     if error is not None:
-        raise error.with_traceback(error.__traceback__)
+        raise error
     else:
         return result
 
