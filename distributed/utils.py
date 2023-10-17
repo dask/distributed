@@ -390,8 +390,8 @@ def sync(
 
     # set up non-locals
     result: T
-    error = None
-    future: asyncio.Future[T] | asyncio.Task[T]
+    error: BaseException | None = None
+    future: asyncio.Future[T]
 
     @gen.coroutine
     def f() -> Generator[AnyType, AnyType, None]:
@@ -405,8 +405,8 @@ def sync(
                 awaitable = wait_for(awaitable, timeout)
             future = asyncio.ensure_future(awaitable)
             result = yield future
-        except Exception:
-            error = sys.exc_info()
+        except Exception as exception:
+            error = exception
         finally:
             e.set()
 
@@ -430,9 +430,7 @@ def sync(
             wait(10)
 
     if error is not None:
-        typ, exc, tb = error
-        assert exc is not None
-        raise exc.with_traceback(tb)
+        raise error.with_traceback(error.__traceback__)
     else:
         return result
 
