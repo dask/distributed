@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Generic, TypeVar
 
 from distributed.metrics import time
 
+_T = TypeVar("_T", int, None)
 
-class ResourceLimiter:
+
+class ResourceLimiter(Generic[_T]):
     """Limit an abstract resource
 
     This allows us to track usage of an abstract resource. If the usage of this
@@ -22,7 +25,7 @@ class ResourceLimiter:
         await limiter.wait_for_available()
     """
 
-    limit: int | None
+    limit: _T
     time_blocked_total: float
     time_blocked_avg: float
 
@@ -30,7 +33,7 @@ class ResourceLimiter:
     _condition: asyncio.Condition
     _waiters: int
 
-    def __init__(self, limit: int | None = None) -> None:
+    def __init__(self, limit: _T):
         self.limit = limit
         self._acquired = 0
         self._condition = asyncio.Condition()
@@ -42,19 +45,19 @@ class ResourceLimiter:
         return f"<ResourceLimiter limit: {self.limit} available: {self.available}>"
 
     @property
-    def available(self) -> int | None:
+    def available(self) -> _T:
         """How far can the value be increased before blocking"""
         if self.limit is None:
-            return None
+            return self.limit
         return max(0, self.limit - self._acquired)
 
     @property
     def full(self) -> bool:
         """Return True if the limit has been reached"""
-        return self.available is None or bool(self.available)
+        return self.available is not None and not self.available
 
     @property
-    def free(self) -> bool:
+    def empty(self) -> bool:
         """Return True if nothing has been acquired / the limiter is in a neutral state"""
         return self._acquired == 0
 

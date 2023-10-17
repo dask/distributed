@@ -60,19 +60,19 @@ async def test_limiter_basic():
 
 @gen_test()
 async def test_unlimited_limiter():
-    res = ResourceLimiter()
+    res = ResourceLimiter(None)
 
-    assert res.free
+    assert res.empty
     assert res.available is None
     assert not res.full
 
     res.increase(3)
-    assert not res.free
+    assert not res.empty
     assert res.available is None
     assert not res.full
 
     res.increase(2**40)
-    assert not res.free
+    assert not res.empty
     assert res.available is None
     assert not res.full
 
