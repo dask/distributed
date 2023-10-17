@@ -394,7 +394,7 @@ def sync(
     future: asyncio.Future[T] | asyncio.Task[T]
 
     @gen.coroutine
-    def f():
+    def f() -> Generator[Any, Any, None]:
         nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
