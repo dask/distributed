@@ -51,6 +51,7 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
         new,
         directory,
         loop,
+        disk,
         Shuffle=ArrayRechunkRun,
     ):
         s = Shuffle(
@@ -66,6 +67,7 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
+            disk=disk,
         )
         self.shuffles[name] = s
         return s
@@ -76,9 +78,10 @@ from itertools import product
 
 @pytest.mark.parametrize("n_workers", [1, 10])
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
+@pytest.mark.parametrize("disk", [True, False])
 @gen_test()
 async def test_lowlevel_rechunk(
-    tmp_path, loop_in_thread, n_workers, barrier_first_worker
+    tmp_path, loop_in_thread, n_workers, barrier_first_worker, disk
 ):
     old = ((1, 2, 3, 4), (5,) * 6)
     new = ((5, 5), (12, 18))
@@ -110,6 +113,7 @@ async def test_lowlevel_rechunk(
                     new=new,
                     directory=tmp_path,
                     loop=loop_in_thread,
+                    disk=disk,
                 )
             )
         random.seed(42)

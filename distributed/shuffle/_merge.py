@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
+import dask
 from dask.base import is_dask_collection, tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
@@ -106,6 +107,7 @@ def hash_join_p2p(
     lhs = _calculate_partitions(lhs, left_on, npartitions)
     rhs = _calculate_partitions(rhs, right_on, npartitions)
     merge_name = "hash-join-" + tokenize(lhs, rhs, **merge_kwargs)
+    disk: bool = dask.config.get("distributed.p2p.disk")
     join_layer = HashJoinP2PLayer(
         name=merge_name,
         name_input_left=lhs._name,
@@ -123,6 +125,7 @@ def hash_join_p2p(
         indicator=indicator,
         left_index=left_index,
         right_index=right_index,
+        disk=disk,
     )
     graph = HighLevelGraph.from_collections(
         merge_name, join_layer, dependencies=[lhs, rhs]
@@ -142,6 +145,7 @@ def merge_transfer(
     npartitions: int,
     meta: pd.DataFrame,
     parts_out: set[int],
+    disk: bool,
 ):
     return shuffle_transfer(
         input=input,
@@ -151,6 +155,7 @@ def merge_transfer(
         column=_HASH_COLUMN_NAME,
         meta=meta,
         parts_out=parts_out,
+        disk=disk,
     )
 
 
@@ -206,6 +211,7 @@ class HashJoinP2PLayer(Layer):
         meta_output: pd.DataFrame,
         left_index: bool,
         right_index: bool,
+        disk: bool,
         how: MergeHow = "inner",
         npartitions: int | None = None,
         suffixes: Suffixes = ("_x", "_y"),
@@ -231,6 +237,7 @@ class HashJoinP2PLayer(Layer):
         self.n_partitions_right = n_partitions_right
         self.left_index = left_index
         self.right_index = right_index
+        self.disk = disk
         annotations = annotations or {}
         annotations.update({"shuffle": lambda key: key[-1]})
         super().__init__(annotations=annotations)
@@ -312,6 +319,7 @@ class HashJoinP2PLayer(Layer):
             parts_out=parts_out,
             left_index=self.left_index,
             right_index=self.right_index,
+            disk=self.disk,
             annotations=self.annotations,
             n_partitions_left=self.n_partitions_left,
             n_partitions_right=self.n_partitions_right,
@@ -361,6 +369,7 @@ class HashJoinP2PLayer(Layer):
                 self.npartitions,
                 self.meta_input_left,
                 self.parts_out,
+                self.disk,
             )
         for i in range(self.n_partitions_right):
             transfer_keys_right.append((name_right, i))
@@ -372,6 +381,7 @@ class HashJoinP2PLayer(Layer):
                 self.npartitions,
                 self.meta_input_right,
                 self.parts_out,
+                self.disk,
             )
 
         _barrier_key_left = barrier_key(ShuffleId(token_left))

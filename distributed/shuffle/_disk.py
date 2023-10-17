@@ -4,9 +4,12 @@ import contextlib
 import pathlib
 import shutil
 import threading
+from collections import defaultdict, deque
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Callable
+
+from dask.sizeof import sizeof
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
@@ -89,6 +92,45 @@ class ReadWriteLock:
             self.release_read()
 
 
+class MemoryShardsBuffer(ShardsBuffer):
+    _deserialize: Callable[[bytes], Any]
+    _shards: defaultdict[str, deque[bytes]]
+
+    def __init__(self, deserialize: Callable[[bytes], tuple[Any, int]]) -> None:
+        super().__init__(
+            memory_limiter=ResourceLimiter(None),
+        )
+        self._deserialize = deserialize
+        self._shards = defaultdict(deque)
+
+    async def _process(self, id: str, shards: list[bytes]) -> None:
+        # TODO: This can be greatly simplified, there's no need for
+        # background threads at all.
+        with log_errors():
+            with self.time("write"):
+                self._shards[id].extend(shards)
+
+    def read(self, id: str) -> Any:
+        self.raise_on_exception()
+        if not self._inputs_done:
+            raise RuntimeError("Tried to read from file before done.")
+
+        with self.time("read"):
+            data = []
+            size = 0
+            shards = self._shards[id]
+            while shards:
+                shard = shards.pop()
+                data.append(self._deserialize(shard))
+                size += sizeof(shards)
+
+        if data:
+            self.bytes_read += size
+            return data
+        else:
+            raise KeyError(id)
+
+
 class DiskShardsBuffer(ShardsBuffer):
     """Accept, buffer, and write many small objects to many files
 
@@ -163,7 +205,7 @@ class DiskShardsBuffer(ShardsBuffer):
                         for shard in shards:
                             f.write(shard)
 
-    def read(self, id: int | str) -> Any:
+    def read(self, id: str) -> Any:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:

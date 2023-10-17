@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import toolz
 
+import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
@@ -23,6 +24,7 @@ from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
     convert_shards,
+    deserialize_table,
     list_of_buffers_to_table,
     read_from_disk,
     serialize_table,
@@ -61,6 +63,7 @@ def shuffle_transfer(
     column: str,
     meta: pd.DataFrame,
     parts_out: set[int],
+    disk: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
@@ -72,6 +75,7 @@ def shuffle_transfer(
                 column=column,
                 meta=meta,
                 parts_out=parts_out,
+                disk=disk,
             ),
         )
 
@@ -119,6 +123,8 @@ def rearrange_by_column_p2p(
         )
 
     name = f"shuffle_p2p-{token}"
+    disk: bool = dask.config.get("distributed.p2p.disk")
+
     layer = P2PShuffleLayer(
         name,
         column,
@@ -126,6 +132,7 @@ def rearrange_by_column_p2p(
         npartitions_input=df.npartitions,
         name_input=df._name,
         meta_input=meta,
+        disk=disk,
     )
     return new_dd_object(
         HighLevelGraph.from_collections(name, layer, [df]),
@@ -139,6 +146,15 @@ _T_LowLevelGraph: TypeAlias = dict[Key, tuple]
 
 
 class P2PShuffleLayer(Layer):
+    name: str
+    column: str
+    npartitions: int
+    npartitions_input: int
+    name_input: str
+    meta_input: pd.DataFrame
+    disk: bool
+    parts_out: set[int]
+
     def __init__(
         self,
         name: str,
@@ -147,7 +163,8 @@ class P2PShuffleLayer(Layer):
         npartitions_input: int,
         name_input: str,
         meta_input: pd.DataFrame,
-        parts_out: Iterable | None = None,
+        disk: bool,
+        parts_out: Iterable[int] | None = None,
         annotations: dict | None = None,
     ):
         check_minimal_arrow_version()
@@ -156,6 +173,7 @@ class P2PShuffleLayer(Layer):
         self.npartitions = npartitions
         self.name_input = name_input
         self.meta_input = meta_input
+        self.disk = disk
         if parts_out:
             self.parts_out = set(parts_out)
         else:
@@ -205,6 +223,7 @@ class P2PShuffleLayer(Layer):
             self.npartitions_input,
             self.name_input,
             self.meta_input,
+            self.disk,
             parts_out=parts_out,
         )
 
@@ -259,6 +278,7 @@ class P2PShuffleLayer(Layer):
                 self.column,
                 self.meta_input,
                 self.parts_out,
+                self.disk,
             )
 
         dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
@@ -410,6 +430,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
+        disk: bool,
     ):
         import pandas as pd
 
@@ -423,6 +444,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
+            disk=disk,
         )
         self.column = column
         self.meta = meta
@@ -505,6 +527,9 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)
 
+    def deserialize(self, buffer: bytes) -> Any:
+        return deserialize_table(buffer)
+
 
 @dataclass(frozen=True)
 class DataFrameShuffleSpec(ShuffleSpec[int]):
@@ -534,8 +559,11 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
             local_address=plugin.worker.address,
             rpc=plugin.worker.rpc,
             scheduler=plugin.worker.scheduler,
-            memory_limiter_disk=plugin.memory_limiter_disk,
+            memory_limiter_disk=plugin.memory_limiter_disk
+            if self.disk
+            else ResourceLimiter(None),
             memory_limiter_comms=plugin.memory_limiter_comms,
+            disk=self.disk,
         )
 
 
