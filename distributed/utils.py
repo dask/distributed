@@ -373,7 +373,7 @@ def in_async_call(loop, default=False):
 
 def sync(
     loop: IOLoop,
-    func: Callable[..., Awaitable[T] | asyncio.Future[T]],
+    func: Callable[..., Awaitable[T]],
     *args: AnyType,
     callback_timeout: str | float | timedelta | None = None,
     **kwargs: AnyType,
@@ -394,7 +394,7 @@ def sync(
     future: asyncio.Future[T] | asyncio.Task[T]
 
     @gen.coroutine
-    def f() -> Generator[Any, Any, None]:
+    def f() -> Generator[AnyType, AnyType, None]:
         nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
@@ -410,11 +410,11 @@ def sync(
         finally:
             e.set()
 
-    def cancel():
+    def cancel() -> None:
         if future is not None:
             future.cancel()
 
-    def wait(timeout):
+    def wait(timeout: float | None) -> bool:
         try:
             return e.wait(timeout)
         except KeyboardInterrupt:
@@ -431,6 +431,7 @@ def sync(
 
     if error is not None:
         typ, exc, tb = error
+        assert exc is not None
         raise exc.with_traceback(tb)
     else:
         return result
