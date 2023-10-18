@@ -5,12 +5,14 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from dask.base import is_dask_collection, tokenize
+from dask.context import thread_state
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 
 from distributed.shuffle._arrow import check_minimal_arrow_version
 from distributed.shuffle._core import ShuffleId, barrier_key, get_worker_plugin
 from distributed.shuffle._shuffle import shuffle_barrier, shuffle_transfer
+from distributed.utils import sync
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -171,13 +173,28 @@ def merge_unpack(
     from dask.dataframe.multi import merge_chunk
 
     ext = get_worker_plugin()
+    left_run = ext.get_shuffle_run(shuffle_id_left, barrier_left)
+    right_run = ext.get_shuffle_run(shuffle_id_right, barrier_right)
+    key = thread_state.key
+
+    async def get_both_partitions() -> tuple[pd.DataFrame, pd.DataFrame]:
+        import asyncio
+
+        return await asyncio.gather(
+            left_run.get_output_partition(
+                partition_id=output_partition,
+                key=key,
+            ),
+            right_run.get_output_partition(
+                partition_id=output_partition,
+                key=key,
+            ),
+        )
+
     # If the partition is empty, it doesn't contain the hash column name
-    left = ext.get_output_partition(
-        shuffle_id_left, barrier_left, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
-    right = ext.get_output_partition(
-        shuffle_id_right, barrier_right, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
+    left, right = sync(ext.worker.loop, get_both_partitions)
+    left = left.drop(columns=_HASH_COLUMN_NAME, errors="ignore")
+    right = right.drop(columns=_HASH_COLUMN_NAME, errors="ignore")
     return merge_chunk(
         left,
         right,
