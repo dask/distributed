@@ -252,7 +252,7 @@ class ShardsBuffer(Generic[ShardType]):
             self._shards_available.notify_all()
         await asyncio.gather(*self._tasks)
 
-    async def __aenter__(self) -> "ShardsBuffer":
+    async def __aenter__(self) -> ShardsBuffer:
         return self
 
     async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:
