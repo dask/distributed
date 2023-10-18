@@ -35,8 +35,8 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.utils import parse_bytes
 from dask.typing import Key
+from dask.utils import parse_bytes
 
 from distributed import Event, Scheduler, system
 from distributed import versions as version_module

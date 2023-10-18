@@ -87,8 +87,8 @@ from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
-    SizeOf,
     BlockedGetData,
+    SizeOf,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
     async_poll_for,
