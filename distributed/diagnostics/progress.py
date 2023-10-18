@@ -296,7 +296,7 @@ class AllProgress(SchedulerPlugin):
 
     def __init__(self, scheduler):
         self.all = defaultdict(set)
-        self.nbytes = defaultdict(lambda: 0)
+        self.nbytes = defaultdict(int)
         self.state = defaultdict(lambda: defaultdict(set))
         self.scheduler = scheduler
 

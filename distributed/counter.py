@@ -44,7 +44,7 @@ class Counter:
 
     def __init__(self, intervals: Sequence[float] = (5, 60, 3600)):
         self.intervals = intervals
-        self.components = [defaultdict(lambda: 0) for _ in intervals]
+        self.components = [defaultdict(int) for _ in intervals]
 
     def add(self, item: Hashable) -> None:
         self.components[0][item] += 1
@@ -57,7 +57,7 @@ class Counter:
 
             for k, v in part.items():
                 self.components[i + 1][k] += v
-            d: defaultdict[Hashable, float] = defaultdict(lambda: 0)
+            d: defaultdict[Hashable, float] = defaultdict(int)
             d.update(rest)
             self.components[i] = d
 
