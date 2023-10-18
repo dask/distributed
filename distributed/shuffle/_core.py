@@ -22,7 +22,7 @@ from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
-from distributed.shuffle._disk import DiskShardsBuffer
+from distributed.shuffle._disk import NewDiskBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
@@ -80,9 +80,8 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.scheduler = scheduler
         self.closed = False
         if disk:
-            self._disk_buffer = DiskShardsBuffer(
+            self._disk_buffer = NewDiskBuffer(
                 directory=directory,
-                read=self.read,
                 memory_limiter=memory_limiter_disk,
             )
         else:

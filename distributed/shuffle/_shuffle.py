@@ -477,12 +477,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, bytes]:
+    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, pa.Table]:
         table = list_of_buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {(k,): serialize_table(v) for k, v in groups.items()}
+        return {(k,): v for k, v in groups.items()}
 
     async def _add_partition(
         self,
