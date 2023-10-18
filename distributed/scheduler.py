@@ -3115,7 +3115,8 @@ class SchedulerState:
 
             start_time += dask.config.get("distributed.scheduler.latency-penalty", 0.25)
 
-        # Differences below 10ms are meaningless
+        # Differences below 10ms are meaningless and we should rather break ties
+        # by nbytes
         start_time = round(start_time, 2)
 
         if ts.actor:
