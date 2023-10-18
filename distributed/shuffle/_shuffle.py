@@ -139,6 +139,13 @@ _T_LowLevelGraph: TypeAlias = dict[Key, tuple]
 
 
 class P2PShuffleLayer(Layer):
+    name: str
+    column: str
+    npartitions: int
+    npartitions_input: int
+    meta_input: pd.DataFrame
+    parts_out: set[int]
+
     def __init__(
         self,
         name: str,
