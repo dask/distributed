@@ -184,6 +184,7 @@ show_error_codes = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
+enable_incomplete_feature = ["Unpack", "TypeVarTuple"]
 
 [[tool.mypy.overrides]]
 # FIXME must clean these modules up

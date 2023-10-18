@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -338,10 +339,12 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         shuffle_run = self.get_or_create_shuffle(spec)
         return sync(
             self.worker.loop,
-            shuffle_run.add_partition,
-            data=data,
-            partition_id=partition_id,
-            **kwargs,
+            functools.partial(
+                shuffle_run.add_partition,
+                data=data,
+                partition_id=partition_id,
+                **kwargs,
+            ),
         )
 
     async def _barrier(self, shuffle_id: ShuffleId, run_ids: Sequence[int]) -> int:
@@ -430,8 +433,10 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         key = thread_state.key
         return sync(
             self.worker.loop,
-            shuffle_run.get_output_partition,
-            partition_id=partition_id,
-            key=key,
-            meta=meta,
+            functools.partial(
+                shuffle_run.get_output_partition,
+                partition_id=partition_id,
+                key=key,
+                meta=meta,
+            ),
         )
