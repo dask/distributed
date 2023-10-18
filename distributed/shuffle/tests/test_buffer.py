@@ -70,7 +70,7 @@ async def test_memory_limit(big_payloads):
 
         many_small = [asyncio.create_task(buf.write(small_payload)) for _ in range(11)]
         assert buf.memory_limiter
-        while buf.memory_limiter.available():
+        while buf.memory_limiter.available:
             await asyncio.sleep(0.1)
 
         new_put = asyncio.create_task(buf.write(small_payload))
@@ -80,7 +80,7 @@ async def test_memory_limit(big_payloads):
         many_small = asyncio.gather(*many_small)
         await new_put
 
-        while not buf.memory_limiter.free():
+        while not buf.memory_limiter.empty:
             await asyncio.sleep(0.1)
         buf.allow_process.clear()
         big_tasks = [

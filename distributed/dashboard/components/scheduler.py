@@ -4459,7 +4459,9 @@ class Shuffling(DashboardComponent):
                 for prefix in ["comm", "disk"]:
                     data[f"{prefix}_total"].append(d[prefix]["total"])
                     data[f"{prefix}_memory"].append(d[prefix]["memory"])
-                    data[f"{prefix}_memory_limit"].append(d[prefix]["memory_limit"])
+                    data[f"{prefix}_memory_limit"].append(
+                        d[prefix]["memory_limit"] or 0
+                    )
                     data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
                     data[f"{prefix}_avg_duration"].append(
                         d[prefix]["diagnostics"].get("avg_duration", 0)

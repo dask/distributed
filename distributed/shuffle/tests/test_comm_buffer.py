@@ -20,7 +20,7 @@ async def test_basic(tmp_path):
     async def send(address, shards):
         d[address].extend(shards)
 
-    mc = CommShardsBuffer(send=send)
+    mc = CommShardsBuffer(send=send, memory_limiter=ResourceLimiter(None))
     await mc.write({"x": b"0" * 1000, "y": b"1" * 500})
     await mc.write({"x": b"0" * 1000, "y": b"1" * 500})
 
@@ -37,7 +37,7 @@ async def test_exceptions(tmp_path):
     async def send(address, shards):
         raise Exception(123)
 
-    mc = CommShardsBuffer(send=send)
+    mc = CommShardsBuffer(send=send, memory_limiter=ResourceLimiter(None))
     await mc.write({"x": b"0" * 1000, "y": b"1" * 500})
 
     while not mc._exception:
@@ -63,7 +63,9 @@ async def test_slow_send(tmp_path):
         d[address].extend(shards)
         sending_first.set()
 
-    mc = CommShardsBuffer(send=send, concurrency_limit=1)
+    mc = CommShardsBuffer(
+        send=send, concurrency_limit=1, memory_limiter=ResourceLimiter(None)
+    )
     await mc.write({"x": b"0", "y": b"1"})
     await mc.write({"x": b"0", "y": b"1"})
     flush_task = asyncio.create_task(mc.flush())
@@ -96,7 +98,7 @@ async def test_concurrent_puts():
         send=send, memory_limiter=ResourceLimiter(parse_bytes("100 MiB"))
     )
     payload = {
-        x: gen_bytes(frac, comm_buffer.memory_limiter._maxvalue) for x in range(nshards)
+        x: gen_bytes(frac, comm_buffer.memory_limiter.limit) for x in range(nshards)
     }
 
     async with comm_buffer as mc:
@@ -113,7 +115,7 @@ async def test_concurrent_puts():
     assert len(d) == 10
     assert (
         sum(map(len, d[0]))
-        == len(gen_bytes(frac, comm_buffer.memory_limiter._maxvalue)) * nputs
+        == len(gen_bytes(frac, comm_buffer.memory_limiter.limit)) * nputs
     )
 
 
@@ -137,7 +139,7 @@ async def test_concurrent_puts_error():
         send=send, memory_limiter=ResourceLimiter(parse_bytes("100 MiB"))
     )
     payload = {
-        x: gen_bytes(frac, comm_buffer.memory_limiter._maxvalue) for x in range(nshards)
+        x: gen_bytes(frac, comm_buffer.memory_limiter.limit) for x in range(nshards)
     }
 
     async with comm_buffer as mc:
