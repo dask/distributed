@@ -53,6 +53,7 @@ from tlz import (
 from tornado.ioloop import IOLoop
 
 import dask
+import dask.config
 from dask.core import get_deps, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
@@ -188,6 +189,8 @@ DEFAULT_EXTENSIONS = {
     "spans": SpansSchedulerExtension,
     "stealing": WorkStealing,
 }
+LATENCY_PENALTY = dask.config.get("distributed.scheduler.latency-penalty", 0.25)
+CONSIDER_HAS_WHAT = dask.config.get("distributed.scheduler.consider-has-what", False)
 
 
 class ClientState:
@@ -3091,7 +3094,10 @@ class SchedulerState:
         comm_bytes = sum(
             dts.get_nbytes()
             for dts in ts.dependencies
-            if (ws not in dts.who_has and dts not in ws.needs_what)
+            if (
+                ws not in dts.who_has
+                and (not CONSIDER_HAS_WHAT or dts not in ws.needs_what)
+            )
         )
 
         stack_time = ws.occupancy / ws.nthreads
@@ -3111,9 +3117,7 @@ class SchedulerState:
             # Note: This coincides with DEFAULT_TASK_DURATION / nthreads==2
             # This means that a 2 Thread worker with one task is a tie on
             # start_time with a worker with zero tasks but a trivial transfer
-            import dask
-
-            start_time += dask.config.get("distributed.scheduler.latency-penalty", 0.25)
+            start_time += LATENCY_PENALTY
 
         # Differences below 10ms are meaningless and we should rather break ties
         # by nbytes
