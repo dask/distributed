@@ -862,7 +862,7 @@ class Client(SyncMethodMixin):
         self._timeout = timeout
 
         self.futures = dict()
-        self.refcount = defaultdict(lambda: 0)
+        self.refcount = defaultdict(int)
         self._handle_report_task = None
         if name is None:
             name = dask.config.get("client-name", None)
@@ -5539,7 +5539,7 @@ class as_completed:
     ):
         if futures is None:
             futures = []
-        self.futures = defaultdict(lambda: 0)
+        self.futures = defaultdict(int)
         self.queue = pyQueue()
         self.lock = threading.Lock()
         self.loop = loop or default_client().loop

@@ -119,8 +119,7 @@ class ShardsBuffer(Generic[ShardType]):
                 "avg_duration"
             ] + 0.02 * (stop - start)
         finally:
-            if self.memory_limiter:
-                await self.memory_limiter.decrease(size)
+            await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
 
     async def _process(self, id: str, shards: list[ShardType]) -> None:
@@ -198,15 +197,13 @@ class ShardsBuffer(Generic[ShardType]):
         self.bytes_memory += total_batch_size
         self.bytes_total += total_batch_size
 
-        if self.memory_limiter:
-            self.memory_limiter.increase(total_batch_size)
+        self.memory_limiter.increase(total_batch_size)
         async with self._shards_available:
             for worker, shard in data.items():
                 self.shards[worker].append(shard)
                 self.sizes[worker] += sizes[worker]
             self._shards_available.notify()
-        if self.memory_limiter:
-            await self.memory_limiter.wait_for_available()
+        await self.memory_limiter.wait_for_available()
         del data
         assert total_batch_size
 
@@ -252,7 +249,7 @@ class ShardsBuffer(Generic[ShardType]):
             self._shards_available.notify_all()
         await asyncio.gather(*self._tasks)
 
-    async def __aenter__(self) -> "ShardsBuffer":
+    async def __aenter__(self) -> ShardsBuffer:
         return self
 
     async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:

@@ -197,23 +197,43 @@ def merge_unpack(
 
 
 class HashJoinP2PLayer(Layer):
+    name: str
+    npartitions: int
+    how: MergeHow
+    suffixes: Suffixes
+    indicator: bool
+    meta_output: pd.DataFrame
+    parts_out: Sequence[int]
+
+    name_input_left: str
+    meta_input_left: pd.DataFrame
+    n_partitions_left: int
+    left_on: IndexLabel | None
+    left_index: bool
+
+    name_input_right: str
+    meta_input_right: pd.DataFrame
+    n_partitions_right: int
+    right_on: IndexLabel | None
+    right_index: bool
+
     def __init__(
         self,
         name: str,
         name_input_left: str,
         meta_input_left: pd.DataFrame,
-        left_on,
+        left_on: IndexLabel | None,
         n_partitions_left: int,
         n_partitions_right: int,
         name_input_right: str,
         meta_input_right: pd.DataFrame,
-        right_on,
+        right_on: IndexLabel | None,
         meta_output: pd.DataFrame,
         left_index: bool,
         right_index: bool,
+        npartitions: int,
         disk: bool,
         how: MergeHow = "inner",
-        npartitions: int | None = None,
         suffixes: Suffixes = ("_x", "_y"),
         indicator: bool = False,
         parts_out: Sequence | None = None,

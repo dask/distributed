@@ -133,7 +133,7 @@ class PubSubWorkerExtension:
 
         self.subscribers = defaultdict(weakref.WeakSet)
         self.publishers = defaultdict(weakref.WeakSet)
-        self.publish_to_scheduler = defaultdict(lambda: False)
+        self.publish_to_scheduler = defaultdict(bool)
 
         self.worker.extensions["pubsub"] = self  # circular reference
 

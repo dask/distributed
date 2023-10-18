@@ -21,11 +21,13 @@ from dask.utils import key_split
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.worker import Status
 
-np = pytest.importorskip("numpy")
-pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
 
+import numpy as np
+import pandas as pd
+
 import dask
+from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_200
 from dask.typing import Key
 
 from distributed import (
@@ -1004,97 +1006,107 @@ def test_processing_chain(tmp_path):
     npartitions = 5
 
     # Test the processing chain with a dataframe that contains all supported dtypes
-    df = pd.DataFrame(
-        {
-            # numpy dtypes
-            f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool"),
-            f"col{next(counter)}": pd.array(range(100), dtype="int8"),
-            f"col{next(counter)}": pd.array(range(100), dtype="int16"),
-            f"col{next(counter)}": pd.array(range(100), dtype="int32"),
-            f"col{next(counter)}": pd.array(range(100), dtype="int64"),
-            f"col{next(counter)}": pd.array(range(100), dtype="uint8"),
-            f"col{next(counter)}": pd.array(range(100), dtype="uint16"),
-            f"col{next(counter)}": pd.array(range(100), dtype="uint32"),
-            f"col{next(counter)}": pd.array(range(100), dtype="uint64"),
-            f"col{next(counter)}": pd.array(range(100), dtype="float16"),
-            f"col{next(counter)}": pd.array(range(100), dtype="float32"),
-            f"col{next(counter)}": pd.array(range(100), dtype="float64"),
-            f"col{next(counter)}": pd.array(
-                [np.datetime64("2022-01-01") + i for i in range(100)],
-                dtype="datetime64[ns]",
-            ),
-            f"col{next(counter)}": pd.array(
-                [np.timedelta64(1, "D") + i for i in range(100)],
-                dtype="timedelta64[ns]",
-            ),
-            # FIXME: PyArrow does not support complex numbers: https://issues.apache.org/jira/browse/ARROW-638
-            # f"col{next(counter)}": pd.array(range(100), dtype="csingle"),
-            # f"col{next(counter)}": pd.array(range(100), dtype="cdouble"),
-            # f"col{next(counter)}": pd.array(range(100), dtype="clongdouble"),
-            # Nullable dtypes
-            f"col{next(counter)}": pd.array([True, False] * 50, dtype="boolean"),
-            f"col{next(counter)}": pd.array(range(100), dtype="Int8"),
-            f"col{next(counter)}": pd.array(range(100), dtype="Int16"),
-            f"col{next(counter)}": pd.array(range(100), dtype="Int32"),
-            f"col{next(counter)}": pd.array(range(100), dtype="Int64"),
-            f"col{next(counter)}": pd.array(range(100), dtype="UInt8"),
-            f"col{next(counter)}": pd.array(range(100), dtype="UInt16"),
-            f"col{next(counter)}": pd.array(range(100), dtype="UInt32"),
-            f"col{next(counter)}": pd.array(range(100), dtype="UInt64"),
-            # pandas dtypes
-            f"col{next(counter)}": pd.array(
-                [np.datetime64("2022-01-01") + i for i in range(100)],
-                dtype=pd.DatetimeTZDtype(tz="Europe/Berlin"),
-            ),
-            f"col{next(counter)}": pd.array(
-                [pd.Period("2022-01-01", freq="D") + i for i in range(100)],
-                dtype="period[D]",
-            ),
-            f"col{next(counter)}": pd.array(
-                [pd.Interval(left=i, right=i + 2) for i in range(100)], dtype="Interval"
-            ),
-            f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
-            f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
-            # FIXME: PyArrow does not support sparse data: https://issues.apache.org/jira/browse/ARROW-8679
-            # f"col{next(counter)}": pd.array(
-            #     [np.nan, np.nan, 1.0, np.nan, np.nan] * 20,
-            #     dtype="Sparse[float64]",
-            # ),
-            # PyArrow dtypes
-            f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
-            f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
-            f"col{next(counter)}": pd.array(
-                [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
-                dtype=pd.ArrowDtype(pa.timestamp("ms")),
-            ),
-            f"col{next(counter)}": pd.array(
-                ["lorem ipsum"] * 100,
-                dtype="string[pyarrow]",
-            ),
-            f"col{next(counter)}": pd.array(
-                ["lorem ipsum"] * 100,
-                dtype=pd.StringDtype("pyarrow"),
-            ),
-            f"col{next(counter)}": pd.array(
-                ["lorem ipsum"] * 100,
-                dtype="string[python]",
-            ),
-            # custom objects
-            # FIXME: Serializing custom objects is not supported in P2P shuffling
-            # f"col{next(counter)}": pd.array(
-            #     [Stub(i) for i in range(100)], dtype="object"
-            # ),
-        }
-    )
+    columns = {
+        # numpy dtypes
+        f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool"),
+        f"col{next(counter)}": pd.array(range(100), dtype="int8"),
+        f"col{next(counter)}": pd.array(range(100), dtype="int16"),
+        f"col{next(counter)}": pd.array(range(100), dtype="int32"),
+        f"col{next(counter)}": pd.array(range(100), dtype="int64"),
+        f"col{next(counter)}": pd.array(range(100), dtype="uint8"),
+        f"col{next(counter)}": pd.array(range(100), dtype="uint16"),
+        f"col{next(counter)}": pd.array(range(100), dtype="uint32"),
+        f"col{next(counter)}": pd.array(range(100), dtype="uint64"),
+        f"col{next(counter)}": pd.array(range(100), dtype="float16"),
+        f"col{next(counter)}": pd.array(range(100), dtype="float32"),
+        f"col{next(counter)}": pd.array(range(100), dtype="float64"),
+        f"col{next(counter)}": pd.array(
+            [np.datetime64("2022-01-01") + i for i in range(100)],
+            dtype="datetime64[ns]",
+        ),
+        f"col{next(counter)}": pd.array(
+            [np.timedelta64(1, "D") + i for i in range(100)],
+            dtype="timedelta64[ns]",
+        ),
+        # FIXME PyArrow does not support complex numbers:
+        #       https://issues.apache.org/jira/browse/ARROW-638
+        # f"col{next(counter)}": pd.array(range(100), dtype="csingle"),
+        # f"col{next(counter)}": pd.array(range(100), dtype="cdouble"),
+        # f"col{next(counter)}": pd.array(range(100), dtype="clongdouble"),
+        # Nullable dtypes
+        f"col{next(counter)}": pd.array([True, False] * 50, dtype="boolean"),
+        f"col{next(counter)}": pd.array(range(100), dtype="Int8"),
+        f"col{next(counter)}": pd.array(range(100), dtype="Int16"),
+        f"col{next(counter)}": pd.array(range(100), dtype="Int32"),
+        f"col{next(counter)}": pd.array(range(100), dtype="Int64"),
+        f"col{next(counter)}": pd.array(range(100), dtype="UInt8"),
+        f"col{next(counter)}": pd.array(range(100), dtype="UInt16"),
+        f"col{next(counter)}": pd.array(range(100), dtype="UInt32"),
+        f"col{next(counter)}": pd.array(range(100), dtype="UInt64"),
+        # pandas dtypes
+        f"col{next(counter)}": pd.array(
+            [np.datetime64("2022-01-01") + i for i in range(100)],
+            dtype=pd.DatetimeTZDtype(tz="Europe/Berlin"),
+        ),
+        f"col{next(counter)}": pd.array(
+            [pd.Period("2022-01-01", freq="D") + i for i in range(100)],
+            dtype="period[D]",
+        ),
+        f"col{next(counter)}": pd.array(
+            [pd.Interval(left=i, right=i + 2) for i in range(100)], dtype="Interval"
+        ),
+        f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
+        f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
+        # FIXME: PyArrow does not support sparse data:
+        #        https://issues.apache.org/jira/browse/ARROW-8679
+        # f"col{next(counter)}": pd.array(
+        #     [np.nan, np.nan, 1.0, np.nan, np.nan] * 20,
+        #     dtype="Sparse[float64]",
+        # ),
+        # custom objects
+        # FIXME: Serializing custom objects is not supported in P2P shuffling
+        # f"col{next(counter)}": pd.array(
+        #     [Stub(i) for i in range(100)], dtype="object"
+        # ),
+    }
+
+    if PANDAS_GE_150:
+        columns.update(
+            {
+                # PyArrow dtypes
+                f"col{next(counter)}": pd.array(
+                    [True, False] * 50, dtype="bool[pyarrow]"
+                ),
+                f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
+                f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
+                f"col{next(counter)}": pd.array(
+                    [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
+                    dtype=pd.ArrowDtype(pa.timestamp("ms")),
+                ),
+                f"col{next(counter)}": pd.array(
+                    ["lorem ipsum"] * 100,
+                    dtype="string[pyarrow]",
+                ),
+                f"col{next(counter)}": pd.array(
+                    ["lorem ipsum"] * 100,
+                    dtype=pd.StringDtype("pyarrow"),
+                ),
+                f"col{next(counter)}": pd.array(
+                    ["lorem ipsum"] * 100,
+                    dtype="string[python]",
+                ),
+            }
+        )
+
+    df = pd.DataFrame(columns)
     df["_partitions"] = df.col4 % npartitions
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
     worker_for = pd.Series(worker_for, name="_worker").astype("category")
@@ -2180,6 +2192,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.skipif(not PANDAS_GE_200, reason="requires pandas >=2.0")
 @gen_cluster(client=True)
 async def test_handle_null_partitions_p2p_shuffling(c, s, a, b):
     data = [
@@ -2492,7 +2505,7 @@ async def test_barrier_handles_stale_resumed_transfer(c, s, *workers):
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
     await wait_for_state(key, "processing", s)
-    barrier_worker: BlockedAfterGatherDep | None = None
+    barrier_worker = None
     bts = s.tasks[key]
     workers = list(workers)
     for w in workers:

@@ -3892,7 +3892,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def get_cluster_state(
         self,
-        exclude: "Collection[str]",
+        exclude: Collection[str],
     ) -> dict:
         "Produce the state dict used in a cluster state dump"
         # Kick off state-dumping on workers before we block the event loop in `self._to_dict`.
@@ -3930,7 +3930,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def dump_cluster_state_to_url(
         self,
         url: str,
-        exclude: "Collection[str]",
+        exclude: Collection[str],
         format: Literal["msgpack", "yaml"],
         **storage_options: dict[str, Any],
     ) -> None:
@@ -7414,7 +7414,7 @@ class Scheduler(SchedulerState, ServerNode):
             result = {k: ts.nbytes for k, ts in self.tasks.items() if ts.nbytes >= 0}
 
         if summary:
-            out: defaultdict[Key, int] = defaultdict(lambda: 0)
+            out: defaultdict[Key, int] = defaultdict(int)
             for k, v in result.items():
                 out[key_split(k)] += v
             result = dict(out)
