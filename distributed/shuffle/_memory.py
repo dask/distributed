@@ -14,7 +14,7 @@ class MemoryShardsBuffer(ShardsBuffer):
     _deserialize: Callable[[bytes], Any]
     _shards: defaultdict[str, deque[bytes]]
 
-    def __init__(self, deserialize: Callable[[bytes], tuple[Any, int]]) -> None:
+    def __init__(self, deserialize: Callable[[bytes], Any]) -> None:
         super().__init__(
             memory_limiter=ResourceLimiter(None),
         )

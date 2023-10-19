@@ -286,7 +286,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Read shards from disk"""
 
     @abc.abstractmethod
-    def deserialize(self, buffer: bytes) -> tuple[Any, int]:
+    def deserialize(self, buffer: bytes) -> Any:
         """Deserialize shards"""
 
 
