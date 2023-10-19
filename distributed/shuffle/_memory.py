@@ -34,16 +34,13 @@ class MemoryShardsBuffer(ShardsBuffer):
             raise RuntimeError("Tried to read from file before done.")
 
         with self.time("read"):
+            shards = self._shards.pop(id)  # Raises KeyError
+            self.bytes_read += sum(map(sizeof, shards))
+            # Don't keep the serialized and the deserialized shards
+            # in memory at the same time
             data = []
-            size = 0
-            shards = self._shards[id]
             while shards:
                 shard = shards.pop()
                 data.append(self._deserialize(shard))
-                size += sizeof(shards)
 
-        if data:
-            self.bytes_read += size
-            return data
-        else:
-            raise KeyError(id)
+        return data
