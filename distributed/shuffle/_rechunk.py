@@ -143,12 +143,13 @@ def rechunk_transfer(
     input_chunk: NDIndex,
     new: ChunkedAxes,
     old: ChunkedAxes,
+    disk: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
-            spec=ArrayRechunkSpec(id=id, new=new, old=old),
+            spec=ArrayRechunkSpec(id=id, new=new, old=old, disk=disk),
         )
 
 
@@ -174,6 +175,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     token = tokenize(x, chunks)
     _barrier_key = barrier_key(ShuffleId(token))
     name = f"rechunk-transfer-{token}"
+    disk: bool = dask.config.get("distributed.p2p.disk")
     transfer_keys = []
     for index in np.ndindex(tuple(len(dim) for dim in x.chunks)):
         transfer_keys.append((name,) + index)
@@ -184,6 +186,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
             index,
             chunks,
             x.chunks,
+            disk,
         )
 
     dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
@@ -258,14 +261,15 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     return axes
 
 
-def convert_chunk(shards: list[tuple[NDIndex, np.ndarray]]) -> np.ndarray:
+def convert_chunk(shards: list[list[tuple[NDIndex, np.ndarray]]]) -> np.ndarray:
     import numpy as np
 
     from dask.array.core import concatenate3
 
     indexed: dict[NDIndex, np.ndarray] = {}
-    for index, shard in shards:
-        indexed[index] = shard
+    for sublist in shards:
+        for index, shard in sublist:
+            indexed[index] = shard
     del shards
 
     subshape = [max(dim) + 1 for dim in zip(*indexed.keys())]
@@ -333,6 +337,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
+        disk: bool,
     ):
         super().__init__(
             id=id,
@@ -344,6 +349,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
+            disk=disk,
         )
         self.old = old
         self.new = new
@@ -429,13 +435,17 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
 
         return await self.offload(_, partition_id)
 
+    def deserialize(self, buffer: bytes) -> Any:
+        result = pickle.loads(buffer)
+        return result
+
     def read(self, path: Path) -> tuple[Any, int]:
-        shards: list[tuple[NDIndex, np.ndarray]] = []
+        shards: list[list[tuple[NDIndex, np.ndarray]]] = []
         with path.open(mode="rb") as f:
             size = f.seek(0, os.SEEK_END)
             f.seek(0)
             while f.tell() < size:
-                shards.extend(pickle.load(f))
+                shards.append(pickle.load(f))
         return shards, size
 
     def _get_assigned_worker(self, id: NDIndex) -> str:
@@ -475,6 +485,7 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
             scheduler=plugin.worker.scheduler,
             memory_limiter_disk=plugin.memory_limiter_disk,
             memory_limiter_comms=plugin.memory_limiter_comms,
+            disk=self.disk,
         )
 
 

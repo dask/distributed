@@ -183,8 +183,9 @@ def get_active_shuffle_runs(worker: Worker) -> dict[ShuffleId, ShuffleRun]:
 
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
+@pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
+async def test_basic_integration(c, s, a, b, lose_annotations, npartitions, disk):
     await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -192,7 +193,8 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
     if npartitions is None:
         assert shuffled.npartitions == df.npartitions
     else:
@@ -1566,6 +1568,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
         worker_for_mapping,
         directory,
         loop,
+        disk,
         Shuffle=DataFrameShuffleRun,
     ):
         s = Shuffle(
@@ -1581,6 +1584,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
+            disk=disk,
         )
         self.shuffles[name] = s
         return s
@@ -1592,6 +1596,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 @pytest.mark.parametrize("n_input_partitions", [1, 2, 10])
 @pytest.mark.parametrize("npartitions", [1, 20])
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
+@pytest.mark.parametrize("disk", [True, False])
 @gen_test()
 async def test_basic_lowlevel_shuffle(
     tmp_path,
@@ -1600,6 +1605,7 @@ async def test_basic_lowlevel_shuffle(
     n_input_partitions,
     npartitions,
     barrier_first_worker,
+    disk,
 ):
     pa = pytest.importorskip("pyarrow")
 
@@ -1631,6 +1637,7 @@ async def test_basic_lowlevel_shuffle(
                     worker_for_mapping=worker_for_mapping,
                     directory=tmp_path,
                     loop=loop_in_thread,
+                    disk=disk,
                 )
             )
         random.seed(42)
@@ -1707,6 +1714,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
+            disk=True,
             Shuffle=ErrorOffload,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1715,6 +1723,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
+            disk=True,
         )
         try:
             await sB.add_partition(dfs[0], 0)
@@ -1761,6 +1770,7 @@ async def test_error_send(tmp_path, loop_in_thread):
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
+            disk=True,
             Shuffle=ErrorSend,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1769,6 +1779,7 @@ async def test_error_send(tmp_path, loop_in_thread):
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
+            disk=True,
         )
         try:
             await sA.add_partition(dfs[0], 0)
@@ -1814,6 +1825,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
+            disk=True,
             Shuffle=ErrorReceive,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1822,6 +1834,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
             worker_for_mapping=worker_for_mapping,
             directory=tmp_path,
             loop=loop_in_thread,
+            disk=True,
         )
         try:
             await sB.add_partition(dfs[0], 0)

@@ -304,6 +304,7 @@ distributed:
         delay:
           min: 1s  # the first non-zero delay between re-tries
           max: 30s  # the maximum delay between re-tries
+    disk: True
 
   ###################
   # Bokeh dashboard #

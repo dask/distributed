@@ -1066,6 +1066,10 @@ properties:
                       max:
                         type: string
                         description: The maximum delay between retries
+          disk:
+            type: boolean
+            description: | 
+              Whether or not P2P stores intermediate data on disk instead of memory
 
       dashboard:
         type: object

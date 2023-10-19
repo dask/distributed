@@ -163,7 +163,7 @@ class DiskShardsBuffer(ShardsBuffer):
                         for shard in shards:
                             f.write(shard)
 
-    def read(self, id: int | str) -> Any:
+    def read(self, id: str) -> Any:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:

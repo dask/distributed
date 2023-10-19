@@ -25,6 +25,7 @@ from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._memory import MemoryShardsBuffer
 from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
@@ -47,6 +48,17 @@ _T = TypeVar("_T")
 
 
 class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
+    id: ShuffleId
+    run_id: int
+    local_address: str
+    executor: ThreadPoolExecutor
+    rpc: Callable[[str], PooledRPCCall]
+    scheduler: PooledRPCCall
+    closed: bool
+    _disk_buffer: DiskShardsBuffer | MemoryShardsBuffer
+    _comm_buffer: CommShardsBuffer
+    diagnostics: dict[str, float]
+
     def __init__(
         self,
         id: ShuffleId,
@@ -58,6 +70,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
+        disk: bool,
     ):
         self.id = id
         self.run_id = run_id
@@ -66,12 +79,14 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.rpc = rpc
         self.scheduler = scheduler
         self.closed = False
-
-        self._disk_buffer = DiskShardsBuffer(
-            directory=directory,
-            read=self.read,
-            memory_limiter=memory_limiter_disk,
-        )
+        if disk:
+            self._disk_buffer = DiskShardsBuffer(
+                directory=directory,
+                read=self.read,
+                memory_limiter=memory_limiter_disk,
+            )
+        else:
+            self._disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
 
         self._comm_buffer = CommShardsBuffer(
             send=self.send, memory_limiter=memory_limiter_comms
@@ -270,6 +285,10 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     def read(self, path: Path) -> tuple[Any, int]:
         """Read shards from disk"""
 
+    @abc.abstractmethod
+    def deserialize(self, buffer: bytes) -> Any:
+        """Deserialize shards"""
+
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:
     from distributed import get_worker
@@ -321,6 +340,7 @@ class ShuffleRunSpec(Generic[_T_partition_id]):
 @dataclass(frozen=True)
 class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
     id: ShuffleId
+    disk: bool
 
     def create_new_run(
         self,
