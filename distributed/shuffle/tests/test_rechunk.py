@@ -190,8 +190,9 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     assert np.all(await c.compute(x2) == a)
 
 
+@pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_rechunk_2d(c, s, *ws):
+async def test_rechunk_2d(c, s, *ws, disk):
     """Try rechunking a random 2d matrix
 
     See Also
@@ -201,13 +202,15 @@ async def test_rechunk_2d(c, s, *ws):
     a = np.random.default_rng().uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
-    x2 = rechunk(x, chunks=new, method="p2p")
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
 
 
+@pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_rechunk_4d(c, s, *ws):
+async def test_rechunk_4d(c, s, *ws, disk):
     """Try rechunking a random 4d matrix
 
     See Also
@@ -223,7 +226,8 @@ async def test_rechunk_4d(c, s, *ws):
         (10,),
         (8, 2),
     )  # This has been altered to return >1 output partition
-    x2 = rechunk(x, chunks=new, method="p2p")
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     await c.compute(x2)
     assert np.all(await c.compute(x2) == a)

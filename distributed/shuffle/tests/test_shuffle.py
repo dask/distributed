@@ -183,8 +183,9 @@ def get_active_shuffle_runs(worker: Worker) -> dict[ShuffleId, ShuffleRun]:
 
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
+@pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
+async def test_basic_integration(c, s, a, b, lose_annotations, npartitions, disk):
     await invoke_annotation_chaos(lose_annotations, c)
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -192,7 +193,8 @@ async def test_basic_integration(c, s, a, b, lose_annotations, npartitions):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=npartitions)
     if npartitions is None:
         assert shuffled.npartitions == df.npartitions
     else:
