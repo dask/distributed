@@ -280,11 +280,13 @@ distributed:
         - coiled
         - cudf
         - cuml
+        - matplotlib
         - pluggy  # part of pytest
         - prefect
         - rechunker
         - xarray
         - xgboost
+        - xdist
       ignore-files:
         - runpy\.py  # `python -m pytest` (or other module) shell command
         - pytest  # `pytest` shell command
