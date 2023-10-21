@@ -9,6 +9,7 @@ import multiprocessing
 import os
 import queue
 import socket
+import sys
 import traceback
 import warnings
 import xml
@@ -934,12 +935,38 @@ async def test_log_errors():
 
         assert await _() == 123
 
+        task = asyncio.create_task(_())
+        assert await task == 123
+
         @log_errors
         async def _():
             raise CustomError("err6")
 
         with pytest.raises(CustomError):
             await _()
+
+        task = asyncio.create_task(_())
+        with pytest.raises(CustomError):
+            await task
+
+        @log_errors()
+        async def _():
+            raise CustomError("err7")
+
+        with pytest.raises(CustomError):
+            await _()
+
+        task = asyncio.create_task(_())
+        with pytest.raises(CustomError):
+            await task
+
+        async def _():
+            with log_errors():
+                raise CustomError("err8")
+
+        task = asyncio.create_task(_())
+        with pytest.raises(CustomError):
+            await task
 
     assert [row for row in caplog.getvalue().splitlines() if row.startswith("err")] == [
         "err1",
@@ -951,15 +978,35 @@ async def test_log_errors():
         "err5",
         "err5",
         "err6",
+        "err6",
+        "err7",
+        "err7",
+        "err8",
     ]
 
-    # Test unroll_stack
-    with captured_logger("distributed.utils") as caplog:
-        with pytest.raises(CustomError):
-            with log_errors(unroll_stack=0):
-                raise CustomError("err7")
 
-    assert caplog.getvalue().startswith("err7\n")
+@pytest.mark.parametrize("unroll_stack,logger_name", [(0, "test_utils"), (1, "a.b.c")])
+def test_log_errors_unroll_stack(unroll_stack, logger_name, tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a").touch("__init__.py")
+    (tmp_path / "a" / "b").mkdir()
+    (tmp_path / "a" / "b").touch("__init__.py")
+    with (tmp_path / "a" / "b" / "c.py").open("w") as fh:
+        fh.write("def f():\n    raise ValueError('myerr')\n")
+
+    sys.path.insert(0, str(tmp_path))
+    import a.b.c
+
+    del sys.path[0]
+
+    with (
+        captured_logger(logger_name) as caplog,
+        pytest.raises(ValueError),
+        log_errors(unroll_stack=unroll_stack),
+    ):
+        a.b.c.f()
+
+    assert "myerr" in caplog.getvalue()
 
 
 def test_load_json_robust_timeout(tmp_path):
