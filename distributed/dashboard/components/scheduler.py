@@ -4457,11 +4457,10 @@ class Shuffling(DashboardComponent):
                 data["y"].append(i)
                 data["worker"].append(worker)
                 for prefix in ["comm", "disk"]:
+                    memory_limit = d[prefix]["memory_limit"] or 0
                     data[f"{prefix}_total"].append(d[prefix]["total"])
                     data[f"{prefix}_memory"].append(d[prefix]["memory"])
-                    data[f"{prefix}_memory_limit"].append(
-                        d[prefix]["memory_limit"] or 0
-                    )
+                    data[f"{prefix}_memory_limit"].append(memory_limit)
                     data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
                     data[f"{prefix}_avg_duration"].append(
                         d[prefix]["diagnostics"].get("avg_duration", 0)
@@ -4473,7 +4472,7 @@ class Shuffling(DashboardComponent):
                     data[f"{prefix}_written"].append(d[prefix]["written"])
                     if self.scheduler.workers[worker].last_seen < now - 5:
                         data[f"{prefix}_color"].append("gray")
-                    elif d[prefix]["memory"] > d[prefix]["memory_limit"]:
+                    elif d[prefix]["memory"] > memory_limit:
                         data[f"{prefix}_color"].append("red")
                     else:
                         data[f"{prefix}_color"].append("blue")
