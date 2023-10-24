@@ -108,7 +108,7 @@ jobs:
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v4.1.0
+        uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
 
