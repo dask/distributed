@@ -16,6 +16,7 @@ import socket
 import sys
 import tempfile
 import threading
+import traceback
 import warnings
 import weakref
 import xml.etree.ElementTree
@@ -755,7 +756,7 @@ def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
     ...
 
 
-def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
+def log_errors(func=None, /, *, pdb=False, unroll_stack=0):
     """Log any errors and then reraise them.
 
     This can be used:
@@ -783,11 +784,32 @@ def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
         Set to True to break into the debugger in case of exception
     unroll_stack: int, optional
         Number of levels of stack to unroll when determining the module's name for the
-        purpose of logging. Normally you should omit this. Set to 2 if you are writing a
+        purpose of logging. Normally you should omit this. Set to 1 if you are writing a
         helper function, context manager, or decorator.
     """
     le = _LogErrors(pdb=pdb, unroll_stack=unroll_stack)
     return le(func) if func else le
+
+
+_getmodulename_with_path_map: dict[str, str] = {}
+
+
+def _getmodulename_with_path(fname: str) -> str:
+    """Variant of inspect.getmodulename that returns the full module path"""
+    try:
+        return _getmodulename_with_path_map[fname]
+    except KeyError:
+        pass
+
+    for modname, mod in sys.modules.items():
+        fname2 = getattr(mod, "__file__", None)
+        if fname2:
+            _getmodulename_with_path_map[fname2] = modname
+
+    try:
+        return _getmodulename_with_path_map[fname]
+    except KeyError:  # pragma: nocover
+        return os.path.splitext(os.path.basename(fname))[0]
 
 
 class _LogErrors:
@@ -820,16 +842,15 @@ class _LogErrors:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, tb):
         from distributed.comm import CommClosedError
 
         if not exc_type or issubclass(exc_type, (CommClosedError, gen.Return)):
             return
 
-        stack = inspect.stack()
+        stack = traceback.extract_tb(tb)
         frame = stack[self.unroll_stack]
-        mod = inspect.getmodule(frame[0])
-        modname = mod.__name__
+        modname = _getmodulename_with_path(frame.filename)
 
         try:
             logger = logging.getLogger(modname)
