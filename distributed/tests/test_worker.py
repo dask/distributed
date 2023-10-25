@@ -1571,6 +1571,37 @@ async def test_close_gracefully(c, s, a, b):
         assert_amm_transfer_story(key, b, a)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_close_gracefully_no_suspicious_tasks(c, s, a, b):
+    workers = {a.worker_address: a, b.worker_address: b}
+    started = Event()
+    block_task = Event()
+
+    def blocking_task():
+        started.set()
+        block_task.wait()
+
+    fut = c.submit(blocking_task)
+    await started.wait()
+
+    to_close = s.tasks[fut.key].processing_on.address
+
+    async def close_gracefully(dask_worker):
+        await asyncio.shield(dask_worker.close_gracefully())
+
+    try:
+        await c.run(close_gracefully, workers=[to_close])
+    except CommClosedError:
+        pass
+    await async_poll_for(lambda: to_close not in s.workers, 5)
+
+    assert b.address not in s.workers
+    assert s.tasks[fut.key].suspicious == 0
+    await block_task.set()
+    await fut
+
+
 @pytest.mark.parametrize("sync", [False, pytest.param(True, marks=[pytest.mark.slow])])
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_close_while_executing(c, s, a, sync):

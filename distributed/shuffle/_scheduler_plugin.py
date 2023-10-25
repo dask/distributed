@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from dask.typing import Key
 
 from distributed.diagnostics.plugin import SchedulerPlugin
+from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._core import (
@@ -74,10 +75,16 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     def shuffle_ids(self) -> set[ShuffleId]:
         return set(self.active_shuffles)
 
-    async def barrier(self, id: ShuffleId, run_id: int) -> None:
+    async def barrier(self, id: ShuffleId, run_id: int, consistent: bool) -> None:
         shuffle = self.active_shuffles[id]
         if shuffle.run_id != run_id:
             raise ValueError(f"{run_id=} does not match {shuffle}")
+        if not consistent:
+            return self._restart_shuffle(
+                shuffle.id,
+                self.scheduler,
+                stimulus_id=f"p2p-barrier-inconsistent-{time()}",
+            )
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
         await self.scheduler.broadcast(
             msg=msg,

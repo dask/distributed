@@ -17,46 +17,71 @@ jobs:
     # Do not run the schedule job on forks
     if: github.repository == 'dask/distributed' || github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ matrix.partition }}
     timeout-minutes: 120
 
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.9", "3.10", "3.11"]
-        queuing: [queue]
+        environment: [mindeps, "3.9", "3.10", "3.11", "3.12"]
+        label: [queue]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
+
         exclude:
+          # MacOS CI does not have any hosts available; run it on 3.12 only
+          - os: macos-latest
+            environment: mindeps
           - os: macos-latest
             environment: "3.9"
           - os: macos-latest
             environment: "3.10"
           - os: macos-latest
-            environment: mindeps
+            environment: "3.11"
+
           - os: windows-latest
             environment: mindeps
+
         include:
+          # Set distributed.scheduler.worker-saturation: .inf
           - os: ubuntu-latest
             environment: "3.9"
-            queuing: no_queue
+            label: no_queue
             partition: "ci1"
           - os: ubuntu-latest
             environment: "3.9"
-            queuing: no_queue
+            label: no_queue
             partition: "not ci1"
-          # P2P rechunking - requires numpy and nothing else beyond mindeps (no pyarrow)
+
+          # dask.array P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
-            extra_packages: [numpy]
+            label: numpy
+            extra_packages: [numpy=1.21]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
-            extra_packages: [numpy]
+            label: numpy
+            extra_packages: [numpy=1.21]
             partition: "not ci1"
+
+          # dask.dataframe P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
+            label: pandas
+            extra_packages: [numpy=1.21, pandas=1.3, pyarrow=12]
+            partition: "ci1"
+          - os: ubuntu-latest
+            environment: mindeps
+            label: pandas
+            extra_packages: [numpy=1.21, pandas=1.3, pyarrow=12]
+            partition: "not ci1"
+
+          - os: ubuntu-latest
+            environment: mindeps
+            label: memray
             extra_packages: [memray]
             partition: "extra_packages"
 
@@ -66,7 +91,7 @@ jobs:
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
         # branch (https://github.com/<your name>/distributed/actions).
-        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     env:
       CONDA_FILE: continuous_integration/environment-${{ matrix.environment }}.yaml
@@ -75,7 +100,7 @@ jobs:
       - name: Set $TEST_ID
         run: |
           export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
-          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.queuing || join(matrix.extra_packages, '_') }}-$PARTITION_LABEL"
+          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-$PARTITION_LABEL"
           # Switch to this version for stress-test:
           # export TEST_ID="$TEST_ID-${{ matrix.run }}"
           echo "TEST_ID: $TEST_ID"
@@ -83,7 +108,7 @@ jobs:
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v4.1.0
+        uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
 
@@ -175,14 +200,14 @@ jobs:
 
       - name: Disable IPv6
         shell: bash -l {0}
-        # FIXME ipv6-related failures on Ubuntu github actions CI
+        # FIXME ipv6-related failures on Ubuntu and MacOS github actions CI
         # https://github.com/dask/distributed/issues/4514
-        if: ${{ matrix.os  == 'ubuntu-latest' }}
+        if: ${{ matrix.os  != 'windows-latest' }}
         run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
 
       - name: Set up dask env for job queuing
         shell: bash -l {0}
-        if: ${{ matrix.queuing == 'no_queue' }}
+        if: ${{ matrix.label == 'no_queue' }}
         run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
 
       - name: Print host info
@@ -231,13 +256,19 @@ jobs:
       # as opposed to root. This is causing filename mismatches in Codecov.
       # This step edits `coverage.xml` in-file by adding `distributed` to all filenames.
       - name: Prepare coverage report
-        if: ${{ matrix.os != 'windows-latest' }}
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure') &&
+          matrix.os != 'windows-latest'
         shell: bash -l {0}
         run: sed -i'' -e 's/filename="/filename="distributed\//g' coverage.xml
 
       # Do not upload coverage reports for cron jobs
       - name: Coverage
-        if: github.event_name != 'schedule'
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure') &&
+          github.event_name != 'schedule'
         uses: codecov/codecov-action@v3
         with:
           name: ${{ env.TEST_ID }}

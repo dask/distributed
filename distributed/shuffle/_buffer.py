@@ -46,7 +46,7 @@ class ShardsBuffer(Generic[ShardType]):
     shards: defaultdict[str, _List[ShardType]]
     sizes: defaultdict[str, int]
     concurrency_limit: int
-    memory_limiter: ResourceLimiter | None
+    memory_limiter: ResourceLimiter
     diagnostics: dict[str, float]
     max_message_size: int
 
@@ -64,7 +64,7 @@ class ShardsBuffer(Generic[ShardType]):
 
     def __init__(
         self,
-        memory_limiter: ResourceLimiter | None,
+        memory_limiter: ResourceLimiter,
         concurrency_limit: int = 2,
         max_message_size: int = -1,
     ) -> None:
@@ -97,7 +97,7 @@ class ShardsBuffer(Generic[ShardType]):
             "written": self.bytes_written,
             "read": self.bytes_read,
             "diagnostics": self.diagnostics,
-            "memory_limit": self.memory_limiter._maxvalue if self.memory_limiter else 0,
+            "memory_limit": self.memory_limiter.limit,
         }
 
     async def process(self, id: str, shards: list[ShardType], size: int) -> None:
@@ -119,8 +119,7 @@ class ShardsBuffer(Generic[ShardType]):
                 "avg_duration"
             ] + 0.02 * (stop - start)
         finally:
-            if self.memory_limiter:
-                await self.memory_limiter.decrease(size)
+            await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
 
     async def _process(self, id: str, shards: list[ShardType]) -> None:
@@ -198,15 +197,13 @@ class ShardsBuffer(Generic[ShardType]):
         self.bytes_memory += total_batch_size
         self.bytes_total += total_batch_size
 
-        if self.memory_limiter:
-            self.memory_limiter.increase(total_batch_size)
+        self.memory_limiter.increase(total_batch_size)
         async with self._shards_available:
             for worker, shard in data.items():
                 self.shards[worker].append(shard)
                 self.sizes[worker] += sizes[worker]
             self._shards_available.notify()
-        if self.memory_limiter:
-            await self.memory_limiter.wait_for_available()
+        await self.memory_limiter.wait_for_available()
         del data
         assert total_batch_size
 
@@ -252,7 +249,7 @@ class ShardsBuffer(Generic[ShardType]):
             self._shards_available.notify_all()
         await asyncio.gather(*self._tasks)
 
-    async def __aenter__(self) -> "ShardsBuffer":
+    async def __aenter__(self) -> ShardsBuffer:
         return self
 
     async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:

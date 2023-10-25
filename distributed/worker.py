@@ -1684,7 +1684,7 @@ class Worker(BaseWorker, ServerNode):
         await self.scheduler.retire_workers(
             workers=[self.address],
             close_workers=False,
-            remove=False,
+            remove=True,
             stimulus_id=f"worker-close-gracefully-{time()}",
         )
         if restart is None:

@@ -4,10 +4,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
+import dask
 from dask.base import is_dask_collection, tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 
+from distributed.shuffle._arrow import check_minimal_arrow_version
 from distributed.shuffle._core import ShuffleId, barrier_key, get_worker_plugin
 from distributed.shuffle._shuffle import shuffle_barrier, shuffle_transfer
 
@@ -105,6 +107,7 @@ def hash_join_p2p(
     lhs = _calculate_partitions(lhs, left_on, npartitions)
     rhs = _calculate_partitions(rhs, right_on, npartitions)
     merge_name = "hash-join-" + tokenize(lhs, rhs, **merge_kwargs)
+    disk: bool = dask.config.get("distributed.p2p.disk")
     join_layer = HashJoinP2PLayer(
         name=merge_name,
         name_input_left=lhs._name,
@@ -122,6 +125,7 @@ def hash_join_p2p(
         indicator=indicator,
         left_index=left_index,
         right_index=right_index,
+        disk=disk,
     )
     graph = HighLevelGraph.from_collections(
         merge_name, join_layer, dependencies=[lhs, rhs]
@@ -141,6 +145,7 @@ def merge_transfer(
     npartitions: int,
     meta: pd.DataFrame,
     parts_out: set[int],
+    disk: bool,
 ):
     return shuffle_transfer(
         input=input,
@@ -150,6 +155,7 @@ def merge_transfer(
         column=_HASH_COLUMN_NAME,
         meta=meta,
         parts_out=parts_out,
+        disk=disk,
     )
 
 
@@ -191,27 +197,49 @@ def merge_unpack(
 
 
 class HashJoinP2PLayer(Layer):
+    name: str
+    npartitions: int
+    how: MergeHow
+    suffixes: Suffixes
+    indicator: bool
+    meta_output: pd.DataFrame
+    parts_out: Sequence[int]
+
+    name_input_left: str
+    meta_input_left: pd.DataFrame
+    n_partitions_left: int
+    left_on: IndexLabel | None
+    left_index: bool
+
+    name_input_right: str
+    meta_input_right: pd.DataFrame
+    n_partitions_right: int
+    right_on: IndexLabel | None
+    right_index: bool
+
     def __init__(
         self,
         name: str,
         name_input_left: str,
         meta_input_left: pd.DataFrame,
-        left_on,
+        left_on: IndexLabel | None,
         n_partitions_left: int,
         n_partitions_right: int,
         name_input_right: str,
         meta_input_right: pd.DataFrame,
-        right_on,
+        right_on: IndexLabel | None,
         meta_output: pd.DataFrame,
         left_index: bool,
         right_index: bool,
+        npartitions: int,
+        disk: bool,
         how: MergeHow = "inner",
-        npartitions: int | None = None,
         suffixes: Suffixes = ("_x", "_y"),
         indicator: bool = False,
         parts_out: Sequence | None = None,
         annotations: dict | None = None,
     ) -> None:
+        check_minimal_arrow_version()
         self.name = name
         self.name_input_left = name_input_left
         self.meta_input_left = meta_input_left
@@ -229,6 +257,7 @@ class HashJoinP2PLayer(Layer):
         self.n_partitions_right = n_partitions_right
         self.left_index = left_index
         self.right_index = right_index
+        self.disk = disk
         annotations = annotations or {}
         annotations.update({"shuffle": lambda key: key[-1]})
         super().__init__(annotations=annotations)
@@ -310,6 +339,7 @@ class HashJoinP2PLayer(Layer):
             parts_out=parts_out,
             left_index=self.left_index,
             right_index=self.right_index,
+            disk=self.disk,
             annotations=self.annotations,
             n_partitions_left=self.n_partitions_left,
             n_partitions_right=self.n_partitions_right,
@@ -359,6 +389,7 @@ class HashJoinP2PLayer(Layer):
                 self.npartitions,
                 self.meta_input_left,
                 self.parts_out,
+                self.disk,
             )
         for i in range(self.n_partitions_right):
             transfer_keys_right.append((name_right, i))
@@ -370,6 +401,7 @@ class HashJoinP2PLayer(Layer):
                 self.npartitions,
                 self.meta_input_right,
                 self.parts_out,
+                self.disk,
             )
 
         _barrier_key_left = barrier_key(ShuffleId(token_left))

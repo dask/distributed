@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import struct
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 import dask
 
@@ -43,13 +43,13 @@ def frame_split_size(
     return [frame[i : i + items_per_shard] for i in range(0, nitems, items_per_shard)]
 
 
-def pack_frames_prelude(frames):
+def pack_frames_prelude(frames: Collection[bytes | bytearray | memoryview]) -> bytes:
     nframes = len(frames)
     nbytes_frames = map(nbytes, frames)
     return struct.pack(f"Q{nframes}Q", nframes, *nbytes_frames)
 
 
-def pack_frames(frames):
+def pack_frames(frames: Collection[bytes | bytearray | memoryview]) -> bytes:
     """Pack frames into a byte-like object
 
     This prepends length information to the front of the bytes-like object

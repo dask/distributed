@@ -110,7 +110,7 @@ class DiskShardsBuffer(ShardsBuffer):
     ----------
     directory : str or pathlib.Path
         Where to write and read data.  Ideally points to fast disk.
-    memory_limiter : ResourceLimiter, optional
+    memory_limiter : ResourceLimiter
         Limiter for in-memory buffering (at most this much data)
         before writes to disk occur. If the incoming data that has yet
         to be processed exceeds this limit, then the buffer will block
@@ -122,7 +122,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self,
         directory: str | pathlib.Path,
         read: Callable[[pathlib.Path], tuple[Any, int]],
-        memory_limiter: ResourceLimiter | None = None,
+        memory_limiter: ResourceLimiter,
     ):
         super().__init__(
             memory_limiter=memory_limiter,
@@ -163,7 +163,7 @@ class DiskShardsBuffer(ShardsBuffer):
                         for shard in shards:
                             f.write(shard)
 
-    def read(self, id: int | str) -> Any:
+    def read(self, id: str) -> Any:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:

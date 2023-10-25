@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+from unittest import mock
+
 import pytest
 
 from distributed.shuffle._merge import hash_join
@@ -9,9 +12,15 @@ from distributed.utils_test import gen_cluster
 dd = pytest.importorskip("dask.dataframe")
 import pandas as pd
 
+import dask
 from dask.dataframe._compat import PANDAS_GE_200, tm
 from dask.dataframe.utils import assert_eq
 from dask.utils_test import hlg_layer_topological
+
+try:
+    import pyarrow as pa
+except ImportError:
+    pa = None
 
 pytestmark = pytest.mark.ci1
 
@@ -40,6 +49,24 @@ def list_eq(aa, bb):
         bv = b.sort_values().values
 
     dd._compat.assert_numpy_array_equal(av, bv)
+
+
+@gen_cluster(client=True)
+async def test_minimal_version(c, s, a, b):
+    no_pyarrow_ctx = (
+        mock.patch.dict("sys.modules", {"pyarrow": None})
+        if pa is not None
+        else contextlib.nullcontext()
+    )
+    with no_pyarrow_ctx:
+        A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
+        a = dd.repartition(A, [0, 4, 5])
+
+        B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
+        b = dd.repartition(B, [0, 2, 5])
+
+        with pytest.raises(ModuleNotFoundError, match="requires pyarrow"):
+            await c.compute(dd.merge(a, b, left_on="x", right_on="z", shuffle="p2p"))
 
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
@@ -80,8 +107,9 @@ async def test_basic_merge(c, s, a, b, how, lose_annotations):
 
 
 @pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
+@pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_merge(c, s, a, b, how, lose_annotations):
+async def test_merge(c, s, a, b, how, disk, lose_annotations):
     await invoke_annotation_chaos(lose_annotations, c)
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
@@ -89,7 +117,10 @@ async def test_merge(c, s, a, b, how, lose_annotations):
     B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
     b = dd.repartition(B, [0, 2, 5])
 
-    joined = dd.merge(a, b, left_index=True, right_index=True, how=how, shuffle="p2p")
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        joined = dd.merge(
+            a, b, left_index=True, right_index=True, how=how, shuffle="p2p"
+        )
     res = await c.compute(joined)
     assert_eq(
         res,

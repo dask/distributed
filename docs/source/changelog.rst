@@ -1,6 +1,11 @@
 Changelog
 =========
 
+.. note::
+
+    Changelog entries for Distributed are now included in the `Dask changelog <https://docs.dask.org/en/stable/changelog.html>`_.
+
+
 .. _v2023.9.3:
 
 2023.9.3
