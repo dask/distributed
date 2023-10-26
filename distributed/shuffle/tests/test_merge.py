@@ -135,17 +135,30 @@ async def test_merge_p2p_shuffle_reused_dataframe_with_same_parameters(c, s, a, 
     ddf1 = dd.from_pandas(pdf1, npartitions=5)
     ddf2 = dd.from_pandas(pdf2, npartitions=10)
 
-    out = ddf1.merge(
+    # This performs two shuffles:
+    #   * ddf1 is shuffled on `a`
+    #   * ddf2 is shuffled on `x`
+    ddf3 = ddf1.merge(
         ddf2,
         left_on="a",
         right_on="x",
         shuffle="p2p",
-    ).merge(ddf2, left_on="b", right_on="x", shuffle="p2p")
+    )
+
+    # This performs one shuffle:
+    #   * ddf3 is shuffled on ``
+    # We can reuse the shuffle from the previous merge.
+    out = ddf2.merge(
+        ddf3,
+        left_on="x",
+        right_on="b",
+        shuffle="p2p",
+    )
     # Generate the same shuffle IDs if the input frame is the same and all its parameters match
     assert sum(id_from_key(k) is not None for k in out.dask) == 3
     result = await c.compute(out)
-    expected = pdf1.merge(pdf2, left_on="a", right_on="x").merge(
-        pdf2, left_on="b", right_on="x"
+    expected = pdf2.merge(
+        pdf1.merge(pdf2, left_on="a", right_on="x"), left_on="x", right_on="b"
     )
     dd.assert_eq(result, expected, check_index=False)
 
