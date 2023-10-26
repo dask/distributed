@@ -146,7 +146,7 @@ async def test_merge_p2p_shuffle_reused_dataframe_with_same_parameters(c, s, a, 
     )
 
     # This performs one shuffle:
-    #   * ddf3 is shuffled on ``
+    #   * ddf3 is shuffled on `b`
     # We can reuse the shuffle from the previous merge.
     out = ddf2.merge(
         ddf3,
