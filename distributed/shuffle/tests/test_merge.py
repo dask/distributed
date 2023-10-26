@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from distributed.shuffle._core import id_from_key
 from distributed.shuffle._merge import hash_join
 from distributed.shuffle.tests.utils import invoke_annotation_chaos
 from distributed.utils_test import gen_cluster
@@ -104,6 +105,49 @@ async def test_basic_merge(c, s, a, b, how, lose_annotations):
         hash_join(a, "y", b, "y", "inner")._name
         != hash_join(a, "y", b, "y", "outer")._name
     )
+
+
+@gen_cluster(client=True)
+async def test_merge_p2p_shuffle_reused_dataframe_with_different_parameters(c, s, a, b):
+    pdf1 = pd.DataFrame({"a": range(100), "b": range(0, 200, 2)})
+    pdf2 = pd.DataFrame({"x": range(200), "y": [1, 2, 3, 4] * 50})
+    ddf1 = dd.from_pandas(pdf1, npartitions=5)
+    ddf2 = dd.from_pandas(pdf2, npartitions=10)
+
+    out = (
+        ddf1.merge(ddf2, left_on="a", right_on="x", shuffle="p2p")
+        # Vary the number of output partitions for the shuffles of dd2
+        .repartition(20).merge(ddf2, left_on="b", right_on="x", shuffle="p2p")
+    )
+    # Generate unique shuffle IDs if the input frame is the same but parameters differ
+    assert sum(id_from_key(k) is not None for k in out.dask) == 4
+    result = await c.compute(out)
+    expected = pdf1.merge(pdf2, left_on="a", right_on="x").merge(
+        pdf2, left_on="b", right_on="x"
+    )
+    dd.assert_eq(result, expected, check_index=False)
+
+
+@gen_cluster(client=True)
+async def test_merge_p2p_shuffle_reused_dataframe_with_same_parameters(c, s, a, b):
+    pdf1 = pd.DataFrame({"a": range(100), "b": range(0, 200, 2)})
+    pdf2 = pd.DataFrame({"x": range(200), "y": [1, 2, 3, 4] * 50})
+    ddf1 = dd.from_pandas(pdf1, npartitions=5)
+    ddf2 = dd.from_pandas(pdf2, npartitions=10)
+
+    out = ddf1.merge(
+        ddf2,
+        left_on="a",
+        right_on="x",
+        shuffle="p2p",
+    ).merge(ddf2, left_on="b", right_on="x", shuffle="p2p")
+    # Generate the same shuffle IDs if the input frame is the same and all its parameters match
+    assert sum(id_from_key(k) is not None for k in out.dask) == 3
+    result = await c.compute(out)
+    expected = pdf1.merge(pdf2, left_on="a", right_on="x").merge(
+        pdf2, left_on="b", right_on="x"
+    )
+    dd.assert_eq(result, expected, check_index=False)
 
 
 @pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
