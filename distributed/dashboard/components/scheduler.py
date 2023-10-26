@@ -3847,9 +3847,9 @@ class Contention(DashboardComponent):
         self.data = dict(
             names=[
                 ("Scheduler", "Event Loop"),
-                ("Scheduler", "GIL Contention"),
+                ("Scheduler", "GIL"),
                 ("Workers", "Event Loop"),
-                ("Workers", "GIL Contention"),
+                ("Workers", "GIL"),
             ],
             values=[0, 0, 0, 0],
             text=["0s", "0%", "0s", "0%"],
@@ -3880,7 +3880,7 @@ class Contention(DashboardComponent):
             fill_color=factor_cmap(
                 field_name="names",
                 palette=["#b8e0ce", "#81aae4"],
-                factors=["Event Loop", "GIL Contention"],
+                factors=["Event Loop", "GIL"],
                 start=1,
                 end=2,
             ),
