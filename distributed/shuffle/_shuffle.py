@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
@@ -456,14 +457,19 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     async def receive(self, data: list[tuple[int, bytes]]) -> None:
         await self._receive(data)
 
-    async def _receive(self, data: list[tuple[int, bytes]]) -> None:
+    async def _receive(self, data: list[bytes]) -> None:
         self.raise_if_closed()
+        import struct
 
         filtered = []
+        ssize = struct.calcsize("Q")
+
         for d in data:
-            if d[0] not in self.received:
-                filtered.append(d[1])
-                self.received.add(d[0])
+            mv = memoryview(d)
+            partition_id = struct.unpack("Q", mv[-ssize:])[0]
+            if partition_id not in self.received:
+                filtered.append(mv[:-ssize])
+                self.received.add(partition_id)
                 self.total_recvd += sizeof(d)
         del data
         if not filtered:
@@ -478,10 +484,16 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
     def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, pa.Table]:
         table = list_of_buffers_to_table(data)
+        total_size = sum(map(len, data))
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {(k,): v for k, v in groups.items()}
+        return {
+            # The size calculation is pretty expensive and is blocking the GIL
+            # Therefore, we'll approximate this here
+            (k,): (v, math.floor(len(v) / len(table) * total_size))
+            for k, v in groups.items()
+        }
 
     async def _add_partition(
         self,
@@ -489,15 +501,14 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         partition_id: int,
         **kwargs: Any,
     ) -> int:
-        def _() -> dict[str, tuple[int, bytes]]:
+        def _() -> dict[str, bytes]:
             out = split_by_worker(
                 data,
                 self.column,
                 self.meta,
                 self.worker_for,
             )
-            out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
-            return out
+            return {k: serialize_table(t, partition_id) for k, t in out.items()}
 
         out = await self.offload(_)
         await self._write_to_comm(out)

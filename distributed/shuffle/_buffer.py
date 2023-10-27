@@ -165,7 +165,7 @@ class ShardsBuffer(Generic[ShardType]):
                 self._shards_available.notify_all()
             await self.process(part_id, shards, size)
 
-    async def write(self, data: dict[str, ShardType]) -> None:
+    async def write(self, data: dict[str, tuple[int, ShardType, int]]) -> None:
         """
         Writes objects into the local buffers, blocks until ready for more
 

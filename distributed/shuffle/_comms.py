@@ -1,13 +1,111 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import Any
+import asyncio
+import contextlib
+import logging
+from collections import defaultdict
+from collections.abc import Awaitable, Callable, Iterator, Sized
+from typing import Any, Generic, TypeVar
 
 from dask.utils import parse_bytes
 
+from distributed.metrics import time
 from distributed.shuffle._disk import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.sizeof import sizeof
 from distributed.utils import log_errors
+
+
+class NewCommBuffer:
+    def __init__(self, memory_limiter, max_message_size, send) -> None:
+        self._accepts_input = True
+        self.shards = defaultdict(list)
+        self.sizes = defaultdict(int)
+        self._exception = None
+        self.concurrency_limit = 20
+        self._inputs_done = False
+        self.memory_limiter = memory_limiter
+        self.diagnostics: dict[str, float] = defaultdict(float)
+
+        self._shards_available = asyncio.Condition()
+        self._flush_lock = asyncio.Lock()
+        self.max_message_size = max_message_size
+        self._send = send
+
+        self.bytes_total = 0
+        self.bytes_memory = 0
+        self.bytes_written = 0
+        self.bytes_read = 0
+
+    def heartbeat(self) -> dict[str, Any]:
+        return {
+            "memory": self.bytes_memory,
+            "total": self.bytes_total,
+            "buckets": len(self.shards),
+            "written": self.bytes_written,
+            "read": self.bytes_read,
+            "diagnostics": self.diagnostics,
+            "memory_limit": self.memory_limiter.limit,
+        }
+
+    async def write(self, data) -> None:
+        """
+        Writes objects into the local buffers, blocks until ready for more
+
+        Parameters
+        ----------
+        data: dict
+            A dictionary mapping destinations to the object that should
+            be written to that destination
+
+        Notes
+        -----
+        If this buffer has a memory limiter configured, then it will
+        apply back-pressure to the sender (blocking further receives)
+        if local resource usage hits the limit, until such time as the
+        resource usage drops.
+
+        """
+
+        if self._exception:
+            raise self._exception
+        if not self._accepts_input or self._inputs_done:
+            raise RuntimeError(f"Trying to put data in closed {self}.")
+
+        if not data:
+            return
+
+        sizes = {worker: sizeof(shard) for worker, shard in data.items()}
+        total_batch_size = sum(sizes.values())
+        self.bytes_memory += total_batch_size
+        self.bytes_total += total_batch_size
+
+        self.memory_limiter.increase(total_batch_size)
+        async with self._shards_available:
+            for worker, shard in data.items():
+                self.shards[worker].append(shard)
+                self.sizes[worker] += sizes[worker]
+            self._shards_available.notify()
+        # await self.memory_limiter.wait_for_available()
+        del data
+        assert total_batch_size
+        while sum(self.sizes.values()) > self.memory_limiter.limit:
+            await self.flush_one()
+
+    async def flush_one(self):
+        if not self.sizes:
+            return
+        max_ = max(self.sizes.values())
+        for k, size in self.sizes.items():
+            if size == max_:
+                data = self.shards.pop(k)
+                del self.sizes[k]
+                try:
+                    return await self._send(k, data)
+                finally:
+                    await self.memory_limiter.decrease(size)
+                    self.bytes_memory -= size
+                    self.bytes_written += size
 
 
 class CommShardsBuffer(ShardsBuffer):
