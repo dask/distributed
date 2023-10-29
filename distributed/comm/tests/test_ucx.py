@@ -26,6 +26,7 @@ from distributed.diagnostics.nvml import (
     has_cuda_context,
 )
 from distributed.protocol import to_serialize
+from distributed.protocol.utils_test import get_host_array
 from distributed.utils_test import gen_test, inc
 
 try:
@@ -432,3 +433,30 @@ async def test_embedded_cupy_array(
             x = da.from_array(a, chunks=(10000,))
             b = await client.compute(x)
             cupy.testing.assert_array_equal(a, b)
+
+
+@gen_test()
+async def test_do_not_share_buffers(ucx_loop):
+    """Test that two objects with buffer interface in the same message do not share
+    their buffer upon deserialization.
+
+    See Also
+    --------
+    test_comms.py::test_do_not_share_buffers
+    """
+    np = pytest.importorskip("numpy")
+
+    com, serv_com = await get_comm_pair()
+    msg = {"data": to_serialize([np.array([1, 2]), np.array([3, 4])])}
+
+    await com.write(msg)
+    result = await serv_com.read()
+    await com.close()
+    await serv_com.close()
+
+    a, b = result["data"]
+    ha = get_host_array(a)
+    hb = get_host_array(b)
+    assert ha is not hb
+    assert ha.nbytes == a.nbytes
+    assert hb.nbytes == a.nbytes
