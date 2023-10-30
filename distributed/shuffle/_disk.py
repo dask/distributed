@@ -114,7 +114,9 @@ class NewDiskBuffer:
 
         self._write_lock = asyncio.Lock()
         self.min_size = parse_bytes("1MB")
-        self.max_size = parse_bytes("1.1GB")
+        self.max_size = parse_bytes("1GB")
+        self.filelocks = defaultdict(threading.Lock)
+        self._threads_writing = 0
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
         self.tpe = ThreadPoolExecutor(2, thread_name_prefix="disk-buffer")
@@ -156,7 +158,7 @@ class NewDiskBuffer:
 
         tab = pa.concat_tables(data).combine_chunks()
         del data
-        with self._directory_lock.read():
+        with self._directory_lock.read(), self.filelocks[bucket]:
             if self._closed:
                 raise RuntimeError("Already closed")
             with open(self.directory / str(bucket), "ab") as fd:
@@ -179,15 +181,16 @@ class NewDiskBuffer:
                     raise RuntimeError("Already closed")
 
                 data_disk, size = read_from_disk(self.directory / str(bucket))
-            data_memory = self.shards.pop(bucket)
+            data_memory = self.shards.pop(bucket, [])
             data = pa.concat_tables([*data_memory, *data_disk])
+            del data_memory, data_disk
             self.bytes_read += size
         except FileNotFoundError:
             # All memory shuffle
             data = pa.concat_tables(self.shards.pop(bucket))
 
         if data:
-            return data
+            return data.combine_chunks()
         else:
             raise KeyError(id)
 
@@ -200,10 +203,12 @@ class NewDiskBuffer:
                 data = self.shards.pop(k)
                 del self.sizes[k]
                 try:
+                    self._threads_writing += 1
                     return await asyncio.get_running_loop().run_in_executor(
                         self.tpe, self.write_data_to_disk, data, k
                     )
                 finally:
+                    self._threads_writing -= 1
                     del data
                     await self.memory_limiter.decrease(size)
                     self.bytes_memory -= size
@@ -215,12 +220,15 @@ class NewDiskBuffer:
         self._inputs_done = True
         self.shards.clear()
         self.bytes_memory = 0
+        self.tpe.shutdown()
         with self._directory_lock.write():
             self._closed = True
             with contextlib.suppress(FileNotFoundError):
                 shutil.rmtree(self.directory)
 
     async def flush(self):
+        while self._threads_writing:
+            await asyncio.sleep(0.01)
         self._inputs_done = True
 
 
