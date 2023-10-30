@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import pathlib
 import shutil
-from typing import Any, Callable
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Any, Callable
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._disk import ReadWriteLock
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 
 class StorageBuffer(ShardsBuffer):
@@ -58,8 +63,9 @@ class StorageBuffer(ShardsBuffer):
         self._write = write
         self._read = read
         self._directory_lock = ReadWriteLock()
+        self._executor = ThreadPoolExecutor(1, thread_name_prefix="disk-buffer")
 
-    async def _process(self, id: str, shards: list[bytes]) -> None:
+    async def _process(self, id: str, shards: list[pa.Table]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -81,7 +87,12 @@ class StorageBuffer(ShardsBuffer):
                 with self._directory_lock.read():
                     if self._closed:
                         raise RuntimeError("Already closed")
-                    self._write(shards, (self.directory / str(id)).resolve())
+                    await asyncio.get_running_loop().run_in_executor(
+                        self._executor,
+                        self._write,
+                        shards,
+                        (self.directory / str(id)).resolve(),
+                    )
 
     def read(self, id: str) -> Any:
         """Read a complete file back into memory"""
@@ -106,6 +117,11 @@ class StorageBuffer(ShardsBuffer):
 
     async def close(self) -> None:
         await super().close()
+
+        try:
+            self._executor.shutdown(cancel_futures=True)
+        except Exception:  # pragma: no cover
+            self._executor.shutdown()
         with self._directory_lock.write():
             self._closed = True
             with contextlib.suppress(FileNotFoundError):
