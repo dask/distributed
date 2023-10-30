@@ -80,6 +80,18 @@ def deserialize_table(buffer: bytes) -> pa.Table:
         return reader.read_all()
 
 
+def write_to_disk(data: list[pa.Table], path: Path) -> None:
+    import pyarrow as pa
+
+    table = pa.concat_tables(data)
+    del data
+    table = table.combine_chunks()
+
+    with path.open(mode="ab") as f:
+        with pa.ipc.new_stream(f, table.schema) as writer:
+            writer.write_table(table)
+
+
 def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
     import pyarrow as pa
 

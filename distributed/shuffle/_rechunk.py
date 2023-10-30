@@ -122,7 +122,9 @@ from distributed.shuffle._core import (
     handle_transfer_errors,
     handle_unpack_errors,
 )
+from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._memory import MemoryShardsBuffer
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
@@ -342,17 +344,24 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         disk: bool,
         loop: IOLoop,
     ):
+        disk_buffer: DiskShardsBuffer | MemoryShardsBuffer
+        if disk:
+            disk_buffer = DiskShardsBuffer(
+                directory=directory,
+                read=self.read,
+                memory_limiter=memory_limiter_disk,
+            )
+        else:
+            disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
         super().__init__(
             id=id,
             run_id=run_id,
             local_address=local_address,
-            directory=directory,
+            storage_buffer=disk_buffer,
             executor=executor,
             rpc=rpc,
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
-            memory_limiter_disk=memory_limiter_disk,
-            disk=disk,
             loop=loop,
         )
         self.old = old
@@ -421,6 +430,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
     def deserialize(self, buffer: bytes) -> Any:
         result = pickle.loads(buffer)
         return result
+
+    def write(self, data: list[np.ndarray], path: Path) -> None:
+        raise NotImplementedError()
 
     def read(self, path: Path) -> tuple[Any, int]:
         shards: list[list[tuple[NDIndex, np.ndarray]]] = []

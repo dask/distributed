@@ -29,6 +29,7 @@ from distributed.shuffle._arrow import (
     list_of_buffers_to_table,
     read_from_disk,
     serialize_table,
+    write_to_disk,
 )
 from distributed.shuffle._core import (
     NDIndex,
@@ -42,6 +43,7 @@ from distributed.shuffle._core import (
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
+from distributed.shuffle._storage import StorageBuffer
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
 
@@ -436,17 +438,22 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     ):
         import pandas as pd
 
+        disk_buffer = StorageBuffer(
+            directory=directory,
+            write=self.write,
+            read=self.read,
+            memory_limiter=memory_limiter_disk if disk else ResourceLimiter(None),
+        )
+
         super().__init__(
             id=id,
             run_id=run_id,
             local_address=local_address,
-            directory=directory,
+            storage_buffer=disk_buffer,
             executor=executor,
             rpc=rpc,
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
-            memory_limiter_disk=memory_limiter_disk,
-            disk=disk,
             loop=loop,
         )
         self.column = column
@@ -485,7 +492,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {(k,): serialize_table(v) for k, v in groups.items()}
+        return {(k,): v for k, v in groups.items()}
 
     def _shard_partition(
         self,
@@ -516,6 +523,9 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
+
+    def write(self, data: list[pd.DataFrame], path: Path) -> None:
+        write_to_disk(data, path)
 
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)

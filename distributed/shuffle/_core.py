@@ -28,6 +28,7 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
+from distributed.shuffle._storage import StorageBuffer
 from distributed.utils import sync
 from distributed.utils_comm import retry
 
@@ -58,7 +59,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     rpc: Callable[[str], PooledRPCCall]
     scheduler: PooledRPCCall
     closed: bool
-    _disk_buffer: DiskShardsBuffer | MemoryShardsBuffer
+    _disk_buffer: DiskShardsBuffer | MemoryShardsBuffer | StorageBuffer
     _comm_buffer: CommShardsBuffer
     diagnostics: dict[str, float]
     received: set[_T_partition_id]
@@ -73,13 +74,11 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         id: ShuffleId,
         run_id: int,
         local_address: str,
-        directory: str,
         executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         scheduler: PooledRPCCall,
-        memory_limiter_disk: ResourceLimiter,
+        storage_buffer: DiskShardsBuffer | MemoryShardsBuffer | StorageBuffer,
         memory_limiter_comms: ResourceLimiter,
-        disk: bool,
         loop: IOLoop,
     ):
         self.id = id
@@ -89,15 +88,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.rpc = rpc
         self.scheduler = scheduler
         self.closed = False
-        if disk:
-            self._disk_buffer = DiskShardsBuffer(
-                directory=directory,
-                read=self.read,
-                memory_limiter=memory_limiter_disk,
-            )
-        else:
-            self._disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
-
+        self._disk_buffer = storage_buffer
         self._comm_buffer = CommShardsBuffer(
             send=self.send, memory_limiter=memory_limiter_comms
         )
@@ -293,6 +284,10 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self, partition_id: _T_partition_id, key: str, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
+
+    @abc.abstractmethod
+    def write(self, data: list[_T_partition_type], path: Path) -> None:
+        """Write shards to disk"""
 
     @abc.abstractmethod
     def read(self, path: Path) -> tuple[Any, int]:
