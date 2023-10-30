@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import struct
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterable, Sequence
 
 import dask
 
@@ -16,6 +16,35 @@ msgpack_opts = {
 }
 msgpack_opts["strict_map_key"] = False
 msgpack_opts["raw"] = False
+
+
+# Find the function, `host_array()`, to use when allocating new host arrays
+try:
+    # Use NumPy, when available, to avoid memory initialization cost.
+    # A `bytearray` is zero-initialized using `calloc`, which we don't need.
+    # `np.empty` both skips the zero-initialization, and
+    # uses hugepages when available ( https://github.com/numpy/numpy/pull/14216 ).
+    import numpy
+
+    def host_array(n: int) -> memoryview:
+        return numpy.empty((n,), dtype="u1").data
+
+except ImportError:
+
+    def host_array(n: int) -> memoryview:
+        return memoryview(bytearray(n))
+
+
+def host_array_from_buffers(
+    buffers: Iterable[bytes | bytearray | memoryview],
+) -> memoryview:
+    mvs = [memoryview(buf) for buf in buffers]
+    out = host_array(sum(mv.nbytes for mv in mvs))
+    offset = 0
+    for mv in mvs:
+        out[offset : offset + mv.nbytes] = mv.cast("B")
+        offset += mv.nbytes
+    return out
 
 
 def frame_split_size(

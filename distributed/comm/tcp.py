@@ -35,10 +35,9 @@ from distributed.comm.utils import (
     ensure_concrete_host,
     from_frames,
     get_tcp_server_address,
-    host_array,
     to_frames,
 )
-from distributed.protocol.utils import pack_frames_prelude, unpack_frames
+from distributed.protocol.utils import host_array, pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nbytes
 

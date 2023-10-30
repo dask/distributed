@@ -21,6 +21,7 @@ from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.utils import (
     frame_split_size,
+    host_array_from_buffers,
     merge_memoryviews,
     msgpack_opts,
     pack_frames_prelude,
@@ -504,7 +505,7 @@ def merge_and_deserialize(header, frames, deserializers=None):
             try:
                 merged = merge_memoryviews(subframes)
             except (ValueError, TypeError):
-                merged = bytearray().join(subframes)
+                merged = host_array_from_buffers(subframes)
 
             merged_frames.append(merged)
 
