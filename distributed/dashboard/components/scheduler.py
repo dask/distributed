@@ -4573,7 +4573,7 @@ def shuffling_doc(scheduler, extra, doc):
     shuffling = Shuffling(scheduler, width=400, height=400)
     workers_memory = WorkersMemory(scheduler, width=400, height=400)
     timeseries = SystemTimeseries(
-        scheduler, width=1600, height=200, follow_interval=3000
+        scheduler, width=1600, height=200, follow_interval=10000
     )
     event_loop = Contention(scheduler, width=200, height=400)
 
