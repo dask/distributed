@@ -418,8 +418,11 @@ def _add_frames_header(
     frames_nbytes = [header_nbytes, *frames_nbytes]
     frames_nbytes_total += header_nbytes
 
-    if frames_nbytes_total < 2**17:  # 128kiB
-        # small enough, send in one go
+    if frames_nbytes_total < 2**17 or (  # 128 kiB total
+        frames_nbytes_total < 2**25  # 32 MiB total
+        and frames_nbytes_total // len(frames) < 2**15  # 32 kiB mean
+    ):
+        # very small or very fragmented; send in one go
         frames = [b"".join(frames)]
         frames_nbytes = [frames_nbytes_total]
 
