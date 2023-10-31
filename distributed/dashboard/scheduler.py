@@ -150,7 +150,10 @@ def template_variables(scheduler):
             for x in applications
             if "individual" in x
         ]
-        + [{"url": "hardware", "name": "Hardware"}],
+        + [
+            {"url": "hardware", "name": "Hardware"},
+            {"url": "shuffle", "name": "Shuffle"},
+        ],
         "jupyter": scheduler.jupyter,
     }
     template_variables["plots"] = sorted(
