@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import pathlib
 import shutil
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable
 
 from distributed.shuffle._buffer import ShardsBuffer
@@ -63,7 +62,6 @@ class StorageBuffer(ShardsBuffer):
         self._write = write
         self._read = read
         self._directory_lock = ReadWriteLock()
-        self._executor = ThreadPoolExecutor(1, thread_name_prefix="disk-buffer")
 
     async def _process(self, id: str, shards: list[pa.Table]) -> None:
         """Write one buffer to file
@@ -87,8 +85,7 @@ class StorageBuffer(ShardsBuffer):
                 with self._directory_lock.read():
                     if self._closed:
                         raise RuntimeError("Already closed")
-                    await asyncio.get_running_loop().run_in_executor(
-                        self._executor,
+                    await asyncio.to_thread(
                         self._write,
                         shards,
                         (self.directory / str(id)).resolve(),
@@ -118,10 +115,6 @@ class StorageBuffer(ShardsBuffer):
     async def close(self) -> None:
         await super().close()
 
-        try:
-            self._executor.shutdown(cancel_futures=True)
-        except Exception:  # pragma: no cover
-            self._executor.shutdown()
         with self._directory_lock.write():
             self._closed = True
             with contextlib.suppress(FileNotFoundError):
