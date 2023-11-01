@@ -90,11 +90,13 @@ logger = _logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    # TODO: import from typing (requires Python >=3.10)
-    from typing_extensions import ParamSpec
+    # TODO: import from typing (ParamSpec requires Python >=3.10,
+    # TypeVarTuple and Unpack require Python >= 3.12)
+    from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
     P = ParamSpec("P")
     T = TypeVar("T")
+    Ts = TypeVarTuple("Ts")
 
 _forkserver_preload_set = False
 
@@ -374,10 +376,10 @@ def in_async_call(loop, default=False):
 
 def sync(
     loop: IOLoop,
-    func: Callable[..., Awaitable[T]],
-    *args: AnyType,
+    func: Callable[[Unpack[Ts]], Awaitable[T]],
+    *args: Unpack[Ts],
     callback_timeout: str | float | timedelta | None = None,
-    **kwargs: AnyType,
+    **kwargs: object,
 ) -> T:
     """
     Run coroutine in loop running in separate thread.
