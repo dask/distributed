@@ -15,6 +15,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from tornado.ioloop import IOLoop
 
 from dask.utils import key_split
 
@@ -1585,6 +1586,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
             disk=disk,
+            loop=loop,
         )
         self.shuffles[name] = s
         return s
@@ -1600,7 +1602,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 @gen_test()
 async def test_basic_lowlevel_shuffle(
     tmp_path,
-    loop_in_thread,
     n_workers,
     n_input_partitions,
     npartitions,
@@ -1608,6 +1609,8 @@ async def test_basic_lowlevel_shuffle(
     disk,
 ):
     pa = pytest.importorskip("pyarrow")
+
+    loop = IOLoop.current()
 
     dfs = []
     rows_per_df = 10
@@ -1636,7 +1639,7 @@ async def test_basic_lowlevel_shuffle(
                     meta=meta,
                     worker_for_mapping=worker_for_mapping,
                     directory=tmp_path,
-                    loop=loop_in_thread,
+                    loop=loop,
                     disk=disk,
                 )
             )
@@ -1669,7 +1672,11 @@ async def test_basic_lowlevel_shuffle(
             all_parts = []
             for part, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_parts.append(s.get_output_partition(part, f"key-{part}", meta=meta))
+                all_parts.append(
+                    asyncio.to_thread(
+                        s.get_output_partition, part, f"key-{part}", meta=meta
+                    )
+                )
 
             all_parts = await asyncio.gather(*all_parts)
 

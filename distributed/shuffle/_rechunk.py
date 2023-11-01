@@ -106,6 +106,8 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from tornado.ioloop import IOLoop
+
 import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
@@ -338,6 +340,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
         disk: bool,
+        loop: IOLoop,
     ):
         super().__init__(
             id=id,
@@ -350,6 +353,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
             disk=disk,
+            loop=loop,
         )
         self.old = old
         self.new = new
@@ -426,14 +430,11 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         await self._write_to_comm(out)
         return self.run_id
 
-    async def _get_output_partition(
+    def _get_output_partition(
         self, partition_id: NDIndex, key: str, **kwargs: Any
     ) -> np.ndarray:
-        def _(partition_id: NDIndex) -> np.ndarray:
-            data = self._read_from_disk(partition_id)
-            return convert_chunk(data)
-
-        return await self.offload(_, partition_id)
+        data = self._read_from_disk(partition_id)
+        return convert_chunk(data)
 
     def deserialize(self, buffer: bytes) -> Any:
         result = pickle.loads(buffer)
@@ -486,6 +487,7 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
             memory_limiter_disk=plugin.memory_limiter_disk,
             memory_limiter_comms=plugin.memory_limiter_comms,
             disk=self.disk,
+            loop=plugin.worker.loop,
         )
 
 
