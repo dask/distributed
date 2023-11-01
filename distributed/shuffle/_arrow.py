@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING
 
 from packaging.version import parse
 
-from dask.utils import parse_bytes
-
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
@@ -95,29 +93,18 @@ def write_to_disk(data: list[pa.Table], path: Path) -> None:
 def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
     import pyarrow as pa
 
-    batch_size = parse_bytes("1 MiB")
-    batch = []
     shards = []
 
     with pa.OSFile(str(path), mode="rb") as f:
         size = f.seek(0, whence=2)
         f.seek(0)
-        prev = 0
-        offset = f.tell()
-        while offset < size:
+        while f.tell() < size:
             sr = pa.RecordBatchStreamReader(f)
             shard = sr.read_all()
-            offset = f.tell()
-            batch.append(shard)
+            shards.append(shard)
 
-            if offset - prev >= batch_size:
-                table = pa.concat_tables(batch)
-                shards.append(_copy_table(table))
-                batch = []
-                prev = offset
-    if batch:
-        table = pa.concat_tables(batch)
-        shards.append(_copy_table(table))
+    if shards:
+        shards = [_copy_table(pa.concat_tables(shards))]
     return shards, size
 
 
