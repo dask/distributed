@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import pathlib
 import shutil
 import threading
-from collections.abc import Generator
+from collections import defaultdict
+from collections.abc import Generator, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, Callable
 
+import pyarrow as pa
+
+from distributed.shuffle._arrow import read_from_disk
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import Deadline, log_errors
@@ -87,6 +93,143 @@ class ReadWriteLock:
             yield
         finally:
             self.release_read()
+
+
+class NewDiskBuffer:
+    def __init__(self, directory, memory_limiter: ResourceLimiter):
+        self.memory_limiter = memory_limiter
+        self._directory_lock = ReadWriteLock()
+        self._closed = False
+        self.shards = defaultdict(list)
+        self.sizes = defaultdict(int)
+        self.bytes_total = 0
+        self.bytes_memory = 0
+        self.bytes_written = 0
+        self.bytes_read = 0
+        self._exception = None
+        self._accepts_input = True
+        self._inputs_done = False
+        self._flush_lock = asyncio.Lock()
+        from dask.utils import parse_bytes
+
+        self._write_lock = asyncio.Lock()
+        self.min_size = parse_bytes("1MB")
+        self.max_size = parse_bytes("1GB")
+        self.filelocks = defaultdict(threading.Lock)
+        self._threads_writing = 0
+        self.directory = pathlib.Path(directory)
+        self.directory.mkdir(exist_ok=True)
+        self.tpe = ThreadPoolExecutor(2, thread_name_prefix="disk-buffer")
+
+    def heartbeat(self) -> dict[str, Any]:
+        return {
+            "memory": self.bytes_memory,
+            "total": self.bytes_total,
+            "buckets": len(self.shards),
+            "written": self.bytes_written,
+            "read": self.bytes_read,
+            "diagnostics": {},
+            "memory_limit": self.memory_limiter.limit,
+        }
+
+    async def write(self, data):
+        if self._exception:
+            raise self._exception
+        if not self._accepts_input or self._inputs_done:
+            raise RuntimeError(f"Trying to put data in closed {self}.")
+
+        if not data:
+            return
+        total_batch_size = 0
+        for worker, (shard, size) in data.items():
+            self.shards[worker].append(shard)
+            self.sizes[worker] += size
+            total_batch_size += size
+        self.memory_limiter.increase(total_batch_size)
+        self.bytes_memory += total_batch_size
+        self.bytes_total += total_batch_size
+        del data
+        assert total_batch_size
+        while sum(self.sizes.values()) > self.max_size:
+            await self.flush_one()
+
+    def write_data_to_disk(self, data: Iterable[pa.Table], bucket: int) -> None:
+        import pyarrow as pa
+
+        tab = pa.concat_tables(data).combine_chunks()
+        del data
+        with self._directory_lock.read(), self.filelocks[bucket]:
+            if self._closed:
+                raise RuntimeError("Already closed")
+            with open(self.directory / str(bucket), "ab") as fd:
+                with pa.ipc.new_stream(fd, tab.schema) as f:
+                    f.write_table(tab)
+
+    def raise_on_exception(self) -> None:
+        """Raises an exception if something went wrong during writing"""
+        if self._exception:
+            raise self._exception
+
+    def read(self, bucket):
+        self.raise_on_exception()
+        if not self._inputs_done:
+            raise RuntimeError("Tried to read from file before done.")
+
+        try:
+            with self._directory_lock.read():
+                if self._closed:
+                    raise RuntimeError("Already closed")
+
+                data_disk, size = read_from_disk(self.directory / str(bucket))
+            data_memory = self.shards.pop(bucket, [])
+            data = pa.concat_tables([*data_memory, *data_disk])
+            del data_memory, data_disk
+            self.bytes_read += size
+        except FileNotFoundError:
+            # All memory shuffle
+            data = pa.concat_tables(self.shards.pop(bucket))
+
+        if data:
+            return data.combine_chunks()
+        else:
+            raise KeyError(id)
+
+    async def flush_one(self, lock=False) -> None:
+        if not self.sizes:
+            return
+        max_ = max(self.sizes.values())
+        for k, size in self.sizes.items():
+            if size == max_:
+                data = self.shards.pop(k)
+                del self.sizes[k]
+                try:
+                    self._threads_writing += 1
+                    return await asyncio.get_running_loop().run_in_executor(
+                        self.tpe, self.write_data_to_disk, data, k
+                    )
+                finally:
+                    self._threads_writing -= 1
+                    del data
+                    await self.memory_limiter.decrease(size)
+                    self.bytes_memory -= size
+                    self.bytes_written += size
+
+    async def close(self):
+        await self.flush()
+        self._accepts_input = False
+        self._inputs_done = True
+        self.shards.clear()
+        self.bytes_memory = 0
+        self.tpe.shutdown()
+        with self._directory_lock.write():
+            self._closed = True
+            with contextlib.suppress(FileNotFoundError):
+                shutil.rmtree(self.directory)
+
+    async def flush(self):
+        while self._threads_writing:
+            await asyncio.sleep(0.01)
+        self._inputs_done = True
 
 
 class DiskShardsBuffer(ShardsBuffer):

@@ -64,12 +64,15 @@ def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     return pa.concat_tables(deserialize_table(buffer) for buffer in data)
 
 
-def serialize_table(table: pa.Table) -> bytes:
+def serialize_table(table: pa.Table, partition_id) -> bytes:
     import pyarrow as pa
 
     stream = pa.BufferOutputStream()
     with pa.ipc.new_stream(stream, table.schema) as writer:
         writer.write_table(table)
+    import struct
+
+    stream.write(struct.pack("Q", partition_id))
     return stream.getvalue().to_pybytes()
 
 

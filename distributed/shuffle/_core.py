@@ -22,7 +22,7 @@ from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.protocol import to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
-from distributed.shuffle._disk import DiskShardsBuffer
+from distributed.shuffle._disk import NewDiskBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
@@ -80,9 +80,8 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.scheduler = scheduler
         self.closed = False
         if disk:
-            self._disk_buffer = DiskShardsBuffer(
+            self._disk_buffer = NewDiskBuffer(
                 directory=directory,
-                read=self.read,
                 memory_limiter=memory_limiter_disk,
             )
         else:
@@ -133,7 +132,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
-            data=to_serialize(shards),
+            data=to_serialize(list(shards)),
             shuffle_id=self.id,
             run_id=self.run_id,
         )
@@ -175,7 +174,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         }
 
     async def _write_to_comm(
-        self, data: dict[str, tuple[_T_partition_id, bytes]]
+        self, data: dict[str, tuple[_T_partition_id, bytes, int]]
     ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
