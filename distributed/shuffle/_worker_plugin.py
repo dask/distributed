@@ -336,9 +336,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         **kwargs: Any,
     ) -> int:
         shuffle_run = self.get_or_create_shuffle(spec)
-        return sync(
-            self.worker.loop,
-            shuffle_run.add_partition,
+        return shuffle_run.add_partition(
             data=data,
             partition_id=partition_id,
             **kwargs,

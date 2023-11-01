@@ -487,25 +487,20 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         del data
         return {(k,): serialize_table(v) for k, v in groups.items()}
 
-    async def _add_partition(
+    def _shard_partition(
         self,
         data: pd.DataFrame,
         partition_id: int,
         **kwargs: Any,
-    ) -> int:
-        def _() -> dict[str, tuple[int, bytes]]:
-            out = split_by_worker(
-                data,
-                self.column,
-                self.meta,
-                self.worker_for,
-            )
-            out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
-            return out
-
-        out = await self.offload(_)
-        await self._write_to_comm(out)
-        return self.run_id
+    ) -> dict[str, tuple[int, bytes]]:
+        out = split_by_worker(
+            data,
+            self.column,
+            self.meta,
+            self.worker_for,
+        )
+        out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
+        return out
 
     def _get_output_partition(
         self,

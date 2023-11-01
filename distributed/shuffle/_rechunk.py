@@ -395,40 +395,22 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
                 repartitioned[id].append(shard)
         return {k: pickle.dumps(v) for k, v in repartitioned.items()}
 
-    async def _add_partition(
+    def _shard_partition(
         self, data: np.ndarray, partition_id: NDIndex, **kwargs: Any
-    ) -> int:
-        def _() -> dict[str, tuple[NDIndex, bytes]]:
-            """Return a mapping of worker addresses to a tuple of input partition
-            IDs and shard data.
+    ) -> dict[str, tuple[NDIndex, bytes]]:
+        out: dict[str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]] = defaultdict(
+            list
+        )
+        from itertools import product
 
+        ndsplits = product(*(axis[i] for axis, i in zip(self.split_axes, partition_id)))
 
-            TODO: Overhaul!
-            As shard data, we serialize the payload together with the sub-index of the
-            slice within the new chunk. To assemble the new chunk from its shards, it
-            needs the sub-index to know where each shard belongs within the chunk.
-            Adding the sub-index into the serialized payload on the sender allows us to
-            write the serialized payload directly to disk on the receiver.
-            """
-            out: dict[
-                str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]
-            ] = defaultdict(list)
-            from itertools import product
-
-            ndsplits = product(
-                *(axis[i] for axis, i in zip(self.split_axes, partition_id))
+        for ndsplit in ndsplits:
+            chunk_index, shard_index, ndslice = zip(*ndsplit)
+            out[self.worker_for[chunk_index]].append(
+                (chunk_index, (shard_index, data[ndslice]))
             )
-
-            for ndsplit in ndsplits:
-                chunk_index, shard_index, ndslice = zip(*ndsplit)
-                out[self.worker_for[chunk_index]].append(
-                    (chunk_index, (shard_index, data[ndslice]))
-                )
-            return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
-
-        out = await self.offload(_)
-        await self._write_to_comm(out)
-        return self.run_id
+        return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
 
     def _get_output_partition(
         self, partition_id: NDIndex, key: str, **kwargs: Any

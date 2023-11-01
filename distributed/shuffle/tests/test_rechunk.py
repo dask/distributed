@@ -131,7 +131,7 @@ async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk)
         try:
             for i, (idx, arr) in enumerate(old_chunks.items()):
                 s = shuffles[i % len(shuffles)]
-                run_ids.append(await s.add_partition(arr, idx))
+                run_ids.append(await asyncio.to_thread(s.add_partition, arr, idx))
 
             await barrier_worker.barrier(run_ids)
 

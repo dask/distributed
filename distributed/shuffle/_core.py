@@ -262,19 +262,21 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     async def _receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
-    async def add_partition(
+    def add_partition(
         self, data: _T_partition_type, partition_id: _T_partition_id
     ) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
-        return await self._add_partition(data, partition_id)
+        shards = self._shard_partition(data, partition_id)
+        sync(self._loop, self._write_to_comm, shards)
+        return self.run_id
 
     @abc.abstractmethod
-    async def _add_partition(
+    def _shard_partition(
         self, data: _T_partition_type, partition_id: _T_partition_id
-    ) -> int:
-        """Add an input partition to the shuffle run"""
+    ) -> dict[str, tuple[_T_partition_id, bytes]]:
+        """Shard an input partition by the assigned output workers"""
 
     def get_output_partition(
         self, partition_id: _T_partition_id, key: str, **kwargs: Any

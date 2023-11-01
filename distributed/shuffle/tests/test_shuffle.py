@@ -1653,7 +1653,7 @@ async def test_basic_lowlevel_shuffle(
         try:
             for ix, df in enumerate(dfs):
                 s = shuffles[ix % len(shuffles)]
-                run_ids.append(await s.add_partition(df, ix))
+                run_ids.append(await asyncio.to_thread(s.add_partition, df, ix))
 
             await barrier_worker.barrier(run_ids=run_ids)
 
@@ -1733,9 +1733,9 @@ async def test_error_offload(tmp_path, loop_in_thread):
             disk=True,
         )
         try:
-            await sB.add_partition(dfs[0], 0)
+            sB.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during deserialization"):
-                await sB.add_partition(dfs[1], 1)
+                sB.add_partition(dfs[1], 1)
                 await sB.barrier(run_ids=[sB.run_id, sB.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
@@ -1789,7 +1789,7 @@ async def test_error_send(tmp_path, loop_in_thread):
             disk=True,
         )
         try:
-            await sA.add_partition(dfs[0], 0)
+            sA.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during send"):
                 await sA.barrier(run_ids=[sA.run_id])
         finally:
@@ -1844,7 +1844,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
             disk=True,
         )
         try:
-            await sB.add_partition(dfs[0], 0)
+            sB.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during receive"):
                 await sB.barrier(run_ids=[sB.run_id])
         finally:
