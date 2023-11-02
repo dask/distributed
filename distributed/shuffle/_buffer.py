@@ -304,13 +304,13 @@ class AsyncShardsBuffer(Generic[ShardType]):
     _exception: Exception | None
     _active_flushes: int
     _flush_condition: asyncio.Condition
+    _locks: defaultdict[str, asyncio.Lock]
 
     def __init__(
         self,
         memory_limiter: ResourceLimiter,
         max_message_size: int = -1,
     ) -> None:
-        self._accepts_input = True
         self.shards = defaultdict(_List)
         self.sizes = defaultdict(int)
         self.memory_limiter = memory_limiter
@@ -325,6 +325,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
         self.bytes_memory = 0
         self.bytes_written = 0
         self.bytes_read = 0
+        self._locks = defaultdict(asyncio.Lock)
 
     def heartbeat(self) -> dict[str, Any]:
         return {
@@ -409,12 +410,16 @@ class AsyncShardsBuffer(Generic[ShardType]):
             start = time()
             try:
                 self._active_flushes += 1
-                await self._write(key, data)
+                async with self._locks[key]:
+                    await self._write(key, data)
             except Exception as e:
                 if not self._state == "erred":
                     self._exception = e
                     self._state = "erred"
                     self.shards.clear()
+                    total_size = sum(self.sizes.values())
+                    self.sizes.clear()
+                    await self.memory_limiter.decrease(total_size)
             finally:
                 async with self._flush_condition:
                     self._active_flushes -= 1

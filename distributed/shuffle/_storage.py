@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import pathlib
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable
 
 from distributed.shuffle._buffer import AsyncShardsBuffer
@@ -49,6 +50,7 @@ class StorageBuffer(AsyncShardsBuffer):
         directory: str | pathlib.Path,
         write: Callable[[Any, pathlib.Path], None],
         read: Callable[[pathlib.Path], tuple[Any, int]],
+        executor: ThreadPoolExecutor,
         memory_limiter: ResourceLimiter,
     ):
         super().__init__(
@@ -57,10 +59,10 @@ class StorageBuffer(AsyncShardsBuffer):
         )
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
-        self._closed = False
         self._write_fn = write
         self._read = read
         self._directory_lock = ReadWriteLock()
+        self._executor = executor
 
     async def _write(self, id: str, shards: list[pa.Table]) -> None:
         """Write one buffer to file
@@ -82,9 +84,8 @@ class StorageBuffer(AsyncShardsBuffer):
                 # We only need shared (i.e., read) access to the directory to write
                 # to a file inside of it.
                 with self._directory_lock.read():
-                    if self._closed:
-                        raise RuntimeError("Already closed")
-                    await asyncio.to_thread(
+                    await asyncio.get_running_loop().run_in_executor(
+                        self._executor,
                         self._write_fn,
                         shards,
                         (self.directory / str(id)).resolve(),
@@ -102,8 +103,8 @@ class StorageBuffer(AsyncShardsBuffer):
         try:
             with self.time("read"):
                 with self._directory_lock.read():
-                    if self._closed:
-                        raise RuntimeError("Already closed")
+                    if self._state != "flushed":
+                        raise RuntimeError("Can't read")
                     data, size = self._read((self.directory / str(id)).resolve())
         except FileNotFoundError:
             raise KeyError(id)
@@ -118,6 +119,5 @@ class StorageBuffer(AsyncShardsBuffer):
         await super().close()
 
         with self._directory_lock.write():
-            self._closed = True
             with contextlib.suppress(FileNotFoundError):
                 shutil.rmtree(self.directory)

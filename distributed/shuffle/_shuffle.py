@@ -443,6 +443,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             write=self.write,
             read=self.read,
             memory_limiter=memory_limiter_disk if disk else ResourceLimiter(None),
+            executor=executor,
         )
 
         super().__init__(
