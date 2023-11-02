@@ -304,6 +304,8 @@ class AsyncShardsBuffer(Generic[ShardType]):
     _exception: Exception | None
     _active_flushes: int
     _flush_condition: asyncio.Condition
+    # FIXME: This is ugly but it is used to avoid flushing the same key multiple times without
+    # blocking adding to it
     _flushing_sizes: dict[str, int]
 
     def __init__(
