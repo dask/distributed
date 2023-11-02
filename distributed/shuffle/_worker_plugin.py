@@ -336,9 +336,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         **kwargs: Any,
     ) -> int:
         shuffle_run = self.get_or_create_shuffle(spec)
-        return sync(
-            self.worker.loop,
-            shuffle_run.add_partition,
+        return shuffle_run.add_partition(
             data=data,
             partition_id=partition_id,
             **kwargs,
@@ -428,9 +426,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         """
         shuffle_run = self.get_shuffle_run(shuffle_id, run_id)
         key = thread_state.key
-        return sync(
-            self.worker.loop,
-            shuffle_run.get_output_partition,
+        return shuffle_run.get_output_partition(
             partition_id=partition_id,
             key=key,
             meta=meta,

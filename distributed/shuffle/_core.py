@@ -14,6 +14,8 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
 
+from tornado.ioloop import IOLoop
+
 import dask.config
 from dask.typing import Key
 from dask.utils import parse_timedelta
@@ -26,6 +28,7 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
+from distributed.utils import sync
 from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
@@ -58,6 +61,12 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     _disk_buffer: DiskShardsBuffer | MemoryShardsBuffer
     _comm_buffer: CommShardsBuffer
     diagnostics: dict[str, float]
+    received: set[_T_partition_id]
+    total_recvd: int
+    start_time: float
+    _exception: Exception | None
+    _closed_event: asyncio.Event
+    _loop: IOLoop
 
     def __init__(
         self,
@@ -71,6 +80,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
         disk: bool,
+        loop: IOLoop,
     ):
         self.id = id
         self.run_id = run_id
@@ -94,13 +104,14 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
 
-        self.diagnostics: dict[str, float] = defaultdict(float)
+        self.diagnostics = defaultdict(float)
         self.transferred = False
-        self.received: set[_T_partition_id] = set()
+        self.received = set()
         self.total_recvd = 0
         self.start_time = time.time()
-        self._exception: Exception | None = None
+        self._exception = None
         self._closed_event = asyncio.Event()
+        self._loop = loop
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: id={self.id!r}, run_id={self.run_id!r}, local_address={self.local_address!r}, closed={self.closed!r}, transferred={self.transferred!r}>"
@@ -251,32 +262,34 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     async def _receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
-    async def add_partition(
+    def add_partition(
         self, data: _T_partition_type, partition_id: _T_partition_id
     ) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
-        return await self._add_partition(data, partition_id)
+        shards = self._shard_partition(data, partition_id)
+        sync(self._loop, self._write_to_comm, shards)
+        return self.run_id
 
     @abc.abstractmethod
-    async def _add_partition(
+    def _shard_partition(
         self, data: _T_partition_type, partition_id: _T_partition_id
-    ) -> int:
-        """Add an input partition to the shuffle run"""
+    ) -> dict[str, tuple[_T_partition_id, bytes]]:
+        """Shard an input partition by the assigned output workers"""
 
-    async def get_output_partition(
+    def get_output_partition(
         self, partition_id: _T_partition_id, key: str, **kwargs: Any
     ) -> _T_partition_type:
         self.raise_if_closed()
-        await self._ensure_output_worker(partition_id, key)
+        sync(self._loop, self._ensure_output_worker, partition_id, key)
         if not self.transferred:
             raise RuntimeError("`get_output_partition` called before barrier task")
-        await self.flush_receive()
-        return await self._get_output_partition(partition_id, key, **kwargs)
+        sync(self._loop, self.flush_receive)
+        return self._get_output_partition(partition_id, key, **kwargs)
 
     @abc.abstractmethod
-    async def _get_output_partition(
+    def _get_output_partition(
         self, partition_id: _T_partition_id, key: str, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""

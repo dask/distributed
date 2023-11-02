@@ -13,6 +13,8 @@ da = pytest.importorskip("dask.array")
 
 from concurrent.futures import ThreadPoolExecutor
 
+from tornado.ioloop import IOLoop
+
 import dask
 from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
@@ -71,6 +73,7 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
             disk=disk,
+            loop=loop,
         )
         self.shuffles[name] = s
         return s
@@ -83,9 +86,8 @@ from itertools import product
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
 @pytest.mark.parametrize("disk", [True, False])
 @gen_test()
-async def test_lowlevel_rechunk(
-    tmp_path, loop_in_thread, n_workers, barrier_first_worker, disk
-):
+async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk):
+    loop = IOLoop.current()
     old = ((1, 2, 3, 4), (5,) * 6)
     new = ((5, 5), (12, 18))
 
@@ -115,7 +117,7 @@ async def test_lowlevel_rechunk(
                     old=old,
                     new=new,
                     directory=tmp_path,
-                    loop=loop_in_thread,
+                    loop=loop,
                     disk=disk,
                 )
             )
@@ -129,7 +131,7 @@ async def test_lowlevel_rechunk(
         try:
             for i, (idx, arr) in enumerate(old_chunks.items()):
                 s = shuffles[i % len(shuffles)]
-                run_ids.append(await s.add_partition(arr, idx))
+                run_ids.append(await asyncio.to_thread(s.add_partition, arr, idx))
 
             await barrier_worker.barrier(run_ids)
 
@@ -148,7 +150,9 @@ async def test_lowlevel_rechunk(
             all_chunks = np.empty(tuple(len(dim) for dim in new), dtype="O")
             for ix, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_chunks[ix] = await s.get_output_partition(ix, f"key-{ix}")
+                all_chunks[ix] = await asyncio.to_thread(
+                    s.get_output_partition, ix, f"key-{ix}"
+                )
 
         finally:
             await asyncio.gather(*[s.close() for s in shuffles])

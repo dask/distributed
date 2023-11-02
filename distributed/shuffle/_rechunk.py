@@ -106,6 +106,8 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from tornado.ioloop import IOLoop
+
 import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
@@ -338,6 +340,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
         disk: bool,
+        loop: IOLoop,
     ):
         super().__init__(
             id=id,
@@ -350,6 +353,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
             disk=disk,
+            loop=loop,
         )
         self.old = old
         self.new = new
@@ -391,49 +395,28 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
                 repartitioned[id].append(shard)
         return {k: pickle.dumps(v) for k, v in repartitioned.items()}
 
-    async def _add_partition(
+    def _shard_partition(
         self, data: np.ndarray, partition_id: NDIndex, **kwargs: Any
-    ) -> int:
-        def _() -> dict[str, tuple[NDIndex, bytes]]:
-            """Return a mapping of worker addresses to a tuple of input partition
-            IDs and shard data.
+    ) -> dict[str, tuple[NDIndex, bytes]]:
+        out: dict[str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]] = defaultdict(
+            list
+        )
+        from itertools import product
 
+        ndsplits = product(*(axis[i] for axis, i in zip(self.split_axes, partition_id)))
 
-            TODO: Overhaul!
-            As shard data, we serialize the payload together with the sub-index of the
-            slice within the new chunk. To assemble the new chunk from its shards, it
-            needs the sub-index to know where each shard belongs within the chunk.
-            Adding the sub-index into the serialized payload on the sender allows us to
-            write the serialized payload directly to disk on the receiver.
-            """
-            out: dict[
-                str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]
-            ] = defaultdict(list)
-            from itertools import product
-
-            ndsplits = product(
-                *(axis[i] for axis, i in zip(self.split_axes, partition_id))
+        for ndsplit in ndsplits:
+            chunk_index, shard_index, ndslice = zip(*ndsplit)
+            out[self.worker_for[chunk_index]].append(
+                (chunk_index, (shard_index, data[ndslice]))
             )
+        return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
 
-            for ndsplit in ndsplits:
-                chunk_index, shard_index, ndslice = zip(*ndsplit)
-                out[self.worker_for[chunk_index]].append(
-                    (chunk_index, (shard_index, data[ndslice]))
-                )
-            return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
-
-        out = await self.offload(_)
-        await self._write_to_comm(out)
-        return self.run_id
-
-    async def _get_output_partition(
+    def _get_output_partition(
         self, partition_id: NDIndex, key: str, **kwargs: Any
     ) -> np.ndarray:
-        def _(partition_id: NDIndex) -> np.ndarray:
-            data = self._read_from_disk(partition_id)
-            return convert_chunk(data)
-
-        return await self.offload(_, partition_id)
+        data = self._read_from_disk(partition_id)
+        return convert_chunk(data)
 
     def deserialize(self, buffer: bytes) -> Any:
         result = pickle.loads(buffer)
@@ -486,6 +469,7 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
             memory_limiter_disk=plugin.memory_limiter_disk,
             memory_limiter_comms=plugin.memory_limiter_comms,
             disk=self.disk,
+            loop=plugin.worker.loop,
         )
 
 

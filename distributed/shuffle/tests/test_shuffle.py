@@ -15,6 +15,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from tornado.ioloop import IOLoop
 
 from dask.utils import key_split
 
@@ -1585,6 +1586,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
             disk=disk,
+            loop=loop,
         )
         self.shuffles[name] = s
         return s
@@ -1600,7 +1602,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 @gen_test()
 async def test_basic_lowlevel_shuffle(
     tmp_path,
-    loop_in_thread,
     n_workers,
     n_input_partitions,
     npartitions,
@@ -1608,6 +1609,8 @@ async def test_basic_lowlevel_shuffle(
     disk,
 ):
     pa = pytest.importorskip("pyarrow")
+
+    loop = IOLoop.current()
 
     dfs = []
     rows_per_df = 10
@@ -1636,7 +1639,7 @@ async def test_basic_lowlevel_shuffle(
                     meta=meta,
                     worker_for_mapping=worker_for_mapping,
                     directory=tmp_path,
-                    loop=loop_in_thread,
+                    loop=loop,
                     disk=disk,
                 )
             )
@@ -1650,7 +1653,7 @@ async def test_basic_lowlevel_shuffle(
         try:
             for ix, df in enumerate(dfs):
                 s = shuffles[ix % len(shuffles)]
-                run_ids.append(await s.add_partition(df, ix))
+                run_ids.append(await asyncio.to_thread(s.add_partition, df, ix))
 
             await barrier_worker.barrier(run_ids=run_ids)
 
@@ -1669,7 +1672,11 @@ async def test_basic_lowlevel_shuffle(
             all_parts = []
             for part, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_parts.append(s.get_output_partition(part, f"key-{part}", meta=meta))
+                all_parts.append(
+                    asyncio.to_thread(
+                        s.get_output_partition, part, f"key-{part}", meta=meta
+                    )
+                )
 
             all_parts = await asyncio.gather(*all_parts)
 
@@ -1726,9 +1733,9 @@ async def test_error_offload(tmp_path, loop_in_thread):
             disk=True,
         )
         try:
-            await sB.add_partition(dfs[0], 0)
+            sB.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during deserialization"):
-                await sB.add_partition(dfs[1], 1)
+                sB.add_partition(dfs[1], 1)
                 await sB.barrier(run_ids=[sB.run_id, sB.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
@@ -1782,7 +1789,7 @@ async def test_error_send(tmp_path, loop_in_thread):
             disk=True,
         )
         try:
-            await sA.add_partition(dfs[0], 0)
+            sA.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during send"):
                 await sA.barrier(run_ids=[sA.run_id])
         finally:
@@ -1837,7 +1844,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
             disk=True,
         )
         try:
-            await sB.add_partition(dfs[0], 0)
+            sB.add_partition(dfs[0], 0)
             with pytest.raises(RuntimeError, match="Error during receive"):
                 await sB.barrier(run_ids=[sB.run_id])
         finally:
