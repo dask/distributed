@@ -6,7 +6,7 @@ import pathlib
 import shutil
 from typing import TYPE_CHECKING, Any, Callable
 
-from distributed.shuffle._buffer import ShardsBuffer
+from distributed.shuffle._buffer import AsyncShardsBuffer
 from distributed.shuffle._disk import ReadWriteLock
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-class StorageBuffer(ShardsBuffer):
+class StorageBuffer(AsyncShardsBuffer):
     """Accept, buffer, and write many small objects to many files
 
     This takes in lots of small objects, writes them to a local directory, and
@@ -54,16 +54,15 @@ class StorageBuffer(ShardsBuffer):
         super().__init__(
             memory_limiter=memory_limiter,
             # Disk is not able to run concurrently atm
-            concurrency_limit=1,
         )
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
         self._closed = False
-        self._write = write
+        self._write_fn = write
         self._read = read
         self._directory_lock = ReadWriteLock()
 
-    async def _process(self, id: str, shards: list[pa.Table]) -> None:
+    async def _write(self, id: str, shards: list[pa.Table]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -86,16 +85,19 @@ class StorageBuffer(ShardsBuffer):
                     if self._closed:
                         raise RuntimeError("Already closed")
                     await asyncio.to_thread(
-                        self._write,
+                        self._write_fn,
                         shards,
                         (self.directory / str(id)).resolve(),
                     )
 
     def read(self, id: str) -> Any:
         """Read a complete file back into memory"""
-        self.raise_on_exception()
-        if not self._inputs_done:
-            raise RuntimeError("Tried to read from file before done.")
+        if self._state == "erred":
+            assert self._exception
+            raise self._exception
+
+        if not self._state == "flushed":
+            raise RuntimeError(f"Tried to read from a {self._state} buffer.")
 
         try:
             with self.time("read"):

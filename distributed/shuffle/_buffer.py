@@ -5,7 +5,9 @@ import contextlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterator, Sized
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
+
+from typing_extensions import TypeAlias
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
@@ -15,6 +17,9 @@ logger = logging.getLogger("distributed.shuffle")
 
 ShardType = TypeVar("ShardType", bound=Sized)
 T = TypeVar("T")
+
+
+BufferState: TypeAlias = Literal["open", "flushing", "flushed", "erred", "closed"]
 
 
 class _List(list[T]):
@@ -250,6 +255,238 @@ class ShardsBuffer(Generic[ShardType]):
         await asyncio.gather(*self._tasks)
 
     async def __aenter__(self) -> ShardsBuffer:
+        return self
+
+    async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:
+        await self.close()
+
+    @contextlib.contextmanager
+    def time(self, name: str) -> Iterator[None]:
+        start = time()
+        yield
+        stop = time()
+        self.diagnostics[name] += stop - start
+
+
+class AsyncShardsBuffer(Generic[ShardType]):
+    """A buffer for P2P shuffle
+
+    The objects to buffer are typically bytes belonging to certain shards.
+    Typically the buffer is implemented on sending and receiving end.
+
+    The buffer allows for concurrent writing and buffers shards to reduce overhead of writing.
+
+    The shards are typically provided in a format like::
+
+        {
+            "bucket-0": [b"shard1", b"shard2"],
+            "bucket-1": [b"shard1", b"shard2"],
+        }
+
+    Buckets typically correspond to output partitions.
+
+    If exceptions occur during writing, the buffer is automatically closed. Subsequent attempts to write will raise the same exception.
+    Flushing will not raise an exception. To ensure that the buffer finished successfully, please call `ShardsBuffer.raise_on_exception`
+    """
+
+    shards: defaultdict[str, _List[ShardType]]
+    sizes: defaultdict[str, int]
+    memory_limiter: ResourceLimiter
+    diagnostics: dict[str, float]
+    max_message_size: int
+
+    bytes_total: int
+    bytes_memory: int
+    bytes_written: int
+    bytes_read: int
+
+    _state: BufferState
+    _exception: Exception | None
+    _active_flushes: int
+    _flush_event: asyncio.Event
+
+    def __init__(
+        self,
+        memory_limiter: ResourceLimiter,
+        max_message_size: int = -1,
+    ) -> None:
+        self._accepts_input = True
+        self.shards = defaultdict(_List)
+        self.sizes = defaultdict(int)
+        self.memory_limiter = memory_limiter
+        self.diagnostics: dict[str, float] = defaultdict(float)
+        self._flush_event = asyncio.Event()
+        self._state = "open"
+        self._active_flushes = 0
+        self._exception = None
+        self.max_message_size = max_message_size
+
+        self.bytes_total = 0
+        self.bytes_memory = 0
+        self.bytes_written = 0
+        self.bytes_read = 0
+
+    def heartbeat(self) -> dict[str, Any]:
+        return {
+            "memory": self.bytes_memory,
+            "total": self.bytes_total,
+            "buckets": len(self.shards),
+            "written": self.bytes_written,
+            "read": self.bytes_read,
+            "diagnostics": self.diagnostics,
+            "memory_limit": self.memory_limiter.limit,
+        }
+
+    async def _write(self, id: str, shards: list[ShardType]) -> None:
+        raise NotImplementedError()
+
+    @property
+    def empty(self) -> bool:
+        return not self.shards
+
+    async def write(self, data: dict[str, ShardType]) -> None:
+        """
+        Writes objects into the local buffers, blocks until ready for more
+
+        Parameters
+        ----------
+        data: dict
+            A dictionary mapping destinations to the object that should
+            be written to that destination
+
+        Notes
+        -----
+        If this buffer has a memory limiter configured, then it will
+        apply back-pressure to the sender (blocking further receives)
+        if local resource usage hits the limit, until such time as the
+        resource usage drops.
+
+        """
+        self._raise_if_erred()
+
+        if not self._state == "open":
+            raise RuntimeError(
+                f"{self} is no longer open for new data, it is {self._state}."
+            )
+
+        if not data:
+            return
+
+        # TODO: sizeof() is expensive, we want to avoid this
+        sizes = {worker: sizeof(shard) for worker, shard in data.items()}
+        total_batch_size = sum(sizes.values())
+        self.bytes_memory += total_batch_size
+        self.bytes_total += total_batch_size
+
+        self.memory_limiter.increase(total_batch_size)
+
+        for worker, shard in data.items():
+            self.shards[worker].append(shard)
+            self.sizes[worker] += sizes[worker]
+        del data
+
+        if self.memory_limiter.full:
+            # TODO: We probably want to prevent flushing a key that's already being flushed
+            largest_key = max(self.sizes, key=self.sizes.__getitem__)
+            await self.flush_key(largest_key)
+
+        # Apply back-pressure
+        await self.memory_limiter.wait_for_available()
+
+    def _raise_if_erred(self) -> None:
+        if self._state == "erred":
+            assert self._exception
+            raise self._exception
+
+    async def flush_key(self, key: str) -> None:
+        self._raise_if_erred()
+        if self._state not in {"open", "flushing"}:
+            raise RuntimeError(f"{self} can no longer flush data, it is {self._state}.")
+
+        try:
+            data = self.shards.pop(key)
+            size = self.sizes.pop(key)
+        except KeyError:
+            return
+        try:
+            start = time()
+            try:
+                self._active_flushes += 1
+                await self._write(key, data)
+            except Exception as e:
+                if not self._state == "erred":
+                    self._exception = e
+                    self._state = "erred"
+                    self.shards.clear()
+            finally:
+                self._active_flushes -= 1
+                if (
+                    self._state != "open"
+                    and not self.shards
+                    and self._active_flushes == 0
+                ):
+                    self._flush_event.set()
+                    self._state = "flushed"
+
+            stop = time()
+            self.diagnostics["avg_size"] = (
+                0.98 * self.diagnostics["avg_size"] + 0.02 * size
+            )
+            self.diagnostics["avg_duration"] = 0.98 * self.diagnostics[
+                "avg_duration"
+            ] + 0.02 * (stop - start)
+        finally:
+            await self.memory_limiter.decrease(size)
+            self.bytes_memory -= size
+            self.bytes_written += size
+
+    async def flush(self) -> None:
+        """Wait until all writes are finished.
+
+        This closes the buffer such that no new writes are allowed
+        """
+        if self._state in {"flushed", "closed"}:
+            return
+
+        if self._state == "flushing":
+            await self._flush_event.wait()
+            return
+
+        self._raise_if_erred()
+        assert self._state == "open", self._state
+        self._state = "flushing"
+
+        tasks = []
+        for key in self.shards:
+            tasks.append(asyncio.create_task(self.flush_key(key)))
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+        asyncio
+        self._flush_event.set()
+        self._state = "flushed"
+
+        if self._exception:
+            raise self._exception
+
+        assert not self.bytes_memory, (type(self), self.bytes_memory)
+
+    async def close(self) -> None:
+        """Flush and close the buffer.
+
+        This cleans up all allocated resources.
+        """
+        if self._state == "closed":
+            return
+
+        try:
+            await self.flush()
+        except Exception:
+            assert self._state == "erred"
+        self._state = "closed"
+        self.shards.clear()
+        self.bytes_memory = 0
+
+    async def __aenter__(self) -> AsyncShardsBuffer:
         return self
 
     async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:
