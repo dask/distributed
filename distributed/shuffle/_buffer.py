@@ -345,7 +345,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
     def empty(self) -> bool:
         return not self.shards
 
-    async def write(self, data: dict[str, ShardType]) -> None:
+    async def write(self, data: dict[str, tuple[ShardType, int]]) -> None:
         """
         Writes objects into the local buffers, blocks until ready for more
 
@@ -373,17 +373,12 @@ class AsyncShardsBuffer(Generic[ShardType]):
         if not data:
             return
 
-        # TODO: sizeof() is expensive, we want to avoid this
-        sizes = {worker: sizeof(shard) for worker, shard in data.items()}
-        total_batch_size = sum(sizes.values())
-        self.bytes_memory += total_batch_size
-        self.bytes_total += total_batch_size
-
-        self.memory_limiter.increase(total_batch_size)
-
-        for worker, shard in data.items():
+        for worker, (shard, size) in data.items():
             self.shards[worker].append(shard)
-            self.sizes[worker] += sizes[worker]
+            self.sizes[worker] += size
+            self.bytes_memory += size
+            self.bytes_total += size
+            self.memory_limiter.increase(size)
         del data
 
         while self.memory_limiter.full and self.sizes:

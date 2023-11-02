@@ -182,7 +182,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
-    async def _write_to_disk(self, data: dict[NDIndex, bytes]) -> None:
+    async def _write_to_disk(self, data: dict[NDIndex, Any]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(
             {"_".join(str(i) for i in k): v for k, v in data.items()}

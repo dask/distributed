@@ -490,14 +490,17 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, bytes]:
+    def _repartition_buffers(
+        self, data: list[bytes]
+    ) -> dict[NDIndex, tuple[pa.Table, int]]:
         table = list_of_buffers_to_table(data)
         del data
         nrows = len(table)
+        metadata_size = sizeof(table.schema.metadata)
         groups = split_by_partition(table, self.column)
         del table
         assert sum(map(len, groups.values())) == nrows
-        return {(k,): v for k, v in groups.items()}
+        return {(k,): (v, v.nbytes + metadata_size) for k, v in groups.items()}
 
     def _shard_partition(
         self,
