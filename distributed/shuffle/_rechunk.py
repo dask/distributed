@@ -431,7 +431,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         result = pickle.loads(buffer)
         return result
 
-    def write(self, data: list[np.ndarray], path: Path) -> None:
+    def write(self, data: list[np.ndarray], path: Path) -> int:
         raise NotImplementedError()
 
     def read(self, path: Path) -> tuple[Any, int]:

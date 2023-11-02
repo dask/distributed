@@ -286,7 +286,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Get an output partition to the shuffle run"""
 
     @abc.abstractmethod
-    def write(self, data: list[_T_partition_type], path: Path) -> None:
+    def write(self, data: list[_T_partition_type], path: Path) -> int:
         """Write shards to disk"""
 
     @abc.abstractmethod

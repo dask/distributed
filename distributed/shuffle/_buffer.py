@@ -338,7 +338,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
             "memory_limit": self.memory_limiter.limit,
         }
 
-    async def _write(self, id: str, shards: list[ShardType]) -> None:
+    async def _write(self, id: str, shards: list[ShardType]) -> int:
         raise NotImplementedError()
 
     @property
@@ -365,7 +365,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
         """
         self._raise_if_erred()
 
-        if not self._state == "open":
+        if self._state != "open":
             raise RuntimeError(
                 f"{self} is no longer open for new data, it is {self._state}."
             )
@@ -386,10 +386,11 @@ class AsyncShardsBuffer(Generic[ShardType]):
             self.sizes[worker] += sizes[worker]
         del data
 
-        while self.memory_limiter.full:
+        while self.memory_limiter.full and self.sizes:
             # TODO: We probably want to prevent flushing a key that's already being flushed
             largest_key = max(self.sizes, key=self.sizes.__getitem__)
             await self.flush_key(largest_key)
+        await self.memory_limiter.wait_for_available()
 
     def _raise_if_erred(self) -> None:
         if self._state == "erred":
@@ -406,12 +407,13 @@ class AsyncShardsBuffer(Generic[ShardType]):
             size = self.sizes.pop(key)
         except KeyError:
             return
+        bytes_written = 0
         try:
             start = time()
             try:
                 self._active_flushes += 1
                 async with self._locks[key]:
-                    await self._write(key, data)
+                    bytes_written = await self._write(key, data)
             except Exception as e:
                 if not self._state == "erred":
                     self._exception = e
@@ -435,7 +437,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
         finally:
             await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
-            self.bytes_written += size
+            self.bytes_written += bytes_written
 
     async def flush(self) -> None:
         """Wait until all writes are finished.
@@ -457,10 +459,6 @@ class AsyncShardsBuffer(Generic[ShardType]):
         assert self._state == "open", self._state
         self._state = "flushing"
 
-        await asyncio.gather(
-            *(self.flush_key(key) for key in self.shards), return_exceptions=True
-        )
-
         async with self._flush_condition:
             await self._flush_condition.wait_for(lambda: self._active_flushes == 0)
             if self._state == "flushing":
@@ -469,8 +467,6 @@ class AsyncShardsBuffer(Generic[ShardType]):
 
         if self._exception:
             raise self._exception
-
-        assert not self.bytes_memory, (type(self), self.bytes_memory)
 
     async def close(self) -> None:
         """Flush and close the buffer.

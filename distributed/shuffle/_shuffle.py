@@ -530,8 +530,8 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
 
-    def write(self, data: list[pd.DataFrame], path: Path) -> None:
-        write_to_disk(data, path)
+    def write(self, data: list[pd.DataFrame], path: Path) -> int:
+        return write_to_disk(data, path)
 
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)

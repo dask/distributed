@@ -48,7 +48,7 @@ class StorageBuffer(AsyncShardsBuffer):
     def __init__(
         self,
         directory: str | pathlib.Path,
-        write: Callable[[Any, pathlib.Path], None],
+        write: Callable[[Any, pathlib.Path], int],
         read: Callable[[pathlib.Path], tuple[Any, int]],
         executor: ThreadPoolExecutor,
         memory_limiter: ResourceLimiter,
@@ -64,7 +64,7 @@ class StorageBuffer(AsyncShardsBuffer):
         self._directory_lock = ReadWriteLock()
         self._executor = executor
 
-    async def _write(self, id: str, shards: list[pa.Table]) -> None:
+    async def _write(self, id: str, shards: list[pa.Table]) -> int:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -84,7 +84,7 @@ class StorageBuffer(AsyncShardsBuffer):
                 # We only need shared (i.e., read) access to the directory to write
                 # to a file inside of it.
                 with self._directory_lock.read():
-                    await asyncio.get_running_loop().run_in_executor(
+                    return await asyncio.get_running_loop().run_in_executor(
                         self._executor,
                         self._write_fn,
                         shards,
@@ -105,12 +105,14 @@ class StorageBuffer(AsyncShardsBuffer):
                 with self._directory_lock.read():
                     if self._state != "flushed":
                         raise RuntimeError("Can't read")
-                    data, size = self._read((self.directory / str(id)).resolve())
+                    data, bytes_read = self._read((self.directory / str(id)).resolve())
+                    self.bytes_read += bytes_read
         except FileNotFoundError:
-            raise KeyError(id)
-
+            data = []
+        data += self.shards.get(id, [])
+        bytes_memory = self.sizes.get(id, 0)
+        self.bytes_memory -= bytes_memory
         if data:
-            self.bytes_read += size
             return data
         else:
             raise KeyError(id)
