@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     import numpy
 
 
-def get_host_array(a: numpy.ndarray) -> numpy.ndarray:
+def get_host_array(a: numpy.ndarray) -> numpy.ndarray | bytes | bytearray:
     """Given a numpy array, find the underlying memory allocated by either
     distributed.protocol.utils.host_array or internally by numpy
     """
@@ -22,9 +22,7 @@ def get_host_array(a: numpy.ndarray) -> numpy.ndarray:
                 o = o.base
             else:
                 return o
-        else:
-            # distributed.comm.utils.host_array() uses numpy.empty()
-            raise TypeError(
-                "Array uses a buffer allocated neither internally nor by host_array: "
-                f"{type(o)}"
-            )
+        elif isinstance(o, (bytes, bytearray)):
+            return o
+        else:  # pragma: nocover
+            raise TypeError(f"Unexpected numpy buffer: {o!r}")

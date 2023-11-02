@@ -455,9 +455,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
-    async def receive(self, data: list[tuple[int, bytes]]) -> None:
-        await self._receive(data)
-
     async def _receive(self, data: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
 

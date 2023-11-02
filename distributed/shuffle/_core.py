@@ -4,19 +4,21 @@ import abc
 import asyncio
 import contextlib
 import itertools
+import pickle
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
 
 from tornado.ioloop import IOLoop
 
 import dask.config
+from dask.core import flatten
 from dask.typing import Key
 from dask.utils import parse_timedelta
 
@@ -140,7 +142,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         return self.run_id
 
     async def _send(
-        self, address: str, shards: list[tuple[_T_partition_id, Any]]
+        self, address: str, shards: list[tuple[_T_partition_id, Any]] | bytes
     ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
@@ -159,8 +161,19 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         retry_delay_max = parse_timedelta(
             dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
         )
+
+        if _mean_shard_size(shards) < 65536:
+            # Don't send buffers individually over the tcp comms.
+            # Instead, merge everything into an opaque bytes blob, send it all at once,
+            # and unpickle it on the other side.
+            # Performance tests informing the size threshold:
+            # https://github.com/dask/distributed/pull/8318
+            shards_or_bytes: list | bytes = pickle.dumps(shards)
+        else:
+            shards_or_bytes = shards
+
         return await retry(
-            partial(self._send, address, shards),
+            partial(self._send, address, shards_or_bytes),
             count=retry_count,
             delay_min=retry_delay_min,
             delay_max=retry_delay_max,
@@ -239,7 +252,10 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.raise_if_closed()
         return self._disk_buffer.read("_".join(str(i) for i in id))
 
-    async def receive(self, data: list[tuple[_T_partition_id, Any]]) -> None:
+    async def receive(self, data: list[tuple[_T_partition_id, Any]] | bytes) -> None:
+        if isinstance(data, bytes):
+            # Unpack opaque blob. See send()
+            data = cast(list[tuple[_T_partition_id, Any]], pickle.loads(data))
         await self._receive(data)
 
     async def _ensure_output_worker(self, i: _T_partition_id, key: str) -> None:
@@ -422,3 +438,18 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
         raise Reschedule()
     except Exception as e:
         raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
+
+
+def _mean_shard_size(shards: Iterable) -> int:
+    """Return estimated mean size in bytes of each shard"""
+    size = 0
+    count = 0
+    for shard in flatten(shards, container=(tuple, list)):
+        if not isinstance(shard, int):
+            # This also asserts that shard is a Buffer and that we didn't forget
+            # a container or metadata type above
+            size += memoryview(shard).nbytes
+            count += 1
+            if count == 10:
+                break
+    return size // count if count else 0

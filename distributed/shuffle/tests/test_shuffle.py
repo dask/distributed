@@ -1816,7 +1816,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
 
     class ErrorReceive(DataFrameShuffleRun):
-        async def receive(self, data: list[tuple[int, bytes]]) -> None:
+        async def _receive(self, data: list[tuple[int, bytes]]) -> None:
             raise RuntimeError("Error during receive")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
