@@ -4,12 +4,15 @@ import contextlib
 import pathlib
 import shutil
 import threading
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any
+
+from toolz import concat
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._pickle import pickle_bytelist
 from distributed.utils import Deadline, log_errors
 
 
@@ -135,7 +138,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self._read = read
         self._directory_lock = ReadWriteLock()
 
-    async def _process(self, id: str, shards: list[bytes]) -> None:
+    async def _process(self, id: str, shards: list[Any]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -157,11 +160,18 @@ class DiskShardsBuffer(ShardsBuffer):
                 with self._directory_lock.read():
                     if self._closed:
                         raise RuntimeError("Already closed")
-                    with open(
-                        self.directory / str(id), mode="ab", buffering=100_000_000
-                    ) as f:
-                        for shard in shards:
-                            f.write(shard)
+
+                    frames: Iterable[bytes | bytearray | memoryview]
+
+                    if not shards or isinstance(shards[0], bytes):
+                        # Manually serialized dataframes
+                        frames = shards
+                    else:
+                        # Unserialized numpy arrays
+                        frames = concat(pickle_bytelist(shard) for shard in shards)
+
+                    with open(self.directory / str(id), mode="ab") as f:
+                        f.writelines(frames)
 
     def read(self, id: str) -> Any:
         """Read a complete file back into memory"""

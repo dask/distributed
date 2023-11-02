@@ -140,7 +140,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         return self.run_id
 
     async def _send(
-        self, address: str, shards: list[tuple[_T_partition_id, bytes]]
+        self, address: str, shards: list[tuple[_T_partition_id, Any]]
     ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
@@ -150,7 +150,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         )
 
     async def send(
-        self, address: str, shards: list[tuple[_T_partition_id, bytes]]
+        self, address: str, shards: list[tuple[_T_partition_id, Any]]
     ) -> None:
         retry_count = dask.config.get("distributed.p2p.comm.retry.count")
         retry_delay_min = parse_timedelta(
@@ -186,12 +186,12 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         }
 
     async def _write_to_comm(
-        self, data: dict[str, tuple[_T_partition_id, bytes]]
+        self, data: dict[str, tuple[_T_partition_id, Any]]
     ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
-    async def _write_to_disk(self, data: dict[NDIndex, bytes]) -> None:
+    async def _write_to_disk(self, data: dict[NDIndex, Any]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(
             {"_".join(str(i) for i in k): v for k, v in data.items()}
@@ -239,7 +239,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.raise_if_closed()
         return self._disk_buffer.read("_".join(str(i) for i in id))
 
-    async def receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
+    async def receive(self, data: list[tuple[_T_partition_id, Any]]) -> None:
         await self._receive(data)
 
     async def _ensure_output_worker(self, i: _T_partition_id, key: str) -> None:
@@ -259,7 +259,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Get the address of the worker assigned to the output partition"""
 
     @abc.abstractmethod
-    async def _receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[_T_partition_id, Any]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
     def add_partition(
@@ -275,7 +275,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     @abc.abstractmethod
     def _shard_partition(
         self, data: _T_partition_type, partition_id: _T_partition_id
-    ) -> dict[str, tuple[_T_partition_id, bytes]]:
+    ) -> dict[str, tuple[_T_partition_id, Any]]:
         """Shard an input partition by the assigned output workers"""
 
     def get_output_partition(
@@ -299,7 +299,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Read shards from disk"""
 
     @abc.abstractmethod
-    def deserialize(self, buffer: bytes) -> Any:
+    def deserialize(self, buffer: Any) -> Any:
         """Deserialize shards"""
 
 

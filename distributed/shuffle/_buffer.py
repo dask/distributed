@@ -45,6 +45,7 @@ class ShardsBuffer(Generic[ShardType]):
 
     shards: defaultdict[str, _List[ShardType]]
     sizes: defaultdict[str, int]
+    sizes_detail: defaultdict[str, list[int]]
     concurrency_limit: int
     memory_limiter: ResourceLimiter
     diagnostics: dict[str, float]
@@ -71,6 +72,7 @@ class ShardsBuffer(Generic[ShardType]):
         self._accepts_input = True
         self.shards = defaultdict(_List)
         self.sizes = defaultdict(int)
+        self.sizes_detail = defaultdict(list)
         self._exception = None
         self.concurrency_limit = concurrency_limit
         self._inputs_done = False
@@ -149,7 +151,7 @@ class ShardsBuffer(Generic[ShardType]):
                         try:
                             shard = self.shards[part_id].pop()
                             shards.append(shard)
-                            s = sizeof(shard)
+                            s = self.sizes_detail[part_id].pop()
                             size += s
                             self.sizes[part_id] -= s
                         except IndexError:
@@ -159,6 +161,8 @@ class ShardsBuffer(Generic[ShardType]):
                                 del self.shards[part_id]
                                 assert not self.sizes[part_id]
                                 del self.sizes[part_id]
+                                assert not self.sizes_detail[part_id]
+                                del self.sizes_detail[part_id]
                 else:
                     shards = self.shards.pop(part_id)
                     size = self.sizes.pop(part_id)
@@ -201,6 +205,7 @@ class ShardsBuffer(Generic[ShardType]):
         async with self._shards_available:
             for worker, shard in data.items():
                 self.shards[worker].append(shard)
+                self.sizes_detail[worker].append(sizes[worker])
                 self.sizes[worker] += sizes[worker]
             self._shards_available.notify()
         await self.memory_limiter.wait_for_available()
