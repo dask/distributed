@@ -303,7 +303,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
     _state: BufferState
     _exception: Exception | None
     _active_flushes: int
-    _flush_event: asyncio.Event
+    _flush_condition: asyncio.Condition
 
     def __init__(
         self,
@@ -315,7 +315,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
         self.sizes = defaultdict(int)
         self.memory_limiter = memory_limiter
         self.diagnostics: dict[str, float] = defaultdict(float)
-        self._flush_event = asyncio.Event()
+        self._flush_condition = asyncio.Condition()
         self._state = "open"
         self._active_flushes = 0
         self._exception = None
@@ -385,13 +385,10 @@ class AsyncShardsBuffer(Generic[ShardType]):
             self.sizes[worker] += sizes[worker]
         del data
 
-        if self.memory_limiter.full:
+        while self.memory_limiter.full:
             # TODO: We probably want to prevent flushing a key that's already being flushed
             largest_key = max(self.sizes, key=self.sizes.__getitem__)
             await self.flush_key(largest_key)
-
-        # Apply back-pressure
-        await self.memory_limiter.wait_for_available()
 
     def _raise_if_erred(self) -> None:
         if self._state == "erred":
@@ -419,14 +416,9 @@ class AsyncShardsBuffer(Generic[ShardType]):
                     self._state = "erred"
                     self.shards.clear()
             finally:
-                self._active_flushes -= 1
-                if (
-                    self._state != "open"
-                    and not self.shards
-                    and self._active_flushes == 0
-                ):
-                    self._flush_event.set()
-                    self._state = "flushed"
+                async with self._flush_condition:
+                    self._active_flushes -= 1
+                    self._flush_condition.notify_all()
 
             stop = time()
             self.diagnostics["avg_size"] = (
@@ -449,21 +441,26 @@ class AsyncShardsBuffer(Generic[ShardType]):
             return
 
         if self._state == "flushing":
-            await self._flush_event.wait()
+            async with self._flush_condition:
+                await self._flush_condition.wait_for(
+                    lambda: self._state in {"erred", "flushed", "closed"}
+                )
+            self._raise_if_erred()
             return
 
         self._raise_if_erred()
         assert self._state == "open", self._state
         self._state = "flushing"
 
-        tasks = []
-        for key in self.shards:
-            tasks.append(asyncio.create_task(self.flush_key(key)))
+        await asyncio.gather(
+            *(self.flush_key(key) for key in self.shards), return_exceptions=True
+        )
 
-        await asyncio.gather(*tasks, return_exceptions=True)
-        asyncio
-        self._flush_event.set()
-        self._state = "flushed"
+        async with self._flush_condition:
+            await self._flush_condition.wait_for(lambda: self._active_flushes == 0)
+            if self._state == "flushing":
+                self._state = "flushed"
+            self._flush_condition.notify_all()
 
         if self._exception:
             raise self._exception

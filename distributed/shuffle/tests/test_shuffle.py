@@ -290,6 +290,9 @@ async def test_concurrent(c, s, a, b, lose_annotations):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.skip(
+    reason="This test is non-deterministic and might work if we don't remove the directory fast enough."
+)
 @gen_cluster(client=True)
 async def test_bad_disk(c, s, a, b):
     df = dask.datasets.timeseries(
