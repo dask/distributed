@@ -22,6 +22,7 @@ from dask.typing import Key
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import (
+    _copy_table,
     check_dtype_support,
     check_minimal_arrow_version,
     convert_shards,
@@ -370,6 +371,7 @@ def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
         t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
+    shards = [_copy_table(shard) for shard in shards]
     assert len(t) == sum(map(len, shards))
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))
@@ -490,9 +492,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
     def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, bytes]:
         table = list_of_buffers_to_table(data)
-        groups = split_by_partition(table, self.column)
-        assert len(table) == sum(map(len, groups.values()))
         del data
+        nrows = len(table)
+        groups = split_by_partition(table, self.column)
+        del table
+        assert sum(map(len, groups.values())) == nrows
         return {(k,): v for k, v in groups.items()}
 
     def _shard_partition(
@@ -507,6 +511,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self.meta,
             self.worker_for,
         )
+        del data
         out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
         return out
 
