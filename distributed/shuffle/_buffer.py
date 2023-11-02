@@ -304,7 +304,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
     _exception: Exception | None
     _active_flushes: int
     _flush_condition: asyncio.Condition
-    _locks: defaultdict[str, asyncio.Lock]
+    _flushing_sizes: dict[str, int]
 
     def __init__(
         self,
@@ -325,7 +325,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
         self.bytes_memory = 0
         self.bytes_written = 0
         self.bytes_read = 0
-        self._locks = defaultdict(asyncio.Lock)
+        self._flushing_sizes = {}
 
     def heartbeat(self) -> dict[str, Any]:
         return {
@@ -375,16 +375,17 @@ class AsyncShardsBuffer(Generic[ShardType]):
 
         for worker, (shard, size) in data.items():
             self.shards[worker].append(shard)
-            self.sizes[worker] += size
+            if worker in self._flushing_sizes:
+                self._flushing_sizes[worker] += size
+            else:
+                self.sizes[worker] += size
             self.bytes_memory += size
             self.bytes_total += size
             self.memory_limiter.increase(size)
         del data
 
         while self.memory_limiter.full and self.sizes:
-            # TODO: We probably want to prevent flushing a key that's already being flushed
-            largest_key = max(self.sizes, key=self.sizes.__getitem__)
-            await self.flush_key(largest_key)
+            await self.flush_largest()
         await self.memory_limiter.wait_for_available()
 
     def _raise_if_erred(self) -> None:
@@ -392,23 +393,26 @@ class AsyncShardsBuffer(Generic[ShardType]):
             assert self._exception
             raise self._exception
 
-    async def flush_key(self, key: str) -> None:
-        self._raise_if_erred()
-        if self._state not in {"open", "flushing"}:
-            raise RuntimeError(f"{self} can no longer flush data, it is {self._state}.")
-
-        try:
-            data = self.shards.pop(key)
-            size = self.sizes.pop(key)
-        except KeyError:
+    async def flush_largest(self) -> None:
+        if not self.sizes:
             return
+        largest_key = max(self.sizes, key=self.sizes.__getitem__)
+        data = self.shards.pop(largest_key)
+        size = self.sizes.pop(largest_key)
+
+        self._flushing_sizes[largest_key] = 0
+
         bytes_written = 0
         try:
+            self._raise_if_erred()
+            if self._state not in {"open", "flushing"}:
+                raise RuntimeError(
+                    f"{self} can no longer flush data, it is {self._state}."
+                )
             start = time()
             try:
                 self._active_flushes += 1
-                async with self._locks[key]:
-                    bytes_written = await self._write(key, data)
+                bytes_written = await self._write(largest_key, data)
             except Exception as e:
                 if not self._state == "erred":
                     self._exception = e
@@ -416,6 +420,7 @@ class AsyncShardsBuffer(Generic[ShardType]):
                     self.shards.clear()
                     total_size = sum(self.sizes.values())
                     self.sizes.clear()
+                    self._flushing_sizes.clear()
                     await self.memory_limiter.decrease(total_size)
             finally:
                 async with self._flush_condition:
@@ -433,6 +438,9 @@ class AsyncShardsBuffer(Generic[ShardType]):
             await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
             self.bytes_written += bytes_written
+            size_since_flush = self._flushing_sizes.pop(largest_key, 0)
+            if size_since_flush:
+                self.sizes[largest_key] = size_since_flush
 
     async def flush(self) -> None:
         """Wait until all writes are finished.
