@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from distributed.protocol.utils import merge_memoryviews, pack_frames, unpack_frames
+from distributed.protocol.utils import (
+    merge_memoryviews,
+    pack_frames,
+    pack_frames_prelude,
+    unpack_frames,
+)
 
 
 def test_pack_frames():
@@ -10,8 +15,41 @@ def test_pack_frames():
     b = pack_frames(frames)
     assert isinstance(b, bytes)
     frames2 = unpack_frames(b)
+    assert frames2 == frames
 
-    assert frames == frames2
+
+@pytest.mark.parametrize("extra", [b"456", b""])
+def test_unpack_frames_remainder(extra):
+    frames = [b"123", b"asdf"]
+    b = pack_frames(frames)
+    assert isinstance(b, bytes)
+
+    frames2 = unpack_frames(b + extra)
+    assert frames2 == frames
+
+    frames2 = unpack_frames(b + extra, remainder=True)
+    assert isinstance(frames2[-1], memoryview)
+    assert frames2 == frames + [extra]
+
+
+def test_unpack_frames_partial():
+    frames = [b"123", b"asdf"]
+    frames.insert(0, pack_frames_prelude(frames))
+
+    frames2, missing_lenghts = unpack_frames(b"".join(frames), partial=True)
+    assert frames2 == frames[1:]
+    assert missing_lenghts == []
+
+    frames2, missing_lenghts = unpack_frames(b"".join(frames[:-1]), partial=True)
+    assert frames2 == frames[1:-1]
+    assert missing_lenghts == [4]
+
+    frames2, missing_lenghts = unpack_frames(frames[0], partial=True)
+    assert frames2 == []
+    assert missing_lenghts == [3, 4]
+
+    with pytest.raises(AssertionError):
+        unpack_frames(b"".join(frames[:-1]))
 
 
 class TestMergeMemroyviews:
