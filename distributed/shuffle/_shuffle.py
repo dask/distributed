@@ -10,7 +10,6 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import toolz
 from tornado.ioloop import IOLoop
 
 import dask
@@ -299,7 +298,7 @@ def split_by_worker(
     df: pd.DataFrame,
     column: str,
     meta: pd.DataFrame,
-    worker_for: pd.Series,
+    partitions_of: dict[Any, list[int]],
 ) -> dict[Any, pa.Table]:
     """
     Split data into many arrow batches, partitioned by destination worker
@@ -309,44 +308,13 @@ def split_by_worker(
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
     df = df.astype(meta.dtypes, copy=False)
-
-    # (cudf support) Avoid pd.Series
-    constructor = df._constructor_sliced
-    assert isinstance(constructor, type)
-    worker_for = constructor(worker_for)
-    df = df.merge(
-        right=worker_for.cat.codes.rename("_worker"),
-        left_on=column,
-        right_index=True,
-        how="inner",
-    )
-    nrows = len(df)
-    if not nrows:
-        return {}
-    # assert len(df) == nrows  # Not true if some outputs aren't wanted
-    # FIXME: If we do not preserve the index something is corrupting the
-    # bytestream such that it cannot be deserialized anymore
-    t = to_pyarrow_table_dispatch(df, preserve_index=True)
-    t = t.sort_by("_worker")
-    codes = np.asarray(t["_worker"])
-    t = t.drop(["_worker"])
-    del df
-
-    splits = np.where(codes[1:] != codes[:-1])[0] + 1
-    splits = np.concatenate([[0], splits])
-
-    shards = [
-        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
-    ]
-    shards.append(t.slice(offset=splits[-1], length=None))
-
-    unique_codes = codes[splits]
+    tab = to_pyarrow_table_dispatch(df)
+    np_arr = np.asarray(df[column])
     out = {
-        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
-        worker_for.cat.categories[code]: shard
-        for code, shard in zip(unique_codes, shards)
+        worker: tab.take(np.nonzero(np.isin(np_arr, parts))[0])
+        for worker, parts in partitions_of.items()
     }
-    assert sum(map(len, out.values())) == nrows
+    assert sum(map(len, out.values())) == len(df)
     return out
 
 
@@ -356,21 +324,13 @@ def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
     """
     import numpy as np
 
-    partitions = t.select([column]).to_pandas()[column].unique()
-    partitions.sort()
-    t = t.sort_by(column)
-
-    partition = np.asarray(t[column])
-    splits = np.where(partition[1:] != partition[:-1])[0] + 1
-    splits = np.concatenate([[0], splits])
-
-    shards = [
-        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
-    ]
-    shards.append(t.slice(offset=splits[-1], length=None))
-    assert len(t) == sum(map(len, shards))
-    assert len(partitions) == len(shards)
-    return dict(zip(partitions, shards))
+    np_arr = np.asarray(t[column])
+    partitions = np.unique(np_arr)
+    shards = {
+        part_id: t.take(np.nonzero(np_arr == part_id)[0]) for part_id in partitions
+    }
+    assert len(t) == sum(map(len, shards.values()))
+    return shards
 
 
 class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
@@ -415,7 +375,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     column: str
     meta: pd.DataFrame
     partitions_of: dict[str, list[int]]
-    worker_for: pd.Series
+    worker_for: dict[int, str]
 
     def __init__(
         self,
@@ -434,8 +394,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         disk: bool,
         loop: IOLoop,
     ):
-        import pandas as pd
-
         super().__init__(
             id=id,
             run_id=run_id,
@@ -455,7 +413,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
-        self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
+        self.worker_for = worker_for
 
     async def receive(self, data: list[tuple[int, bytes]]) -> None:
         await self._receive(data)
@@ -497,7 +455,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             data,
             self.column,
             self.meta,
-            self.worker_for,
+            self.partitions_of,
         )
         out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
         return out

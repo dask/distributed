@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from asyncio import iscoroutinefunction
+from collections import defaultdict
 
 import pytest
 
@@ -54,8 +55,10 @@ def test_split_by_worker():
         worker_for_mapping[part] = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
-    worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
-    out = split_by_worker(df, "_partition", meta, worker_for)
+    partitions_of = defaultdict(list)
+    for worker, part in worker_for_mapping.items():
+        partitions_of[worker].append(part)
+    out = split_by_worker(df, "_partition", meta, partitions_of)
     assert set(out) == {"alice", "bob"}
     assert list(out["alice"].to_pandas().columns) == list(df.columns)
 
@@ -72,8 +75,8 @@ def test_split_by_worker_empty():
         }
     )
     meta = df[["x"]].head(0)
-    worker_for = pd.Series({5: "chuck"}, name="_workers").astype("category")
-    out = split_by_worker(df, "_partition", meta, worker_for)
+    partitions_of = {"chuck": [5]}
+    out = split_by_worker(df, "_partition", meta, partitions_of)
     assert out == {}
 
 
@@ -94,8 +97,11 @@ def test_split_by_worker_many_workers():
         worker_for_mapping[part] = _get_worker_for_range_sharding(
             npartitions, part, workers
         )
-    worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
-    out = split_by_worker(df, "_partition", meta, worker_for)
+
+    partitions_of = defaultdict(list)
+    for worker, part in worker_for_mapping.items():
+        partitions_of[worker].append(part)
+    out = split_by_worker(df, "_partition", meta, partitions_of)
     assert _get_worker_for_range_sharding(npartitions, 5, workers) in out
     assert _get_worker_for_range_sharding(npartitions, 0, workers) in out
     assert _get_worker_for_range_sharding(npartitions, 7, workers) in out
