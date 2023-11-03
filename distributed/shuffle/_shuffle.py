@@ -311,10 +311,11 @@ def split_by_worker(
     df = df.astype(meta.dtypes, copy=False)
     tab = to_pyarrow_table_dispatch(df, preserve_index=True)
     np_arr = np.asarray(df[column])
-    out = {
-        worker: tab.take(np.nonzero(np.isin(np_arr, parts))[0])
-        for worker, parts in partitions_of.items()
-    }
+    out = {}
+    for worker, parts in partitions_of.items():
+        split = tab.take(np.nonzero(np.isin(np_arr, parts))[0])
+        if split.num_rows > 0:
+            out[worker] = split
     assert sum(map(len, out.values())) == len(df)
     return out
 
