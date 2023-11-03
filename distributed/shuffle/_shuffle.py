@@ -308,7 +308,7 @@ def split_by_worker(
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
     df = df.astype(meta.dtypes, copy=False)
-    tab = to_pyarrow_table_dispatch(df)
+    tab = to_pyarrow_table_dispatch(df, preserve_index=True)
     np_arr = np.asarray(df[column])
     out = {
         worker: tab.take(np.nonzero(np.isin(np_arr, parts))[0])
