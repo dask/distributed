@@ -10,6 +10,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import toolz
 from tornado.ioloop import IOLoop
 
 import dask
@@ -324,13 +325,21 @@ def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
     """
     import numpy as np
 
-    np_arr = np.asarray(t[column])
-    partitions = np.unique(np_arr)
-    shards = {
-        part_id: t.take(np.nonzero(np_arr == part_id)[0]) for part_id in partitions
-    }
-    assert len(t) == sum(map(len, shards.values()))
-    return shards
+    partitions = t.select([column]).to_pandas()[column].unique()
+    partitions.sort()
+    t = t.sort_by(column)
+
+    partition = np.asarray(t[column])
+    splits = np.where(partition[1:] != partition[:-1])[0] + 1
+    splits = np.concatenate([[0], splits])
+
+    shards = [
+        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
+    ]
+    shards.append(t.slice(offset=splits[-1], length=None))
+    assert len(t) == sum(map(len, shards))
+    assert len(partitions) == len(shards)
+    return dict(zip(partitions, shards))
 
 
 class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
