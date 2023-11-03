@@ -365,9 +365,8 @@ async def read_bytes_rw(stream: IOStream, n: int) -> memoryview:
         range(0, n + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE),
     ):
         chunk = buf[i:j]
-        chunk_nbytes = chunk.nbytes
-        n = await stream.read_into(chunk)  # type: ignore[arg-type]
-        assert n == chunk_nbytes, (n, chunk_nbytes)
+        actual = await stream.read_into(chunk)  # type: ignore[arg-type]
+        assert actual == chunk.nbytes
 
     return buf
 
