@@ -475,7 +475,7 @@ class SpecCluster(Cluster):
             assert self.status == Status.running
             return self
         except Exception:
-            await self.close()
+            await self._close()
             raise
 
     def _threads_per_worker(self) -> int:
