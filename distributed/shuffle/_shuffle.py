@@ -304,16 +304,15 @@ def split_by_worker(
     """
     Split data into many arrow batches, partitioned by destination worker
     """
-    import numpy as np
+    import pyarrow.compute as pc
 
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
     df = df.astype(meta.dtypes, copy=False)
     tab = to_pyarrow_table_dispatch(df, preserve_index=True)
-    np_arr = np.asarray(df[column])
     out = {}
     for worker, parts in partitions_of.items():
-        split = tab.take(np.nonzero(np.isin(np_arr, parts))[0])
+        split = tab.filter(pc.field(column).isin(parts))
         if split.num_rows > 0:
             out[worker] = split
     assert sum(map(len, out.values())) == len(df)
