@@ -273,7 +273,6 @@ def convert_chunk(shards: list[list[tuple[NDIndex, np.ndarray]]]) -> np.ndarray:
     for sublist in shards:
         for index, shard in sublist:
             indexed[index] = shard
-    del shards
 
     subshape = [max(dim) + 1 for dim in zip(*indexed.keys())]
     assert len(indexed) == np.prod(subshape)

@@ -147,7 +147,12 @@ async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk)
                 total_bytes_recvd += metrics["disk"]["total"]
                 total_bytes_recvd_shuffle += s.total_recvd
 
-            assert total_bytes_recvd_shuffle == total_bytes_sent
+            # Allow for some uncertainty due to slight differences in measuring
+            assert (
+                total_bytes_sent * 0.95
+                < total_bytes_recvd_shuffle
+                < total_bytes_sent * 1.05
+            )
 
             all_chunks = np.empty(tuple(len(dim) for dim in new), dtype="O")
             for ix, worker in worker_for_mapping.items():

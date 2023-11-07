@@ -5,21 +5,22 @@ import contextlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterator, Sized
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
+if TYPE_CHECKING:
+    # TODO import from collections.abc (requires Python >=3.12)
+    from typing_extensions import Buffer
+else:
+    Buffer = Sized
 
-ShardType = TypeVar("ShardType", bound=Sized)
+ShardType = TypeVar("ShardType", bound=Buffer)
+
 T = TypeVar("T")
-
-
-class _List(list[T]):
-    # This ensures that the distributed.protocol will not iterate over this collection
-    pass
 
 
 class ShardsBuffer(Generic[ShardType]):
@@ -43,7 +44,7 @@ class ShardsBuffer(Generic[ShardType]):
     Flushing will not raise an exception. To ensure that the buffer finished successfully, please call `ShardsBuffer.raise_on_exception`
     """
 
-    shards: defaultdict[str, _List[ShardType]]
+    shards: defaultdict[str, list[ShardType]]
     sizes: defaultdict[str, int]
     sizes_detail: defaultdict[str, list[int]]
     concurrency_limit: int
@@ -70,7 +71,7 @@ class ShardsBuffer(Generic[ShardType]):
         max_message_size: int = -1,
     ) -> None:
         self._accepts_input = True
-        self.shards = defaultdict(_List)
+        self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
         self.sizes_detail = defaultdict(list)
         self._exception = None
@@ -146,7 +147,7 @@ class ShardsBuffer(Generic[ShardType]):
                 part_id = max(self.sizes, key=self.sizes.__getitem__)
                 if self.max_message_size > 0:
                     size = 0
-                    shards: _List[ShardType] = _List()
+                    shards = []
                     while size < self.max_message_size:
                         try:
                             shard = self.shards[part_id].pop()

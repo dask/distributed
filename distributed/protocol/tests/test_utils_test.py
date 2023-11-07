@@ -21,6 +21,8 @@ def test_get_host_array():
     a = np.frombuffer(buf[1:], dtype="u1")
     assert get_host_array(a) is buf.obj
 
-    a = np.frombuffer(bytearray(3), dtype="u1")
-    with pytest.raises(TypeError):
-        get_host_array(a)
+    for buf in (b"123", bytearray(b"123")):
+        a = np.frombuffer(buf, dtype="u1")
+        assert get_host_array(a) is buf
+        a = np.frombuffer(memoryview(buf), dtype="u1")
+        assert get_host_array(a) is buf
