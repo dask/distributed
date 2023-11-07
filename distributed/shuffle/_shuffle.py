@@ -455,9 +455,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
-    async def receive(self, data: list[tuple[int, bytes]]) -> None:
-        await self._receive(data)
-
     async def _receive(self, data: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
 
@@ -518,7 +515,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)
 
-    def deserialize(self, buffer: bytes) -> Any:
+    def deserialize(self, buffer: Any) -> Any:
         return deserialize_table(buffer)
 
 
