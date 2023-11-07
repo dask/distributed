@@ -7,7 +7,6 @@ import pytest
 
 from distributed.shuffle._core import id_from_key
 from distributed.shuffle._merge import hash_join
-from distributed.shuffle.tests.utils import invoke_annotation_chaos
 from distributed.utils_test import gen_cluster
 
 dd = pytest.importorskip("dask.dataframe")
@@ -24,11 +23,6 @@ except ImportError:
     pa = None
 
 pytestmark = pytest.mark.ci1
-
-
-@pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
-def lose_annotations(request):
-    return request.param
 
 
 def list_eq(aa, bb):
@@ -72,8 +66,7 @@ async def test_minimal_version(c, s, a, b):
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 @gen_cluster(client=True)
-async def test_basic_merge(c, s, a, b, how, lose_annotations):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_basic_merge(c, s, a, b, how):
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
@@ -166,8 +159,7 @@ async def test_merge_p2p_shuffle_reused_dataframe_with_same_parameters(c, s, a, 
 @pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
 @pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_merge(c, s, a, b, how, disk, lose_annotations):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_merge(c, s, a, b, how, disk):
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
