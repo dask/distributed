@@ -518,7 +518,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)
 
-    def deserialize(self, buffer: bytes) -> Any:
+    def deserialize(self, buffer: Any) -> Any:
         return deserialize_table(buffer)
 
 
