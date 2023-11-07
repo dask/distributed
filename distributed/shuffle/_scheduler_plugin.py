@@ -191,21 +191,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         for partition in output_partitions:
             worker = pick(partition, workers)
             mapping[partition] = worker
-
-        for dt in barrier.dependents:
-            try:
-                partition = dt.annotations["shuffle"]
-            except KeyError:
-                continue
-
-            if dt.worker_restrictions:
-                worker = pick(partition, list(dt.worker_restrictions))
-                mapping[partition] = worker
-            else:
-                worker = mapping[partition]
-
-            self._set_restriction(dt, worker)
-
         return mapping
 
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
