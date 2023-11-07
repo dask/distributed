@@ -1175,7 +1175,17 @@ class TaskState:
     key: Key
 
     #: The broad class of tasks to which this task belongs like "inc" or "read_csv"
-    prefix: TaskPrefix
+    _prefix: TaskPrefix
+
+    @property
+    def prefix(self) -> TaskPrefix:
+        if not hasattr(self, "_prefix"):
+            self._prefix = None  # type: ignore
+        return self._prefix
+
+    @prefix.setter
+    def prefix(self, prefix):
+        self._prefix = prefix
 
     #: A specification of how to run the task.  The type and meaning of this value is
     #: opaque to the scheduler, as it is only interpreted by the worker to which the
@@ -1196,7 +1206,17 @@ class TaskState:
     #: within a large graph that may be important, such as if they are on the critical
     #: path, or good to run in order to release many dependencies.  This is explained
     #: further in :doc:`Scheduling Policy <scheduling-policies>`.
-    priority: tuple[float, ...] | None
+    _priority: tuple[float, ...] | None
+
+    @property
+    def priority(self) -> tuple[float, ...] | None:
+        if not hasattr(self, "_priority"):
+            self._priority = None
+        return self._priority
+
+    @priority.setter
+    def priority(self, priority):
+        self._priority = priority
 
     # Attribute underlying the state property
     _state: TaskStateState
@@ -1208,11 +1228,31 @@ class TaskState:
     #: A task can only be executed once all its dependencies have already been
     #: successfully executed and have their result stored on at least one worker. This
     #: is tracked by progressively draining the :attr:`waiting_on` set.
-    dependencies: set[TaskState]
+    _dependencies: set[TaskState]
+
+    @property
+    def dependencies(self) -> set[TaskState]:
+        if not hasattr(self, "_dependencies"):
+            self._dependencies = set()
+        return self._dependencies
+
+    @dependencies.setter
+    def dependencies(self, dependencies):
+        self._dependencies = dependencies
 
     #: The set of tasks which depend on this task.  Only tasks still alive are listed in
     #: this set. This is the reverse mapping of :attr:`dependencies`.
-    dependents: set[TaskState]
+    _dependents: set[TaskState]
+
+    @property
+    def dependents(self) -> set[TaskState]:
+        if not hasattr(self, "_dependents"):
+            self._dependents = set()
+        return self._dependents
+
+    @dependents.setter
+    def dependents(self, dependents):
+        self._dependents = dependents
 
     #: Whether any of the dependencies of this task has been forgotten. For memory
     #: consumption reasons, forgotten tasks are not kept in memory even though they may
@@ -1221,7 +1261,17 @@ class TaskState:
     #:
     #: If :attr:`has_lost_dependencies` is true, this task cannot go into the
     #: "processing" state anymore.
-    has_lost_dependencies: bool
+    _has_lost_dependencies: bool
+
+    @property
+    def has_lost_dependencies(self) -> bool:
+        if not hasattr(self, "_has_lost_dependencies"):
+            self._has_lost_dependencies = False
+        return self._has_lost_dependencies
+
+    @has_lost_dependencies.setter
+    def has_lost_dependencies(self, has_lost_dependencies):
+        self._has_lost_dependencies = has_lost_dependencies
 
     #: The set of tasks this task is waiting on *before* it can be executed. This is
     #: always a subset of :attr:`dependencies`.  Each time one of the dependencies has
@@ -1230,7 +1280,17 @@ class TaskState:
     #: Once :attr:`waiting_on` becomes empty, this task can move from the "waiting"
     #: state to the "processing" state (unless one of the dependencies errored out, in
     #: which case this task is instead marked "erred").
-    waiting_on: set[TaskState]
+    _waiting_on: set[TaskState]
+
+    @property
+    def waiting_on(self) -> set[TaskState]:
+        if not hasattr(self, "_waiting_on"):
+            self._waiting_on = set()
+        return self._waiting_on
+
+    @waiting_on.setter
+    def waiting_on(self, waiting_on):
+        self._waiting_on = waiting_on
 
     #: The set of tasks which need this task to remain alive.  This is always a subset
     #: of :attr:`dependents`.  Each time one of the dependents has finished processing,
@@ -1243,7 +1303,17 @@ class TaskState:
     #: .. note::
     #:    Counter-intuitively, :attr:`waiting_on` and :attr:`waiters` are not reverse
     #:    mappings of each other.
-    waiters: set[TaskState]
+    _waiters: set[TaskState]
+
+    @property
+    def waiters(self) -> set[TaskState]:
+        if not hasattr(self, "_waiters"):
+            self._waiters = set()
+        return self._waiters
+
+    @waiters.setter
+    def waiters(self, waiters):
+        self._waiters = waiters
 
     #: The set of clients who want the result of this task to remain alive.
     #: This is the reverse mapping of :attr:`ClientState.wants_what`.
@@ -1257,54 +1327,174 @@ class TaskState:
     #: Once both :attr:`waiters` and :attr:`who_wants` become empty, this task can be
     #: released (if it has a non-empty :attr:`run_spec`) or forgotten (otherwise) by the
     #: scheduler, and by any workers in :attr:`who_has`.
-    who_wants: set[ClientState]
+    _who_wants: set[ClientState]
+
+    @property
+    def who_wants(self) -> set[ClientState]:
+        if not hasattr(self, "_who_wants"):
+            self._who_wants = set()
+        return self._who_wants
+
+    @who_wants.setter
+    def who_wants(self, who_wants):
+        self._who_wants = who_wants
 
     #: The set of workers who have this task's result in memory. It is non-empty iff the
     #: task is in the "memory" state.  There can be more than one worker in this set if,
     #: for example, :meth:`Client.scatter` or :meth:`Client.replicate` was used.
     #:
     #: This is the reverse mapping of :attr:`WorkerState.has_what`.
-    who_has: set[WorkerState]
+    _who_has: set[WorkerState]
+
+    @property
+    def who_has(self) -> set[WorkerState]:
+        if not hasattr(self, "_who_has"):
+            self._who_has = set()
+        return self._who_has
+
+    @who_has.setter
+    def who_has(self, who_has):
+        self._who_has = who_has
 
     #: If this task is in the "processing" state, which worker is currently processing
     #: it. This attribute is kept in sync with :attr:`WorkerState.processing`.
-    processing_on: WorkerState | None
+    _processing_on: WorkerState | None
+
+    @property
+    def processing_on(self) -> WorkerState | None:
+        if not hasattr(self, "_processing_on"):
+            self._processing_on = None
+        return self._processing_on
+
+    @processing_on.setter
+    def processing_on(self, processing_on):
+        self._processing_on = processing_on
 
     #: The number of times this task can automatically be retried in case of failure.
     #: If a task fails executing (the worker returns with an error), its :attr:`retries`
     #: attribute is checked. If it is equal to 0, the task is marked "erred". If it is
     #: greater than 0, the :attr:`retries` attribute is decremented and execution is
     #: attempted again.
-    retries: int
+    _retries: int
+
+    @property
+    def retries(self) -> int:
+        if not hasattr(self, "_retries"):
+            self._retries = 0
+        return self._retries
+
+    @retries.setter
+    def retries(self, retries):
+        self._retries = retries
 
     #: The number of bytes, as determined by ``sizeof``, of the result of a finished
     #: task. This number is used for diagnostics and to help prioritize work.
     #: Set to -1 for unfinished tasks.
-    nbytes: int
+    _nbytes: int
+
+    @property
+    def nbytes(self) -> int:
+        if not hasattr(self, "_nbytes"):
+            self._nbytes = -1
+        return self._nbytes
+
+    @nbytes.setter
+    def nbytes(self, nbytes):
+        self._nbytes = nbytes
 
     #: The type of the object as a string. Only present for tasks that have been
     #: computed.
-    type: str
+    _type: str
+
+    @property
+    def type(self) -> str:
+        if not hasattr(self, "_type"):
+            self._type = None  # type: ignore
+        return self._type
+
+    @type.setter
+    def type(self, type):
+        self._type = type
 
     #: If this task failed executing, the exception object is stored here.
-    exception: Serialized | None
+    _exception: Serialized | None
+
+    @property
+    def exception(self) -> Serialized | None:
+        if not hasattr(self, "_exception"):
+            self._exception = None
+        return self._exception
+
+    @exception.setter
+    def exception(self, exception):
+        self._exception = exception
 
     #: If this task failed executing, the traceback object is stored here.
-    traceback: Serialized | None
+    _traceback: Serialized | None
+
+    @property
+    def traceback(self) -> Serialized | None:
+        if not hasattr(self, "_traceback"):
+            self._traceback = None
+        return self._traceback
+
+    @traceback.setter
+    def traceback(self, traceback):
+        self._traceback = traceback
 
     #: string representation of exception
-    exception_text: str
+    _exception_text: str
+
+    @property
+    def exception_text(self) -> str:
+        if not hasattr(self, "_exception_text"):
+            self._exception_text = ""
+        return self._exception_text
+
+    @exception_text.setter
+    def exception_text(self, exception_text):
+        self._exception_text = exception_text
 
     #: string representation of traceback
-    traceback_text: str
+    _traceback_text: str
+
+    @property
+    def traceback_text(self) -> str:
+        if not hasattr(self, "_traceback_text"):
+            self._traceback_text = ""
+        return self._traceback_text
+
+    @traceback_text.setter
+    def traceback_text(self, traceback_text):
+        self._traceback_text = traceback_text
 
     #: If this task or one of its dependencies failed executing, the failed task is
     #: stored here (possibly itself).
-    exception_blame: TaskState | None
+    _exception_blame: TaskState | None
+
+    @property
+    def exception_blame(self) -> TaskState | None:
+        if not hasattr(self, "_exception_blame"):
+            self._exception_blame = None
+        return self._exception_blame
+
+    @exception_blame.setter
+    def exception_blame(self, exception_blame):
+        self._exception_blame = exception_blame
 
     #: Worker addresses on which errors appeared, causing this task to be in an error
     #: state.
-    erred_on: set[str]
+    _erred_on: set[str]
+
+    @property
+    def erred_on(self) -> set[str]:
+        if not hasattr(self, "_erred_on"):
+            self._erred_on = set()
+        return self._erred_on
+
+    @erred_on.setter
+    def erred_on(self, erred_on):
+        self._erred_on = erred_on
 
     #: The number of times this task has been involved in a worker death.
     #:
@@ -1315,24 +1505,64 @@ class TaskState:
     #: task currently processing on that worker (as recorded by
     #: :attr:`WorkerState.processing`) as suspicious. If a task is involved in three
     #: deaths (or some other fixed constant) then we mark the task as ``erred``.
-    suspicious: int
+    _suspicious: int
+
+    @property
+    def suspicious(self) -> int:
+        if not hasattr(self, "_suspicious"):
+            self._suspicious = 0
+        return self._suspicious
+
+    @suspicious.setter
+    def suspicious(self, suspicious):
+        self._suspicious = suspicious
 
     #: A set of hostnames where this task can be run (or ``None`` if empty). Usually
     #: this is empty unless the task has been specifically restricted to only run on
     #: certain hosts. A hostname may correspond to one or several connected workers.
-    host_restrictions: set[str]
+    _host_restrictions: set[str]
+
+    @property
+    def host_restrictions(self) -> set[str]:
+        if not hasattr(self, "_host_restrictions"):
+            self._host_restrictions = set()
+        return self._host_restrictions
+
+    @host_restrictions.setter
+    def host_restrictions(self, host_restrictions):
+        self._host_restrictions = host_restrictions
 
     #: A set of complete worker addresses where this can be run (or ``None`` if empty).
     #: Usually this is empty unless the task has been specifically restricted to only
     #: run on certain workers.
     #: Note this is tracking worker addresses, not worker states, since the specific
     #: workers may not be connected at this time.
-    worker_restrictions: set[str]
+    _worker_restrictions: set[str]
+
+    @property
+    def worker_restrictions(self) -> set[str]:
+        if not hasattr(self, "_worker_restrictions"):
+            self._worker_restrictions = set()
+        return self._worker_restrictions
+
+    @worker_restrictions.setter
+    def worker_restrictions(self, worker_restrictions):
+        self._worker_restrictions = worker_restrictions
 
     #: Resources required by this task, such as ``{'gpu': 1}`` or ``{'memory': 1e9}``
     #: These are user-defined names and are matched against the : contents of each
     #: :attr:`WorkerState.resources` dictionary.
-    resource_restrictions: dict[str, float]
+    _resource_restrictions: dict[str, float]
+
+    @property
+    def resource_restrictions(self) -> dict[str, float]:
+        if not hasattr(self, "_resource_restrictions"):
+            self._resource_restrictions = dict()
+        return self._resource_restrictions
+
+    @resource_restrictions.setter
+    def resource_restrictions(self, resource_restrictions):
+        self._resource_restrictions = resource_restrictions
 
     #: False
     #:     Each of :attr:`host_restrictions`, :attr:`worker_restrictions` and
@@ -1343,22 +1573,72 @@ class TaskState:
     #:     The above restrictions are mere preferences: if no worker is available
     #:     satisfying those restrictions, the task can still go into the
     #:     "processing" state and be sent for execution to another connected worker.
-    loose_restrictions: bool
+    _loose_restrictions: bool
+
+    @property
+    def loose_restrictions(self) -> bool:
+        if not hasattr(self, "_loose_restrictions"):
+            self._loose_restrictions = False
+        return self._loose_restrictions
+
+    @loose_restrictions.setter
+    def loose_restrictions(self, loose_restrictions):
+        self._loose_restrictions = loose_restrictions
 
     #: Whether this task is an Actor
-    actor: bool
+    _actor: bool
+
+    @property
+    def actor(self) -> bool:
+        if not hasattr(self, "_actor"):
+            self._actor = False
+        return self._actor
+
+    @actor.setter
+    def actor(self, actor):
+        self._actor = actor
 
     #: The group of tasks to which this one belongs
-    group: TaskGroup
+    _group: TaskGroup
+
+    @property
+    def group(self) -> TaskGroup:
+        if not hasattr(self, "_group"):
+            self._group = None  # type: ignore
+        return self._group
+
+    @group.setter
+    def group(self, group):
+        self._group = group
 
     #: Same as of group.name
     group_key: str
 
     #: Metadata related to task
-    metadata: dict[str, Any]
+    _metadata: dict[str, Any]
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        if not hasattr(self, "_metadata"):
+            self._metadata = dict()
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, metadata):
+        self._metadata = metadata
 
     #: Task annotations
-    annotations: dict[str, Any]
+    _annotations: dict[str, Any]
+
+    @property
+    def annotations(self) -> dict[str, Any]:
+        if not hasattr(self, "_annotations"):
+            self._annotations = dict()
+        return self._annotations
+
+    @annotations.setter
+    def annotations(self, annotations):
+        self._annotations = annotations
 
     #: The unique identifier of a specific execution of a task. This identifier
     #: is used to sign a task such that the assigned worker is expected to return
@@ -1366,10 +1646,26 @@ class TaskState:
     #: responses.
     #: Only the most recently assigned worker is trusted. All other results will
     #: be rejected.
-    run_id: int | None
+    _run_id: int | None
+
+    @property
+    def run_id(self) -> int | None:
+        if not hasattr(self, "_run_id"):
+            self._run_id = None
+        return self._run_id
+
+    @run_id.setter
+    def run_id(self, run_id):
+        self._run_id = run_id
 
     #: Cached hash of :attr:`~TaskState.client_key`
-    _hash: int
+    __hash: int
+
+    @property
+    def _hash(self) -> int:
+        if not hasattr(self, "__hash"):
+            self.__hash = hash(self.key)
+        return self.__hash
 
     # Support for weakrefs to a class with __slots__
     __weakref__: Any = None
@@ -1388,39 +1684,9 @@ class TaskState:
         state: TaskStateState,
     ):
         self.key = key
-        self._hash = hash(key)
         self.run_spec = run_spec
         self._state = state
-        self.exception = None
-        self.exception_blame = None
-        self.traceback = None
-        self.exception_text = ""
-        self.traceback_text = ""
-        self.suspicious = 0
-        self.retries = 0
-        self.nbytes = -1
-        self.priority = None
-        self.who_wants = set()
-        self.dependencies = set()
-        self.dependents = set()
-        self.waiting_on = set()
-        self.waiters = set()
-        self.who_has = set()
-        self.processing_on = None
-        self.has_lost_dependencies = False
-        self.host_restrictions = set()
-        self.worker_restrictions = set()
-        self.resource_restrictions = {}
-        self.loose_restrictions = False
-        self.actor = False
-        self.prefix = None  # type: ignore
-        self.type = None  # type: ignore
         self.group_key = key_split_group(key)
-        self.group = None  # type: ignore
-        self.metadata = {}
-        self.annotations = {}
-        self.erred_on = set()
-        self.run_id = None
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -1515,6 +1781,28 @@ class TaskState:
         chain of ~200+ tasks.
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
+
+
+# def gen_lazy(T):
+#     def gen(attr, type):
+#         @property
+#         def func(self):
+#             if not hasattr(self, attr):
+#                 setattr(self, attr, globals()[type])()
+#             return getattr(self, attr)
+#         func.__name__ = attr.replace('__lazy_', '')
+#         return func
+
+#     for attr, type in T.__annotations__.items():
+#         if not attr.startswith('__lazy_'):
+#             continue
+#         if '[' in type:
+#             type = type[:type.find('[')]
+#         f = gen(attr, type)
+#         setattr(T, f.__name__, f)
+#     return T
+
+# TaskState = gen_lazy(TaskState)
 
 
 class Transition(NamedTuple):
