@@ -163,7 +163,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
                     frames: Iterable[bytes | bytearray | memoryview]
 
-                    if not shards or isinstance(shards[0], bytes):
+                    if isinstance(shards[0], bytes):
                         # Manually serialized dataframes
                         frames = shards
                     else:
