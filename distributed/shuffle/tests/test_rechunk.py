@@ -209,8 +209,7 @@ async def test_rechunk_2d(c, s, *ws, disk):
     with dask.config.set({"distributed.p2p.disk": disk}):
         x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
-    x2 = await c.compute(x2)
-    assert np.all(x2 == a)
+    assert np.all(await c.compute(x2) == a)
 
 
 @pytest.mark.parametrize("disk", [True, False])
