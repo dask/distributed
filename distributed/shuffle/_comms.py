@@ -52,7 +52,7 @@ class CommShardsBuffer(ShardsBuffer):
 
     def __init__(
         self,
-        send: Callable[[str, list[tuple[Any, bytes]]], Awaitable[None]],
+        send: Callable[[str, list[tuple[Any, Any]]], Awaitable[None]],
         memory_limiter: ResourceLimiter,
         concurrency_limit: int = 10,
     ):
@@ -63,7 +63,7 @@ class CommShardsBuffer(ShardsBuffer):
         )
         self.send = send
 
-    async def _process(self, address: str, shards: list[tuple[Any, bytes]]) -> None:
+    async def _process(self, address: str, shards: list[tuple[Any, Any]]) -> None:
         """Send one message off to a neighboring worker"""
         with log_errors():
             # Consider boosting total_size a bit here to account for duplication

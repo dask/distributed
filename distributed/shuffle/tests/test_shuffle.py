@@ -57,10 +57,7 @@ from distributed.shuffle._shuffle import (
     split_by_worker,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin, _ShuffleRunManager
-from distributed.shuffle.tests.utils import (
-    AbstractShuffleTestPool,
-    invoke_annotation_chaos,
-)
+from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils import Deadline
 from distributed.utils_test import (
     async_poll_for,
@@ -186,8 +183,7 @@ def get_active_shuffle_runs(worker: Worker) -> dict[ShuffleId, ShuffleRun]:
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
 @pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b, lose_annotations, npartitions, disk):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_basic_integration(c, s, a, b, npartitions, disk):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -232,8 +228,7 @@ async def test_basic_integration_local_cluster(processes):
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
-async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npartitions):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -271,8 +266,7 @@ def test_shuffle_before_categorize(loop_in_thread):
 
 
 @gen_cluster(client=True)
-async def test_concurrent(c, s, a, b, lose_annotations):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_concurrent(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1817,7 +1811,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
 
     class ErrorReceive(DataFrameShuffleRun):
-        async def receive(self, data: list[tuple[int, bytes]]) -> None:
+        async def _receive(self, data: list[tuple[int, bytes]]) -> None:
             raise RuntimeError("Error during receive")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
@@ -2383,8 +2377,6 @@ class BlockedBarrierShuffleRun(DataFrameShuffleRun):
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
-    await invoke_annotation_chaos(1.0, c)
-
     expected = pd.DataFrame({"a": list(range(10))})
     ddf = dd.from_pandas(expected, npartitions=2)
     ddf = ddf.shuffle("a")

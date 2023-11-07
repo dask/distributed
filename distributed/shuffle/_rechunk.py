@@ -96,8 +96,8 @@ the same output brick.
 
 from __future__ import annotations
 
+import mmap
 import os
-import pickle
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -125,6 +125,7 @@ from distributed.shuffle._core import (
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
+from distributed.shuffle._pickle import unpickle_bytestream
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
@@ -274,7 +275,6 @@ def convert_chunk(shards: list[list[tuple[NDIndex, np.ndarray]]]) -> np.ndarray:
     for sublist in shards:
         for index, shard in sublist:
             indexed[index] = shard
-    del shards
 
     subshape = [max(dim) + 1 for dim in zip(*indexed.keys())]
     assert len(indexed) == np.prod(subshape)
@@ -283,6 +283,9 @@ def convert_chunk(shards: list[list[tuple[NDIndex, np.ndarray]]]) -> np.ndarray:
     for index, shard in indexed.items():
         rec_cat_arg[tuple(index)] = shard
     arrs = rec_cat_arg.tolist()
+
+    # This may block for several seconds, as it physically reads the memory-mapped
+    # buffers from disk
     return concatenate3(arrs)
 
 
@@ -373,75 +376,87 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         self.worker_for = worker_for
         self.split_axes = split_axes(old, new)
 
-    async def _receive(self, data: list[tuple[NDIndex, bytes]]) -> None:
+    async def _receive(
+        self,
+        data: list[tuple[NDIndex, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]]],
+    ) -> None:
         self.raise_if_closed()
 
-        filtered = []
+        # Repartition shards and filter out already received ones
+        shards = defaultdict(list)
         for d in data:
-            id, payload = d
-            if id in self.received:
+            id1, payload = d
+            if id1 in self.received:
                 continue
-            filtered.append(payload)
-            self.received.add(id)
+            self.received.add(id1)
+            for id2, shard in payload:
+                shards[id2].append(shard)
             self.total_recvd += sizeof(d)
         del data
-        if not filtered:
+        if not shards:
             return
+
         try:
-            shards = await self.offload(self._repartition_shards, filtered)
-            del filtered
             await self._write_to_disk(shards)
         except Exception as e:
             self._exception = e
             raise
 
-    def _repartition_shards(self, data: list[bytes]) -> dict[NDIndex, bytes]:
-        repartitioned: defaultdict[
-            NDIndex, list[tuple[NDIndex, np.ndarray]]
-        ] = defaultdict(list)
-        for buffer in data:
-            for id, shard in pickle.loads(buffer):
-                repartitioned[id].append(shard)
-        return {k: pickle.dumps(v) for k, v in repartitioned.items()}
-
     def _shard_partition(
-        self, data: np.ndarray, partition_id: NDIndex, **kwargs: Any
-    ) -> dict[str, tuple[NDIndex, bytes]]:
+        self, data: np.ndarray, partition_id: NDIndex
+    ) -> dict[str, tuple[NDIndex, Any]]:
         out: dict[str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]] = defaultdict(
             list
         )
-        from itertools import product
-
         ndsplits = product(*(axis[i] for axis, i in zip(self.split_axes, partition_id)))
 
         for ndsplit in ndsplits:
             chunk_index, shard_index, ndslice = zip(*ndsplit)
+
+            shard = data[ndslice]
+            # Don't wait until all shards have been transferred over the network
+            # before data can be released
+            if shard.base is not None:
+                shard = shard.copy()
+
             out[self.worker_for[chunk_index]].append(
-                (chunk_index, (shard_index, data[ndslice]))
+                (chunk_index, (shard_index, shard))
             )
-        return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
+        return {k: (partition_id, v) for k, v in out.items()}
 
     def _get_output_partition(
         self, partition_id: NDIndex, key: str, **kwargs: Any
     ) -> np.ndarray:
+        # Quickly read metadata from disk.
+        # This is a bunch of seek()'s interleaved with short reads.
         data = self._read_from_disk(partition_id)
-        return convert_chunk(data)
+        # Copy the memory-mapped buffers from disk into memory.
+        # This is where we'll spend most time.
+        with self._disk_buffer.time("read"):
+            return convert_chunk(data)
 
-    def deserialize(self, buffer: bytes) -> Any:
-        result = pickle.loads(buffer)
-        return result
+    def deserialize(self, buffer: Any) -> Any:
+        return buffer
 
     def write(self, data: list[np.ndarray], path: Path) -> int:
         raise NotImplementedError()
 
-    def read(self, path: Path) -> tuple[Any, int]:
-        shards: list[list[tuple[NDIndex, np.ndarray]]] = []
-        with path.open(mode="rb") as f:
-            size = f.seek(0, os.SEEK_END)
-            f.seek(0)
-            while f.tell() < size:
-                shards.append(pickle.load(f))
-        return shards, size
+    def read(self, path: Path) -> tuple[list[list[tuple[NDIndex, np.ndarray]]], int]:
+        """Open a memory-mapped file descriptor to disk, read all metadata, and unpickle
+        all arrays. This is a fast sequence of short reads interleaved with seeks.
+        Do not read in memory the actual data; the arrays' buffers will point to the
+        memory-mapped area.
+
+        The file descriptor will be automatically closed by the kernel when all the
+        returned arrays are dereferenced, which will happen after the call to
+        concatenate3.
+        """
+        with path.open(mode="r+b") as fh:
+            buffer = memoryview(mmap.mmap(fh.fileno(), 0))
+
+        # The file descriptor has *not* been closed!
+        shards = list(unpickle_bytestream(buffer))
+        return shards, buffer.nbytes
 
     def _get_assigned_worker(self, id: NDIndex) -> str:
         return self.worker_for[id]

@@ -183,8 +183,6 @@ class P2PShuffleLayer(Layer):
         else:
             self.parts_out = set(range(self.npartitions))
         self.npartitions_input = npartitions_input
-        annotations = annotations or {}
-        annotations.update({"shuffle": lambda key: key[1]})
         super().__init__(annotations=annotations)
 
     def __repr__(self) -> str:
@@ -435,9 +433,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         self.partitions_of = dict(partitions_of)
         self.worker_for = worker_for
 
-    async def receive(self, data: list[tuple[int, bytes]]) -> None:
-        await self._receive(data)
-
     async def _receive(self, data: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
 
@@ -507,7 +502,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)
 
-    def deserialize(self, buffer: bytes) -> Any:
+    def deserialize(self, buffer: Any) -> Any:
         return deserialize_table(buffer)
 
 
