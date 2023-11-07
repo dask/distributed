@@ -244,7 +244,7 @@ def rechunk_p2p_single(
         return {}
 
     dsk: dict = {}
-    local_token = tokenize(x, chunks)
+    local_token = tokenize(x, chunks, old_slice, new_slice)
     _barrier_key = barrier_key(ShuffleId(local_token))
     transfer_name = f"rechunk-transfer-{local_token}"
     disk: bool = dask.config.get("distributed.p2p.disk")
