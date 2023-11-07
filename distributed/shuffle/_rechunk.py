@@ -96,6 +96,7 @@ the same output brick.
 
 from __future__ import annotations
 
+import math
 import os
 import pickle
 from collections import defaultdict
@@ -164,45 +165,111 @@ def rechunk_unpack(
         )
 
 
-def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
+def split_independent_partitions(old: ChunkedAxes, new: ChunkedAxes) -> Any:
     import numpy as np
 
+    old_partial_axes = []
+    new_partial_axes = []
+
+    def is_unknown(dim: ChunkedAxis) -> bool:
+        return any(math.isnan(chunk) for chunk in dim)
+
+    for old_axis, new_axis in zip(old, new):
+        if is_unknown(old_axis):
+            old_partial_axes.append([slice(i, 1, None) for i in range(len(old_axis))])
+            new_partial_axes.append([slice(i, 1, None) for i in range(len(new_axis))])
+            continue
+
+        old_offsets = np.cumsum(old_axis)
+        new_offsets = np.cumsum(new_axis)
+        _, old_indices, new_indices = np.intersect1d(
+            old_offsets, new_offsets, return_indices=True
+        )
+
+        old_partial_axis = []
+        new_partial_axis = []
+        prev_old = 0
+        prev_new = 0
+        for old_index, new_index in zip(old_indices, new_indices):
+            old_partial_axis.append(slice(prev_old, old_index + 1, None))
+            new_partial_axis.append(slice(prev_new, new_index + 1, None))
+            prev_old = old_index + 1
+            prev_new = new_index + 1
+        new_partial_axes.append(new_partial_axis)
+        old_partial_axes.append(old_partial_axis)
+    return old_partial_axes, new_partial_axes
+
+
+def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     import dask.array as da
 
     if x.size == 0:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
 
-    dsk: dict = {}
+    partial_old_axes, partial_new_axes = split_independent_partitions(x.chunks, chunks)
+    partials = product(
+        *(
+            zip(old_axis, new_axis)
+            for old_axis, new_axis in zip(partial_old_axes, partial_new_axes)
+        )
+    )
+    dsk = {}
     token = tokenize(x, chunks)
-    _barrier_key = barrier_key(ShuffleId(token))
-    name = f"rechunk-transfer-{token}"
+    name = f"rechunk-p2p-{token}"
+    for partial in partials:
+        old_slices, new_slices = zip(*partial)
+        dsk.update(
+            rechunk_p2p_single(
+                x, chunks=chunks, old_slice=old_slices, new_slice=new_slices, name=name
+            )
+        )
+
+    layer = MaterializedLayer(dsk)
+    graph = HighLevelGraph.from_collections(name, layer, dependencies=[x])
+    arr = da.Array(graph, name, chunks, meta=x)
+    return arr
+
+
+def rechunk_p2p_single(
+    x: da.Array,
+    chunks: ChunkedAxes,
+    old_slice: tuple[slice, ...],
+    new_slice: tuple[slice, ...],
+    name: str,
+) -> Any:
+    import numpy as np
+
+    if x.partitions[*old_slice].size == 0:
+        return {}
+
+    dsk: dict = {}
+    local_token = tokenize(x, chunks)
+    _barrier_key = barrier_key(ShuffleId(local_token))
+    transfer_name = f"rechunk-transfer-{local_token}"
     disk: bool = dask.config.get("distributed.p2p.disk")
     transfer_keys = []
-    for index in np.ndindex(tuple(len(dim) for dim in x.chunks)):
-        transfer_keys.append((name,) + index)
-        dsk[(name,) + index] = (
+    old_offsets = tuple(axis.start for axis in old_slice)
+    for index in np.ndindex(tuple(slc.stop - slc.start for slc in old_slice)):
+        global_index = tuple(int(offset + ix) for offset, ix in zip(old_offsets, index))
+        transfer_keys.append((transfer_name,) + global_index)
+        dsk[(transfer_name,) + global_index] = (
             rechunk_transfer,
-            (x.name,) + index,
-            token,
+            (x.name,) + global_index,
+            local_token,
             index,
-            chunks,
-            x.chunks,
+            tuple(chunk[slc] for slc, chunk in zip(new_slice, chunks)),
+            tuple(chunk[slc] for slc, chunk in zip(old_slice, x.chunks)),
             disk,
         )
 
-    dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
+    dsk[_barrier_key] = (shuffle_barrier, local_token, transfer_keys)
 
-    name = f"rechunk-p2p-{token}"
-
-    for index in np.ndindex(tuple(len(dim) for dim in chunks)):
-        dsk[(name,) + index] = (rechunk_unpack, token, index, _barrier_key)
-
-    with dask.annotate(shuffle=lambda key: key[1:]):
-        layer = MaterializedLayer(dsk)
-        graph = HighLevelGraph.from_collections(name, layer, dependencies=[x])
-
-        return da.Array(graph, name, chunks, meta=x)
+    new_offsets = tuple(axis.start for axis in new_slice)
+    for index in np.ndindex(tuple(slc.stop - slc.start for slc in new_slice)):
+        global_index = tuple(int(offset + ix) for offset, ix in zip(new_offsets, index))
+        dsk[(name,) + global_index] = (rechunk_unpack, local_token, index, _barrier_key)
+    return dsk
 
 
 class Split(NamedTuple):
