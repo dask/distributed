@@ -1115,11 +1115,12 @@ def test_processing_chain(tmp_path):
     df = pd.DataFrame(columns)
     df["_partitions"] = df.col4 % npartitions
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
-    worker_for = pd.Series(worker_for, name="_worker").astype("category")
-
+    partitions_of = defaultdict(list)
+    for worker, part in worker_for.items():
+        partitions_of[worker].append(part)
     meta = df.head(0)
-    data = split_by_worker(df, "_partitions", worker_for=worker_for, meta=meta)
-    assert set(data) == set(worker_for.cat.categories)
+    data = split_by_worker(df, "_partitions", partitions_of=partitions_of, meta=meta)
+    assert set(data) == set(partitions_of)
     assert sum(map(len, data.values())) == len(df)
 
     batches = {worker: [serialize_table(t)] for worker, t in data.items()}
@@ -1193,15 +1194,6 @@ async def test_head(c, s, a, b):
     await check_worker_cleanup(b)
     del out
     await check_scheduler_cleanup(s)
-
-
-def test_split_by_worker():
-    workers = ["a", "b", "c"]
-    npartitions = 5
-    df = pd.DataFrame({"x": range(100), "y": range(100)})
-    df["_partitions"] = df.x % npartitions
-    worker_for = {i: random.choice(workers) for i in range(npartitions)}
-    s = pd.Series(worker_for, name="_worker").astype("category")
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
