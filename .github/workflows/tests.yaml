@@ -71,12 +71,12 @@ jobs:
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=1.3, pyarrow=13]
+            extra_packages: [numpy=1.21, pandas=1.3, pyarrow=14]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=1.3, pyarrow=13]
+            extra_packages: [numpy=1.21, pandas=1.3, pyarrow=14]
             partition: "not ci1"
 
           - os: ubuntu-latest
