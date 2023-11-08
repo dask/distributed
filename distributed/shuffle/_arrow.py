@@ -47,6 +47,7 @@ def check_minimal_arrow_version() -> None:
 
 
 def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
+    import pandas as pd
     import pyarrow as pa
     from pandas.core.dtypes.cast import find_common_type  # type: ignore[attr-defined]
 
@@ -58,7 +59,17 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     reconciled_dtypes = {}
     for column, dtype in meta.dtypes.items():
         actual = df[column].dtype
-        if type(actual) == type(dtype):
+        if actual == dtype:
+            continue
+        # Use the specific string dtype from meta (e.g., string[pyarrow])
+        if isinstance(actual, pd.StringDtype) and isinstance(dtype, pd.StringDtype):
+            reconciled_dtypes[column] = dtype
+            continue
+        # meta might not be aware of the actual categories so the two dtype objects are not equal
+        # Also, the categories_dtype does not properly roundtrip through Arrow
+        if isinstance(actual, pd.CategoricalDtype) and isinstance(
+            dtype, pd.CategoricalDtype
+        ):
             continue
         reconciled_dtypes[column] = find_common_type([actual, dtype])
     return df.astype(reconciled_dtypes, copy=False)

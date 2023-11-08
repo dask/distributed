@@ -2300,7 +2300,7 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
     with raises_with_cause(
-        RuntimeError, "failed during transfer", pa.ArrowTypeError, "incompatible types"
+        RuntimeError, r"shuffling \w* failed", pa.ArrowTypeError, "incompatible types"
     ):
         await c.compute(out)
 
