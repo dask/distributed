@@ -35,7 +35,7 @@ def check_minimal_arrow_version() -> None:
     ImportError if the installed version is not recent enough.
     """
     # First version to implement type promotion for pa.concat_tables (apache/arrow#36846)
-    minversion = "13.0.0"
+    minversion = "14.0.0"
     try:
         import pyarrow as pa
     except ModuleNotFoundError:
