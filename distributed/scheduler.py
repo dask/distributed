@@ -2698,8 +2698,7 @@ class SchedulerState:
             if not dts.waiters and not dts.who_wants:
                 recommendations[dts.key] = "released"
 
-        if ts.waiters:
-            ts.waiters.clear()  # do anything with this?
+        ts.waiters = None
 
         ts.state = "erred"
 
