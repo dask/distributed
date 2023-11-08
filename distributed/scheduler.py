@@ -782,7 +782,8 @@ class WorkerState:
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
         if self.scheduler.validate:
-            assert self in (ts.who_has or ())
+            assert ts.who_has
+            assert self in ts.who_has
             assert ts in self.has_what
             assert ts not in self.needs_what
 
