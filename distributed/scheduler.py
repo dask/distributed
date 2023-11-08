@@ -789,8 +789,9 @@ class WorkerState:
 
         self.nbytes -= ts.get_nbytes()
         del self._has_what[ts]
-        if ts.who_has:
-            ts.who_has.remove(self)
+        ts.who_has.remove(self)  # type: ignore
+        if not ts.who_has:
+            ts.who_has = None
 
     def _inc_needs_replica(self, ts: TaskState) -> None:
         """Assign a task fetch to this worker and update network occupancies"""
