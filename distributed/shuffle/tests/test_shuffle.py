@@ -15,6 +15,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from packaging.version import parse
 from tornado.ioloop import IOLoop
 
 from dask.utils import key_split
@@ -1045,13 +1046,6 @@ def test_processing_chain(tmp_path):
             [np.datetime64("2022-01-01") + i for i in range(100)],
             dtype=pd.DatetimeTZDtype(tz="Europe/Berlin"),
         ),
-        f"col{next(counter)}": pd.array(
-            [pd.Period("2022-01-01", freq="D") + i for i in range(100)],
-            dtype="period[D]",
-        ),
-        f"col{next(counter)}": pd.array(
-            [pd.Interval(left=i, right=i + 2) for i in range(100)], dtype="Interval"
-        ),
         f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
         f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
         # FIXME: PyArrow does not support sparse data:
@@ -1066,6 +1060,21 @@ def test_processing_chain(tmp_path):
         #     [Stub(i) for i in range(100)], dtype="object"
         # ),
     }
+
+    if parse(pa.__version__) >= parse("12.0.0"):
+        columns.update(
+            {
+                # Extension types
+                f"col{next(counter)}": pd.array(
+                    [pd.Period("2022-01-01", freq="D") + i for i in range(100)],
+                    dtype="period[D]",
+                ),
+                f"col{next(counter)}": pd.array(
+                    [pd.Interval(left=i, right=i + 2) for i in range(100)],
+                    dtype="Interval",
+                ),
+            }
+        )
 
     if PANDAS_GE_150:
         columns.update(
@@ -2277,12 +2286,20 @@ async def test_reconcile_partitions(c, s, a, b):
 
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
-    result, expected = c.compute([ddf, out])
+
+    if parse(pa.__version__) >= "14.0.0":
+        result, expected = c.compute([ddf, out])
+        result = await result
+        expected = await expected
+        dd.assert_eq(result, expected)
+        del result
+    else:
+        with raises_with_cause(
+            RuntimeError, r"shuffling \w+ failed", pa.ArrowInvalid, "incompatible types"
+        ):
+            await c.compute(out)
+        await c.close()
     del out
-    result = await result
-    expected = await expected
-    dd.assert_eq(result, expected)
-    del result
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -2299,10 +2316,19 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
 
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
-    with raises_with_cause(
-        RuntimeError, r"shuffling \w* failed", pa.ArrowTypeError, "incompatible types"
-    ):
-        await c.compute(out)
+    if parse(pa.__version) >= parse("14.0.0"):
+        with raises_with_cause(
+            RuntimeError,
+            r"shuffling \w* failed",
+            pa.ArrowTypeError,
+            "incompatible types",
+        ):
+            await c.compute(out)
+    else:
+        with raises_with_cause(
+            RuntimeError, r"shuffling \w* failed", pa.ArrowInvalid, "incompatible types"
+        ):
+            await c.compute(out)
 
     await c.close()
     await check_worker_cleanup(a)
