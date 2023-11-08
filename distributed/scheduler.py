@@ -2565,8 +2565,7 @@ class SchedulerState:
                     dts.waiters.discard(ts)
                 if not dts.waiters and not dts.who_wants:
                     recommendations[dts.key] = "released"
-        if ts.waiting_on:
-            ts.waiting_on.clear()
+        ts.waiting_on = None
 
         ts.state = "released"
 
@@ -2789,8 +2788,7 @@ class SchedulerState:
         self.unrunnable.discard(ts)
         for cs in ts.who_wants or ():
             cs.wants_what.remove(ts)
-        if ts.who_wants:
-            ts.who_wants.clear()
+        ts.who_wants = None
         ts.processing_on = None
         ts.exception_blame = ts.exception = ts.traceback = None
         self.task_metadata.pop(key, None)
@@ -3139,8 +3137,7 @@ class SchedulerState:
             del ws._has_what[ts]
         if len(ts.who_has or ()) > 1:
             self.replicated_tasks.remove(ts)
-        if ts.who_has:
-            ts.who_has.clear()
+        ts.who_has = None
 
     def bulk_schedule_unrunnable_after_adding_worker(self, ws: WorkerState) -> Recs:
         """Send ``no-worker`` tasks to ``processing`` that this worker can handle.
@@ -3322,8 +3319,7 @@ class SchedulerState:
                         dts.waiters.discard(ts)
                     if not dts.waiters and not dts.who_wants:
                         recommendations[dts.key] = "released"
-            if ts.waiters:
-                ts.waiters.clear()
+            ts.waiters = None
 
         if self.validate:
             assert not ts.processing_on
@@ -3346,10 +3342,8 @@ class SchedulerState:
             if dts.state not in ("memory", "erred"):
                 # Cannot compute task anymore
                 recommendations[dts.key] = "forgotten"
-        if ts.dependents:
-            ts.dependents.clear()
-        if ts.waiters:
-            ts.waiters.clear()
+        ts.dependents.clear()
+        ts.waiters = None
 
         for dts in ts.dependencies:
             if dts.dependents:
@@ -3360,10 +3354,8 @@ class SchedulerState:
                 # Task not needed anymore
                 assert dts is not ts
                 recommendations[dts.key] = "forgotten"
-        if ts.dependencies:
-            ts.dependencies.clear()
-        if ts.waiting_on:
-            ts.waiting_on.clear()
+        ts.dependencies.clear()
+        ts.waiting_on = None
 
         for ws in ts.who_has or ():
             if ws.address in self.workers:  # in case worker has died
