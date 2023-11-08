@@ -232,7 +232,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             )  # pragma: no cover
         recs.update({barrier_task.key: "released"})
 
-        for dt in barrier_task.dependencies or ():
+        for dt in barrier_task.dependencies:
             if dt.state == "erred":
                 # This should never happen, a dependent of the barrier should already
                 # be `erred`
