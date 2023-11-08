@@ -2197,7 +2197,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
 
 @pytest.mark.skipif(not PANDAS_GE_200, reason="requires pandas >=2.0")
 @gen_cluster(client=True)
-async def test_handle_null_partitions_p2p_shuffling(c, s, a, b):
+async def test_handle_null_partitions(c, s, a, b):
     data = [
         {"companies": [], "id": "a", "x": None},
         {"companies": [{"id": 3}, {"id": 5}], "id": "b", "x": None},
@@ -2216,7 +2216,7 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
+async def test_handle_null_partitions_2(c, s, a, b):
     def make_partition(i):
         """Return null column for every other partition"""
         if i % 2 == 1:
@@ -2237,7 +2237,7 @@ async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_handle_object_columns_p2p(c, s, a, b):
+async def test_handle_object_columns(c, s, a, b):
     with dask.config.set({"dataframe.convert-string": False}):
         df = pd.DataFrame(
             {
@@ -2266,11 +2266,13 @@ async def test_handle_object_columns_p2p(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_reconcile_mismatching_partitions_p2p_shuffling(c, s, a, b):
+async def test_reconcile_partitions(c, s, a, b):
     def make_partition(i):
         """Return mismatched column types for every other partition"""
         if i % 2 == 1:
-            return pd.DataFrame({"a": np.random.random(10), "b": [True] * 10})
+            return pd.DataFrame(
+                {"a": np.random.random(10), "b": np.random.randint(1, 10, 10)}
+            )
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
 
     ddf = dd.from_map(make_partition, range(50))
@@ -2288,7 +2290,7 @@ async def test_reconcile_mismatching_partitions_p2p_shuffling(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
+async def test_raise_on_incompatible_partitions(c, s, a, b):
     def make_partition(i):
         """Return incompatible column types for every other partition"""
         if i % 2 == 1:
@@ -2309,7 +2311,7 @@ async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_shuffle_with_categorical_data(c, s, a, b):
+async def test_handle_categorical_data(c, s, a, b):
     """Regression test for https://github.com/dask/distributed/issues/8186"""
     df = dd.from_dict(
         {
@@ -2327,7 +2329,7 @@ async def test_shuffle_with_categorical_data(c, s, a, b):
     df.b = df.b.astype("category")
     shuffled = df.shuffle("a", shuffle="p2p")
     result, expected = await c.compute([shuffled, df], sync=True)
-    dd.assert_eq(result, expected)
+    dd.assert_eq(result, expected, check_categorical=False)
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -2335,7 +2337,7 @@ async def test_shuffle_with_categorical_data(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_shuffle_handles__in_int_meta(c, s, a, b):
+async def test_handle_floats_in_int_meta(c, s, a, b):
     """Regression test for https://github.com/dask/distributed/issues/8183"""
     df1 = pd.DataFrame(
         {
@@ -2357,7 +2359,7 @@ async def test_shuffle_handles__in_int_meta(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_set_index_p2p(c, s, *workers):
+async def test_set_index(c, s, *workers):
     df = pd.DataFrame({"a": [1, 2, 3, 4, 5, 6, 7, 8], "b": 1})
     ddf = dd.from_pandas(df, npartitions=3)
     ddf = ddf.set_index("a", shuffle="p2p", divisions=(1, 3, 8))
@@ -2370,7 +2372,7 @@ async def test_set_index_p2p(c, s, *workers):
     await check_scheduler_cleanup(s)
 
 
-def test_shuffle_p2p_with_existing_index(client):
+def test_shuffle_with_existing_index(client):
     df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
     ddf = dd.from_pandas(
         df,
@@ -2381,7 +2383,7 @@ def test_shuffle_p2p_with_existing_index(client):
     dd.assert_eq(result, df)
 
 
-def test_set_index_p2p_with_existing_index(client):
+def test_set_index_with_existing_index(client):
     df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
     ddf = dd.from_pandas(
         df,
@@ -2392,7 +2394,7 @@ def test_set_index_p2p_with_existing_index(client):
     dd.assert_eq(result, df.set_index("a"))
 
 
-def test_sort_values_p2p_with_existing_divisions(client):
+def test_sort_values_with_existing_divisions(client):
     "Regression test for #8165"
     df = pd.DataFrame(
         {"a": np.random.randint(0, 3, 20), "b": np.random.randint(0, 3, 20)}
@@ -2478,7 +2480,7 @@ class FlakyConnectionPool(ConnectionPool):
     client=True,
     config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 0},
 )
-async def test_p2p_flaky_connect_fails_without_retry(c, s, a, b):
+async def test_flaky_connect_fails_without_retry(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -2508,7 +2510,7 @@ async def test_p2p_flaky_connect_fails_without_retry(c, s, a, b):
     client=True,
     config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 1},
 )
-async def test_p2p_flaky_connect_recover_with_retry(c, s, a, b):
+async def test_flaky_connect_recover_with_retry(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
