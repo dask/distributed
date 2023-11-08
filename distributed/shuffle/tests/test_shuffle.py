@@ -2287,7 +2287,7 @@ async def test_reconcile_partitions(c, s, a, b):
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
 
-    if parse(pa.__version__) >= "14.0.0":
+    if parse(pa.__version__) >= parse("14.0.0"):
         result, expected = c.compute([ddf, out])
         result = await result
         expected = await expected
@@ -2316,7 +2316,7 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
 
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
-    if parse(pa.__version) >= parse("14.0.0"):
+    if parse(pa.__version__) >= parse("14.0.0"):
         with raises_with_cause(
             RuntimeError,
             r"shuffling \w* failed",
