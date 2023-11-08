@@ -206,8 +206,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self.scheduler.set_restrictions({ts.key: {worker}})
 
     def _unset_restriction(self, ts: TaskState) -> None:
-        if ts.annotations is None:
-            ts.annotations = dict()
+        assert ts.annotations is not None
         # shuffle_original_restrictions is only set if the task was first scheduled
         # on the wrong worker
         if "shuffle_original_restrictions" not in ts.annotations:
