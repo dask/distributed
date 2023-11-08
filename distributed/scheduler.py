@@ -2545,8 +2545,7 @@ class SchedulerState:
         }
         for ws_addr in ts.erred_on or ():
             worker_msgs[ws_addr] = [w_msg]
-        if ts.erred_on:
-            ts.erred_on.clear()
+        ts.erred_on = None
 
         report_msg = {"op": "task-retried", "key": key}
         for cs in ts.who_wants or ():
