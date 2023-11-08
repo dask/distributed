@@ -2298,7 +2298,7 @@ async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
     with raises_with_cause(
-        RuntimeError, "failed during transfer", ValueError, "could not convert"
+        RuntimeError, "failed during transfer", pa.ArrowTypeError, "incompatible types"
     ):
         await c.compute(out)
 
@@ -2306,6 +2306,54 @@ async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
     await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_shuffle_with_categorical_data(c, s, a, b):
+    """Regression test for https://github.com/dask/distributed/issues/8186"""
+    df = dd.from_dict(
+        {
+            "a": [1, 2, 3, 4, 5],
+            "b": [
+                "x",
+                "y",
+                "x",
+                "y",
+                "z",
+            ],
+        },
+        npartitions=2,
+    )
+    df.b = df.b.astype("category")
+    shuffled = df.shuffle("a", shuffle="p2p")
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(result, expected)
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_shuffle_handles__in_int_meta(c, s, a, b):
+    """Regression test for https://github.com/dask/distributed/issues/8183"""
+    df1 = pd.DataFrame(
+        {
+            "a": [1, 2],
+        },
+    )
+    df2 = pd.DataFrame(
+        {
+            "b": [1],
+        },
+    )
+    expected = df1.join(df2, how="left")
+
+    ddf1 = dd.from_pandas(df1, npartitions=1)
+    ddf2 = dd.from_pandas(df2, npartitions=1)
+    result = ddf1.join(ddf2, how="left").shuffle(on="a")
+    result = await c.compute(result)
+    dd.assert_eq(result, expected)
 
 
 @gen_cluster(client=True)

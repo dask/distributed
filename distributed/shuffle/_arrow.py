@@ -34,8 +34,8 @@ def check_minimal_arrow_version() -> None:
     Raises a ModuleNotFoundError if pyarrow is not installed or an
     ImportError if the installed version is not recent enough.
     """
-    # First version that supports concatenating extension arrays (apache/arrow#14463)
-    minversion = "12.0.0"
+    # First version to implement type promotion for pa.concat_tables (apache/arrow#36846)
+    minversion = "13.0.0"
     try:
         import pyarrow as pa
     except ModuleNotFoundError:
@@ -51,17 +51,17 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
 
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
-    table = pa.concat_tables(shards)
+    table = pa.concat_tables(shards, promote_options="permissive")
 
-    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
-    return df.astype(meta.dtypes, copy=False)
+    return from_pyarrow_table_dispatch(meta, table, self_destruct=True)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
     import pyarrow as pa
 
-    return pa.concat_tables(deserialize_table(buffer) for buffer in data)
+    tables = (deserialize_table(buffer) for buffer in data)
+    return pa.concat_tables(tables, promote_options="permissive")
 
 
 def serialize_table(table: pa.Table) -> bytes:
@@ -99,12 +99,12 @@ def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
             batch.append(shard)
 
             if offset - prev >= batch_size:
-                table = pa.concat_tables(batch)
+                table = pa.concat_tables(batch, promote_options="permissive")
                 shards.append(_copy_table(table))
                 batch = []
                 prev = offset
     if batch:
-        table = pa.concat_tables(batch)
+        table = pa.concat_tables(batch, promote_options="permissive")
         shards.append(_copy_table(table))
     return shards, size
 
