@@ -490,6 +490,8 @@ class SpansSchedulerExtension:
         default_span = None
 
         for ts in tss:
+            if ts.annotations is None:
+                ts.annotations = dict()
             # You may have different tasks belonging to the same TaskGroup but to
             # different spans. If that happens, arbitrarily force everything onto the
             # span of the earliest encountered TaskGroup.

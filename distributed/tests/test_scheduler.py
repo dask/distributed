@@ -1650,7 +1650,7 @@ async def test_file_descriptors(c, s):
 @gen_cluster(client=True)
 async def test_learn_occupancy(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.2)
-    while sum(len(ts.who_has) for ts in s.tasks.values()) < 10:
+    while sum(len(ts.who_has or ()) for ts in s.tasks.values()) < 10:
         await asyncio.sleep(0.01)
 
     nproc = sum(ts.state == "processing" for ts in s.tasks.values())

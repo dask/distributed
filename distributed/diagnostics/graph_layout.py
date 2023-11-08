@@ -35,7 +35,7 @@ class GraphLayout(SchedulerPlugin):
 
         if self.scheduler.tasks:
             dependencies = {
-                k: [ds.key for ds in ts.dependencies]
+                k: [ds.key for ds in ts.dependencies or ()]
                 for k, ts in scheduler.tasks.items()
             }
             priority = {k: ts.priority for k, ts in scheduler.tasks.items()}

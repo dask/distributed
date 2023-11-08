@@ -194,14 +194,20 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         return mapping
 
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
+        if ts.annotations is None:
+            ts.annotations = dict()
         if "shuffle_original_restrictions" in ts.annotations:
             # This may occur if multiple barriers share the same output task,
             # e.g. in a hash join.
             return
-        ts.annotations["shuffle_original_restrictions"] = ts.worker_restrictions.copy()
+        ts.annotations["shuffle_original_restrictions"] = (
+            ts.worker_restrictions.copy() if ts.worker_restrictions else None
+        )
         self.scheduler.set_restrictions({ts.key: {worker}})
 
     def _unset_restriction(self, ts: TaskState) -> None:
+        if ts.annotations is None:
+            ts.annotations = dict()
         # shuffle_original_restrictions is only set if the task was first scheduled
         # on the wrong worker
         if "shuffle_original_restrictions" not in ts.annotations:
@@ -213,7 +219,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         barrier_task = self.scheduler.tasks[barrier_key(id)]
         recs: Recs = {}
 
-        for dt in barrier_task.dependents:
+        for dt in barrier_task.dependents or ():
             if dt.state == "erred":
                 return {}
             recs.update({dt.key: "released"})
@@ -227,7 +233,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             )  # pragma: no cover
         recs.update({barrier_task.key: "released"})
 
-        for dt in barrier_task.dependencies:
+        for dt in barrier_task.dependencies or ():
             if dt.state == "erred":
                 # This should never happen, a dependent of the barrier should already
                 # be `erred`
@@ -324,7 +330,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             del self.heartbeats[id]
 
         barrier_task = self.scheduler.tasks[barrier_key(id)]
-        for dt in barrier_task.dependents:
+        for dt in barrier_task.dependents or ():
             self._unset_restriction(dt)
 
     def restart(self, scheduler: Scheduler) -> None:

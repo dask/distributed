@@ -270,7 +270,8 @@ class ActiveMemoryManagerExtension:
             log_reject("no running candidates")
             return None
 
-        candidates -= ts.who_has
+        if ts.who_has:
+            candidates -= ts.who_has
         if not candidates:
             log_reject("all candidates already own a replica")
             return None
@@ -309,7 +310,7 @@ class ActiveMemoryManagerExtension:
         def log_reject(msg: str) -> None:
             task_logger.debug("(drop, %s, %s) rejected: %s", ts, orig_candidates, msg)
 
-        if len(ts.who_has) - len(pending_drop) < 2:
+        if len(ts.who_has or ()) - len(pending_drop) < 2:
             log_reject("less than 2 replicas exist")
             return None
 
@@ -317,11 +318,11 @@ class ActiveMemoryManagerExtension:
             log_reject("task is an actor")
             return None
 
-        if candidates is None:
+        if candidates is None and ts.who_has:
             candidates = ts.who_has.copy()
         else:
             # Don't modify orig_candidates
-            candidates = candidates & ts.who_has
+            candidates = (candidates or set()) & (ts.who_has or set())
             if not candidates:
                 log_reject("no candidates suggested by the policy own a replica")
                 return None
@@ -334,7 +335,7 @@ class ActiveMemoryManagerExtension:
         # The `candidates &` bit could seem redundant with `candidates -=` immediately
         # below on first look, but beware of the second use of this variable later on!
         candidates_with_dependents_processing = candidates & {
-            waiter_ts.processing_on for waiter_ts in ts.waiters
+            waiter_ts.processing_on for waiter_ts in ts.waiters or ()
         }
 
         candidates -= candidates_with_dependents_processing
@@ -405,11 +406,11 @@ class ActiveMemoryManagerExtension:
 
             for ws in pending_repl:
                 if validate:
-                    assert ws not in ts.who_has
+                    assert ws not in (ts.who_has or ())
                 repl_by_worker[ws].append(ts.key)
             for ws in pending_drop:
                 if validate:
-                    assert ws in ts.who_has
+                    assert ws in (ts.who_has or ())
                 drop_by_worker[ws].append(ts.key)
 
         stimulus_id = f"active_memory_manager-{time()}"
@@ -533,7 +534,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
         for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
 
-            nwaiters = len(ts.waiters)
+            nwaiters = len(ts.waiters or ())
             if desired_replicas < nwaiters < 20:
                 # If a dependent task has not been assigned to a worker yet, err on the
                 # side of caution and preserve an additional replica for it.
@@ -542,10 +543,10 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
                 # This calculation is quite CPU-intensive, so it's disabled for tasks
                 # with lots of waiters.
                 nwaiters = len(
-                    {waiter.processing_on or waiter for waiter in ts.waiters}
+                    {waiter.processing_on or waiter for waiter in ts.waiters or ()}
                 )
 
-            ndrop_key = len(ts.who_has) - max(desired_replicas, nwaiters)
+            ndrop_key = len(ts.who_has or ()) - max(desired_replicas, nwaiters)
             if ts in self.manager.pending:
                 pending_repl, pending_drop = self.manager.pending[ts]
                 ndrop_key += len(pending_repl) - len(pending_drop)
@@ -657,7 +658,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
                 # would have stopped earlier
                 continue
 
-            if len(ts.who_has) > 1:
+            if len(ts.who_has or ()) > 1:
                 # There are already replicas of this key on other workers.
                 # Suggest dropping the replica from this worker.
                 # Use cases:
@@ -677,7 +678,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
                 drop_ws = yield Suggestion("drop", ts, {ws})
                 if drop_ws:
                     continue  # Use case 1 or 2
-                if ts.who_has & self.manager.scheduler.running:
+                if (ts.who_has or set()) & self.manager.scheduler.running:
                     continue  # Use case 3 or 4
                 # Use case 5
 
@@ -732,4 +733,4 @@ class RetireWorker(ActiveMemoryManagerPolicy):
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:
             return True
-        return all(len(ts.who_has) > 1 for ts in ws.has_what)
+        return all(len(ts.who_has or ()) > 1 for ts in ws.has_what)

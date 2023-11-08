@@ -43,7 +43,7 @@ class ReplayTaskScheduler:
         ts = self.scheduler.tasks.get(key)
         return {
             "task": ToPickle(ts.run_spec),
-            "deps": [dts.key for dts in ts.dependencies],
+            "deps": [dts.key for dts in ts.dependencies or ()],
         }
 
 

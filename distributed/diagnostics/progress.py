@@ -41,7 +41,8 @@ def dependent_keys(tasks, complete=False):
                 continue
 
         out.add(key)
-        stack.extend(ts.dependencies)
+        if ts.dependencies:
+            stack.extend(ts.dependencies)
     return out, errors
 
 
