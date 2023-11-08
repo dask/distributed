@@ -536,6 +536,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
 
         for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
+            assert ts.who_has
 
             nwaiters = len(ts.waiters or ())
             if desired_replicas < nwaiters < 20:
@@ -549,7 +550,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
                     {waiter.processing_on or waiter for waiter in ts.waiters or ()}
                 )
 
-            ndrop_key = len(ts.who_has or ()) - max(desired_replicas, nwaiters)
+            ndrop_key = len(ts.who_has) - max(desired_replicas, nwaiters)
             if ts in self.manager.pending:
                 pending_repl, pending_drop = self.manager.pending[ts]
                 ndrop_key += len(pending_repl) - len(pending_drop)
