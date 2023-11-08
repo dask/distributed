@@ -2579,8 +2579,7 @@ class SchedulerState:
         elif not ts.exception_blame and (ts.who_wants or ts.waiters):
             recommendations[key] = "waiting"
         else:
-            if ts.waiters:
-                ts.waiters.clear()
+            ts.waiters = None
 
         return recommendations, {}, {}
 
