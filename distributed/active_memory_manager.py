@@ -305,12 +305,15 @@ class ActiveMemoryManagerExtension:
         The worker with the highest memory usage (downstream of pending replications and
         drops), or None if no eligible candidates are available.
         """
+        if ts.who_has is None:
+            return None
+
         orig_candidates = candidates
 
         def log_reject(msg: str) -> None:
             task_logger.debug("(drop, %s, %s) rejected: %s", ts, orig_candidates, msg)
 
-        if len(ts.who_has or ()) - len(pending_drop) < 2:
+        if len(ts.who_has) - len(pending_drop) < 2:
             log_reject("less than 2 replicas exist")
             return None
 
@@ -318,11 +321,11 @@ class ActiveMemoryManagerExtension:
             log_reject("task is an actor")
             return None
 
-        if candidates is None and ts.who_has:
+        if candidates is None:
             candidates = ts.who_has.copy()
         else:
             # Don't modify orig_candidates
-            candidates = (candidates or set()) & (ts.who_has or set())
+            candidates = candidates & ts.who_has
             if not candidates:
                 log_reject("no candidates suggested by the policy own a replica")
                 return None
