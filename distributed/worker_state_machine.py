@@ -2652,10 +2652,11 @@ class WorkerState:
         return recs, instructions
 
     def _resource_restrictions_satisfied(self, ts: TaskState) -> bool:
-        resource_restrictions = ts.resource_restrictions or dict()
+        if not ts.resource_restrictions:
+            return True
         return all(
             self.available_resources[resource] >= needed
-            for resource, needed in resource_restrictions.items()
+            for resource, needed in ts.resource_restrictions.items()
         )
 
     def _acquire_resources(self, ts: TaskState) -> None:

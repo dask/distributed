@@ -2233,8 +2233,7 @@ class Worker(BaseWorker, ServerNode):
             function, args, kwargs = ts.run_spec
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
-            if ts.annotations is None:
-                ts.annotations = dict()
+            assert ts.annotations is not None
             executor = ts.annotations.get("executor", "default")
             try:
                 e = self.executors[executor]

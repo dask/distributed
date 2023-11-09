@@ -218,7 +218,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         barrier_task = self.scheduler.tasks[barrier_key(id)]
         recs: Recs = {}
 
-        for dt in barrier_task.dependents or ():
+        for dt in barrier_task.dependents:
             if dt.state == "erred":
                 return {}
             recs.update({dt.key: "released"})
@@ -329,7 +329,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             del self.heartbeats[id]
 
         barrier_task = self.scheduler.tasks[barrier_key(id)]
-        for dt in barrier_task.dependents or ():
+        for dt in barrier_task.dependents:
             self._unset_restriction(dt)
 
     def restart(self, scheduler: Scheduler) -> None:

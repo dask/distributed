@@ -256,7 +256,7 @@ class ActiveMemoryManagerExtension:
         if ts.state != "memory":
             log_reject(f"ts.state = {ts.state}")
             return None
-
+        assert ts.who_has
         if ts.actor:
             log_reject("task is an actor")
             return None
@@ -270,8 +270,7 @@ class ActiveMemoryManagerExtension:
             log_reject("no running candidates")
             return None
 
-        if ts.who_has:
-            candidates -= ts.who_has
+        candidates -= ts.who_has
         if not candidates:
             log_reject("all candidates already own a replica")
             return None

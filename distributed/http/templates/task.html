@@ -77,7 +77,7 @@
             <th> Key </th>
             <th> State </th>
           </thead>
-          {% for dts in ts.dependencies or [] %}
+          {% for dts in ts.dependencies %}
           <tr>
             <td> <a href="{{ url_escape(str(dts.key)) }}.html">{{dts.key}}</a> </td>
             <td> {{ dts.state }} </td>
@@ -93,7 +93,7 @@
             <th> Key </th>
             <th> State </th>
           </thead>
-          {% for dts in ts.dependents or [] %}
+          {% for dts in ts.dependents %}
           <tr>
             <td> <a href="{{ url_escape(str(dts.key)) }}.html">{{dts.key}}</a> </td>
             <td> {{ dts.state }} </td>
@@ -107,7 +107,7 @@
       {% if ts.state == 'memory' %}
       <div id="workers" class="column">
         <h3 class="title is-5"> Workers with data </h3>
-          {% set worker_list = ts.who_has or {} %}
+          {% set worker_list = ts.who_has %}
           {% include "worker-table.html" %}
       </div><!-- #workers -->
       {% end %}
@@ -118,7 +118,7 @@
         <div class="content">
           <ul>
             <!--FIXME: There was supposed to be a client route but there isn't-->
-            {% for cs in ts.who_wants or [] %}
+            {% for cs in ts.who_wants %}
             <li>{{ cs.client_key }}</li>
             {% end %}
           </ul>

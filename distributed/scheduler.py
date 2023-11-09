@@ -737,7 +737,8 @@ class WorkerState:
         self.scheduler._task_prefix_count_global[tp.name] += 1
         self.processing.add(ts)
         for dts in ts.dependencies:
-            if self not in (dts.who_has or ()):
+            assert dts.who_has
+            if self not in dts.who_has:
                 self._inc_needs_replica(dts)
 
     def add_to_long_running(self, ts: TaskState) -> None:
@@ -796,7 +797,8 @@ class WorkerState:
     def _inc_needs_replica(self, ts: TaskState) -> None:
         """Assign a task fetch to this worker and update network occupancies"""
         if self.scheduler.validate:
-            assert self not in (ts.who_has or ())
+            assert ts.who_has
+            assert self not in ts.who_has
             assert ts not in self.has_what
         if ts not in self.needs_what:
             self.needs_what[ts] = 1
@@ -823,13 +825,15 @@ class WorkerState:
             assert self not in (ts.who_has or ())
             assert ts not in self.has_what
 
+        if ts.who_has is None:
+            ts.who_has = set()
+        if ts in self._has_what:
+            return
         nbytes = ts.get_nbytes()
         if ts in self.needs_what:
             del self.needs_what[ts]
             self._network_occ -= nbytes
             self.scheduler._network_occ_global -= nbytes
-        if ts.who_has is None:
-            ts.who_has = set()
         ts.who_has.add(self)
         self.nbytes += nbytes
         self._has_what[ts] = None
@@ -3120,7 +3124,8 @@ class SchedulerState:
     def add_replica(self, ts: TaskState, ws: WorkerState) -> None:
         """Note that a worker holds a replica of a task with state='memory'"""
         ws.add_replica(ts)
-        if len(ts.who_has or ()) == 2:
+        assert ts.who_has
+        if len(ts.who_has) == 2:
             self.replicated_tasks.add(ts)
 
     def remove_replica(self, ts: TaskState, ws: WorkerState) -> None:
@@ -3132,10 +3137,12 @@ class SchedulerState:
     def remove_all_replicas(self, ts: TaskState) -> None:
         """Remove all replicas of a task from all workers"""
         nbytes = ts.get_nbytes()
-        for ws in ts.who_has or ():
+        if not ts.who_has:
+            return
+        for ws in ts.who_has:
             ws.nbytes -= nbytes
             del ws._has_what[ts]
-        if len(ts.who_has or ()) > 1:
+        if len(ts.who_has) > 1:
             self.replicated_tasks.remove(ts)
         ts.who_has = None
 
@@ -3335,8 +3342,7 @@ class SchedulerState:
         ts.state = "forgotten"
         for dts in ts.dependents:
             dts.has_lost_dependencies = True
-            if dts.dependencies:
-                dts.dependencies.remove(ts)
+            dts.dependencies.remove(ts)
             if dts.waiting_on:
                 dts.waiting_on.discard(ts)
             if dts.state not in ("memory", "erred"):
@@ -3346,8 +3352,7 @@ class SchedulerState:
         ts.waiters = None
 
         for dts in ts.dependencies:
-            if dts.dependents:
-                dts.dependents.remove(ts)
+            dts.dependents.remove(ts)
             if dts.waiters:
                 dts.waiters.discard(ts)
             if not dts.dependents and not dts.who_wants:
@@ -3412,7 +3417,7 @@ class SchedulerState:
             "run_spec": ToPickle(ts.run_spec),
             "resource_restrictions": ts.resource_restrictions,
             "actor": ts.actor,
-            "annotations": ts.annotations,
+            "annotations": ts.annotations or {},
             "span_id": ts.group.span_id,
         }
         if self.validate:
@@ -4953,16 +4958,18 @@ class Scheduler(SchedulerState, ServerNode):
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
-            if ts.metadata is None:
-                ts.metadata = dict()
-            ts.metadata.update(kwargs["metadata"])
+            if kwargs["metadata"]:
+                if ts.metadata is None:
+                    ts.metadata = dict()
+                ts.metadata.update(kwargs["metadata"])
             r: tuple = self._transition(
                 key, "memory", stimulus_id, worker=worker, **kwargs
             )
             recommendations, client_msgs, worker_msgs = r
 
             if ts.state == "memory":
-                assert ws in (ts.who_has or ())
+                assert ts.who_has
+                assert ws in ts.who_has
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
@@ -5239,8 +5246,8 @@ class Scheduler(SchedulerState, ServerNode):
                     )
                 logger.info("Scheduler cancels key %s.  Force=%s", key, force)
                 cancelled_keys.append(key)
-            if ts.who_wants:
-                clients.extend(list(ts.who_wants) if force else [cs])
+            assert ts.who_wants
+            clients.extend(list(ts.who_wants) if force else [cs])
         for cs in clients:
             self.client_releases_keys(
                 keys=cancelled_keys,
@@ -6308,8 +6315,7 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is None or ts.state != "memory":
                 logger.warning(f"Key lost during replication: {key}")
                 continue
-            if ws not in (ts.who_has or ()):
-                self.add_replica(ts, ws)
+            self.add_replica(ts, ws)
 
         return keys_failed
 
@@ -6791,6 +6797,7 @@ class Scheduler(SchedulerState, ServerNode):
                         # task is no longer needed by any client or dependent task
                         tasks.remove(ts)
                         continue
+                    assert ts.who_has is not None
                     n_missing = n - len(ts.who_has & workers)
                     if n_missing <= 0:
                         # Already replicated enough
@@ -6802,7 +6809,7 @@ class Scheduler(SchedulerState, ServerNode):
 
                     for ws in random.sample(tuple(workers - ts.who_has), count):
                         gathers[ws.address][ts.key] = [
-                            wws.address for wws in ts.who_has or ()
+                            wws.address for wws in ts.who_has
                         ]
 
                 await asyncio.gather(
@@ -7159,8 +7166,7 @@ class Scheduler(SchedulerState, ServerNode):
         for key in keys:
             ts = self.tasks.get(key)
             if ts is not None and ts.state == "memory":
-                if ws not in (ts.who_has or ()):
-                    self.add_replica(ts, ws)
+                self.add_replica(ts, ws)
             else:
                 redundant_replicas.append(key)
 
@@ -7201,8 +7207,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             for w in workers:
                 ws = self.workers[w]
-                if ws not in (ts.who_has or ()):
-                    self.add_replica(ts, ws)
+                self.add_replica(ts, ws)
             self.report({"op": "key-in-memory", "key": key, "workers": list(workers)})
 
         if client:
@@ -7507,7 +7512,7 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks[key]
             if isinstance(restrictions, str):
                 restrictions = {restrictions}
-            ts.worker_restrictions = set(restrictions or ())
+            ts.worker_restrictions = set(restrictions)
 
     @log_errors
     def get_task_prefix_states(self) -> dict[str, dict[str, int]]:
@@ -8258,7 +8263,8 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks[key]
             if self.validate:
                 # Do not destroy the last copy
-                assert len(ts.who_has or ()) > 1
+                assert ts.who_has
+                assert len(ts.who_has) > 1
             self.remove_replica(ts, ws)
 
         self.stream_comms[addr].send(
@@ -8346,13 +8352,13 @@ def validate_task_state(ts: TaskState) -> None:
     """Validate the given TaskState"""
     assert ts.state in ALL_TASK_STATES, ts
 
-    if ts.waiting_on and ts.dependencies:
+    if ts.waiting_on:
         assert ts.waiting_on.issubset(ts.dependencies), (
             "waiting not subset of dependencies",
             str(ts.waiting_on),
             str(ts.dependencies),
         )
-    if ts.waiters and ts.dependents:
+    if ts.waiters:
         assert ts.waiters.issubset(ts.dependents), (
             "waiters not subset of dependents",
             str(ts.waiters),
@@ -8363,15 +8369,14 @@ def validate_task_state(ts: TaskState) -> None:
         assert not dts.who_has, ("waiting on in-memory dep", str(ts), str(dts))
         assert dts.state != "released", ("waiting on released dep", str(ts), str(dts))
     for dts in ts.dependencies:
-        if dts.dependents:
-            assert ts in dts.dependents, (
-                "not in dependency's dependents",
-                str(ts),
-                str(dts),
-                str(dts.dependents),
-            )
+        assert ts in dts.dependents, (
+            "not in dependency's dependents",
+            str(ts),
+            str(dts),
+            str(dts.dependents),
+        )
         if ts.state in ("waiting", "queued", "processing", "no-worker"):
-            assert (dts in (ts.waiting_on or ())) or dts.who_has, (
+            assert ts.waiting_on and dts in ts.waiting_on or dts.who_has, (
                 "dep missing",
                 str(ts),
                 str(dts),
@@ -8385,14 +8390,13 @@ def validate_task_state(ts: TaskState) -> None:
             str(dts),
         )
     for dts in ts.dependents:
-        if dts.dependencies:
-            assert ts in dts.dependencies, (
-                "not in dependent's dependencies",
-                str(ts),
-                str(dts),
-                str(dts.dependencies),
-            )
-            assert dts.state != "forgotten"
+        assert ts in dts.dependencies, (
+            "not in dependent's dependencies",
+            str(ts),
+            str(dts),
+            str(dts.dependencies),
+        )
+        assert dts.state != "forgotten"
 
     assert (ts.processing_on is not None) == (ts.state == "processing")
     assert bool(ts.who_has) == (ts.state == "memory"), (ts, ts.who_has, ts.state)
@@ -8423,8 +8427,14 @@ def validate_task_state(ts: TaskState) -> None:
         if ts.run_spec:  # was computed
             assert ts.type
             assert isinstance(ts.type, str)
-        assert not any([ts in (dts.waiting_on or ()) for dts in ts.dependents])
-        for ws in ts.who_has or ():
+        assert not any(
+            [
+                ts in dts.waiting_on
+                for dts in ts.dependents
+                if dts.waiting_on is not None
+            ]
+        )
+        for ws in ts.who_has:
             assert ts in ws.has_what, (
                 "not in who_has' has_what",
                 str(ts),
@@ -8442,7 +8452,8 @@ def validate_task_state(ts: TaskState) -> None:
 
     if ts.actor:
         if ts.state == "memory":
-            assert sum(ts in ws.actors for ws in ts.who_has or ()) == 1
+            assert ts.who_has
+            assert sum(ts in ws.actors for ws in ts.who_has) == 1
         if ts.state == "processing":
             assert ts.processing_on
             assert ts in ts.processing_on.actors
@@ -8451,7 +8462,8 @@ def validate_task_state(ts: TaskState) -> None:
 
 def validate_worker_state(ws: WorkerState) -> None:
     for ts in ws.has_what or ():
-        assert ws in (ts.who_has or ()), (
+        assert ts.who_has
+        assert ws in ts.who_has, (
             "not in has_what' who_has",
             str(ws),
             str(ts),
@@ -8480,7 +8492,8 @@ def validate_state(
 
     for cs in clients.values():
         for ts in cs.wants_what or ():
-            assert cs in (ts.who_wants or ()), (
+            assert ts.who_wants
+            assert cs in ts.who_wants, (
                 "not in wants_what' who_wants",
                 str(cs),
                 str(ts),
