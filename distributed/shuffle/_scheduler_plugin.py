@@ -212,7 +212,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if "shuffle_original_restrictions" not in ts.annotations:
             return
         original_restrictions = ts.annotations.pop("shuffle_original_restrictions")
-        self.scheduler.set_restrictions({ts.key: original_restrictions})
+        if original_restrictions:
+            self.scheduler.set_restrictions({ts.key: original_restrictions})
 
     def _restart_recommendations(self, id: ShuffleId) -> Recs:
         barrier_task = self.scheduler.tasks[barrier_key(id)]
