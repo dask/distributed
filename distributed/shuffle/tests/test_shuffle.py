@@ -1065,14 +1065,10 @@ def test_processing_chain(tmp_path):
         columns.update(
             {
                 # Extension types
-                f"col{next(counter)}": pd.array(
-                    [pd.Period("2022-01-01", freq="D") + i for i in range(100)],
-                    dtype="period[D]",
+                f"col{next(counter)}": pd.period_range(
+                    "2022-01-01", periods=100, freq="D"
                 ),
-                f"col{next(counter)}": pd.array(
-                    [pd.Interval(left=i, right=i + 2) for i in range(100)],
-                    dtype="Interval",
-                ),
+                f"col{next(counter)}": pd.interval_range(start=0, end=100, freq=1),
             }
         )
 
