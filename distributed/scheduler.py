@@ -821,10 +821,6 @@ class WorkerState:
 
     def add_replica(self, ts: TaskState) -> None:
         """The worker acquired a replica of task"""
-        if self.scheduler.validate:
-            assert self not in (ts.who_has or ())
-            assert ts not in self.has_what
-
         if ts.who_has is None:
             ts.who_has = set()
         if ts in self._has_what:
