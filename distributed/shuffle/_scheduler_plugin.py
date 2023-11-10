@@ -21,6 +21,7 @@ from distributed.shuffle._core import (
     id_from_key,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
+from distributed.utils import log_errors
 
 if TYPE_CHECKING:
     from distributed.scheduler import (
@@ -193,27 +194,32 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             mapping[partition] = worker
         return mapping
 
+    @log_errors()
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
-        if ts.annotations is None:
-            ts.annotations = dict()
-        if "shuffle_original_restrictions" in ts.annotations:
+        if ts.annotations and "shuffle_original_restrictions" in ts.annotations:
             # This may occur if multiple barriers share the same output task,
             # e.g. in a hash join.
             return
+        if ts.annotations is None:
+            ts.annotations = dict()
         ts.annotations["shuffle_original_restrictions"] = (
-            ts.worker_restrictions.copy() if ts.worker_restrictions else None
+            ts.worker_restrictions.copy()
+            if ts.worker_restrictions is not None
+            else None
         )
         self.scheduler.set_restrictions({ts.key: {worker}})
 
+    @log_errors()
     def _unset_restriction(self, ts: TaskState) -> None:
-        assert ts.annotations is not None
         # shuffle_original_restrictions is only set if the task was first scheduled
         # on the wrong worker
-        if "shuffle_original_restrictions" not in ts.annotations:
+        if (
+            ts.annotations is None
+            or "shuffle_original_restrictions" not in ts.annotations
+        ):
             return
         original_restrictions = ts.annotations.pop("shuffle_original_restrictions")
-        if original_restrictions:
-            self.scheduler.set_restrictions({ts.key: original_restrictions})
+        self.scheduler.set_restrictions({ts.key: original_restrictions})
 
     def _restart_recommendations(self, id: ShuffleId) -> Recs:
         barrier_task = self.scheduler.tasks[barrier_key(id)]

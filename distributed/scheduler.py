@@ -1392,6 +1392,11 @@ class TaskState:
         run_spec: T_runspec | None,
         state: TaskStateState,
     ):
+        # Most of the attributes below are not initialized since there are not
+        # always required for every tasks. Particularly for large graphs, these
+        # can add up significant memory, see
+        # https://github.com/dask/distributed/pull/8331
+        # https://github.com/dask/distributed/issues/7998#issuecomment-1677167478
         self.key = key
         self._hash = hash(key)
         self.run_spec = run_spec
@@ -7503,12 +7508,12 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise
 
-    def set_restrictions(self, worker: dict[Key, Collection[str] | str]) -> None:
+    def set_restrictions(self, worker: dict[Key, Collection[str] | str | None]) -> None:
         for key, restrictions in worker.items():
             ts = self.tasks[key]
             if isinstance(restrictions, str):
                 restrictions = {restrictions}
-            ts.worker_restrictions = set(restrictions)
+            ts.worker_restrictions = set(restrictions) if restrictions else None
 
     @log_errors
     def get_task_prefix_states(self) -> dict[str, dict[str, int]]:
