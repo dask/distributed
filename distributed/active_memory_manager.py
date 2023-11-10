@@ -661,7 +661,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
                 # would have stopped earlier
                 continue
 
-            if ts.who_has:
+            if ts.who_has and len(ts.who_has) > 1:
                 # There are already replicas of this key on other workers.
                 # Suggest dropping the replica from this worker.
                 # Use cases:
