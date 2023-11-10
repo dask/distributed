@@ -306,8 +306,6 @@ def split_by_worker(
 
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
-    df = df.astype(meta.dtypes, copy=False)
-
     # (cudf support) Avoid pd.Series
     constructor = df._constructor_sliced
     assert isinstance(constructor, type)
