@@ -58,7 +58,9 @@ def copy_table(table: pa.Table) -> pa.Table:
     import pyarrow as pa
 
     # concat_arrays forced a deep-copy even if the input arrays only have a single chunk.
-    return pa.table(pa.concat_arrays(table.columns), schema=table.schema)
+    return pa.table(
+        [concat_arrays(column.chunks) for column in table.columns], schema=table.schema
+    )
 
 
 def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
