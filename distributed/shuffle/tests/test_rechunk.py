@@ -70,6 +70,7 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             local_address=name,
             executor=self._executor,
+            io_executor=self._executor,
             rpc=self,
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),

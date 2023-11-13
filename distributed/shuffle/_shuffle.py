@@ -296,26 +296,54 @@ class P2PShuffleLayer(Layer):
 
 
 def split_by_worker(
-    df: pd.DataFrame,
-    column: str,
-    meta: pd.DataFrame,
-    partitions_of: dict[Any, list[int]],
+    df: pd.DataFrame, column: str, meta: pd.DataFrame, worker_for: pd.Series
 ) -> dict[Any, pa.Table]:
     """
     Split data into many arrow batches, partitioned by destination worker
     """
-    import pyarrow.compute as pc
+    import numpy as np
 
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
     df = df.astype(meta.dtypes, copy=False)
-    tab = to_pyarrow_table_dispatch(df, preserve_index=True)
-    out = {}
-    for worker, parts in partitions_of.items():
-        split = tab.filter(pc.field(column).isin(parts))
-        if split.num_rows > 0:
-            out[worker] = split
-    assert sum(map(len, out.values())) == len(df)
+
+    # (cudf support) Avoid pd.Series
+    constructor = df._constructor_sliced
+    assert isinstance(constructor, type)
+    worker_for = constructor(worker_for)
+    df = df.merge(
+        right=worker_for.cat.codes.rename("_worker"),
+        left_on=column,
+        right_index=True,
+        how="inner",
+    )
+    nrows = len(df)
+    if not nrows:
+        return {}
+    # assert len(df) == nrows  # Not true if some outputs aren't wanted
+    # FIXME: If we do not preserve the index something is corrupting the
+    # bytestream such that it cannot be deserialized anymore
+    t = to_pyarrow_table_dispatch(df, preserve_index=True)
+    t = t.sort_by("_worker")
+    codes = np.asarray(t["_worker"])
+    t = t.drop(["_worker"])
+    del df
+
+    splits = np.where(codes[1:] != codes[:-1])[0] + 1
+    splits = np.concatenate([[0], splits])
+
+    shards = [
+        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
+    ]
+    shards.append(t.slice(offset=splits[-1], length=None))
+
+    unique_codes = codes[splits]
+    out = {
+        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
+        worker_for.cat.categories[code]: shard
+        for code, shard in zip(unique_codes, shards)
+    }
+    assert sum(map(len, out.values())) == nrows
     return out
 
 
@@ -384,8 +412,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
 
     column: str
     meta: pd.DataFrame
-    partitions_of: dict[str, list[int]]
-    worker_for: dict[int, str]
+    worker_for: pd.Series
 
     def __init__(
         self,
@@ -424,8 +451,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         partitions_of = defaultdict(list)
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
-        self.partitions_of = dict(partitions_of)
-        self.worker_for = worker_for
+        self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
     async def _receive(self, data: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
@@ -469,7 +495,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             data,
             self.column,
             self.meta,
-            self.partitions_of,
+            self.worker_for,
         )
         del data
         out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}

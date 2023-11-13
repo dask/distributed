@@ -1109,12 +1109,10 @@ def test_processing_chain(tmp_path):
     df = pd.DataFrame(columns)
     df["_partitions"] = df.col4 % npartitions
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
-    partitions_of = defaultdict(list)
-    for worker, part in worker_for.items():
-        partitions_of[worker].append(part)
+    worker_for = pd.Series(worker_for, name="_worker").astype("category")
     meta = df.head(0)
-    data = split_by_worker(df, "_partitions", partitions_of=partitions_of, meta=meta)
-    assert set(data) == set(partitions_of)
+    data = split_by_worker(df, "_partitions", worker_for=worker_for, meta=meta)
+    assert set(data) == set(worker_for.cat.categories)
     assert sum(map(len, data.values())) == len(df)
 
     batches = {worker: [serialize_table(t)] for worker, t in data.items()}
@@ -1570,6 +1568,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             local_address=name,
             executor=self._executor,
+            io_executor=self._executor,
             rpc=self,
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
