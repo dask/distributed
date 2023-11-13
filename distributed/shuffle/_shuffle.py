@@ -432,6 +432,8 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         disk: bool,
         loop: IOLoop,
     ):
+        import pandas as pd
+
         super().__init__(
             id=id,
             run_id=run_id,
