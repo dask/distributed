@@ -546,7 +546,7 @@ class Cluster(SyncMethodMixin):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.close()
+        await self._close()
 
     @property
     def scheduler_address(self) -> str:

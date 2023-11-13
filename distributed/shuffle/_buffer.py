@@ -5,21 +5,22 @@ import contextlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterator, Sized
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
+if TYPE_CHECKING:
+    # TODO import from collections.abc (requires Python >=3.12)
+    from typing_extensions import Buffer
+else:
+    Buffer = Sized
 
-ShardType = TypeVar("ShardType", bound=Sized)
+ShardType = TypeVar("ShardType", bound=Buffer)
+
 T = TypeVar("T")
-
-
-class _List(list[T]):
-    # This ensures that the distributed.protocol will not iterate over this collection
-    pass
 
 
 class ShardsBuffer(Generic[ShardType]):
@@ -43,9 +44,10 @@ class ShardsBuffer(Generic[ShardType]):
     Flushing will not raise an exception. To ensure that the buffer finished successfully, please call `ShardsBuffer.raise_on_exception`
     """
 
-    shards: defaultdict[str, _List[ShardType]]
+    shards: defaultdict[str, list[ShardType]]
     in_flight_sizes: defaultdict[str, int]
     sizes: defaultdict[str, int]
+    sizes_detail: defaultdict[str, list[int]]
     concurrency_limit: int
     memory_limiter: ResourceLimiter
     diagnostics: dict[str, float]
@@ -70,9 +72,10 @@ class ShardsBuffer(Generic[ShardType]):
         max_message_size: int = -1,
     ) -> None:
         self._accepts_input = True
-        self.shards = defaultdict(_List)
+        self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
         self.in_flight_sizes = defaultdict(int)
+        self.sizes_detail = defaultdict(list)
         self._exception = None
         self.concurrency_limit = concurrency_limit
         self._inputs_done = False
@@ -158,13 +161,13 @@ class ShardsBuffer(Generic[ShardType]):
                 part_id = max(self.sizes, key=self.sizes.__getitem__)
                 if self.max_message_size > 0:
                     size = 0
-                    shards: _List[ShardType] = _List()
+                    shards = []
                     self.in_flight_sizes[part_id] = self.sizes.pop(part_id)
                     while size < self.max_message_size:
                         try:
                             shard = self.shards[part_id].pop()
                             shards.append(shard)
-                            s = sizeof(shard)
+                            s = self.sizes_detail[part_id].pop()
                             size += s
                             self.in_flight_sizes[part_id] -= s
                         except IndexError:
@@ -173,6 +176,8 @@ class ShardsBuffer(Generic[ShardType]):
                             if not self.shards[part_id]:
                                 del self.shards[part_id]
                                 assert self.in_flight_sizes[part_id] == 0
+                                assert not self.sizes_detail[part_id]
+                                del self.sizes_detail[part_id]
                 else:
                     shards = self.shards.pop(part_id)
                     size = self.sizes.pop(part_id)
@@ -220,6 +225,7 @@ class ShardsBuffer(Generic[ShardType]):
                     self.in_flight_sizes[worker] += sizes[worker]
                 else:
                     self.sizes[worker] += sizes[worker]
+                self.sizes_detail[worker].append(sizes[worker])
             self._shards_available.notify_all()
         await self.memory_limiter.wait_for_available()
         del data

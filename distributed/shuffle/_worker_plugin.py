@@ -299,7 +299,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self,
         shuffle_id: ShuffleId,
         run_id: int,
-        data: list[tuple[int, bytes]],
+        data: list[tuple[int, Any]] | bytes,
     ) -> None:
         """
         Handler: Receive an incoming shard of data from a peer worker.

@@ -15,6 +15,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from packaging.version import parse
 from tornado.ioloop import IOLoop
 
 from dask.utils import key_split
@@ -57,10 +58,7 @@ from distributed.shuffle._shuffle import (
     split_by_worker,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin, _ShuffleRunManager
-from distributed.shuffle.tests.utils import (
-    AbstractShuffleTestPool,
-    invoke_annotation_chaos,
-)
+from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils import Deadline
 from distributed.utils_test import (
     async_poll_for,
@@ -186,8 +184,7 @@ def get_active_shuffle_runs(worker: Worker) -> dict[ShuffleId, ShuffleRun]:
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
 @pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_basic_integration(c, s, a, b, lose_annotations, npartitions, disk):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_basic_integration(c, s, a, b, npartitions, disk):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -232,8 +229,7 @@ async def test_basic_integration_local_cluster(processes):
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
 @gen_cluster(client=True)
-async def test_shuffle_with_array_conversion(c, s, a, b, lose_annotations, npartitions):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -271,8 +267,7 @@ def test_shuffle_before_categorize(loop_in_thread):
 
 
 @gen_cluster(client=True)
-async def test_concurrent(c, s, a, b, lose_annotations):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_concurrent(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1058,13 +1053,6 @@ def test_processing_chain(tmp_path):
             [np.datetime64("2022-01-01") + i for i in range(100)],
             dtype=pd.DatetimeTZDtype(tz="Europe/Berlin"),
         ),
-        f"col{next(counter)}": pd.array(
-            [pd.Period("2022-01-01", freq="D") + i for i in range(100)],
-            dtype="period[D]",
-        ),
-        f"col{next(counter)}": pd.array(
-            [pd.Interval(left=i, right=i + 2) for i in range(100)], dtype="Interval"
-        ),
         f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
         f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
         # FIXME: PyArrow does not support sparse data:
@@ -1079,6 +1067,17 @@ def test_processing_chain(tmp_path):
         #     [Stub(i) for i in range(100)], dtype="object"
         # ),
     }
+
+    if parse(pa.__version__) >= parse("12.0.0"):
+        columns.update(
+            {
+                # Extension types
+                f"col{next(counter)}": pd.period_range(
+                    "2022-01-01", periods=100, freq="D"
+                ),
+                f"col{next(counter)}": pd.interval_range(start=0, end=100, freq=1),
+            }
+        )
 
     if PANDAS_GE_150:
         columns.update(
@@ -1829,7 +1828,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
 
     class ErrorReceive(DataFrameShuffleRun):
-        async def receive(self, data: list[tuple[int, bytes]]) -> None:
+        async def _receive(self, data: list[tuple[int, bytes]]) -> None:
             raise RuntimeError("Error during receive")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
@@ -2210,7 +2209,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
 
 @pytest.mark.skipif(not PANDAS_GE_200, reason="requires pandas >=2.0")
 @gen_cluster(client=True)
-async def test_handle_null_partitions_p2p_shuffling(c, s, a, b):
+async def test_handle_null_partitions(c, s, a, b):
     data = [
         {"companies": [], "id": "a", "x": None},
         {"companies": [{"id": 3}, {"id": 5}], "id": "b", "x": None},
@@ -2229,7 +2228,7 @@ async def test_handle_null_partitions_p2p_shuffling(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
+async def test_handle_null_partitions_2(c, s, a, b):
     def make_partition(i):
         """Return null column for every other partition"""
         if i % 2 == 1:
@@ -2250,7 +2249,7 @@ async def test_handle_null_partitions_p2p_shuffling_2(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_handle_object_columns_p2p(c, s, a, b):
+async def test_handle_object_columns(c, s, a, b):
     with dask.config.set({"dataframe.convert-string": False}):
         df = pd.DataFrame(
             {
@@ -2279,21 +2278,31 @@ async def test_handle_object_columns_p2p(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_reconcile_mismatching_partitions_p2p_shuffling(c, s, a, b):
+async def test_reconcile_partitions(c, s, a, b):
     def make_partition(i):
         """Return mismatched column types for every other partition"""
         if i % 2 == 1:
-            return pd.DataFrame({"a": np.random.random(10), "b": [True] * 10})
+            return pd.DataFrame(
+                {"a": np.random.random(10), "b": np.random.randint(1, 10, 10)}
+            )
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
 
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
-    result, expected = c.compute([ddf, out])
+
+    if parse(pa.__version__) >= parse("14.0.0"):
+        result, expected = c.compute([ddf, out])
+        result = await result
+        expected = await expected
+        dd.assert_eq(result, expected)
+        del result
+    else:
+        with raises_with_cause(
+            RuntimeError, r"shuffling \w+ failed", pa.ArrowInvalid, "incompatible types"
+        ):
+            await c.compute(out)
+        await c.close()
     del out
-    result = await result
-    expected = await expected
-    dd.assert_eq(result, expected)
-    del result
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -2301,7 +2310,7 @@ async def test_reconcile_mismatching_partitions_p2p_shuffling(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
+async def test_raise_on_incompatible_partitions(c, s, a, b):
     def make_partition(i):
         """Return incompatible column types for every other partition"""
         if i % 2 == 1:
@@ -2310,10 +2319,19 @@ async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
 
     ddf = dd.from_map(make_partition, range(50))
     out = ddf.shuffle(on="a", shuffle="p2p", ignore_index=True)
-    with raises_with_cause(
-        RuntimeError, "failed during transfer", ValueError, "could not convert"
-    ):
-        await c.compute(out)
+    if parse(pa.__version__) >= parse("14.0.0"):
+        with raises_with_cause(
+            RuntimeError,
+            r"shuffling \w* failed",
+            pa.ArrowTypeError,
+            "incompatible types",
+        ):
+            await c.compute(out)
+    else:
+        with raises_with_cause(
+            RuntimeError, r"shuffling \w* failed", pa.ArrowInvalid, "incompatible types"
+        ):
+            await c.compute(out)
 
     await c.close()
     await check_worker_cleanup(a)
@@ -2322,7 +2340,55 @@ async def test_raise_on_incompatible_partitions_p2p_shuffling(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_set_index_p2p(c, s, *workers):
+async def test_handle_categorical_data(c, s, a, b):
+    """Regression test for https://github.com/dask/distributed/issues/8186"""
+    df = dd.from_dict(
+        {
+            "a": [1, 2, 3, 4, 5],
+            "b": [
+                "x",
+                "y",
+                "x",
+                "y",
+                "z",
+            ],
+        },
+        npartitions=2,
+    )
+    df.b = df.b.astype("category")
+    shuffled = df.shuffle("a", shuffle="p2p")
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(result, expected, check_categorical=False)
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+async def test_handle_floats_in_int_meta(c, s, a, b):
+    """Regression test for https://github.com/dask/distributed/issues/8183"""
+    df1 = pd.DataFrame(
+        {
+            "a": [1, 2],
+        },
+    )
+    df2 = pd.DataFrame(
+        {
+            "b": [1],
+        },
+    )
+    expected = df1.join(df2, how="left")
+
+    ddf1 = dd.from_pandas(df1, npartitions=1)
+    ddf2 = dd.from_pandas(df2, npartitions=1)
+    result = ddf1.join(ddf2, how="left").shuffle(on="a")
+    result = await c.compute(result)
+    dd.assert_eq(result, expected)
+
+
+@gen_cluster(client=True)
+async def test_set_index(c, s, *workers):
     df = pd.DataFrame({"a": [1, 2, 3, 4, 5, 6, 7, 8], "b": 1})
     ddf = dd.from_pandas(df, npartitions=3)
     ddf = ddf.set_index("a", shuffle="p2p", divisions=(1, 3, 8))
@@ -2335,7 +2401,7 @@ async def test_set_index_p2p(c, s, *workers):
     await check_scheduler_cleanup(s)
 
 
-def test_shuffle_p2p_with_existing_index(client):
+def test_shuffle_with_existing_index(client):
     df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
     ddf = dd.from_pandas(
         df,
@@ -2346,7 +2412,7 @@ def test_shuffle_p2p_with_existing_index(client):
     dd.assert_eq(result, df)
 
 
-def test_set_index_p2p_with_existing_index(client):
+def test_set_index_with_existing_index(client):
     df = pd.DataFrame({"a": np.random.randint(0, 3, 20)}, index=np.random.random(20))
     ddf = dd.from_pandas(
         df,
@@ -2357,7 +2423,7 @@ def test_set_index_p2p_with_existing_index(client):
     dd.assert_eq(result, df.set_index("a"))
 
 
-def test_sort_values_p2p_with_existing_divisions(client):
+def test_sort_values_with_existing_divisions(client):
     "Regression test for #8165"
     df = pd.DataFrame(
         {"a": np.random.randint(0, 3, 20), "b": np.random.randint(0, 3, 20)}
@@ -2395,8 +2461,6 @@ class BlockedBarrierShuffleRun(DataFrameShuffleRun):
 )
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
-    await invoke_annotation_chaos(1.0, c)
-
     expected = pd.DataFrame({"a": list(range(10))})
     ddf = dd.from_pandas(expected, npartitions=2)
     ddf = ddf.shuffle("a")
@@ -2445,7 +2509,7 @@ class FlakyConnectionPool(ConnectionPool):
     client=True,
     config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 0},
 )
-async def test_p2p_flaky_connect_fails_without_retry(c, s, a, b):
+async def test_flaky_connect_fails_without_retry(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -2475,7 +2539,7 @@ async def test_p2p_flaky_connect_fails_without_retry(c, s, a, b):
     client=True,
     config={"distributed.comm.retry.count": 0, "distributed.p2p.comm.retry.count": 1},
 )
-async def test_p2p_flaky_connect_recover_with_retry(c, s, a, b):
+async def test_flaky_connect_recover_with_retry(c, s, a, b):
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",

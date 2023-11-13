@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import struct
 from collections.abc import Collection, Iterable, Sequence
+from typing import Literal, overload
 
 import dask
 
@@ -90,11 +91,43 @@ def pack_frames(frames: Collection[bytes | bytearray | memoryview]) -> bytes:
     return b"".join([pack_frames_prelude(frames), *frames])
 
 
-def unpack_frames(b):
+@overload
+def unpack_frames(
+    b: bytes | bytearray | memoryview,
+    *,
+    remainder: bool = False,
+    partial: Literal[False] = False,
+) -> list[memoryview]:
+    ...
+
+
+@overload
+def unpack_frames(
+    b: bytes | bytearray | memoryview,
+    *,
+    remainder: bool = False,
+    partial: Literal[True],
+) -> tuple[list[memoryview], list[int]]:
+    ...
+
+
+def unpack_frames(b, *, remainder=False, partial=False):
     """Unpack bytes into a sequence of frames
 
     This assumes that length information is at the front of the bytestring,
     as performed by pack_frames
+
+    Parameters
+    ----------
+    b:
+        packed frames, as returned by :func:`pack_frames`
+    remainder:
+        If True, return one extra frame at the end which is the continuation of a
+        stream created by concatenating multiple calls to :func:`pack_frames`.
+        This last frame will be empty at the end of the stream.
+    partial:
+        If True, allow for b to contain less frames than what the preamble indicates;
+        return a tuple of ([frames so far], [lengths of missing frames])
 
     See Also
     --------
@@ -110,12 +143,26 @@ def unpack_frames(b):
 
     frames = []
     start = fmt_size * (1 + n_frames)
+    nb = b.nbytes
+    end = 0
+    missing_lengths = []
     for length in lengths:
+        if partial and start == nb:
+            missing_lengths.extend(lengths[len(frames) :])
+            break
+
         end = start + length
         frames.append(b[start:end])
         start = end
+    assert end <= nb
 
-    return frames
+    if remainder:
+        frames.append(b[start:])
+
+    if partial:
+        return frames, missing_lengths
+    else:
+        return frames
 
 
 def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
