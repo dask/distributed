@@ -126,9 +126,8 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 
 
 def write_to_disk(data: list[pa.Table], path: Path) -> int:
-    table = concat_tables(data)
+    table = combine_tables(data)
     del data
-    table = table.combine_chunks()
 
     with path.open(mode="ab") as f:
         start = f.tell()
