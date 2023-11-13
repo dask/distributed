@@ -309,20 +309,23 @@ def split_by_worker(
     constructor = df._constructor_sliced
     assert isinstance(constructor, type)
     worker_for = constructor(worker_for)
-    df = df.merge(
-        right=worker_for.cat.codes.rename("_worker"),
-        left_on=column,
-        right_index=True,
-        how="inner",
+
+    df = (
+        worker_for.cat.codes.rename("_worker")
+        .sort_values()
+        .to_frame()
+        .merge(
+            right=df,
+            right_on=column,
+            left_index=True,
+            how="inner",
+        )
     )
+    assert df["_worker"].is_monotonic_increasing
     nrows = len(df)
     if not nrows:
         return {}
-    # assert len(df) == nrows  # Not true if some outputs aren't wanted
-    # FIXME: If we do not preserve the index something is corrupting the
-    # bytestream such that it cannot be deserialized anymore
-    t = to_pyarrow_table_dispatch(df, preserve_index=True)
-    t = t.sort_by("_worker")
+    t = to_pyarrow_table_dispatch(df)
     codes = np.asarray(t["_worker"])
     t = t.drop(["_worker"])
     del df
