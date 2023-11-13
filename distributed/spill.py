@@ -94,7 +94,7 @@ class SpillBuffer(zict.Buffer[Key, object]):
         # If a value is still in use somewhere on the worker since the last time it was
         # unspilled, don't duplicate it
         slow = Slow(spill_directory, max_spill)
-        slow_cached = zict.Cache(slow, zict.WeakValueMapping())  # type: ignore
+        slow_cached = zict.Cache(slow, zict.WeakValueMapping())
 
         super().__init__(fast={}, slow=slow_cached, n=target, weight=_in_memory_weight)
         self.logged_pickle_errors = set()  # keys logged with pickle error
