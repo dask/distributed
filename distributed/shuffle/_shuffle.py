@@ -25,6 +25,7 @@ from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
     convert_shards,
+    copy_table,
     deserialize_table,
     list_of_buffers_to_table,
     read_from_disk,
@@ -362,7 +363,7 @@ def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
         t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
-    shards = [shard for shard in shards]
+    shards = [copy_table(shard) for shard in shards]
     assert len(t) == sum(map(len, shards))
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))

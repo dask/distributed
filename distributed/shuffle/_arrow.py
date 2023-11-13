@@ -44,6 +44,23 @@ def check_minimal_arrow_version() -> None:
         )
 
 
+def combine_tables(tables: Iterable[pa.Table], deep_copy: bool = True) -> pa.Table:
+    import pyarrow as pa
+
+    table = pa.concat_tables(tables)
+    if deep_copy:
+        return copy_table(table)
+    return table.combine_chunks()
+
+
+def copy_table(table: pa.Table) -> pa.Table:
+    """Creates a deep-copy of the table"""
+    import pyarrow as pa
+
+    # concat_arrays forced a deep-copy even if the input arrays only have a single chunk.
+    return pa.table(pa.concat_arrays(table.columns), schema=table.schema)
+
+
 def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
     import pyarrow as pa
 
@@ -134,7 +151,7 @@ def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
             shards.append(shard)
 
     if shards:
-        shards = [_copy_table(concat_tables(shards))]
+        shards = [combine_tables(shards)]
     return shards, size
 
 
@@ -151,10 +168,3 @@ def concat_arrays(arrays: Iterable[pa.Array]) -> pa.Array:
                 "P2P shuffling requires pyarrow>=12.0.0 to support extension types."
             ) from e
         raise
-
-
-def _copy_table(table: pa.Table) -> pa.Table:
-    import pyarrow as pa
-
-    arrs = [concat_arrays(column.chunks) for column in table.columns]
-    return pa.table(data=arrs, schema=table.schema)
