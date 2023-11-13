@@ -122,9 +122,7 @@ from distributed.shuffle._core import (
     handle_transfer_errors,
     handle_unpack_errors,
 )
-from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._memory import MemoryShardsBuffer
 from distributed.shuffle._pickle import unpickle_bytestream
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
@@ -340,6 +338,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         local_address: str,
         directory: str,
         executor: ThreadPoolExecutor,
+        io_executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
@@ -347,24 +346,18 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         disk: bool,
         loop: IOLoop,
     ):
-        disk_buffer: DiskShardsBuffer | MemoryShardsBuffer
-        if disk:
-            disk_buffer = DiskShardsBuffer(
-                directory=directory,
-                read=self.read,
-                memory_limiter=memory_limiter_disk,
-            )
-        else:
-            disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
         super().__init__(
             id=id,
             run_id=run_id,
             local_address=local_address,
-            storage_buffer=disk_buffer,
+            directory=directory,
             executor=executor,
+            io_executor=io_executor,
             rpc=rpc,
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
+            memory_limiter_disk=memory_limiter_disk,
+            disk=disk,
             loop=loop,
         )
         self.old = old
@@ -432,7 +425,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         data = self._read_from_disk(partition_id)
         # Copy the memory-mapped buffers from disk into memory.
         # This is where we'll spend most time.
-        with self._disk_buffer.time("read"):
+        with self._storage_buffer.time("read"):
             return convert_chunk(data)
 
     def deserialize(self, buffer: Any) -> Any:
@@ -490,6 +483,7 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
                 f"shuffle-{self.id}-{run_id}",
             ),
             executor=plugin._executor,
+            io_executor=plugin._io_executor,
             local_address=plugin.worker.address,
             rpc=plugin.worker.rpc,
             scheduler=plugin.worker.scheduler,

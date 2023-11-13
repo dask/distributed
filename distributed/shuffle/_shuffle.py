@@ -44,7 +44,6 @@ from distributed.shuffle._core import (
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
-from distributed.shuffle._storage import StorageBuffer
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
 
@@ -406,23 +405,18 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         disk: bool,
         loop: IOLoop,
     ):
-        disk_buffer = StorageBuffer(
-            directory=directory,
-            write=self.write,
-            read=self.read,
-            memory_limiter=memory_limiter_disk if disk else ResourceLimiter(None),
-            executor=io_executor,
-        )
-
         super().__init__(
             id=id,
             run_id=run_id,
             local_address=local_address,
-            storage_buffer=disk_buffer,
+            directory=directory,
             executor=executor,
+            io_executor=io_executor,
             rpc=rpc,
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
+            memory_limiter_disk=memory_limiter_disk,
+            disk=disk,
             loop=loop,
         )
         self.column = column
@@ -535,9 +529,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
             local_address=plugin.worker.address,
             rpc=plugin.worker.rpc,
             scheduler=plugin.worker.scheduler,
-            memory_limiter_disk=plugin.memory_limiter_disk
-            if self.disk
-            else ResourceLimiter(None),
+            memory_limiter_disk=plugin.memory_limiter_disk,
             memory_limiter_comms=plugin.memory_limiter_comms,
             disk=self.disk,
             loop=plugin.worker.loop,
