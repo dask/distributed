@@ -48,6 +48,7 @@ def combine_tables(tables: Iterable[pa.Table], deep_copy: bool = True) -> pa.Tab
     import pyarrow as pa
 
     table = pa.concat_tables(tables)
+    del tables
     if deep_copy:
         return copy_table(table)
     return table.combine_chunks()
