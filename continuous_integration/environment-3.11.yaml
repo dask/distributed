@@ -25,7 +25,7 @@ dependencies:
   - pre-commit
   - prometheus_client
   - psutil
-  - pyarrow
+  - pyarrow=14
   - pytest
   - pytest-cov
   - pytest-faulthandler
