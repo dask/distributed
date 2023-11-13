@@ -377,15 +377,17 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         self.raise_if_closed()
 
         # Repartition shards and filter out already received ones
-        shards = defaultdict(list)
+        shards: defaultdict[NDIndex, list[Any]] = defaultdict(lambda: [[], 0])
         for d in data:
             id1, payload = d
             if id1 in self.received:
                 continue
             self.received.add(id1)
             for id2, shard in payload:
-                shards[id2].append(shard)
-            self.total_recvd += sizeof(d)
+                shards[id2][0].append(shard)
+                size = sizeof(shard)
+                shards[id2][1] += size
+        self.total_recvd += sizeof(d)
         del data
         if not shards:
             return

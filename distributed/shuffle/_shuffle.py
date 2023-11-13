@@ -450,6 +450,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         partitions_of = defaultdict(list)
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
+        self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
     async def _receive(self, data: list[tuple[int, bytes]]) -> None:

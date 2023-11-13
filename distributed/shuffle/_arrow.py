@@ -109,9 +109,7 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 
 
 def write_to_disk(data: list[pa.Table], path: Path) -> int:
-    import pyarrow as pa
-
-    table = pa.concat_tables(data)
+    table = concat_tables(data)
     del data
     table = table.combine_chunks()
 
