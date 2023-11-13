@@ -1204,6 +1204,10 @@ properties:
                     description: |
                       GIL polling interval. More frequent polling will reflect a more accurate GIL
                       contention metric but will be more likely to impact runtime performance.
+              gpu:
+                type: boolean
+                description: Should we include GPU metrics (if GPUs are available)?
+              
 
       rmm:
         type: object
