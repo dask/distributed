@@ -377,9 +377,8 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
     """
 
     _lock: ClassVar[asyncio.Lock | None] = None
-    WORKER_PLUGIN_CLASS: ClassVar[type]
 
-    installer: _PackageInstaller
+    _installer: _PackageInstaller
     name: str
     restart_workers: bool
     _scheduler: Scheduler
@@ -389,9 +388,9 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
         installer: _PackageInstaller,
         restart_workers: bool,
     ):
-        self.installer = installer
+        self._installer = installer
         self.restart_workers = restart_workers
-        self.name = f"{self.installer.INSTALLER}-install-{uuid.uuid4()}"
+        self.name = f"{self._installer.INSTALLER}-install-{uuid.uuid4()}"
 
     async def start(self, scheduler: Scheduler) -> None:
         self._scheduler = scheduler
@@ -400,32 +399,123 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
             PackageInstall._lock = asyncio.Lock()
 
         async with PackageInstall._lock:
-            if not self._is_installed(scheduler):
-                logger.info(
-                    "%s installing the following packages on the scheduler: %s",
-                    self.installer.INSTALLER,
-                    self.installer.packages,
-                )
-                self.installer.install()
-                self._set_installed(scheduler)
+            self._installer.install()
 
-                worker_plugin = _PackageInstallWorker(
-                    self.installer, self.restart_workers, self.name
-                )
-                await scheduler.register_worker_plugin(
-                    comm=None, plugin=dumps(worker_plugin), name=self.name
+            if self.restart_workers:
+                nanny_plugin = _PackageInstallNanny(self._installer, self.name)
+                await scheduler.register_nanny_plugin(
+                    comm=None, plugin=dumps(nanny_plugin), name=self.name
                 )
             else:
-                logger.info(
-                    "The following packages have already been installed on the scheduler: %s",
-                    self.installer.packages,
+                worker_plugin = _PackageInstallWorker(self._installer, self.name)
+                await scheduler.register_worker_plugin(
+                    comm=None, plugin=dumps(worker_plugin), name=self.name
                 )
 
     async def close(self) -> None:
         assert PackageInstall._lock is not None
 
         async with PackageInstall._lock:
-            await self._scheduler.unregister_worker_plugin(comm=None, name=self.name)
+            if self.restart_workers:
+                await self._scheduler.unregister_nanny_plugin(comm=None, name=self.name)
+            else:
+                await self._scheduler.unregister_worker_plugin(
+                    comm=None, name=self.name
+                )
+
+
+class _PackageInstallNanny(NannyPlugin):
+    """Worker plugin to install a set of packages
+
+    This accepts an installer which will install a set of packages on all nannies
+    and then restarts the workers.
+
+    .. note::
+
+       This will increase the time it takes to start up
+       each worker. If possible, we recommend including the
+       libraries in the worker environment or image. This is
+       primarily intended for experimentation and debugging.
+
+    Parameters
+    ----------
+    installer
+        Installer that installs a set of packages
+    name:
+        Name of the plugin
+
+    See Also
+    --------
+    PackageInstall
+    """
+
+    installer: _PackageInstaller
+    name: str
+    restart = True
+
+    def __init__(self, installer: _PackageInstaller, name: str):
+        self.installer = installer
+        self.name = name
+
+    async def setup(self, nanny):
+        from distributed.semaphore import Semaphore
+
+        async with (
+            await Semaphore(
+                max_leases=1,
+                name=socket.gethostname(),
+                register=True,
+                scheduler_rpc=nanny.scheduler,
+                loop=nanny.loop,
+            )
+        ):
+            self.installer.install()
+
+
+class _PackageInstallWorker(WorkerPlugin):
+    """Worker plugin to install a set of packages
+
+    This accepts an installer which will install a set of packages on all workers.
+
+    .. note::
+
+       This will increase the time it takes to start up
+       each worker. If possible, we recommend including the
+       libraries in the worker environment or image. This is
+       primarily intended for experimentation and debugging.
+
+    Parameters
+    ----------
+    installer
+        Installer that installs a set of packages
+    name:
+        Name of the plugin
+
+    See Also
+    --------
+    PackageInstall
+    """
+
+    installer: _PackageInstaller
+    name: str
+
+    def __init__(self, installer: _PackageInstaller, name: str):
+        self.installer = installer
+        self.name = name
+
+    async def setup(self, worker):
+        from distributed.semaphore import Semaphore
+
+        async with (
+            await Semaphore(
+                max_leases=1,
+                name=socket.gethostname(),
+                register=True,
+                scheduler_rpc=worker.scheduler,
+                loop=worker.loop,
+            )
+        ):
+            self.installer.install()
 
     def _is_installed(self, scheduler: Scheduler) -> bool:
         return scheduler.get_metadata(self._compose_installed_key(), default=False)
@@ -442,111 +532,6 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
             "installed",
             socket.gethostname(),
         ]
-
-
-class _PackageInstallWorker(WorkerPlugin):
-    """Worker plugin to install a set of packages
-
-    This accepts an installer which will install a set of packages on all workers.
-    You can also optionally ask for the worker to restart itself after
-    performing this installation.
-
-    .. note::
-
-       This will increase the time it takes to start up
-       each worker. If possible, we recommend including the
-       libraries in the worker environment or image. This is
-       primarily intended for experimentation and debugging.
-
-    Parameters
-    ----------
-    installer
-        Installer that installs a set of packages
-    restart
-        Whether or not to restart the worker after installing the packages
-        Only functions if the worker has an attached nanny process
-    name:
-        Name of the plugin
-
-    See Also
-    --------
-    PackageInstall
-    """
-
-    installer: _PackageInstaller
-    name: str
-    restart: bool
-
-    def __init__(self, installer: _PackageInstaller, restart: bool, name: str):
-        self.installer = installer
-        self.restart = restart
-        self.name = name
-
-    async def setup(self, worker):
-        from distributed.semaphore import Semaphore
-
-        async with (
-            await Semaphore(
-                max_leases=1,
-                name=socket.gethostname(),
-                register=True,
-                scheduler_rpc=worker.scheduler,
-                loop=worker.loop,
-            )
-        ):
-            if not await self._is_installed(worker):
-                logger.info(
-                    "%s installing the following packages: %s",
-                    self.installer.INSTALLER,
-                    self.installer.packages,
-                )
-                await self._set_installed(worker)
-                self.installer.install()
-            else:
-                logger.info(
-                    "The following packages have already been installed: %s",
-                    self.installer.packages,
-                )
-
-            if self.restart and worker.nanny and not await self._is_restarted(worker):
-                logger.info("Restarting worker to refresh interpreter.")
-                await self._set_restarted(worker)
-                worker.loop.add_callback(
-                    worker.close_gracefully, restart=True, reason=f"{self.name}-setup"
-                )
-
-    async def _is_installed(self, worker):
-        return await worker.client.get_metadata(
-            self._compose_installed_key(), default=False
-        )
-
-    async def _set_installed(self, worker):
-        await worker.client.set_metadata(
-            self._compose_installed_key(),
-            True,
-        )
-
-    def _compose_installed_key(self):
-        return [
-            self.name,
-            "installed",
-            socket.gethostname(),
-        ]
-
-    async def _is_restarted(self, worker):
-        return await worker.client.get_metadata(
-            self._compose_restarted_key(worker),
-            default=False,
-        )
-
-    async def _set_restarted(self, worker):
-        await worker.client.set_metadata(
-            self._compose_restarted_key(worker),
-            True,
-        )
-
-    def _compose_restarted_key(self, worker):
-        return [self.name, "restarted", worker.nanny]
 
 
 class _PackageInstaller(abc.ABC):
