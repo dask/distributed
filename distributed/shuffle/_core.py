@@ -319,10 +319,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     def read(self, path: Path) -> tuple[Any, int]:
         """Read shards from disk"""
 
-    @abc.abstractmethod
-    def deserialize(self, buffer: Any) -> Any:
-        """Deserialize shards"""
-
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:
     from distributed import get_worker

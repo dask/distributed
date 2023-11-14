@@ -431,9 +431,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         with self._storage_buffer.time("read"):
             return convert_chunk(data)
 
-    def deserialize(self, buffer: Any) -> Any:
-        return buffer
-
     def write(self, data: list[Any], path: Path) -> int:
         frames = concat(pickle_bytelist(shard) for shard in data)
 

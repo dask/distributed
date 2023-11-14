@@ -102,13 +102,6 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     return df.astype(reconciled_dtypes, copy=False)
 
 
-def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
-    """Convert a list of arrow buffers and a schema to an Arrow Table"""
-
-    tables = (deserialize_table(buffer) for buffer in data)
-    return concat_tables(tables)
-
-
 def serialize_table(table: pa.Table) -> bytes:
     import pyarrow as pa
 
@@ -116,13 +109,6 @@ def serialize_table(table: pa.Table) -> bytes:
     with pa.ipc.new_stream(stream, table.schema) as writer:
         writer.write_table(table)
     return stream.getvalue().to_pybytes()
-
-
-def deserialize_table(buffer: bytes) -> pa.Table:
-    import pyarrow as pa
-
-    with pa.ipc.open_stream(pa.py_buffer(buffer)) as reader:
-        return reader.read_all()
 
 
 def write_to_disk(data: list[pa.Table], path: Path) -> int:
