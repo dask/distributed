@@ -641,3 +641,168 @@ async def test_scheduler_plugin_in_register_worker_plugin_overrides_nanny(c, s, 
         await c.register_worker_plugin(DuckPlugin(), nanny=True)
     assert len(s.plugins) == n_existing_plugins + 1
     assert s.foo == 123
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_register_idempotent_plugin(c, s):
+    class IdempotentPlugin(Scheduler):
+        def __init__(self, instance=None):
+            self.name = "idempotentplugin"
+            self.instance = instance
+            self.idempotent = True
+
+        def start(self, scheduler):
+            if self.instance != "first":
+                raise RuntimeError(
+                    "Only the first plugin should be started when idempotent is set"
+                )
+
+    first = IdempotentPlugin(instance="first")
+    await c.register_plugin(first)
+    assert "idempotentplugin" in s.plugins
+
+    second = IdempotentPlugin(instance="second")
+    await c.register_plugin(second)
+    assert "idempotentplugin" in s.plugins
+    assert s.plugins["idempotentplugin"].instance == "first"
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_register_plugin_with_idempotent_keyword(c, s):
+    class IdempotentPlugin(SchedulerPlugin):
+        def __init__(self, instance=None):
+            self.name = "idempotentplugin"
+            self.instance = instance
+
+        def start(self, scheduler):
+            if self.instance != "first":
+                raise RuntimeError(
+                    "Only the first plugin should be started when idempotent is set"
+                )
+
+    first = IdempotentPlugin(instance="first")
+    await c.register_plugin(first, idempotent=True)
+    assert "idempotentplugin" in s.plugins
+
+    second = IdempotentPlugin(instance="second")
+    await c.register_plugin(second, idempotent=True)
+    assert "idempotentplugin" in s.plugins
+    assert s.plugins["idempotentplugin"].instance == "first"
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_register_non_idempotent_plugin(c, s):
+    class NonIdempotentPlugin(SchedulerPlugin):
+        def __init__(self, instance=None):
+            self.name = "nonidempotentplugin"
+            self.instance = instance
+
+    first = NonIdempotentPlugin(instance="first")
+    await c.register_plugin(first)
+    assert "nonidempotentplugin" in s.plugins
+
+    second = NonIdempotentPlugin(instance="second")
+    await c.register_plugin(second)
+    assert "nonidempotentplugin" in s.plugins
+    assert s.plugins["nonidempotentplugin"].instance == "second"
+
+    third = NonIdempotentPlugin(instance="third")
+    with pytest.warns(
+        FutureWarning,
+        match="`SchedulerPlugin.register_scheduler_plugin` now requires `idempotent`",
+    ):
+        await s.register_scheduler_plugin(
+            comm=None, plugin=dumps(third), name="nonidempotentplugin"
+        )
+    assert "nonidempotentplugin" in s.plugins
+    assert s.plugins["nonidempotentplugin"].instance == "third"
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_register_plugin_with_idempotent_keyword_overrules_plugin(c, s):
+    class NonIdempotentPlugin(SchedulerPlugin):
+        def __init__(self, instance=None):
+            self.name = "nonidempotentplugin"
+            self.instance = instance
+            # We want to overrule this
+            self.idempotent = True
+
+    first = NonIdempotentPlugin(instance="first")
+    await c.register_plugin(first, idempotent=False)
+    assert "nonidempotentplugin" in s.plugins
+
+    second = NonIdempotentPlugin(instance="second")
+    await c.register_plugin(second, idempotent=False)
+    assert "nonidempotentplugin" in s.plugins
+    assert s.plugins["nonidempotentplugin"].instance == "second"
+
+    class IdempotentPlugin(SchedulerPlugin):
+        def __init__(self, instance=None):
+            self.name = "idempotentplugin"
+            self.instance = instance
+            # We want to overrule this
+            self.idempotent = False
+
+        def start(self, scheduler):
+            if self.instance != "first":
+                raise RuntimeError(
+                    "Only the first plugin should be started when idempotent is set"
+                )
+
+    first = IdempotentPlugin(instance="first")
+    await c.register_plugin(first, idempotent=True)
+    assert "idempotentplugin" in s.plugins
+
+    second = IdempotentPlugin(instance="second")
+    await c.register_plugin(second, idempotent=True)
+    assert "idempotentplugin" in s.plugins
+    assert s.plugins["idempotentplugin"].instance == "first"
+
+
+@gen_cluster(nthreads=[])
+async def test_register_idempotent_plugins_directly(s):
+    class IdempotentPlugin(SchedulerPlugin):
+        def __init__(self, instance=None):
+            self.name = "idempotentplugin"
+            self.instance = instance
+
+        def start(self, scheduler):
+            if self.instance != "first":
+                raise RuntimeError(
+                    "Only the first plugin should be started when idempotent is set"
+                )
+
+    first = IdempotentPlugin(instance="first")
+    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=True)
+    assert "idempotentplugin" in s.plugins
+
+    second = IdempotentPlugin(instance="second")
+    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=True)
+    assert "idempotentplugin" in s.plugins
+    assert s.plugins["idempotentplugin"].instance == "first"
+
+
+@gen_cluster(nthreads=[])
+async def test_register_non_idempotent_plugins_directly(s):
+    class NonIdempotentPlugin(SchedulerPlugin):
+        def __init__(self, instance=None):
+            self.name = "nonidempotentplugin"
+            self.instance = instance
+
+    first = NonIdempotentPlugin(instance="first")
+    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=False)
+    assert "nonidempotentplugin" in s.plugins
+
+    second = NonIdempotentPlugin(instance="second")
+    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=False)
+    assert "nonidempotentplugin" in s.plugins
+    assert s.plugins["nonidempotentplugin"].instance == "second"
+
+    third = NonIdempotentPlugin(instance="third")
+    with pytest.warns(
+        FutureWarning,
+        match="`Scheduler.register_scheduler_plugin` now requires `idempotent`",
+    ):
+        await s.register_scheduler_plugin(plugin=dumps(third))
+    assert "nonidempotentplugin" in s.plugins
+    assert s.plugins["nonidempotentplugin"].instance == "third"

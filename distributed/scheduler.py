@@ -5824,7 +5824,7 @@ class Scheduler(SchedulerState, ServerNode):
         self,
         plugin: bytes | SchedulerPlugin,
         name: str | None = None,
-        idempotent: bool = False,
+        idempotent: bool | None = None,
     ) -> None:
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
@@ -5834,6 +5834,14 @@ class Scheduler(SchedulerState, ServerNode):
                 "arbitrary bytestrings using pickle via the "
                 "'distributed.scheduler.pickle' configuration setting."
             )
+        if idempotent is None:
+            warnings.warn(
+                "The signature of `SchedulerPlugin.register_scheduler_plugin` now requires "
+                "`idempotent`. Not including `idempotent` in the signature will no longer "
+                "be supported in future versions.",
+                FutureWarning,
+            )
+            idempotent = False
         if not isinstance(plugin, SchedulerPlugin):
             plugin = loads(plugin)
             assert isinstance(plugin, SchedulerPlugin)
@@ -7539,10 +7547,18 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(
-        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
+        self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
     ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
+        if idempotent is None:
+            warnings.warn(
+                "The signature of `SchedulerPlugin.register_worker_plugin` now requires "
+                "`idempotent`. Not including `idempotent` in the signature will no longer "
+                "be supported in future versions.",
+                FutureWarning,
+            )
+            idempotent = False
         if name in self.worker_plugins and idempotent:
             return {}
 
@@ -7566,10 +7582,20 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def register_nanny_plugin(
-        self, comm: None, plugin: bytes, name: str, idempotent: bool = False
+        self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
     ) -> dict[str, OKMessage]:
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
+
+        if idempotent is None:
+            warnings.warn(
+                "The signature of `SchedulerPlugin.register_nanny_plugin` now requires "
+                "`idempotent`. Not including `idempotent` in the signature will no longer "
+                "be supported in future versions.",
+                FutureWarning,
+            )
+            idempotent = False
+
         if name in self.nanny_plugins and idempotent:
             return {}
 
