@@ -70,6 +70,10 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     _closed_event: asyncio.Event
     _loop: IOLoop
 
+    RETRY_COUNT: int
+    RETRY_DELAY_MIN: float
+    RETRY_DELAY_MAX: float
+
     def __init__(
         self,
         id: ShuffleId,
@@ -115,6 +119,14 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self._closed_event = asyncio.Event()
         self._loop = loop
 
+        self.RETRY_COUNT = dask.config.get("distributed.p2p.comm.retry.count")
+        self.RETRY_DELAY_MIN = parse_timedelta(
+            dask.config.get("distributed.p2p.comm.retry.delay.min"), default="s"
+        )
+        self.RETRY_DELAY_MAX = parse_timedelta(
+            dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
+        )
+
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: id={self.id!r}, run_id={self.run_id!r}, local_address={self.local_address!r}, closed={self.closed!r}, transferred={self.transferred!r}>"
 
@@ -154,14 +166,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     async def send(
         self, address: str, shards: list[tuple[_T_partition_id, Any]]
     ) -> None:
-        retry_count = dask.config.get("distributed.p2p.comm.retry.count")
-        retry_delay_min = parse_timedelta(
-            dask.config.get("distributed.p2p.comm.retry.delay.min"), default="s"
-        )
-        retry_delay_max = parse_timedelta(
-            dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
-        )
-
         if _mean_shard_size(shards) < 65536:
             # Don't send buffers individually over the tcp comms.
             # Instead, merge everything into an opaque bytes blob, send it all at once,
@@ -174,9 +178,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
         return await retry(
             partial(self._send, address, shards_or_bytes),
-            count=retry_count,
-            delay_min=retry_delay_min,
-            delay_max=retry_delay_max,
+            count=self.RETRY_COUNT,
+            delay_min=self.RETRY_DELAY_MIN,
+            delay_max=self.RETRY_DELAY_MAX,
         )
 
     async def offload(
