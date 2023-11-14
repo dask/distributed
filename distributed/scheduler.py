@@ -7056,8 +7056,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # time (depending on interval settings)
                 amm.run_once()
 
-                workers_info = dict(await asyncio.gather(*coros))
-                workers_info.pop(None, None)
+                workers_info = {
+                    addr: info
+                    for addr, info in await asyncio.gather(*coros)
+                    if addr is not None
+                }
             finally:
                 if stop_amm:
                     amm.stop()
@@ -7789,7 +7792,7 @@ class Scheduler(SchedulerState, ServerNode):
             workers = self.workers
         else:
             workers = set(self.workers) & set(workers)
-        results = await asyncio.gather(
+        results: Sequence[Any] = await asyncio.gather(
             *(self.rpc(w).profile_metadata(start=start, stop=stop) for w in workers),
             return_exceptions=True,
         )
