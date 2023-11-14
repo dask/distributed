@@ -7,6 +7,7 @@ from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
+from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,12 +25,11 @@ from distributed.exceptions import Reschedule
 from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
+    concat_tables,
     convert_shards,
     copy_table,
     deserialize_table,
-    list_of_buffers_to_table,
     read_from_disk,
-    serialize_table,
     write_to_disk,
 )
 from distributed.shuffle._core import (
@@ -356,7 +356,6 @@ def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
 
     partitions = t.select([column]).to_pandas()[column].unique()
     partitions.sort()
-    t = t.sort_by(column)
 
     partition = np.asarray(t[column])
     splits = np.where(partition[1:] != partition[:-1])[0] + 1
@@ -478,16 +477,22 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             raise
 
     def _repartition_buffers(
-        self, data: list[bytes]
+        self, data: list[pa.Table]
     ) -> dict[NDIndex, tuple[pa.Table, int]]:
-        table = list_of_buffers_to_table(data)
-        del data
-        nrows = len(table)
-        metadata_size = sizeof(table.schema.metadata)
-        groups = split_by_partition(table, self.column)
-        del table
-        assert sum(map(len, groups.values())) == nrows
-        return {(k,): (v, v.nbytes + metadata_size) for k, v in groups.items()}
+        nrows = sum(map(len, data))
+        shards: defaultdict[int, list[Any]] = defaultdict(lambda: [[], 0])
+        while data:
+            table = data.pop()
+            metadata_size = sizeof(table.schema.metadata)
+            groups = split_by_partition(table, self.column)
+            for key, shard in groups.items():
+                shards[key][0].append(shard)
+                shards[key][1] += metadata_size + shard.nbytes
+        actual = sum(map(len, chain(*toolz.pluck(0, shards.values()))))
+        assert actual == nrows
+        return {
+            (k,): (concat_tables(shards), size) for k, (shards, size) in shards.items()
+        }
 
     def _shard_partition(
         self,
@@ -502,7 +507,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self.worker_for,
         )
         del data
-        out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
+        out = {k: (partition_id, t) for k, t in out.items()}
         return out
 
     def _get_output_partition(

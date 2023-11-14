@@ -162,16 +162,16 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         retry_delay_max = parse_timedelta(
             dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
         )
-
-        if _mean_shard_size(shards) < 65536:
-            # Don't send buffers individually over the tcp comms.
-            # Instead, merge everything into an opaque bytes blob, send it all at once,
-            # and unpickle it on the other side.
-            # Performance tests informing the size threshold:
-            # https://github.com/dask/distributed/pull/8318
-            shards_or_bytes: list | bytes = pickle.dumps(shards)
-        else:
-            shards_or_bytes = shards
+        # FIXME
+        # if _mean_shard_size(shards) < 65536:
+        # Don't send buffers individually over the tcp comms.
+        # Instead, merge everything into an opaque bytes blob, send it all at once,
+        # and unpickle it on the other side.
+        # Performance tests informing the size threshold:
+        # https://github.com/dask/distributed/pull/8318
+        # shards_or_bytes: list | bytes = pickle.dumps(shards)
+        # else:
+        shards_or_bytes = shards
 
         return await retry(
             partial(self._send, address, shards_or_bytes),

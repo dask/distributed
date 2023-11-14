@@ -381,6 +381,11 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         except Exception:  # pragma: no cover
             self._executor.shutdown()
 
+        try:
+            self._io_executor.shutdown(cancel_futures=True)
+        except Exception:  # pragma: no cover
+            self._io_executor.shutdown()
+
     #############################
     # Methods for worker thread #
     #############################

@@ -45,9 +45,7 @@ def check_minimal_arrow_version() -> None:
 
 
 def combine_tables(tables: Iterable[pa.Table], deep_copy: bool = True) -> pa.Table:
-    import pyarrow as pa
-
-    table = pa.concat_tables(tables)
+    table = concat_tables(tables)
     if deep_copy:
         return copy_table(table)
     return table.combine_chunks()
@@ -128,6 +126,8 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 
 
 def write_to_disk(data: list[pa.Table], path: Path) -> int:
+    import pyarrow as pa
+
     table = combine_tables(data)
     del data
 
