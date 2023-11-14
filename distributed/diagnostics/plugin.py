@@ -399,6 +399,11 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
             PackageInstall._lock = asyncio.Lock()
 
         async with PackageInstall._lock:
+            logger.info(
+                "%s installing the following packages on the scheduler: %s",
+                self._installer.INSTALLER,
+                self._installer.packages,
+            )
             self._installer.install()
 
             if self.restart_workers:
@@ -449,12 +454,12 @@ class _PackageInstallNanny(NannyPlugin):
     PackageInstall
     """
 
-    installer: _PackageInstaller
+    _installer: _PackageInstaller
     name: str
     restart = True
 
     def __init__(self, installer: _PackageInstaller, name: str):
-        self.installer = installer
+        self._installer = installer
         self.name = name
 
     async def setup(self, nanny):
@@ -469,7 +474,12 @@ class _PackageInstallNanny(NannyPlugin):
                 loop=nanny.loop,
             )
         ):
-            self.installer.install()
+            logger.info(
+                "%s installing the following packages: %s",
+                self._installer.INSTALLER,
+                self._installer.packages,
+            )
+            self._installer.install()
 
 
 class _PackageInstallWorker(WorkerPlugin):
@@ -496,11 +506,11 @@ class _PackageInstallWorker(WorkerPlugin):
     PackageInstall
     """
 
-    installer: _PackageInstaller
+    _installer: _PackageInstaller
     name: str
 
     def __init__(self, installer: _PackageInstaller, name: str):
-        self.installer = installer
+        self._installer = installer
         self.name = name
 
     async def setup(self, worker):
@@ -515,7 +525,12 @@ class _PackageInstallWorker(WorkerPlugin):
                 loop=worker.loop,
             )
         ):
-            self.installer.install()
+            logger.info(
+                "%s installing the following packages: %s",
+                self._installer.INSTALLER,
+                self._installer.packages,
+            )
+            self._installer.install()
 
     def _is_installed(self, scheduler: Scheduler) -> bool:
         return scheduler.get_metadata(self._compose_installed_key(), default=False)
