@@ -413,7 +413,10 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
                     self.installer, self.restart_workers, self.name
                 )
                 await scheduler.register_worker_plugin(
-                    comm=None, plugin=dumps(worker_plugin), name=self.name
+                    comm=None,
+                    plugin=dumps(worker_plugin),
+                    name=self.name,
+                    idempotent=True,
                 )
             else:
                 logger.info(

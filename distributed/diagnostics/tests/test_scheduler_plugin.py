@@ -426,7 +426,7 @@ async def test_unregister_scheduler_plugin(s):
             self.name = "plugin"
 
     plugin = Plugin()
-    await s.register_scheduler_plugin(plugin=dumps(plugin))
+    await s.register_scheduler_plugin(plugin=dumps(plugin), idempotent=False)
     assert "plugin" in s.plugins
 
     await s.unregister_scheduler_plugin(name="plugin")
@@ -478,7 +478,7 @@ async def test_register_plugin_on_scheduler(c, s, a, b):
         async def start(self, scheduler: Scheduler) -> None:
             scheduler._foo = "bar"  # type: ignore
 
-    await s.register_scheduler_plugin(MyPlugin())
+    await s.register_scheduler_plugin(MyPlugin(), idempotent=False)
 
     assert s._foo == "bar"
 
@@ -499,8 +499,8 @@ async def test_closing_errors_ok(c, s, a, b, capsys):
         async def close(self):
             raise Exception("AFTER_CLOSE")
 
-    await s.register_scheduler_plugin(OK())
-    await s.register_scheduler_plugin(Bad())
+    await s.register_scheduler_plugin(OK(), idempotent=False)
+    await s.register_scheduler_plugin(Bad(), idempotent=False)
 
     with captured_logger("distributed.scheduler") as logger:
         await s.close()
@@ -645,7 +645,7 @@ async def test_scheduler_plugin_in_register_worker_plugin_overrides_nanny(c, s, 
 
 @gen_cluster(client=True, nthreads=[])
 async def test_register_idempotent_plugin(c, s):
-    class IdempotentPlugin(Scheduler):
+    class IdempotentPlugin(SchedulerPlugin):
         def __init__(self, instance=None):
             self.name = "idempotentplugin"
             self.instance = instance

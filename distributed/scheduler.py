@@ -5836,7 +5836,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
         if idempotent is None:
             warnings.warn(
-                "The signature of `SchedulerPlugin.register_scheduler_plugin` now requires "
+                "The signature of `Scheduler.register_scheduler_plugin` now requires "
                 "`idempotent`. Not including `idempotent` in the signature will no longer "
                 "be supported in future versions.",
                 FutureWarning,
@@ -7553,7 +7553,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Registering Worker plugin %s", name)
         if idempotent is None:
             warnings.warn(
-                "The signature of `SchedulerPlugin.register_worker_plugin` now requires "
+                "The signature of `Scheduler.register_worker_plugin` now requires "
                 "`idempotent`. Not including `idempotent` in the signature will no longer "
                 "be supported in future versions.",
                 FutureWarning,
@@ -7589,7 +7589,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         if idempotent is None:
             warnings.warn(
-                "The signature of `SchedulerPlugin.register_nanny_plugin` now requires "
+                "The signature of `Scheduler.register_nanny_plugin` now requires "
                 "`idempotent`. Not including `idempotent` in the signature will no longer "
                 "be supported in future versions.",
                 FutureWarning,

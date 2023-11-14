@@ -388,7 +388,7 @@ async def test_register_non_idempotent_plugin(c, s, a):
     third = NonIdempotentPlugin(instance="third")
     with pytest.warns(
         FutureWarning,
-        match="`SchedulerPlugin.register_worker_plugin` now requires `idempotent`",
+        match="`Scheduler.register_worker_plugin` now requires `idempotent`",
     ):
         await s.register_worker_plugin(
             comm=None, plugin=dumps(third), name="nonidempotentplugin"
