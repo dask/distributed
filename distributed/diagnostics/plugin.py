@@ -48,8 +48,8 @@ class SchedulerPlugin:
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
     The ``idempotent`` attribute is used to control whether or not the plugin should
-    skip installation if a scheduler plugin with the same name is already registered.
-    If ``True``, the installation is skipped, otherwise the existing plugin is replaced.
+    be ignored upon registration if a scheduler plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
     Defaults to ``False``.
 
     Examples
@@ -226,8 +226,8 @@ class WorkerPlugin:
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
     The ``idempotent`` attribute is used to control whether or not the plugin should
-    skip installation if a worker plugin with the same name is already registered.
-    If ``True``, the installation is skipped, otherwise the existing plugin is replaced.
+    be ignored upon registration if a worker plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
     Defaults to ``False``.
 
     Examples
@@ -314,8 +314,8 @@ class NannyPlugin:
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
     The ``idempotent`` attribute is used to control whether or not the plugin should
-    skip installation if a nanny plugin with the same name is already registered.
-    If ``True``, the installation is skipped, otherwise the existing plugin is replaced.
+    be ignored upon registration if a nanny plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
     Defaults to ``False``.
 
     The ``restart`` attribute is used to control whether or not a running ``Worker``
