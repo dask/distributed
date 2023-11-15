@@ -9,10 +9,9 @@ import socket
 import subprocess
 import sys
 import uuid
-import warnings
 import zipfile
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from dask.typing import Key
 from dask.utils import funcname, tmpfile
@@ -352,7 +351,7 @@ class SchedulerUploadFile(SchedulerPlugin):
 class InstallPlugin(SchedulerPlugin):
     """Scheduler plugin to install software on the cluster
 
-    This accepts an Installer instance to install on the scheduler and
+    This accepts an function that installs software on the scheduler and
     all workers. You can also optionally ask for the worker to restart
     after performing this installation.
 
@@ -365,8 +364,8 @@ class InstallPlugin(SchedulerPlugin):
 
     Parameters
     ----------
-    installer
-        Installer used to install the software
+    install_fn
+        Callable used to install the software
     restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
@@ -380,17 +379,17 @@ class InstallPlugin(SchedulerPlugin):
     idempotent = True
     _lock: ClassVar[asyncio.Lock | None] = None
 
-    _installer: Installer
+    _install_fn: Callable[[], None]
     name: str
     restart_workers: bool
     _scheduler: Scheduler
 
     def __init__(
         self,
-        installer: Installer,
+        install_fn: Callable[[], None],
         restart_workers: bool,
     ):
-        self._installer = installer
+        self._install_fn = install_fn
         self.restart_workers = restart_workers
         self.name = f"{self.__class__.__name__}-{uuid.uuid4()}"
 
@@ -401,15 +400,15 @@ class InstallPlugin(SchedulerPlugin):
             InstallPlugin._lock = asyncio.Lock()
 
         async with InstallPlugin._lock:
-            self._installer.install()
+            self._install_fn()
 
             if self.restart_workers:
-                nanny_plugin = _InstallNannyPlugin(self._installer, self.name)
+                nanny_plugin = _InstallNannyPlugin(self._install_fn, self.name)
                 await scheduler.register_nanny_plugin(
                     comm=None, plugin=dumps(nanny_plugin), name=self.name
                 )
             else:
-                worker_plugin = _InstallWorkerPlugin(self._installer, self.name)
+                worker_plugin = _InstallWorkerPlugin(self._install_fn, self.name)
                 await scheduler.register_worker_plugin(
                     comm=None, plugin=dumps(worker_plugin), name=self.name
                 )
@@ -440,8 +439,8 @@ class _InstallNannyPlugin(NannyPlugin):
 
     Parameters
     ----------
-    installer
-        Installer that installs software
+    install_fn
+        Function that installs software
     name:
         Name of the plugin
 
@@ -450,12 +449,12 @@ class _InstallNannyPlugin(NannyPlugin):
     InstallPlugin
     """
 
-    _installer: Installer
+    _install_fn: Callable[[], None]
     name: str
     restart = True
 
-    def __init__(self, installer: Installer, name: str):
-        self._installer = installer
+    def __init__(self, _install_fn: Callable[[], None], name: str):
+        self._install_fn = _install_fn
         self.name = name
 
     async def setup(self, nanny):
@@ -470,7 +469,7 @@ class _InstallNannyPlugin(NannyPlugin):
                 loop=nanny.loop,
             )
         ):
-            self._installer.install()
+            self._install_fn()
 
 
 class _InstallWorkerPlugin(WorkerPlugin):
@@ -487,8 +486,8 @@ class _InstallWorkerPlugin(WorkerPlugin):
 
     Parameters
     ----------
-    installer
-        Installer that installs software
+    install_fn
+        Callable that installs software
     name:
         Name of the plugin
 
@@ -497,11 +496,11 @@ class _InstallWorkerPlugin(WorkerPlugin):
     InstallPlugin
     """
 
-    _installer: Installer
+    _install_fn: Callable[[], None]
     name: str
 
-    def __init__(self, installer: Installer, name: str):
-        self._installer = installer
+    def __init__(self, install_fn: Callable[[], None], name: str):
+        self._install_fn = install_fn
         self.name = name
 
     async def setup(self, worker):
@@ -516,31 +515,7 @@ class _InstallWorkerPlugin(WorkerPlugin):
                 loop=worker.loop,
             )
         ):
-            self._installer.install()
-
-
-class Installer(Protocol):
-    def install(self) -> None:
-        """Install the required software.
-
-        .. note::
-           This method may be executed multiple times on the same machine
-           and must be idempotent.
-        """
-
-
-class PackageInstall(InstallPlugin):
-    def __init__(
-        self,
-        installer: Installer,
-        restart_workers: bool,
-    ):
-        warnings.warn(
-            "PackageInstall has been renamed to InstallPlugin. The PackageInstall "
-            "alias will be removed in a future version",
-            FutureWarning,
-        )
-        super().__init__(installer, restart_workers)
+            self._install_fn()
 
 
 class CondaInstall(InstallPlugin):
@@ -602,7 +577,7 @@ class _CondaInstaller:
         self.packages = packages
         self.conda_options = conda_options or []
 
-    def install(self) -> None:
+    def __call__(self) -> None:
         logger.info(
             "%s installing the following packages: %s",
             self.INSTALLER,
@@ -690,7 +665,7 @@ class _PipInstaller:
         self.packages = packages
         self.pip_options = pip_options or []
 
-    def install(self) -> None:
+    def __call__(self) -> None:
         logger.info(
             "%s installing the following packages: %s",
             self.INSTALLER,

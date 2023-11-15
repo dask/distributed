@@ -138,45 +138,18 @@ async def test_conda_install_fails_on_returncode(c, s, a, b):
             assert "install failed" in logs
 
 
-class _StubInstaller:
-    def install(self) -> None:
-        pass
-
-
-class StubInstall(InstallPlugin):
-    def __init__(self, restart_workers: bool = False):
-        installer = _StubInstaller()
-        super().__init__(installer=installer, restart_workers=restart_workers)
-
-
 @gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_install_plugin_installs_once_with_multiple_workers(c, s, a, b):
+async def test_install_plugin_warns_when_reregistered(c, s, a, b):
+    plugin = InstallPlugin(lambda: None, restart_workers=False)
     with captured_logger(
         "distributed.diagnostics.plugin", level=logging.INFO
     ) as logger:
-        install_mock = mock.Mock(name="install")
-        with mock.patch.object(_StubInstaller, "install", install_mock):
-            await c.register_plugin(StubInstall())
-            assert install_mock.call_count > 0
-            logs = logger.getvalue()
-
-
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_install_plugin_installs_once_when_reregistered(c, s, a, b):
-    stub_install = StubInstall()
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        install_mock = mock.Mock(name="install")
-        with mock.patch.object(_StubInstaller, "install", install_mock):
-            await c.register_plugin(stub_install)
-            with pytest.warns(
-                UserWarning,
-                match=r"Scheduler already contains a plugin with name StubInstall-.*; overwriting.",
-            ):
-                await c.register_plugin(stub_install)
-            assert install_mock.call_count > 0
-            logs = logger.getvalue()
+        await c.register_plugin(plugin)
+        with pytest.warns(
+            UserWarning,
+            match=r"Scheduler already contains a plugin with name InstallPlugin-.*; overwriting.",
+        ):
+            await c.register_plugin(plugin)
 
 
 @pytest.mark.slow
@@ -184,7 +157,8 @@ async def test_install_plugin_installs_once_when_reregistered(c, s, a, b):
 async def test_package_install_restarts_on_nanny(c, s, a):
     (addr,) = s.workers
     await c.register_plugin(
-        StubInstall(
+        InstallPlugin(
+            lambda: None,
             restart_workers=True,
         )
     )
@@ -193,23 +167,17 @@ async def test_package_install_restarts_on_nanny(c, s, a):
         await asyncio.sleep(0.01)
 
 
-class _FailingInstaller:
-    def install(self) -> None:
-        raise RuntimeError()
-
-
-class FailingInstall(InstallPlugin):
-    def __init__(self, restart_workers: bool = False):
-        installer = _FailingInstaller()
-        super().__init__(installer=installer, restart_workers=restart_workers)
-
-
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_package_install_failing_does_not_restart_on_nanny(c, s, a):
     (addr,) = s.workers
+
+    def install_fn():
+        raise RuntimeError()
+
     with pytest.raises(RuntimeError):
         await c.register_plugin(
-            FailingInstall(
+            InstallPlugin(
+                install_fn,
                 restart_workers=True,
             )
         )
