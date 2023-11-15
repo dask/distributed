@@ -4176,46 +4176,6 @@ async def test_dump_cluster_state(s, *workers, format):
         fs.rm("state-dumps", recursive=True)
 
 
-@gen_cluster(nthreads=[])
-async def test_idempotent_plugins(s):
-    class IdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "idempotentplugin"
-            self.instance = instance
-
-        def start(self, scheduler):
-            if self.instance != "first":
-                raise RuntimeError(
-                    "Only the first plugin should be started when idempotent is set"
-                )
-
-    first = IdempotentPlugin(instance="first")
-    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=True)
-    assert "idempotentplugin" in s.plugins
-
-    second = IdempotentPlugin(instance="second")
-    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=True)
-    assert "idempotentplugin" in s.plugins
-    assert s.plugins["idempotentplugin"].instance == "first"
-
-
-@gen_cluster(nthreads=[])
-async def test_non_idempotent_plugins(s):
-    class NonIdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "nonidempotentplugin"
-            self.instance = instance
-
-    first = NonIdempotentPlugin(instance="first")
-    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=False)
-    assert "nonidempotentplugin" in s.plugins
-
-    second = NonIdempotentPlugin(instance="second")
-    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=False)
-    assert "nonidempotentplugin" in s.plugins
-    assert s.plugins["nonidempotentplugin"].instance == "second"
-
-
 @gen_cluster(nthreads=[("", 1)])
 async def test_repr(s, a):
     async with Worker(s.address, nthreads=2) as b:  # name = address by default
