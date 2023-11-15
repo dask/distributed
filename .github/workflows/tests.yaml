@@ -17,6 +17,7 @@ jobs:
     # Do not run the schedule job on forks
     if: github.repository == 'dask/distributed' || github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    # If you change the pattern of this name, please adjust the scripts/test_report.py parsing accordingly
     name: ${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ matrix.partition }}
     timeout-minutes: 120
 
