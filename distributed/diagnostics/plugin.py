@@ -365,7 +365,7 @@ class InstallPlugin(SchedulerPlugin):
     Parameters
     ----------
     install_fn
-        Callable used to install the software
+        Callable used to install the software; must be idempotent.
     restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
