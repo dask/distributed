@@ -425,12 +425,18 @@ class InstallPlugin(SchedulerPlugin):
             if self.restart_workers:
                 nanny_plugin = _InstallNannyPlugin(self._install_fn, self.name)
                 await scheduler.register_nanny_plugin(
-                    comm=None, plugin=dumps(nanny_plugin), name=self.name
+                    comm=None,
+                    plugin=dumps(nanny_plugin),
+                    name=self.name,
+                    idempotent=True,
                 )
             else:
                 worker_plugin = _InstallWorkerPlugin(self._install_fn, self.name)
                 await scheduler.register_worker_plugin(
-                    comm=None, plugin=dumps(worker_plugin), name=self.name
+                    comm=None,
+                    plugin=dumps(worker_plugin),
+                    name=self.name,
+                    idempotent=True,
                 )
 
     async def close(self) -> None:

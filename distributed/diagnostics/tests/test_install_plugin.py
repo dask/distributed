@@ -138,20 +138,6 @@ async def test_conda_install_fails_on_returncode(c, s, a, b):
             assert "install failed" in logs
 
 
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_install_plugin_warns_when_reregistered(c, s, a, b):
-    plugin = InstallPlugin(lambda: None, restart_workers=False)
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        await c.register_plugin(plugin)
-        with pytest.warns(
-            UserWarning,
-            match=r"Scheduler already contains a plugin with name InstallPlugin-.*; overwriting.",
-        ):
-            await c.register_plugin(plugin)
-
-
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_package_install_restarts_on_nanny(c, s, a):
