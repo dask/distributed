@@ -4316,206 +4316,182 @@ class WorkerTable(DashboardComponent):
 class Shuffling(DashboardComponent):
     """Occupancy (in time) per worker"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
-            self.scheduler = scheduler
-            self.source = ColumnDataSource(
-                {
-                    "worker": [],
-                    "y": [],
-                    "comm_memory": [],
-                    "comm_memory_limit": [],
-                    "comm_buckets": [],
-                    "comm_avg_duration": [],
-                    "comm_avg_size": [],
-                    "comm_read": [],
-                    "comm_written": [],
-                    "comm_color": [],
-                    "disk_memory": [],
-                    "disk_memory_limit": [],
-                    "disk_buckets": [],
-                    "disk_avg_duration": [],
-                    "disk_avg_size": [],
-                    "disk_read": [],
-                    "disk_written": [],
-                    "disk_color": [],
-                }
-            )
-            self.totals_source = ColumnDataSource(
-                {
-                    "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
-                    "values": [0, 0, 0, 0],
-                }
-            )
+        self.scheduler = scheduler
+        self.source = ColumnDataSource(
+            {
+                "worker": [],
+                "y": [],
+                "comm_memory": [],
+                "comm_memory_limit": [],
+                "comm_buckets": [],
+                "comm_avg_duration": [],
+                "comm_avg_size": [],
+                "comm_read": [],
+                "comm_written": [],
+                "comm_color": [],
+                "disk_memory": [],
+                "disk_memory_limit": [],
+                "disk_buckets": [],
+                "disk_avg_duration": [],
+                "disk_avg_size": [],
+                "disk_read": [],
+                "disk_written": [],
+                "disk_color": [],
+            }
+        )
+        self.totals_source = ColumnDataSource(
+            {
+                "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
+                "values": [0, 0, 0, 0],
+            }
+        )
 
-            self.comm_memory = figure(
-                title="Comms Buffer",
-                tools="",
-                toolbar_location="above",
-                x_range=Range1d(0, 100_000_000),
-                **kwargs,
-            )
-            self.comm_memory.hbar(
-                source=self.source,
-                right="comm_memory",
-                y="y",
-                height=0.9,
-                color="comm_color",
-            )
-            hover = HoverTool(
-                tooltips=[
-                    ("Memory Used", "@comm_memory{0.00 b}"),
-                    ("Average Write", "@comm_avg_size{0.00 b}"),
-                    ("# Buckets", "@comm_buckets"),
-                    ("Average Duration", "@comm_avg_duration"),
-                ],
-                formatters={"@comm_avg_duration": "datetime"},
-                mode="hline",
-            )
-            self.comm_memory.add_tools(hover)
-            self.comm_memory.x_range.start = 0
-            self.comm_memory.x_range.end = 1
-            self.comm_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.comm_memory = figure(
+            title="Comms Buffer",
+            tools="",
+            toolbar_location="above",
+            x_range=Range1d(0, 100_000_000),
+            **kwargs,
+        )
+        self.comm_memory.hbar(
+            source=self.source,
+            right="comm_memory",
+            y="y",
+            height=0.9,
+            color="comm_color",
+        )
+        hover = HoverTool(
+            tooltips=[
+                ("Memory Used", "@comm_memory{0.00 b}"),
+                ("Average Write", "@comm_avg_size{0.00 b}"),
+                ("# Buckets", "@comm_buckets"),
+                ("Average Duration", "@comm_avg_duration"),
+            ],
+            formatters={"@comm_avg_duration": "datetime"},
+            mode="hline",
+        )
+        self.comm_memory.add_tools(hover)
+        self.comm_memory.x_range.start = 0
+        self.comm_memory.x_range.end = 1
+        self.comm_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            self.disk_memory = figure(
-                title="Disk Buffer",
-                tools="",
-                toolbar_location="above",
-                x_range=Range1d(0, 100_000_000),
-                **kwargs,
-            )
-            self.disk_memory.yaxis.visible = False
+        self.disk_memory = figure(
+            title="Disk Buffer",
+            tools="",
+            toolbar_location="above",
+            x_range=Range1d(0, 100_000_000),
+            **kwargs,
+        )
+        self.disk_memory.yaxis.visible = False
 
-            self.disk_memory.hbar(
-                source=self.source,
-                right="disk_memory",
-                y="y",
-                height=0.9,
-                color="disk_color",
-            )
+        self.disk_memory.hbar(
+            source=self.source,
+            right="disk_memory",
+            y="y",
+            height=0.9,
+            color="disk_color",
+        )
 
-            hover = HoverTool(
-                tooltips=[
-                    ("Memory Used", "@disk_memory{0.00 b}"),
-                    ("Average Write", "@disk_avg_size{0.00 b}"),
-                    ("# Buckets", "@disk_buckets"),
-                    ("Average Duration", "@disk_avg_duration"),
-                ],
-                formatters={"@disk_avg_duration": "datetime"},
-                mode="hline",
-            )
-            self.disk_memory.add_tools(hover)
-            self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        hover = HoverTool(
+            tooltips=[
+                ("Memory Used", "@disk_memory{0.00 b}"),
+                ("Average Write", "@disk_avg_size{0.00 b}"),
+                ("# Buckets", "@disk_buckets"),
+                ("Average Duration", "@disk_avg_duration"),
+            ],
+            formatters={"@disk_avg_duration": "datetime"},
+            mode="hline",
+        )
+        self.disk_memory.add_tools(hover)
+        self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            self.totals = figure(
-                title="Total movement",
-                tools="",
-                toolbar_location="above",
-                **kwargs,
-            )
-            titles = ["Network Send", "Network Receive", "Disk Write", "Disk Read"]
-            self.totals = figure(
-                x_range=titles,
-                title="Totals",
-                toolbar_location=None,
-                tools="",
-                **kwargs,
-            )
+        self.totals = figure(
+            title="Total movement",
+            tools="",
+            toolbar_location="above",
+            **kwargs,
+        )
+        titles = ["Network Send", "Network Receive", "Disk Write", "Disk Read"]
+        self.totals = figure(
+            x_range=titles,
+            title="Totals",
+            toolbar_location=None,
+            tools="",
+            **kwargs,
+        )
 
-            self.totals.vbar(
-                x="x",
-                top="values",
-                width=0.9,
-                source=self.totals_source,
-            )
+        self.totals.vbar(
+            x="x",
+            top="values",
+            width=0.9,
+            source=self.totals_source,
+        )
 
-            self.totals.xgrid.grid_line_color = None
-            self.totals.y_range.start = 0
-            self.totals.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.totals.xgrid.grid_line_color = None
+        self.totals.y_range.start = 0
+        self.totals.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            hover = HoverTool(
-                tooltips=[("Total", "@values{0.00b}")],
-                mode="vline",
-            )
-            self.totals.add_tools(hover)
+        hover = HoverTool(
+            tooltips=[("Total", "@values{0.00b}")],
+            mode="vline",
+        )
+        self.totals.add_tools(hover)
 
-            self.root = row(self.comm_memory, self.disk_memory)
+        self.root = row(self.comm_memory, self.disk_memory)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
-            input = self.scheduler.extensions["shuffle"].heartbeats
-            if not input:
-                return
+        input = self.scheduler.extensions["shuffle"].heartbeats
+        if not input:
+            return
 
-            input = list(input.values())[-1]  # TODO: multiple concurrent shuffles
+        input = list(input.values())[-1]  # TODO: multiple concurrent shuffles
 
-            data = defaultdict(list)
-            now = time()
+        data = defaultdict(list)
+        now = time()
 
-            for i, (worker, d) in enumerate(input.items()):
-                data["y"].append(i)
-                data["worker"].append(worker)
-                for prefix in ["comm", "disk"]:
-                    memory_limit = d[prefix]["memory_limit"] or 0
-                    data[f"{prefix}_total"].append(d[prefix]["total"])
-                    data[f"{prefix}_memory"].append(d[prefix]["memory"])
-                    data[f"{prefix}_memory_limit"].append(memory_limit)
-                    data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
-                    data[f"{prefix}_avg_duration"].append(
-                        d[prefix]["diagnostics"].get("avg_duration", 0)
-                    )
-                    data[f"{prefix}_avg_size"].append(
-                        d[prefix]["diagnostics"].get("avg_size", 0)
-                    )
-                    data[f"{prefix}_read"].append(d[prefix]["read"])
-                    data[f"{prefix}_written"].append(d[prefix]["written"])
-                    if self.scheduler.workers[worker].last_seen < now - 5:
-                        data[f"{prefix}_color"].append("gray")
-                    elif d[prefix]["memory"] > memory_limit:
-                        data[f"{prefix}_color"].append("red")
-                    else:
-                        data[f"{prefix}_color"].append("blue")
+        for i, (worker, d) in enumerate(input.items()):
+            data["y"].append(i)
+            data["worker"].append(worker)
+            for prefix in ["comm", "disk"]:
+                memory_limit = d[prefix]["memory_limit"] or 0
+                data[f"{prefix}_total"].append(d[prefix]["total"])
+                data[f"{prefix}_memory"].append(d[prefix]["memory"])
+                data[f"{prefix}_memory_limit"].append(memory_limit)
+                data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
+                data[f"{prefix}_avg_duration"].append(
+                    d[prefix]["diagnostics"].get("avg_duration", 0)
+                )
+                data[f"{prefix}_avg_size"].append(
+                    d[prefix]["diagnostics"].get("avg_size", 0)
+                )
+                data[f"{prefix}_read"].append(d[prefix]["read"])
+                data[f"{prefix}_written"].append(d[prefix]["written"])
+                if self.scheduler.workers[worker].last_seen < now - 5:
+                    data[f"{prefix}_color"].append("gray")
+                elif d[prefix]["memory"] > memory_limit:
+                    data[f"{prefix}_color"].append("red")
+                else:
+                    data[f"{prefix}_color"].append("blue")
 
-            """
-            singletons = {
-                f"{prefix}_avg_duration": [
-                    sum(data[f"{prefix}_avg_duration"]) / len(data[f"{prefix}_avg_duration"])
-                ],
-                f"{prefix}_avg_size": [
-                    sum(data[f"{prefix}_avg_size"]) / len(data[f"{prefix}_avg_size"])
-                ],
-                "disk_avg_duration": [
-                    sum(data["disk_avg_duration"]) / len(data["disk_avg_duration"])
-                ],
-                "disk_avg_size": [
-                    sum(data["disk_avg_size"]) / len(data["disk_avg_size"])
-                ],
-            }
-            singletons[f"{prefix}_avg_bandwidth"] = [
-                singletons[f"{prefix}_avg_size"][0] / singletons[f"{prefix}_avg_duration"][0]
-            ]
-            singletons["disk_avg_bandwidth"] = [
-                singletons["disk_avg_size"][0] / singletons["disk_avg_duration"][0]
-            ]
-            singletons["y"] = [data["y"][-1] / 2]
-            """
+        totals = {
+            "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
+            "values": [
+                sum(data["comm_written"]),
+                sum(data["comm_read"]),
+                sum(data["disk_written"]),
+                sum(data["disk_read"]),
+            ],
+        }
+        update(self.totals_source, totals)
 
-            totals = {
-                "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
-                "values": [
-                    sum(data["comm_written"]),
-                    sum(data["comm_read"]),
-                    sum(data["disk_written"]),
-                    sum(data["disk_read"]),
-                ],
-            }
-            update(self.totals_source, totals)
-
-            update(self.source, dict(data))
-            limit = max(data["comm_memory_limit"] + data["disk_memory_limit"]) * 1.2
-            self.comm_memory.x_range.end = limit
-            self.disk_memory.x_range.end = limit
+        update(self.source, dict(data))
+        limit = max(data["comm_memory_limit"] + data["disk_memory_limit"]) * 1.2
+        self.comm_memory.x_range.end = limit
+        self.disk_memory.x_range.end = limit
 
 
 _STYLES = {
@@ -4802,16 +4778,16 @@ def status_doc(scheduler, extra, doc):
     doc.template_variables.update(extra)
 
 
+@log_errors
 @curry
 def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwargs):
     # Note: @log_errors and @curry are not compatible
-    with log_errors():
-        fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
-        fig.update()
-        add_periodic_callback(doc, fig, interval)
-        doc.add_root(getattr(fig, fig_attr))
-        doc.theme = BOKEH_THEME
-        doc.title = "Dask: " + funcname(cls)
+    fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
+    fig.update()
+    add_periodic_callback(doc, fig, interval)
+    doc.add_root(getattr(fig, fig_attr))
+    doc.theme = BOKEH_THEME
+    doc.title = "Dask: " + funcname(cls)
 
 
 @log_errors

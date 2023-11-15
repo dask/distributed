@@ -71,14 +71,14 @@ class _ShuffleRunManager:
 
         self._plugin.worker._ongoing_background_tasks.call_soon(self.close, shuffle_run)
 
+    @log_errors
     async def close(self, shuffle_run: ShuffleRun) -> None:
-        with log_errors():
-            try:
-                await shuffle_run.close()
-            finally:
-                async with self._runs_cleanup_condition:
-                    self._runs.remove(shuffle_run)
-                    self._runs_cleanup_condition.notify_all()
+        try:
+            await shuffle_run.close()
+        finally:
+            async with self._runs_cleanup_condition:
+                self._runs.remove(shuffle_run)
+                self._runs_cleanup_condition.notify_all()
 
     async def teardown(self) -> None:
         assert not self.closed
@@ -308,14 +308,14 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
         await shuffle_run.receive(data)
 
+    @log_errors
     async def shuffle_inputs_done(self, shuffle_id: ShuffleId, run_id: int) -> None:
         """
         Handler: Inform the extension that all input partitions have been handed off to extensions.
         Using an unknown ``shuffle_id`` is an error.
         """
-        with log_errors():
-            shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
-            await shuffle_run.inputs_done()
+        shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
+        await shuffle_run.inputs_done()
 
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
         """Fails the shuffle run with the message as exception and triggers cleanup.
