@@ -4854,7 +4854,14 @@ class Client(SyncMethodMixin):
         if name is None:
             name = _get_plugin_name(plugin)
         assert name
-        if idempotent is None:
+        if idempotent is not None:
+            warnings.warn(
+                "The `idempotent` argument is deprecated and will be removed in a "
+                "future version. Please mark your plugin as idempotent by setting its "
+                "`.idempotent` atrribute to `True`.",
+                FutureWarning,
+            )
+        else:
             idempotent = getattr(plugin, "idempotent", False)
         assert isinstance(idempotent, bool)
         return self._register_plugin(plugin, name, idempotent)

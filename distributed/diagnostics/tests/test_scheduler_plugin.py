@@ -668,29 +668,6 @@ async def test_register_idempotent_plugin(c, s):
 
 
 @gen_cluster(client=True, nthreads=[])
-async def test_register_plugin_with_idempotent_keyword(c, s):
-    class IdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "idempotentplugin"
-            self.instance = instance
-
-        def start(self, scheduler):
-            if self.instance != "first":
-                raise RuntimeError(
-                    "Only the first plugin should be started when idempotent is set"
-                )
-
-    first = IdempotentPlugin(instance="first")
-    await c.register_plugin(first, idempotent=True)
-    assert "idempotentplugin" in s.plugins
-
-    second = IdempotentPlugin(instance="second")
-    await c.register_plugin(second, idempotent=True)
-    assert "idempotentplugin" in s.plugins
-    assert s.plugins["idempotentplugin"].instance == "first"
-
-
-@gen_cluster(client=True, nthreads=[])
 async def test_register_non_idempotent_plugin(c, s):
     class NonIdempotentPlugin(SchedulerPlugin):
         def __init__(self, instance=None):
@@ -719,7 +696,7 @@ async def test_register_non_idempotent_plugin(c, s):
 
 
 @gen_cluster(client=True, nthreads=[])
-async def test_register_plugin_with_idempotent_keyword_overrules_plugin(c, s):
+async def test_register_plugin_with_idempotent_keyword_is_deprecated(c, s):
     class NonIdempotentPlugin(SchedulerPlugin):
         def __init__(self, instance=None):
             self.name = "nonidempotentplugin"
@@ -728,11 +705,13 @@ async def test_register_plugin_with_idempotent_keyword_overrules_plugin(c, s):
             self.idempotent = True
 
     first = NonIdempotentPlugin(instance="first")
-    await c.register_plugin(first, idempotent=False)
+    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
+        await c.register_plugin(first, idempotent=False)
     assert "nonidempotentplugin" in s.plugins
 
     second = NonIdempotentPlugin(instance="second")
-    await c.register_plugin(second, idempotent=False)
+    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
+        await c.register_plugin(second, idempotent=False)
     assert "nonidempotentplugin" in s.plugins
     assert s.plugins["nonidempotentplugin"].instance == "second"
 
@@ -750,11 +729,13 @@ async def test_register_plugin_with_idempotent_keyword_overrules_plugin(c, s):
                 )
 
     first = IdempotentPlugin(instance="first")
-    await c.register_plugin(first, idempotent=True)
+    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
+        await c.register_plugin(first, idempotent=True)
     assert "idempotentplugin" in s.plugins
 
     second = IdempotentPlugin(instance="second")
-    await c.register_plugin(second, idempotent=True)
+    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
+        await c.register_plugin(second, idempotent=True)
     assert "idempotentplugin" in s.plugins
     assert s.plugins["idempotentplugin"].instance == "first"
 
