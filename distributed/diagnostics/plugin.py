@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 class SchedulerPlugin:
     """Interface to extend the Scheduler
 
-    A plugin enables custom hooks to run when specific events occur.  The
-    scheduler will run the methods of this plugin whenever the corresponding
+    A plugin enables custom hooks to run when specific events occur.
+    The scheduler will run the methods of this plugin whenever the corresponding
     method of the scheduler is run.  This runs user code within the scheduler
     thread that can perform arbitrary operations in synchrony with the scheduler
     itself.
@@ -45,6 +45,11 @@ class SchedulerPlugin:
     1. inherit from this class
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
+
+    The ``idempotent`` attribute is used to control whether or not the plugin should
+    be ignored upon registration if a scheduler plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
+    Defaults to ``False``.
 
     Examples
     --------
@@ -62,6 +67,8 @@ class SchedulerPlugin:
     >>> plugin = Counter()
     >>> scheduler.add_plugin(plugin)  # doctest: +SKIP
     """
+
+    idempotent: bool = False
 
     async def start(self, scheduler: Scheduler) -> None:
         """Run when the scheduler starts up
@@ -217,6 +224,11 @@ class WorkerPlugin:
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
+    The ``idempotent`` attribute is used to control whether or not the plugin should
+    be ignored upon registration if a worker plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
+    Defaults to ``False``.
+
     Examples
     --------
     >>> class ErrorLogger(WorkerPlugin):
@@ -239,6 +251,8 @@ class WorkerPlugin:
     >>> plugin = ErrorLogger(logging)
     >>> client.register_plugin(plugin)  # doctest: +SKIP
     """
+
+    idempotent: bool = False
 
     def setup(self, worker: Worker) -> None | Awaitable[None]:
         """
@@ -298,6 +312,11 @@ class NannyPlugin:
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
+    The ``idempotent`` attribute is used to control whether or not the plugin should
+    be ignored upon registration if a nanny plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
+    Defaults to ``False``.
+
     The ``restart`` attribute is used to control whether or not a running ``Worker``
     needs to be restarted when registering the plugin.
 
@@ -307,7 +326,8 @@ class NannyPlugin:
     SchedulerPlugin
     """
 
-    restart = False
+    idempotent: bool = False
+    restart: bool = False
 
     def setup(self, nanny):
         """

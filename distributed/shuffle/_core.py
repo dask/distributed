@@ -357,7 +357,7 @@ class ShuffleType(Enum):
 
 @dataclass(frozen=True)
 class ShuffleRunSpec(Generic[_T_partition_id]):
-    run_id: int = field(init=False, default_factory=partial(next, itertools.count(1)))  # type: ignore
+    run_id: int = field(init=False, default_factory=partial(next, itertools.count(1)))
     spec: ShuffleSpec
     worker_for: dict[_T_partition_id, str]
 

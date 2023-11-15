@@ -4834,7 +4834,7 @@ class Client(SyncMethodMixin):
         self,
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
         name: str | None = None,
-        idempotent: bool = False,
+        idempotent: bool | None = None,
     ):
         """Register a plugin.
 
@@ -4849,11 +4849,21 @@ class Client(SyncMethodMixin):
             plugin instance or automatically generated if not present.
         idempotent :
             Do not re-register if a plugin of the given name already exists.
+            If None, ``plugin.idempotent`` is taken if defined, False otherwise.
         """
         if name is None:
             name = _get_plugin_name(plugin)
         assert name
-
+        if idempotent is not None:
+            warnings.warn(
+                "The `idempotent` argument is deprecated and will be removed in a "
+                "future version. Please mark your plugin as idempotent by setting its "
+                "`.idempotent` atrribute to `True`.",
+                FutureWarning,
+            )
+        else:
+            idempotent = getattr(plugin, "idempotent", False)
+        assert isinstance(idempotent, bool)
         return self._register_plugin(plugin, name, idempotent)
 
     @singledispatchmethod
