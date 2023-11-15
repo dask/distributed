@@ -377,6 +377,7 @@ class InstallPlugin(SchedulerPlugin):
     PipInstall
     """
 
+    idempotent = True
     _lock: ClassVar[asyncio.Lock | None] = None
 
     _installer: Installer
