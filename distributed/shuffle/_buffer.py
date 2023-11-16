@@ -481,6 +481,9 @@ class BaseBuffer(Generic[ShardType]):
         except Exception:
             logger.debug(f"Failed to flush {self}, now in {self._state}")
             raise
+        finally:
+            async with self._flush_condition:
+                self._flush_condition.notify_all()
 
     async def close(self) -> None:
         if self._state == "closed":
