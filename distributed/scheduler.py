@@ -2490,11 +2490,10 @@ class SchedulerState:
         client_msgs: Msgs = {}
 
         if self.validate:
-            with log_errors(pdb=LOG_PDB):
-                assert ts.exception_blame
-                assert not ts.who_has
-                assert not ts.waiting_on
-                assert not ts.waiters
+            assert ts.exception_blame
+            assert not ts.who_has
+            assert not ts.waiting_on
+            assert not ts.waiters
 
         failing_ts = ts.exception_blame
         assert failing_ts
@@ -2525,11 +2524,10 @@ class SchedulerState:
         worker_msgs: Msgs = {}
 
         if self.validate:
-            with log_errors(pdb=LOG_PDB):
-                assert ts.exception_blame
-                assert not ts.who_has
-                assert not ts.waiting_on
-                assert not ts.waiters
+            assert ts.exception_blame
+            assert not ts.who_has
+            assert not ts.waiting_on
+            assert not ts.waiters
 
         ts.exception = None
         ts.exception_blame = None
@@ -6841,6 +6839,7 @@ class Scheduler(SchedulerState, ServerNode):
                 },
             )
 
+    @log_errors
     def workers_to_close(
         self,
         memory_ratio: int | float | None = None,
@@ -6917,61 +6916,56 @@ class Scheduler(SchedulerState, ServerNode):
         if n is None and memory_ratio is None:
             memory_ratio = 2
 
-        with log_errors():
-            if not n and all([ws.processing for ws in self.workers.values()]):
-                return []
+        if not n and all([ws.processing for ws in self.workers.values()]):
+            return []
 
-            if key is None:
-                key = operator.attrgetter("address")
-            if isinstance(key, bytes) and dask.config.get(
-                "distributed.scheduler.pickle"
+        if key is None:
+            key = operator.attrgetter("address")
+        if isinstance(key, bytes) and dask.config.get("distributed.scheduler.pickle"):
+            key = pickle.loads(key)
+
+        groups = groupby(key, self.workers.values())
+
+        limit_bytes = {k: sum(ws.memory_limit for ws in v) for k, v in groups.items()}
+        group_bytes = {k: sum(ws.nbytes for ws in v) for k, v in groups.items()}
+
+        limit = sum(limit_bytes.values())
+        total = sum(group_bytes.values())
+
+        def _key(group):
+            is_idle = not any([wws.processing for wws in groups[group]])
+            bytes = -group_bytes[group]
+            return is_idle, bytes
+
+        idle = sorted(groups, key=_key)
+
+        to_close = []
+        n_remain = len(self.workers)
+
+        while idle:
+            group = idle.pop()
+            if n is None and any([ws.processing for ws in groups[group]]):
+                break
+
+            if minimum and n_remain - len(groups[group]) < minimum:
+                break
+
+            limit -= limit_bytes[group]
+
+            if (n is not None and n_remain - len(groups[group]) >= (target or 0)) or (
+                memory_ratio is not None and limit >= memory_ratio * total
             ):
-                key = pickle.loads(key)
+                to_close.append(group)
+                n_remain -= len(groups[group])
 
-            groups = groupby(key, self.workers.values())
+            else:
+                break
 
-            limit_bytes = {
-                k: sum(ws.memory_limit for ws in v) for k, v in groups.items()
-            }
-            group_bytes = {k: sum(ws.nbytes for ws in v) for k, v in groups.items()}
+        result = [getattr(ws, attribute) for g in to_close for ws in groups[g]]
+        if result:
+            logger.debug("Suggest closing workers: %s", result)
 
-            limit = sum(limit_bytes.values())
-            total = sum(group_bytes.values())
-
-            def _key(group):
-                is_idle = not any([wws.processing for wws in groups[group]])
-                bytes = -group_bytes[group]
-                return is_idle, bytes
-
-            idle = sorted(groups, key=_key)
-
-            to_close = []
-            n_remain = len(self.workers)
-
-            while idle:
-                group = idle.pop()
-                if n is None and any([ws.processing for ws in groups[group]]):
-                    break
-
-                if minimum and n_remain - len(groups[group]) < minimum:
-                    break
-
-                limit -= limit_bytes[group]
-
-                if (
-                    n is not None and n_remain - len(groups[group]) >= (target or 0)
-                ) or (memory_ratio is not None and limit >= memory_ratio * total):
-                    to_close.append(group)
-                    n_remain -= len(groups[group])
-
-                else:
-                    break
-
-            result = [getattr(ws, attribute) for g in to_close for ws in groups[g]]
-            if result:
-                logger.debug("Suggest closing workers: %s", result)
-
-            return result
+        return result
 
     @log_errors
     async def retire_workers(

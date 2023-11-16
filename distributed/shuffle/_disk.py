@@ -138,6 +138,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self._read = read
         self._directory_lock = ReadWriteLock()
 
+    @log_errors
     async def _process(self, id: str, shards: list[Any]) -> None:
         """Write one buffer to file
 
@@ -151,27 +152,25 @@ class DiskShardsBuffer(ShardsBuffer):
         future then we should consider simplifying this considerably and
         dropping the write into communicate above.
         """
+        # Consider boosting total_size a bit here to account for duplication
+        with self.time("write"):
+            # We only need shared (i.e., read) access to the directory to write
+            # to a file inside of it.
+            with self._directory_lock.read():
+                if self._closed:
+                    raise RuntimeError("Already closed")
 
-        with log_errors():
-            # Consider boosting total_size a bit here to account for duplication
-            with self.time("write"):
-                # We only need shared (i.e., read) access to the directory to write
-                # to a file inside of it.
-                with self._directory_lock.read():
-                    if self._closed:
-                        raise RuntimeError("Already closed")
+                frames: Iterable[bytes | bytearray | memoryview]
 
-                    frames: Iterable[bytes | bytearray | memoryview]
+                if isinstance(shards[0], bytes):
+                    # Manually serialized dataframes
+                    frames = shards
+                else:
+                    # Unserialized numpy arrays
+                    frames = concat(pickle_bytelist(shard) for shard in shards)
 
-                    if isinstance(shards[0], bytes):
-                        # Manually serialized dataframes
-                        frames = shards
-                    else:
-                        # Unserialized numpy arrays
-                        frames = concat(pickle_bytelist(shard) for shard in shards)
-
-                    with open(self.directory / str(id), mode="ab") as f:
-                        f.writelines(frames)
+                with open(self.directory / str(id), mode="ab") as f:
+                    f.writelines(frames)
 
     def read(self, id: str) -> Any:
         """Read a complete file back into memory"""
