@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import uuid
 import zipfile
 from collections.abc import Awaitable
@@ -697,17 +698,28 @@ class _PipInstaller:
             self.INSTALLER,
             self.packages,
         )
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        _, stderr = proc.communicate()
-        returncode = proc.wait()
-        if returncode != 0:
-            msg = f"pip install failed with '{stderr.decode().strip()}'"
-            logger.error(msg)
-            raise RuntimeError(msg)
+        with tempfile.NamedTemporaryFile(mode="w+") as f:
+            f.writelines(self.packages)
+            f.flush()
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *self.pip_options,
+                    "-r",
+                    f.name,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            _, stderr = proc.communicate()
+            returncode = proc.wait()
+            if returncode != 0:
+                msg = f"pip install failed with '{stderr.decode().strip()}'"
+                logger.error(msg)
+                raise RuntimeError(msg)
 
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
