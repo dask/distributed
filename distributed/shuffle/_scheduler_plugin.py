@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class ShuffleSchedulerPlugin(SchedulerPlugin):
@@ -82,7 +83,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             raise ValueError(f"{run_id=} does not match {shuffle}")
         if not consistent:
             logger.debug(
-                "Restarting shuffle %s due to data inconsistency during barrier",
+                "Shuffle %s restarted due to data inconsistency during barrier",
                 shuffle.id,
             )
             return self._restart_shuffle(
@@ -257,10 +258,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     def _restart_shuffle(
         self, id: ShuffleId, scheduler: Scheduler, *, stimulus_id: str
     ) -> None:
-        logger.debug("Restarting shuffle %s due to stimulus '%s", id, stimulus_id)
         recs = self._restart_recommendations(id)
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
         self.scheduler.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+        logger.debug("Shuffle %s restarted due to stimulus '%s", id, stimulus_id)
 
     def remove_worker(
         self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
@@ -311,6 +312,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             return
 
         if shuffle := self.active_shuffles.get(shuffle_id):
+            self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
+            self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
             logger.debug(
                 "Shuffle %s forgotten because task '%s' transitioned to %s due to "
                 "stimulus '%s'",
@@ -319,8 +322,6 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 finish,
                 stimulus_id,
             )
-            self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
-            self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
 
         if finish == "forgotten":
             shuffles = self._shuffles.pop(shuffle_id, set())
