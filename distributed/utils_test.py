@@ -22,7 +22,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Generator, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Hashable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
@@ -55,7 +55,7 @@ from distributed.core import (
 )
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
@@ -1462,6 +1462,20 @@ def captured_handler(handler):
         yield handler.stream
     finally:
         handler.stream = orig_stream
+
+
+@contextmanager
+def captured_context_meter() -> Generator[defaultdict[tuple, float], None, None]:
+    """Capture distributed.metrics.context_meter metrics into a local defaultdict"""
+    # Don't cast int metrics to float
+    metrics: defaultdict[tuple, float] = defaultdict(int)
+
+    def cb(label: Hashable, value: float, unit: str) -> None:
+        label = label + (unit,) if isinstance(label, tuple) else (label, unit)
+        metrics[label] += value
+
+    with context_meter.add_callback(cb):
+        yield metrics
 
 
 @contextmanager
