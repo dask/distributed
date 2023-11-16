@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 class ShuffleSchedulerPlugin(SchedulerPlugin):
