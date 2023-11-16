@@ -423,6 +423,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         local_address: str,
         directory: str,
         executor: ThreadPoolExecutor,
+        io_executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
@@ -438,6 +439,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             local_address=local_address,
             directory=directory,
             executor=executor,
+            io_executor=io_executor,
             rpc=rpc,
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
@@ -510,6 +512,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
 
+    def write(self, data: list[bytes], path: Path) -> int:
+        with path.open(mode="ab") as f:
+            offset = f.tell()
+            f.writelines(data)
+            return f.tell() - offset
+
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)
 
@@ -542,6 +550,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
                 f"shuffle-{self.id}-{run_id}",
             ),
             executor=plugin._executor,
+            io_executor=plugin._io_executor,
             local_address=plugin.worker.address,
             rpc=plugin.worker.rpc,
             scheduler=plugin.worker.scheduler,

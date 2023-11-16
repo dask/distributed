@@ -6,7 +6,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterator, Sized
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Generic, Literal, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, NamedTuple, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
@@ -48,6 +48,8 @@ class ShardsBuffer(Generic[ShardType]):
     If exceptions occur during writing, the buffer is automatically closed. Subsequent attempts to write will raise the same exception.
     Flushing will not raise an exception. To ensure that the buffer finished successfully, please call `ShardsBuffer.raise_on_exception`
     """
+
+    drain: ClassVar[bool] = True
 
     shards: defaultdict[str, list[ShardType]]
     sizes: defaultdict[str, int]
@@ -280,6 +282,9 @@ class SizedShard(NamedTuple, Generic[ShardType]):
 
 
 class BaseBuffer(Generic[ShardType]):
+    #: Whether or not to drain the buffer when flushing
+    drain: ClassVar[bool] = True
+
     #: List of buffered shards per output key with their approximate in-memory size
     shards: defaultdict[str, list[SizedShard[ShardType]]]
     #: Total size of in-memory data per flushable key
@@ -326,10 +331,16 @@ class BaseBuffer(Generic[ShardType]):
         self.bytes_memory = 0
         self.bytes_written = 0
         self.bytes_read = 0
-        self._tasks = [
-            asyncio.create_task(self._background_task())
-            for _ in range(concurrency_limit)
-        ]
+        self._state = "open"
+        self._exception = None
+        self._flush_condition = asyncio.Condition()
+        if self.memory_limiter.limit or self.drain:
+            self._tasks = [
+                asyncio.create_task(self._background_task())
+                for _ in range(concurrency_limit)
+            ]
+        else:
+            self._tasks = []
 
     def heartbeat(self) -> dict[str, Any]:
         return {
@@ -375,7 +386,7 @@ class BaseBuffer(Generic[ShardType]):
         while True:
             async with self._flush_condition:
                 await self._flush_condition.wait_for(_continue)
-                if not self.flushable_sizes and not self._state != "open":
+                if self._state != "open" and not (self.drain and self.flushable_sizes):
                     break
             await self.flush_largest()
 
@@ -457,10 +468,19 @@ class BaseBuffer(Generic[ShardType]):
             return
         self._raise_if_erred()
         assert self._state == "open", self._state
-
-        async with self._flush_condition:
+        logger.debug(f"Flushing {self}")
+        self._state = "flushing"
+        try:
+            async with self._flush_condition:
+                self._flush_condition.notify_all()
             await asyncio.gather(*self._tasks)
-        self._raise_if_erred()
+            self._raise_if_erred()
+            assert self._state == "flushing"
+            self._state = "flushed"
+            logger.debug(f"Successfully flushed {self}")
+        except Exception:
+            logger.debug(f"Failed to flush {self}, now in {self._state}")
+            raise
 
     async def close(self) -> None:
         if self._state == "closed":
@@ -472,11 +492,10 @@ class BaseBuffer(Generic[ShardType]):
             assert self._state == "erred"
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._state = "closed"
-
-        assert not self.shards
-        assert not self.flushable_sizes
+        self.shards.clear()
+        self.flushable_sizes.clear()
+        self.bytes_memory = 0
         assert not self.flushing_sizes
-        assert not self.bytes_memory
 
     async def __aenter__(self) -> BaseBuffer:
         return self
@@ -496,3 +515,10 @@ class BaseBuffer(Generic[ShardType]):
 
     async def _flush(self, id: str, shards: list[ShardType]) -> int:
         raise NotImplementedError()
+
+    @contextlib.contextmanager
+    def time(self, name: str) -> Iterator[None]:
+        start = time()
+        yield
+        stop = time()
+        self.diagnostics[name] += stop - start

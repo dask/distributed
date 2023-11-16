@@ -278,9 +278,10 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self.worker = worker
         self.shuffle_runs = _ShuffleRunManager(self)
         self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
-        self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
+        self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 KiB"))
         self.closed = False
         self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
+        self._io_executor = ThreadPoolExecutor(self.worker.state.nthreads)
 
     def __str__(self) -> str:
         return f"ShuffleWorkerPlugin on {self.worker.address}"
@@ -379,6 +380,10 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             self._executor.shutdown(cancel_futures=True)
         except Exception:  # pragma: no cover
             self._executor.shutdown()
+        try:
+            self._io_executor.shutdown(cancel_futures=True)
+        except Exception:  # pragma: no cover
+            self._io_executor.shutdown()
 
     #############################
     # Methods for worker thread #
