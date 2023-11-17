@@ -45,6 +45,8 @@ class StorageBuffer(BaseBuffer):
         implementation of this scheme.
     """
 
+    drain = False
+
     def __init__(
         self,
         directory: str | pathlib.Path,

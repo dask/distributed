@@ -106,6 +106,7 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from toolz import concat
 from tornado.ioloop import IOLoop
 
 import dask
@@ -123,7 +124,7 @@ from distributed.shuffle._core import (
     handle_unpack_errors,
 )
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._pickle import unpickle_bytestream
+from distributed.shuffle._pickle import pickle_bytelist, unpickle_bytestream
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
@@ -430,6 +431,13 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
 
     def deserialize(self, buffer: Any) -> Any:
         return buffer
+
+    def write(self, data: list[np.ndarray], path: Path) -> int:
+        frames = concat(pickle_bytelist(shard) for shard in data)
+        with path.open(mode="ab") as f:
+            offset = f.tell()
+            f.writelines(frames)
+            return f.tell() - offset
 
     def read(self, path: Path) -> tuple[list[list[tuple[NDIndex, np.ndarray]]], int]:
         """Open a memory-mapped file descriptor to disk, read all metadata, and unpickle

@@ -40,6 +40,7 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._executor = ThreadPoolExecutor(2)
+        self._io_executor = ThreadPoolExecutor(2)
 
     def __enter__(self):
         return self
@@ -49,6 +50,10 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             self._executor.shutdown(cancel_futures=True)
         except Exception:  # pragma: no cover
             self._executor.shutdown()
+        try:
+            self._io_executor.shutdown(cancel_futures=True)
+        except Exception:  # pragma: no cover
+            self._io_executor.shutdown()
 
     def new_shuffle(
         self,
@@ -70,6 +75,7 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             local_address=name,
             executor=self._executor,
+            io_executor=self._io_executor,
             rpc=self,
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
