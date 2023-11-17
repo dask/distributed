@@ -120,7 +120,7 @@ class StorageBuffer(BaseBuffer):
             raise KeyError(id)
 
     async def close(self) -> None:
+        await super().close()
         with self._directory_lock.write():
-            await super().close()
             with contextlib.suppress(FileNotFoundError):
                 shutil.rmtree(self.directory)
