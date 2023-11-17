@@ -4,16 +4,94 @@ import asyncio
 import contextlib
 import pathlib
 import shutil
+import threading
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, Callable
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
 
 from distributed.shuffle._buffer import BaseBuffer
-from distributed.shuffle._disk import ReadWriteLock
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.utils import log_errors
+from distributed.utils import Deadline, log_errors
 
 if TYPE_CHECKING:
     import pyarrow as pa
+
+
+class ReadWriteLock:
+    _condition: threading.Condition
+    _n_reads: int
+    _write_pending: bool
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition(threading.Lock())
+        self._n_reads = 0
+        self._write_pending = False
+        self._write_active = False
+
+    def acquire_write(self, timeout: float = -1) -> bool:
+        deadline = Deadline.after(timeout if timeout >= 0 else None)
+        with self._condition:
+            result = self._condition.wait_for(
+                lambda: not self._write_pending, timeout=deadline.remaining
+            )
+            if result is False:
+                return False
+
+            self._write_pending = True
+            result = self._condition.wait_for(
+                lambda: self._n_reads == 0, timeout=deadline.remaining
+            )
+
+            if result is False:
+                self._write_pending = False
+                self._condition.notify_all()
+                return False
+            self._write_active = True
+            return True
+
+    def release_write(self) -> None:
+        with self._condition:
+            if self._write_active is False:
+                raise RuntimeError("Tried releasing unlocked write lock")
+            self._write_pending = False
+            self._write_active = False
+            self._condition.notify_all()
+
+    def acquire_read(self, timeout: float = -1) -> bool:
+        deadline = Deadline.after(timeout if timeout >= 0 else None)
+        with self._condition:
+            result = self._condition.wait_for(
+                lambda: not self._write_pending, timeout=deadline.remaining
+            )
+            if result is False:
+                return False
+            self._n_reads += 1
+            return True
+
+    def release_read(self) -> None:
+        with self._condition:
+            if self._n_reads == 0:
+                raise RuntimeError("Tired releasing unlocked read lock")
+            self._n_reads -= 1
+            if self._n_reads == 0:
+                self._condition.notify_all()
+
+    @contextmanager
+    def write(self) -> Generator[None, None, None]:
+        self.acquire_write()
+        try:
+            yield
+        finally:
+            self.release_write()
+
+    @contextmanager
+    def read(self) -> Generator[None, None, None]:
+        self.acquire_read()
+        try:
+            yield
+        finally:
+            self.release_read()
 
 
 class StorageBuffer(BaseBuffer):
@@ -66,7 +144,7 @@ class StorageBuffer(BaseBuffer):
         self._directory_lock = ReadWriteLock()
         self._executor = executor
 
-    async def _flush(self, id: str, shards: list[pa.Table]) -> int:
+    async def _flush(self, id: str, shards: list[pa.Table]) -> int | None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've

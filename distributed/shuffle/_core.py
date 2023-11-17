@@ -206,9 +206,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             "start": self.start_time,
         }
 
-    async def _write_to_comm(
-        self, data: dict[str, tuple[_T_partition_id, Any]]
-    ) -> None:
+    async def _write_to_comm(self, data: dict[str, list[Any]]) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
@@ -229,7 +227,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.transferred = True
         await self._flush_comm()
         try:
-            self._comm_buffer.raise_on_exception()
+            self._comm_buffer.raise_if_erred()
         except Exception as e:
             self._exception = e
             raise
