@@ -131,9 +131,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
         )
 
-    def write(self, data: Any, path: Path) -> int:
-        raise NotImplementedError()
-
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: id={self.id!r}, run_id={self.run_id!r}, local_address={self.local_address!r}, closed={self.closed!r}, transferred={self.transferred!r}>"
 
@@ -322,12 +319,12 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Get an output partition to the shuffle run"""
 
     @abc.abstractmethod
-    def read(self, path: Path) -> tuple[Any, int]:
-        """Read shards from disk"""
+    def write(self, data: list[Any], path: Path) -> int:
+        """Write shards to disk"""
 
     @abc.abstractmethod
-    def deserialize(self, buffer: Any) -> Any:
-        """Deserialize shards"""
+    def read(self, path: Path) -> tuple[Any, int]:
+        """Read shards from disk"""
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:

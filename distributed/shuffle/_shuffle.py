@@ -25,10 +25,10 @@ from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
     convert_shards,
-    deserialize_table,
     list_of_buffers_to_table,
     read_from_disk,
     serialize_table,
+    write_to_disk,
 )
 from distributed.shuffle._core import (
     NDIndex,
@@ -480,7 +480,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {(k,): serialize_table(v) for k, v in groups.items()}
+        return {(k,): v for k, v in groups.items()}
 
     def _shard_partition(
         self,
@@ -512,17 +512,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
 
-    def write(self, data: list[bytes], path: Path) -> int:
-        with path.open(mode="ab") as f:
-            offset = f.tell()
-            f.writelines(data)
-            return f.tell() - offset
+    def write(self, data: list[Any], path: Path) -> int:
+        return write_to_disk(data, path)
 
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)
-
-    def deserialize(self, buffer: Any) -> Any:
-        return deserialize_table(buffer)
 
 
 @dataclass(frozen=True)
