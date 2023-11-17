@@ -135,9 +135,10 @@ class StorageBuffer(BaseBuffer):
     ):
         super().__init__(
             memory_limiter=memory_limiter,
+            concurrency_limit=executor._max_workers
             # Disk is not able to run concurrently atm
         )
-        self.directory = pathlib.Path(directory)
+        self.directory = pathlib.Path(directory).resolve()
         self.directory.mkdir(exist_ok=True)
         self._write_fn = write
         self._read = read
@@ -168,7 +169,7 @@ class StorageBuffer(BaseBuffer):
                     self._executor,
                     self._write_fn,
                     shards,
-                    (self.directory / str(id)).resolve(),
+                    (self.directory / str(id)),
                 )
 
     def read(self, id: str) -> Any:
@@ -185,7 +186,7 @@ class StorageBuffer(BaseBuffer):
                 with self._directory_lock.read():
                     if self._state != "flushed":
                         raise RuntimeError("Can't read")
-                    data, bytes_read = self._read((self.directory / str(id)).resolve())
+                    data, bytes_read = self._read(self.directory / str(id))
                     self.bytes_read += bytes_read
         except FileNotFoundError:
             data = []

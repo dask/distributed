@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING, Any, overload
 
 import dask
@@ -267,8 +268,10 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     memory_limiter_comms: ResourceLimiter
     memory_limiter_disk: ResourceLimiter
     closed: bool
+    _exit_stack: ExitStack
 
     def setup(self, worker: Worker) -> None:
+        self._exit_stack = ExitStack()
         # Attach to worker
         worker.handlers["shuffle_receive"] = self.shuffle_receive
         worker.handlers["shuffle_inputs_done"] = self.shuffle_inputs_done
@@ -285,10 +288,30 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         storage_limit = parse_bytes(dask.config.get("distributed.p2p.storage.buffer"))
         self.memory_limiter_disk = ResourceLimiter(storage_limit)
         self.closed = False
+
+        @contextmanager
+        def _executor_context(
+            n_threads: int, thread_name_prefix: str
+        ) -> Generator[ThreadPoolExecutor, None, None]:
+            executor = ThreadPoolExecutor(
+                max_workers=n_threads, thread_name_prefix=thread_name_prefix
+            )
+            try:
+                yield executor
+            finally:
+                try:
+                    executor.shutdown(cancel_futures=True)
+                except Exception:  # pragma: no cover
+                    executor.shutdown()
+
         n_threads = dask.config.get("distributed.p2p.threads")
-        self._executor = ThreadPoolExecutor(n_threads)
+        self._executor = self._exit_stack.enter_context(
+            _executor_context(n_threads, thread_name_prefix="P2P-Threads")
+        )
         n_io_threads = dask.config.get("distributed.p2p.io-threads")
-        self._io_executor = ThreadPoolExecutor(n_io_threads)
+        self._io_executor = self._exit_stack.enter_context(
+            _executor_context(n_io_threads, thread_name_prefix="P2P-IO-Threads")
+        )
 
     def __str__(self) -> str:
         return f"ShuffleWorkerPlugin on {self.worker.address}"
@@ -383,14 +406,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
 
         self.closed = True
         await self.shuffle_runs.teardown()
-        try:
-            self._executor.shutdown(cancel_futures=True)
-        except Exception:  # pragma: no cover
-            self._executor.shutdown()
-        try:
-            self._io_executor.shutdown(cancel_futures=True)
-        except Exception:  # pragma: no cover
-            self._io_executor.shutdown()
+        self._exit_stack.close()
 
     #############################
     # Methods for worker thread #

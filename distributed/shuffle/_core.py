@@ -110,6 +110,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             send=self.send,
             memory_limiter=memory_limiter_comms,
             message_bytes_limit=message_bytes_limit,
+            concurrency_limit=io_executor._max_workers,
         )
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
@@ -206,7 +207,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             "start": self.start_time,
         }
 
-    async def _write_to_comm(self, data: dict[str, list[Any]]) -> None:
+    async def _write_to_comm(
+        self, data: dict[str, list[tuple[_T_partition_id, Any]]]
+    ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 

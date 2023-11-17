@@ -25,6 +25,7 @@ from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
     convert_shards,
+    copy_table,
     list_of_buffers_to_table,
     read_from_disk,
     write_to_disk,
@@ -334,8 +335,9 @@ def split_by_worker(
         t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
     ]
     shards.append(t.slice(offset=splits[-1], length=None))
-
     unique_codes = codes[splits]
+    del splits
+    shards = [copy_table(shard) for shard in shards]
     out = {
         # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
         worker_for.cat.categories[code]: shard

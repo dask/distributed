@@ -28,8 +28,8 @@ T = TypeVar("T")
 BufferState: TypeAlias = Literal["open", "flushing", "flushed", "erred", "closed"]
 
 
-class SizedShard(NamedTuple, Generic[ShardType]):
-    shard: ShardType
+class SizedShard(NamedTuple):
+    shard: Any
     size: int
 
 
@@ -57,7 +57,7 @@ class BaseBuffer(Generic[ShardType]):
     drain: ClassVar[bool] = True
 
     #: List of buffered shards per output key with their approximate in-memory size
-    shards: defaultdict[str, list[SizedShard[ShardType]]]
+    shards: defaultdict[str, list[SizedShard]]
     #: Total size of in-memory data per flushable key
     flushable_sizes: defaultdict[str, int]
     #: Total size of in-memory data per currently flushing key
