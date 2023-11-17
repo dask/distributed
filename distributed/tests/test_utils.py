@@ -16,6 +16,7 @@ import xml
 from array import array
 from collections import deque
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from contextvars import ContextVar
 from time import sleep
 from unittest import mock
 
@@ -97,16 +98,21 @@ async def test_All():
         assert end - start < 10
 
 
+def test_sync(loop_in_thread):
+    async def f(x, y):
+        await asyncio.sleep(0.01)
+        return x, y
+
+    result = sync(loop_in_thread, f, 1, y=2)
+    assert result == (1, 2)
+
+
 def test_sync_error(loop_in_thread):
-    loop = loop_in_thread
-    try:
-        result = sync(loop, throws, 1)
-    except Exception as exc:
-        f = exc
-        assert "hello" in str(exc)
-        tb = get_traceback()
-        L = traceback.format_tb(tb)
-        assert any("throws" in line for line in L)
+    with pytest.raises(RuntimeError, match="hello!") as exc:
+        sync(loop_in_thread, throws, 1)
+
+    L = traceback.format_tb(exc.value.__traceback__)
+    assert any("throws" in line for line in L)
 
     def function1(x):
         return function2(x)
@@ -114,18 +120,15 @@ def test_sync_error(loop_in_thread):
     def function2(x):
         return throws(x)
 
-    try:
-        result = sync(loop, function1, 1)
-    except Exception as exc:
-        assert "hello" in str(exc)
-        tb = get_traceback()
-        L = traceback.format_tb(tb)
-        assert any("function1" in line for line in L)
-        assert any("function2" in line for line in L)
+    with pytest.raises(RuntimeError, match="hello!") as exc:
+        sync(loop_in_thread, function1, 1)
+
+    L = traceback.format_tb(exc.value.__traceback__)
+    assert any("function1" in line for line in L)
+    assert any("function2" in line for line in L)
 
 
 def test_sync_timeout(loop_in_thread):
-    loop = loop_in_thread
     with pytest.raises(TimeoutError):
         sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout=0.05)
 
@@ -143,6 +146,21 @@ def test_sync_closed_loop():
     with pytest.raises(RuntimeError) as exc_info:
         sync(loop, inc, 1)
     exc_info.match("IOLoop is clos(ed|ing)")
+
+
+def test_sync_contextvars(loop_in_thread):
+    """Test that sync() propagates contextvars - namely,
+    distributed.metrics.context_meter callbacks
+    """
+    v = ContextVar("v", default=0)
+
+    async def f():
+        return v.get()
+
+    assert sync(loop_in_thread, f) == 0
+    tok = v.set(1)
+    assert sync(loop_in_thread, f) == 1
+    v.reset(tok)
 
 
 def test_is_kernel():

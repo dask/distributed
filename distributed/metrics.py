@@ -231,6 +231,15 @@ class ContextMeter:
         finally:
             tok.var.reset(tok)
 
+    @contextmanager
+    def clear_callbacks(self) -> Iterator[None]:
+        """Do not trigger any callbacks set outside of this context"""
+        tok = self._callbacks.set({})
+        try:
+            yield
+        finally:
+            tok.var.reset(tok)
+
     def digest_metric(self, label: Hashable, value: float, unit: str) -> None:
         """Invoke the currently set context callbacks for an arbitrary quantitative
         metric.

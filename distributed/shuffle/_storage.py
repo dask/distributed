@@ -144,6 +144,7 @@ class StorageBuffer(BaseBuffer):
         self._directory_lock = ReadWriteLock()
         self._executor = executor
 
+    @log_errors
     async def _flush(self, id: str, shards: list[pa.Table]) -> int | None:
         """Write one buffer to file
 
@@ -158,18 +159,17 @@ class StorageBuffer(BaseBuffer):
         dropping the write into communicate above.
         """
 
-        with log_errors():
-            # Consider boosting total_size a bit here to account for duplication
-            with self.time("write"):
-                # We only need shared (i.e., read) access to the directory to write
-                # to a file inside of it.
-                with self._directory_lock.read():
-                    return await asyncio.get_running_loop().run_in_executor(
-                        self._executor,
-                        self._write_fn,
-                        shards,
-                        (self.directory / str(id)).resolve(),
-                    )
+        # Consider boosting total_size a bit here to account for duplication
+        with self.time("write"):
+            # We only need shared (i.e., read) access to the directory to write
+            # to a file inside of it.
+            with self._directory_lock.read():
+                return await asyncio.get_running_loop().run_in_executor(
+                    self._executor,
+                    self._write_fn,
+                    shards,
+                    (self.directory / str(id)).resolve(),
+                )
 
     def read(self, id: str) -> Any:
         """Read a complete file back into memory"""

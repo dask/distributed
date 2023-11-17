@@ -1667,6 +1667,7 @@ class Client(SyncMethodMixin):
             with suppress(TimeoutError, asyncio.CancelledError):
                 await wait_for(handle_report_task, 0 if fast else 2)
 
+    @log_errors
     async def _close(self, fast=False):
         """
         Send close signal and wait until scheduler completes
@@ -1688,51 +1689,49 @@ class Client(SyncMethodMixin):
             for pc in self._periodic_callbacks.values():
                 pc.stop()
 
-        with log_errors():
-            _del_global_client(self)
-            self._scheduler_identity = {}
-            if self._set_as_default and not _get_global_client():
-                with suppress(AttributeError):
-                    # clear the dask.config set keys
-                    with self._set_config:
-                        pass
-            if self.get == dask.config.get("get", None):
-                del dask.config.config["get"]
+        _del_global_client(self)
+        self._scheduler_identity = {}
+        if self._set_as_default and not _get_global_client():
+            with suppress(AttributeError):
+                # clear the dask.config set keys
+                with self._set_config:
+                    pass
+        if self.get == dask.config.get("get", None):
+            del dask.config.config["get"]
 
+        if (
+            self.scheduler_comm
+            and self.scheduler_comm.comm
+            and not self.scheduler_comm.comm.closed()
+        ):
+            self._send_to_scheduler({"op": "close-client"})
+            self._send_to_scheduler({"op": "close-stream"})
+        async with self._wait_for_handle_report_task(fast=fast):
             if (
                 self.scheduler_comm
                 and self.scheduler_comm.comm
                 and not self.scheduler_comm.comm.closed()
             ):
-                self._send_to_scheduler({"op": "close-client"})
-                self._send_to_scheduler({"op": "close-stream"})
-            async with self._wait_for_handle_report_task(fast=fast):
-                if (
-                    self.scheduler_comm
-                    and self.scheduler_comm.comm
-                    and not self.scheduler_comm.comm.closed()
-                ):
-                    await self.scheduler_comm.close()
+                await self.scheduler_comm.close()
 
-                for key in list(self.futures):
-                    self._release_key(key=key)
+            for key in list(self.futures):
+                self._release_key(key=key)
 
-                if self._start_arg is None:
-                    with suppress(AttributeError):
-                        await self.cluster.close()
+            if self._start_arg is None:
+                with suppress(AttributeError):
+                    await self.cluster.close()
 
-                await self.rpc.close()
+            await self.rpc.close()
 
-                self.status = "closed"
+            self.status = "closed"
 
-                if _get_global_client() is self:
-                    _set_global_client(None)
+            if _get_global_client() is self:
+                _set_global_client(None)
 
-            with suppress(AttributeError):
-                await self.scheduler.close_rpc()
+        with suppress(AttributeError):
+            await self.scheduler.close_rpc()
 
-            self.scheduler = None
-
+        self.scheduler = None
         self.status = "closed"
 
     def close(self, timeout=no_default):

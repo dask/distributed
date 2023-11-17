@@ -62,9 +62,9 @@ class CommShardsBuffer(BaseBuffer):
         )
         self.send = send
 
+    @log_errors
     async def _flush(self, id: str, shards: list[Any]) -> int | None:  # type: ignore[return]
         """Send one message off to a neighboring worker"""
-        with log_errors():
-            # Consider boosting total_size a bit here to account for duplication
-            with self.time("send"):
-                await self.send(id, shards)
+        # Consider boosting total_size a bit here to account for duplication
+        with self.time("send"):
+            await self.send(id, shards)

@@ -19,12 +19,12 @@ class MemoryShardsBuffer(ShardsBuffer):
         self._deserialize = deserialize
         self._shards = defaultdict(deque)
 
+    @log_errors
     async def _process(self, id: str, shards: list[Any]) -> None:
         # TODO: This can be greatly simplified, there's no need for
         # background threads at all.
-        with log_errors():
-            with self.time("write"):
-                self._shards[id].extend(shards)
+        with self.time("write"):
+            self._shards[id].extend(shards)
 
     def read(self, id: str) -> Any:
         self.raise_on_exception()
