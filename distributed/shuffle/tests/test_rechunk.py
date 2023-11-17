@@ -1199,7 +1199,9 @@ async def test_rechunk_in_memory_shards_dont_share_buffer(c, s, a, b):
 
     [run] = a.extensions["shuffle"].shuffle_runs._runs
     shards = [
-        s3 for s1 in run._disk_buffer._shards.values() for s2 in s1 for _, s3 in s2
+        shard.shard[1]
+        for shards in run._storage_buffer.shards.values()
+        for shard in shards
     ]
     assert shards
 

@@ -265,15 +265,14 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     return axes
 
 
-def convert_chunk(shards: list[list[tuple[NDIndex, np.ndarray]]]) -> np.ndarray:
+def convert_chunk(shards: list[tuple[NDIndex, np.ndarray]]) -> np.ndarray:
     import numpy as np
 
     from dask.array.core import concatenate3
 
     indexed: dict[NDIndex, np.ndarray] = {}
-    for sublist in shards:
-        for index, shard in sublist:
-            indexed[index] = shard
+    for index, shard in shards:
+        indexed[index] = shard
 
     subshape = [max(dim) + 1 for dim in zip(*indexed.keys())]
     assert len(indexed) == np.prod(subshape)

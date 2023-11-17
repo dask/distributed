@@ -353,7 +353,7 @@ class BaseBuffer(Generic[ShardType]):
             "memory_limit": self.memory_limiter.limit,
         }
 
-    async def write(self, data: dict[str, Any]) -> None:
+    async def write(self, data: dict[str, list[Any]]) -> None:
         self._raise_if_erred()
 
         if self._state != "open":
@@ -365,16 +365,17 @@ class BaseBuffer(Generic[ShardType]):
             return
 
         async with self._flush_condition:
-            for worker, shard in data.items():
-                size = sizeof(shard)
-                self.shards[worker].append(SizedShard(shard=shard, size=size))
-                if worker in self.flushing_sizes:
-                    self.flushing_sizes[worker] += size
-                else:
-                    self.flushable_sizes[worker] += size
-                self.bytes_memory += size
-                self.bytes_total += size
-                self.memory_limiter.increase(size)
+            for worker, shards in data.items():
+                for shard in shards:
+                    size = sizeof(shard)
+                    self.shards[worker].append(SizedShard(shard=shard, size=size))
+                    if worker in self.flushing_sizes:
+                        self.flushing_sizes[worker] += size
+                    else:
+                        self.flushable_sizes[worker] += size
+                    self.bytes_memory += size
+                    self.bytes_total += size
+                    self.memory_limiter.increase(size)
             del data
             self._flush_condition.notify_all()
         await self.memory_limiter.wait_for_available()
