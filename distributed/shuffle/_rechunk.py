@@ -179,7 +179,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     token = tokenize(x, chunks)
     _barrier_key = barrier_key(ShuffleId(token))
     name = f"rechunk-transfer-{token}"
-    disk: bool = dask.config.get("distributed.p2p.disk")
+    disk: bool = dask.config.get("distributed.p2p.storage.disk")
     transfer_keys = []
     for index in np.ndindex(tuple(len(dim) for dim in x.chunks)):
         transfer_keys.append((name,) + index)

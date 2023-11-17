@@ -219,7 +219,7 @@ async def test_rechunk_2d(c, s, *ws, disk):
     a = np.random.default_rng().uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
-    with dask.config.set({"distributed.p2p.disk": disk}):
+    with dask.config.set({"distributed.p2p.storage.disk": disk}):
         x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
@@ -243,7 +243,7 @@ async def test_rechunk_4d(c, s, *ws, disk):
         (10,),
         (8, 2),
     )  # This has been altered to return >1 output partition
-    with dask.config.set({"distributed.p2p.disk": disk}):
+    with dask.config.set({"distributed.p2p.storge.disk": disk}):
         x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     await c.compute(x2)
@@ -1172,7 +1172,7 @@ async def test_preserve_writeable_flag(c, s, a, b):
     assert out.tolist() == [True, True]
 
 
-@gen_cluster(client=True, config={"distributed.p2p.disk": False})
+@gen_cluster(client=True, config={"distributed.p2p.storage.disk": False})
 async def test_rechunk_in_memory_shards_dont_share_buffer(c, s, a, b):
     """Test that, if two shards are sent in the same RPC call and they contribute to
     different output chunks, downstream tasks don't need to consume all output chunks in
