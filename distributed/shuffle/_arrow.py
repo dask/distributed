@@ -105,7 +105,7 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
 
-    tables = (deserialize_table(buffer) for buffer in data)
+    tables = (buffer for buffer in data)
     return concat_tables(tables)
 
 

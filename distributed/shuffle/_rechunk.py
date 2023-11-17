@@ -397,7 +397,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
 
     def _shard_partition(
         self, data: np.ndarray, partition_id: NDIndex
-    ) -> dict[str, tuple[NDIndex, Any]]:
+    ) -> dict[str, list[tuple[NDIndex, Any]]]:
         out: dict[str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]] = defaultdict(
             list
         )
@@ -415,7 +415,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             out[self.worker_for[chunk_index]].append(
                 (chunk_index, (shard_index, shard))
             )
-        return {k: (partition_id, v) for k, v in out.items()}
+        return {k: [(partition_id, v)] for k, v in out.items()}
 
     def _get_output_partition(
         self, partition_id: NDIndex, key: str, **kwargs: Any

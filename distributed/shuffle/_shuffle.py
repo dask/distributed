@@ -27,7 +27,6 @@ from distributed.shuffle._arrow import (
     convert_shards,
     list_of_buffers_to_table,
     read_from_disk,
-    serialize_table,
     write_to_disk,
 )
 from distributed.shuffle._core import (
@@ -487,14 +486,14 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         data: pd.DataFrame,
         partition_id: int,
         **kwargs: Any,
-    ) -> dict[str, tuple[int, bytes]]:
+    ) -> dict[str, list[tuple[int, bytes]]]:
         out = split_by_worker(
             data,
             self.column,
             self.meta,
             self.worker_for,
         )
-        out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
+        out = {k: [(partition_id, t)] for k, t in out.items()}
         return out
 
     def _get_output_partition(
