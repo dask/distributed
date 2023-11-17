@@ -1105,16 +1105,13 @@ def context_meter_to_server_digest(digest_tag: str) -> Callable:
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(self: Server, *args: Any, **kwargs: Any) -> Any:
-            loop = asyncio.get_running_loop()
-
             def metrics_callback(label: Hashable, value: float, unit: str) -> None:
                 if not isinstance(label, tuple):
                     label = (label,)
                 name = (digest_tag, *label, unit)
-                # This callback could be called from another thread through offload()
-                loop.call_soon_threadsafe(self.digest_metric, name, value)
+                self.digest_metric(name, value)
 
-            with context_meter.add_callback(metrics_callback):
+            with context_meter.add_callback(metrics_callback, allow_offload=True):
                 return await func(self, *args, **kwargs)
 
         return wrapper

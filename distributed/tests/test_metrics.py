@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import math
 import pickle
+import threading
 import time
 
 import pytest
 
 from distributed import metrics
 from distributed.compatibility import WINDOWS
+from distributed.utils import offload
+from distributed.utils_test import gen_test
 
 
 @pytest.mark.parametrize("name", ["time", "monotonic"])
@@ -221,6 +224,25 @@ def test_context_meter_clear_callbacks_raises():
 
         with pytest.raises(RuntimeError, match="hello"):
             metrics.context_meter.digest_metric("foo", 1, "s")
+
+
+@gen_test()
+async def test_context_meter_allow_offload():
+    tid = threading.get_ident()
+    m = []
+
+    def cb(label, value, unit):
+        m.append((threading.get_ident(), label, value, unit))
+
+    with metrics.context_meter.add_callback(cb, allow_offload=True):
+        metrics.context_meter.digest_metric("foo", 1, "x")
+        await offload(metrics.context_meter.digest_metric, "bar", 1, "x")
+
+    assert m == [
+        (tid, "foo", 1, "x"),
+        (tid, "offload", m[1][2], "seconds"),
+        (tid, "bar", 1, "x"),
+    ]
 
 
 def test_delayed_metrics_ledger():
