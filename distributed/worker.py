@@ -1042,7 +1042,8 @@ class Worker(BaseWorker, ServerNode):
             spans_ext.collect_digests()
 
         # Send metrics with squashed span_id
-        digests: defaultdict[Hashable, float] = defaultdict(float)
+        # Don't cast int metrics to float
+        digests: defaultdict[Hashable, float] = defaultdict(int)
         for k, v in self.digests_total_since_heartbeat.items():
             if isinstance(k, tuple) and k[0] == "execute":
                 k = k[:1] + k[2:]
