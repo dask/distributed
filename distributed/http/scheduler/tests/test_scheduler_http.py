@@ -340,26 +340,82 @@ async def test_sitemap(s, a, b):
     assert "/statics/css/base.css" in out["paths"]
 
 
-@gen_cluster(client=True)
-async def test_task_page(c, s, a, b):
-    future = c.submit(lambda x: x + 1, 1, workers=a.address)
-    x = c.submit(inc, 1)
-    await future
-    http_client = AsyncHTTPClient()
+KEY_EDGE_CASES = [
+    1,
+    "1",
+    "x",
+    "a+b",
+    "a b",
+    ("x", 1),
+    ("a+b", 1),
+    ("a b", 1),
+    ((1, 2), ("x", "y")),
+    "(",
+    "[",
+    "'",
+    '"',
+    b"123",
+    (b"123", 1),
+    ("[", 1),
+    ("(", 1),
+    ("'", 1),
+    ('"', 1),
+]
 
-    "info/task/" + url_escape(future.key) + ".html",
-    response = await http_client.fetch(
-        "http://localhost:%d/info/task/" % s.http_server.port
-        + url_escape(future.key)
-        + ".html"
-    )
+
+@pytest.mark.parametrize("key", KEY_EDGE_CASES)
+@gen_cluster(client=True)
+async def test_task_page(c, s, a, b, key):
+    http_client = AsyncHTTPClient()
+    skey = url_escape(str(key), plus=False)
+    url = f"http://localhost:{s.http_server.port}/info/task/{skey}.html"
+
+    response = await http_client.fetch(url, raise_error=False)
+    assert response.code == 404
+
+    future = c.submit(lambda: 1, key=key, workers=a.address)
+    await future
+    response = await http_client.fetch(url)
     assert response.code == 200
     body = response.body.decode()
 
+    assert a.address in body
     assert str(sizeof(1)) in body
     assert "int" in body
-    assert a.address in body
     assert "memory" in body
+
+
+@pytest.mark.parametrize("key", KEY_EDGE_CASES)
+@gen_cluster(client=True)
+async def test_call_stack_page(c, s, a, b, key):
+    http_client = AsyncHTTPClient()
+    skey = url_escape(str(key), plus=False)
+    url = f"http://localhost:{s.http_server.port}/info/call-stack/{skey}.html"
+
+    response = await http_client.fetch(url, raise_error=False)
+    assert response.code == 404
+
+    ev1 = Event()
+    ev2 = Event()
+
+    def f(ev1, ev2):
+        ev1.set()
+        ev2.wait()
+
+    future = c.submit(f, ev1, ev2, key=key)
+    await ev1.wait()
+
+    response = await http_client.fetch(url)
+    assert response.code == 200
+    body = response.body.decode()
+    assert "test_scheduler_http.py" in body
+
+    await ev2.set()
+    await future
+    response = await http_client.fetch(url)
+    assert response.code == 200
+    body = response.body.decode()
+    assert "Task not actively running" in body
 
 
 @gen_cluster(
