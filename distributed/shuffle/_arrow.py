@@ -125,16 +125,15 @@ def deserialize_table(buffer: bytes) -> pa.Table:
         return reader.read_all()
 
 
-def write_to_disk(data: list[pa.Table], path: Path) -> int:
+def write_to_disk(data: list[pa.Table], file: pa.OSFile) -> int:
     import pyarrow as pa
 
     table = combine_tables(data)
     del data
-    with path.open(mode="ab") as f:
-        start = f.tell()
-        with pa.ipc.new_stream(f, table.schema) as writer:
-            writer.write_table(table)
-        return f.tell() - start
+    start = file.tell()
+    with pa.ipc.new_stream(file, table.schema) as writer:
+        writer.write_table(table)
+    return file.tell() - start
 
 
 def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:

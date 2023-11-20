@@ -413,6 +413,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     meta: pd.DataFrame
     partitions_of: dict[str, list[int]]
     worker_for: pd.Series
+    fds: dict[Path, pa.OSFile]
 
     def __init__(
         self,
@@ -455,6 +456,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
+        self.fds = {}
 
     async def _receive(self, data: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
@@ -514,10 +516,19 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         return self.worker_for[id]
 
     def write(self, data: list[Any], path: Path) -> int:
-        return write_to_disk(data, path)
+        return write_to_disk(data, self.get_pa_file(path))
 
     def read(self, path: Path) -> tuple[pa.Table, int]:
         return read_from_disk(path)
+
+    def get_pa_file(self, path: Path) -> pa.OSFile:
+        import pyarrow as pa
+
+        try:
+            return self.fds[path]
+        except KeyError:
+            self.fds[path] = pa.OSFile(str(path), mode="w")
+            return self.fds[path]
 
 
 @dataclass(frozen=True)
