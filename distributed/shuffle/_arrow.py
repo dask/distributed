@@ -45,10 +45,14 @@ def check_minimal_arrow_version() -> None:
 
 
 def combine_tables(tables: Iterable[pa.Table], deep_copy: bool = True) -> pa.Table:
+    import numpy as np
+
     table = concat_tables(tables)
-    if deep_copy:
-        return copy_table(table)
-    return table.combine_chunks()
+    # if table.
+    # if deep_copy:
+    # return copy_table(table)
+    return table.take(np.arange(start=0, stop=table.num_rows))
+    # return table.combine_chunks()
 
 
 def copy_table(table: pa.Table) -> pa.Table:
@@ -105,7 +109,7 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
 
-    tables = (buffer for buffer in data)
+    tables = (deserialize_table(buffer) for buffer in data)
     return concat_tables(tables)
 
 

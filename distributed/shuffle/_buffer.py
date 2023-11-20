@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, NamedTuple, T
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
@@ -124,7 +123,7 @@ class BaseBuffer(Generic[ShardType]):
             "memory_limit": self.memory_limiter.limit,
         }
 
-    async def write(self, data: dict[str, list[Any]]) -> None:
+    async def write(self, data: dict[str, list[SizedShard]]) -> None:
         self.raise_if_erred()
 
         if self._state != "open":
@@ -138,8 +137,8 @@ class BaseBuffer(Generic[ShardType]):
         async with self._flush_condition:
             for worker, shards in data.items():
                 for shard in shards:
-                    size = sizeof(shard)
-                    self.shards[worker].append(SizedShard(shard=shard, size=size))
+                    self.shards[worker].append(shard)
+                    size = shard.size
                     if worker in self.flushing_sizes:
                         self.flushing_sizes[worker] += size
                     else:

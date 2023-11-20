@@ -25,11 +25,12 @@ from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
     convert_shards,
-    copy_table,
     list_of_buffers_to_table,
     read_from_disk,
+    serialize_table,
     write_to_disk,
 )
+from distributed.shuffle._buffer import SizedShard
 from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
@@ -303,6 +304,7 @@ def split_by_worker(
     Split data into many arrow batches, partitioned by destination worker
     """
     import numpy as np
+    import pyarrow as pa
 
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
@@ -332,12 +334,13 @@ def split_by_worker(
     splits = np.concatenate([[0], splits])
 
     shards = [
-        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
+        t.take(pa.array(np.arange(start=a, stop=b)))
+        for a, b in toolz.sliding_window(2, splits)
     ]
-    shards.append(t.slice(offset=splits[-1], length=None))
+    shards.append(t.take(pa.array(np.arange(start=splits[-1], stop=t.num_rows))))
     unique_codes = codes[splits]
     del splits
-    shards = [copy_table(shard) for shard in shards]
+    # shards = [copy_table(shard) for shard in shards]
     out = {
         # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
         worker_for.cat.categories[code]: shard
@@ -352,20 +355,24 @@ def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
     Split data into many arrow batches, partitioned by final partition
     """
     import numpy as np
+    import pyarrow as pa
 
     partitions = t.select([column]).to_pandas()[column].unique()
     partitions.sort()
     t = t.sort_by(column)
-
+    nrows = len(t)
     partition = np.asarray(t[column])
     splits = np.where(partition[1:] != partition[:-1])[0] + 1
     splits = np.concatenate([[0], splits])
 
     shards = [
-        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
+        t.take(pa.array(np.arange(start=a, stop=b)))
+        for a, b in toolz.sliding_window(2, splits)
     ]
-    shards.append(t.slice(offset=splits[-1], length=None))
-    assert len(t) == sum(map(len, shards))
+    shards.append(t.take(pa.array(np.arange(start=splits[-1], stop=t.num_rows))))
+    del t
+    # shards = [copy_table(shard) for shard in shards]
+    assert nrows == sum(map(len, shards))
     assert len(partitions) == len(shards)
     return dict(zip(partitions, shards))
 
@@ -466,7 +473,8 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             if d[0] not in self.received:
                 filtered.append(d[1])
                 self.received.add(d[0])
-                self.total_recvd += sizeof(d)
+                # FIXME
+                self.total_recvd += sizeof(d[1])
         del data
         if not filtered:
             return
@@ -483,7 +491,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {(k,): [v] for k, v in groups.items()}
+        return {(k,): [SizedShard(shard=v, size=v.nbytes)] for k, v in groups.items()}
 
     def _shard_partition(
         self,
@@ -497,7 +505,8 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self.meta,
             self.worker_for,
         )
-        out = {k: [(partition_id, t)] for k, t in out.items()}
+        out = {k: serialize_table(t) for k, t in out.items()}
+        out = {k: [SizedShard((partition_id, b), sizeof(b))] for k, b in out.items()}
         return out
 
     def _get_output_partition(
