@@ -140,7 +140,10 @@ class Span:
         self.children = []
         self.groups = set()
         self._code = {}
-        self._cumulative_worker_metrics = defaultdict(float)
+
+        # Don't cast int metrics to float
+        self._cumulative_worker_metrics = defaultdict(int)
+
         assert len(total_nthreads_history) > 0
         self._total_nthreads_history = total_nthreads_history
         self._total_nthreads_offset = len(total_nthreads_history) - 1

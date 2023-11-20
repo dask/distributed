@@ -3576,7 +3576,8 @@ class Scheduler(SchedulerState, ServerNode):
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
 
-        self.cumulative_worker_metrics = defaultdict(float)
+        # Don't cast int metrics to float
+        self.cumulative_worker_metrics = defaultdict(int)
 
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")

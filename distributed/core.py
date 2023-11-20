@@ -478,11 +478,12 @@ class Server:
         except ImportError:
             self.digests = None
 
-        # In case crick is not installed, also log cumulative totals (reset at server
-        # restart) and local maximums (reset by prometheus poll)
-        self.digests_total = defaultdict(float)
-        self.digests_total_since_heartbeat = defaultdict(float)
-        self.digests_max = defaultdict(float)
+        # Also log cumulative totals (reset at server restart)
+        # and local maximums (reset by prometheus poll)
+        # Don't cast int metrics to float
+        self.digests_total = defaultdict(int)
+        self.digests_total_since_heartbeat = defaultdict(int)
+        self.digests_max = defaultdict(int)
 
         self.counters = defaultdict(Counter)
         pc = PeriodicCallback(self._shift_counters, 5000)
