@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, overload
 
 from dask.context import thread_state
+from dask.typing import Key
 from dask.utils import parse_bytes
 
 from distributed.diagnostics.plugin import WorkerPlugin
@@ -114,9 +115,7 @@ class _ShuffleRunManager:
         """
         shuffle_run = self._active_runs.get(shuffle_id, None)
         if shuffle_run is None or shuffle_run.run_id < run_id:
-            shuffle_run = await self._refresh(
-                shuffle_id=shuffle_id,
-            )
+            shuffle_run = await self._refresh(shuffle_id=shuffle_id)
 
         if shuffle_run.run_id > run_id:
             raise RuntimeError(f"{run_id=} stale, got {shuffle_run}")
@@ -129,7 +128,7 @@ class _ShuffleRunManager:
             raise shuffle_run._exception
         return shuffle_run
 
-    async def get_or_create(self, spec: ShuffleSpec, key: str) -> ShuffleRun:
+    async def get_or_create(self, spec: ShuffleSpec, key: Key) -> ShuffleRun:
         """Get or create a shuffle matching the ID and data spec.
 
         Parameters
@@ -182,7 +181,7 @@ class _ShuffleRunManager:
         self,
         shuffle_id: ShuffleId,
         spec: ShuffleSpec | None = None,
-        key: str | None = None,
+        key: Key | None = None,
     ) -> ShuffleRunSpec:
         # FIXME: This should never be ToPickle[ShuffleRunSpec]
         result: ShuffleRunSpec | ToPickle[ShuffleRunSpec]
@@ -213,7 +212,7 @@ class _ShuffleRunManager:
         self,
         shuffle_id: ShuffleId,
         spec: ShuffleSpec,
-        key: str,
+        key: Key,
     ) -> ShuffleRun:
         ...
 
@@ -221,7 +220,7 @@ class _ShuffleRunManager:
         self,
         shuffle_id: ShuffleId,
         spec: ShuffleSpec | None = None,
-        key: str | None = None,
+        key: Key | None = None,
     ) -> ShuffleRun:
         result = await self._fetch(shuffle_id=shuffle_id, spec=spec, key=key)
         if self.closed:
@@ -366,7 +365,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
     async def _get_or_create_shuffle(
         self,
         spec: ShuffleSpec,
-        key: str,
+        key: Key,
     ) -> ShuffleRun:
         return await self.shuffle_runs.get_or_create(spec=spec, key=key)
 

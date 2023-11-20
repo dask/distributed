@@ -498,7 +498,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def _get_output_partition(
         self,
         partition_id: int,
-        key: str,
+        key: Key,
         **kwargs: Any,
     ) -> pd.DataFrame:
         try:

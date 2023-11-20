@@ -111,6 +111,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
+from dask.typing import Key
 
 from distributed.core import PooledRPCCall
 from distributed.shuffle._core import (
@@ -416,7 +417,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         return {k: (partition_id, v) for k, v in out.items()}
 
     def _get_output_partition(
-        self, partition_id: NDIndex, key: str, **kwargs: Any
+        self, partition_id: NDIndex, key: Key, **kwargs: Any
     ) -> np.ndarray:
         # Quickly read metadata from disk.
         # This is a bunch of seek()'s interleaved with short reads.

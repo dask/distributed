@@ -262,7 +262,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             data = cast(list[tuple[_T_partition_id, Any]], pickle.loads(data))
         await self._receive(data)
 
-    async def _ensure_output_worker(self, i: _T_partition_id, key: str) -> None:
+    async def _ensure_output_worker(self, i: _T_partition_id, key: Key) -> None:
         assigned_worker = self._get_assigned_worker(i)
 
         if assigned_worker != self.local_address:
@@ -299,7 +299,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Shard an input partition by the assigned output workers"""
 
     def get_output_partition(
-        self, partition_id: _T_partition_id, key: str, **kwargs: Any
+        self, partition_id: _T_partition_id, key: Key, **kwargs: Any
     ) -> _T_partition_type:
         self.raise_if_closed()
         sync(self._loop, self._ensure_output_worker, partition_id, key)
@@ -310,7 +310,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
     @abc.abstractmethod
     def _get_output_partition(
-        self, partition_id: _T_partition_id, key: str, **kwargs: Any
+        self, partition_id: _T_partition_id, key: Key, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
 
