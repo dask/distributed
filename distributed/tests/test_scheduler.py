@@ -1650,7 +1650,7 @@ async def test_file_descriptors(c, s):
 @gen_cluster(client=True)
 async def test_learn_occupancy(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.2)
-    while sum(len(ts.who_has) for ts in s.tasks.values()) < 10:
+    while sum(len(ts.who_has or ()) for ts in s.tasks.values()) < 10:
         await asyncio.sleep(0.01)
 
     nproc = sum(ts.state == "processing" for ts in s.tasks.values())
@@ -4174,46 +4174,6 @@ async def test_dump_cluster_state(s, *workers, format):
     finally:
         fs = fsspec.filesystem("memory")
         fs.rm("state-dumps", recursive=True)
-
-
-@gen_cluster(nthreads=[])
-async def test_idempotent_plugins(s):
-    class IdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "idempotentplugin"
-            self.instance = instance
-
-        def start(self, scheduler):
-            if self.instance != "first":
-                raise RuntimeError(
-                    "Only the first plugin should be started when idempotent is set"
-                )
-
-    first = IdempotentPlugin(instance="first")
-    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=True)
-    assert "idempotentplugin" in s.plugins
-
-    second = IdempotentPlugin(instance="second")
-    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=True)
-    assert "idempotentplugin" in s.plugins
-    assert s.plugins["idempotentplugin"].instance == "first"
-
-
-@gen_cluster(nthreads=[])
-async def test_non_idempotent_plugins(s):
-    class NonIdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "nonidempotentplugin"
-            self.instance = instance
-
-    first = NonIdempotentPlugin(instance="first")
-    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=False)
-    assert "nonidempotentplugin" in s.plugins
-
-    second = NonIdempotentPlugin(instance="second")
-    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=False)
-    assert "nonidempotentplugin" in s.plugins
-    assert s.plugins["nonidempotentplugin"].instance == "second"
 
 
 @gen_cluster(nthreads=[("", 1)])

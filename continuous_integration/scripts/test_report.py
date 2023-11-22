@@ -140,14 +140,10 @@ def get_jobs(run, session):
     # Somehow the job ID is not part of the workflow schema and we have no other way to later join
     # this to the JXML results.
 
-    name_components = (
-        df_jobs.name.str.extract(r"test \((.+)\)", expand=False)
-        .dropna()
-        .str.split(", ", expand=True)
-    )
-    if len(name_components.columns) != 4:
-        raise ValueError(f"Job names must have 4 components:\n{name_components!r}")
-    name_components.columns = ["OS", "environment", "label", "partition"]
+    name_components = df_jobs.name.str.split("-", expand=True).dropna()
+    if len(name_components.columns) != 5:
+        raise ValueError(f"Job names must have 5 components:\n{name_components!r}")
+    name_components.columns = ["OS", "OS version", "environment", "label", "partition"]
 
     # See `Set $TEST_ID` step in `tests.yaml`
     name_components["partition"] = name_components.partition.str.replace(" ", "")

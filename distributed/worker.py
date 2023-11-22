@@ -414,7 +414,7 @@ class Worker(BaseWorker, ServerNode):
     transfer_outgoing_count_limit: int
     threads: dict[Key, int]  # {ts.key: thread ID}
     active_threads_lock: threading.Lock
-    active_threads: dict[int, str]  # {thread ID: ts.key}
+    active_threads: dict[int, Key]  # {thread ID: ts.key}
     active_keys: set[Key]
     profile_keys: defaultdict[str, dict[str, Any]]
     profile_keys_history: deque[tuple[float, dict[str, dict[str, Any]]]]
@@ -1042,7 +1042,8 @@ class Worker(BaseWorker, ServerNode):
             spans_ext.collect_digests()
 
         # Send metrics with squashed span_id
-        digests: defaultdict[Hashable, float] = defaultdict(float)
+        # Don't cast int metrics to float
+        digests: defaultdict[Hashable, float] = defaultdict(int)
         for k, v in self.digests_total_since_heartbeat.items():
             if isinstance(k, tuple) and k[0] == "execute":
                 k = k[:1] + k[2:]
@@ -2516,7 +2517,7 @@ class Worker(BaseWorker, ServerNode):
             )
         return result
 
-    def get_call_stack(self, keys: Collection[str] | None = None) -> dict[str, Any]:
+    def get_call_stack(self, keys: Collection[Key] | None = None) -> dict[Key, Any]:
         with self.active_threads_lock:
             sys_frames = sys._current_frames()
             frames = {key: sys_frames[tid] for tid, key in self.active_threads.items()}
@@ -2608,7 +2609,7 @@ class Worker(BaseWorker, ServerNode):
 
         return self._client
 
-    def get_current_task(self) -> str:
+    def get_current_task(self) -> Key:
         """Get the key of the task we are currently running
 
         This only makes sense to run within a task

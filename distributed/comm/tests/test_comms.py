@@ -13,7 +13,6 @@ import dask
 
 from distributed.comm import (
     CommClosedError,
-    asyncio_tcp,
     connect,
     get_address_host,
     get_local_address_for,
@@ -26,7 +25,7 @@ from distributed.comm import (
 )
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tcp import get_stream_address
-from distributed.compatibility import WINDOWS, asyncio_run
+from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
@@ -44,13 +43,13 @@ from distributed.utils_test import (
 EXTERNAL_IP4 = get_ip()
 
 
-@pytest.fixture(params=["tornado", "asyncio"])
+@pytest.fixture(params=["tornado"])
 def tcp(monkeypatch, request):
     """Set the TCP backend to either tornado or asyncio"""
     if request.param == "tornado":
         import distributed.comm.tcp as tcp
     else:
-        import distributed.comm.asyncio_tcp as tcp
+        raise NotImplementedError()
     monkeypatch.setitem(backends, "tcp", tcp.TCPBackend())
     monkeypatch.setitem(backends, "tls", tcp.TLSBackend())
     return tcp
@@ -340,8 +339,6 @@ async def test_comm_failure_threading(tcp):
     We only assert for PY3, because the thread limit only is
     set for python 3.  See github PR #2403 discussion for info.
     """
-    if tcp is asyncio_tcp:
-        pytest.skip("not applicable for asyncio")
 
     async def sleep_for_60ms():
         max_thread_count = 0
@@ -887,8 +884,6 @@ async def test_comm_closed_on_write_error(tcp, exc_type):
     # Internal errors from comm.stream.write, such as
     # BufferError should lead to the stream being closed
     # and not re-used. See GitHub #4133
-    if tcp is asyncio_tcp:
-        pytest.skip("Not applicable for asyncio")
 
     reader, writer = await get_tcp_comm_pair()
 
@@ -907,9 +902,6 @@ async def test_comm_closed_on_write_error(tcp, exc_type):
 
 @gen_test()
 async def test_comm_closed_on_read_error(tcp):
-    if tcp is asyncio_tcp:
-        pytest.skip("Not applicable for asyncio")
-
     reader, writer = await get_tcp_comm_pair()
 
     with pytest.raises(asyncio.TimeoutError):
@@ -1447,8 +1439,6 @@ async def test_share_buffer_with_header(
     test_do_not_share_buffers
     """
     np = pytest.importorskip("numpy")
-    if tcp is asyncio_tcp and WINDOWS:
-        pytest.xfail("asyncio_tcp is faulty on windows")
 
     async def handle_comm(comm):
         comm.max_shard_size = 250_000
@@ -1467,8 +1457,4 @@ async def test_share_buffer_with_header(
 
     a = msg["np"]
     ha = get_host_array(a)
-    if tcp is asyncio_tcp:
-        # TODO unimplemented optimization. Buffers are always split.
-        assert ha.nbytes == a.nbytes
-    else:
-        assert (ha.nbytes == a.nbytes) == expect_separate_buffer
+    assert (ha.nbytes == a.nbytes) == expect_separate_buffer

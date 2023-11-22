@@ -306,8 +306,6 @@ def split_by_worker(
 
     from dask.dataframe.dispatch import to_pyarrow_table_dispatch
 
-    df = df.astype(meta.dtypes, copy=False)
-
     # (cudf support) Avoid pd.Series
     constructor = df._constructor_sliced
     assert isinstance(constructor, type)
@@ -500,7 +498,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def _get_output_partition(
         self,
         partition_id: int,
-        key: str,
+        key: Key,
         **kwargs: Any,
     ) -> pd.DataFrame:
         try:
