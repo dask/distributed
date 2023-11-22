@@ -491,7 +491,10 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data
-        return {(k,): [SizedShard(shard=v, size=v.nbytes)] for k, v in groups.items()}
+        return {
+            (k,): [SizedShard(shard=v, size=v.get_total_buffer_size())]
+            for k, v in groups.items()
+        }
 
     def _shard_partition(
         self,
@@ -506,7 +509,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self.worker_for,
         )
         out = {k: serialize_table(t) for k, t in out.items()}
-        out = {k: [SizedShard((partition_id, b), sizeof(b))] for k, b in out.items()}
+        out = {k: [SizedShard((partition_id, b), b.size)] for k, b in out.items()}
         return out
 
     def _get_output_partition(

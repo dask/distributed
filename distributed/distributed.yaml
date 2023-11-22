@@ -301,18 +301,18 @@ distributed:
 
   p2p:
     comm:
-      buffer: 100 MiB
-      message-bytes-limit: 20 MiB
+      buffer: 500 MiB
+      message-bytes-limit: 50 MiB
       retry:
         count: 10
         delay:
           min: 1s  # the first non-zero delay between re-tries
           max: 30s  # the maximum delay between re-tries
     storage:
-      buffer: 1 GiB
+      buffer: 500 MiB
       disk: True
-    threads: 8
-    io-threads: 8
+    threads: 1
+    io-threads: 1
 
   ###################
   # Bokeh dashboard #
