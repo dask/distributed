@@ -81,6 +81,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if shuffle.run_id != run_id:
             raise ValueError(f"{run_id=} does not match {shuffle}")
         if not consistent:
+            logger.warning(
+                "Shuffle %s restarted due to data inconsistency during barrier",
+                shuffle.id,
+            )
             return self._restart_shuffle(
                 shuffle.id,
                 self.scheduler,
@@ -256,6 +260,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         recs = self._restart_recommendations(id)
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
         self.scheduler.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+        logger.warning("Shuffle %s restarted due to stimulus '%s", id, stimulus_id)
 
     def remove_worker(
         self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
@@ -276,6 +281,12 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         for shuffle_id, shuffle in self.active_shuffles.copy().items():
             if worker not in shuffle.participating_workers:
                 continue
+            logger.debug(
+                "Worker %s removed during active shuffle %s due to stimulus '%s'",
+                worker,
+                shuffle_id,
+                stimulus_id,
+            )
             exception = RuntimeError(f"Worker {worker} left during active {shuffle}")
             self._fail_on_workers(shuffle, str(exception))
             self._clean_on_scheduler(shuffle_id, stimulus_id)
@@ -302,6 +313,14 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if shuffle := self.active_shuffles.get(shuffle_id):
             self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
             self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
+            logger.debug(
+                "Shuffle %s forgotten because task '%s' transitioned to %s due to "
+                "stimulus '%s'",
+                shuffle_id,
+                key,
+                finish,
+                stimulus_id,
+            )
 
         if finish == "forgotten":
             shuffles = self._shuffles.pop(shuffle_id, set())
