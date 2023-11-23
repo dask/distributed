@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 class ShuffleSchedulerPlugin(SchedulerPlugin):
@@ -82,7 +81,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if shuffle.run_id != run_id:
             raise ValueError(f"{run_id=} does not match {shuffle}")
         if not consistent:
-            logger.debug(
+            logger.warning(
                 "Shuffle %s restarted due to data inconsistency during barrier",
                 shuffle.id,
             )
@@ -261,7 +260,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         recs = self._restart_recommendations(id)
         self.scheduler.transitions(recs, stimulus_id=stimulus_id)
         self.scheduler.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
-        logger.debug("Shuffle %s restarted due to stimulus '%s", id, stimulus_id)
+        logger.warning("Shuffle %s restarted due to stimulus '%s", id, stimulus_id)
 
     def remove_worker(
         self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
