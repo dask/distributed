@@ -667,13 +667,12 @@ class PipInstall(InstallPlugin):
     --------
     >>> from dask.distributed import PipInstall
     >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
-
     >>> client.register_plugin(plugin)
 
     Install package from a private GitHub repository
+
     >>> from dask.distributed import PipInstall
     >>> plugin = PipInstall(packages=["private_package@git+https://${GITHUB_TOKEN}@github.com/dask/private_package.git])
-
     >>> client.register_plugin(plugin)
 
     See Also
