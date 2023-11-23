@@ -31,7 +31,7 @@ from distributed.shuffle._rechunk import (
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
-from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
+from distributed.utils_test import gen_cluster, gen_test
 
 NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 
@@ -231,38 +231,12 @@ async def test_rechunk_4d(c, s, *ws, disk):
     old = ((5, 5),) * 4
     a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
-    new = (
-        (10,),
-        (10,),
-        (10,),
-        (8, 2),
-    )  # This has been altered to return >1 output partition
+    new = ((10,),) * 4
     with dask.config.set({"distributed.p2p.disk": disk}):
         x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     await c.compute(x2)
     assert np.all(await c.compute(x2) == a)
-
-
-@gen_cluster(client=True)
-async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
-    """See distributed#7816
-
-    See Also
-    --------
-    dask.array.tests.test_rechunk.test_rechunk_4d
-    """
-    old = ((5, 5),) * 4
-    a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
-    x = da.from_array(a, chunks=old)
-    new = ((10,),) * 4
-    x2 = rechunk(x, chunks=new, method="p2p")
-    assert x2.chunks == new
-    # FIXME: distributed#7816
-    with raises_with_cause(
-        RuntimeError, "failed during transfer", RuntimeError, "Barrier task"
-    ):
-        await c.compute(x2)
 
 
 @gen_cluster(client=True)

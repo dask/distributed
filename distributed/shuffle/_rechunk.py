@@ -178,8 +178,12 @@ def split_independent_partitions(old: ChunkedAxes, new: ChunkedAxes) -> Any:
 
     for old_axis, new_axis in zip(old, new):
         if is_unknown(old_axis):
-            old_partial_axes.append([slice(i, 1, None) for i in range(len(old_axis))])
-            new_partial_axes.append([slice(i, 1, None) for i in range(len(new_axis))])
+            old_partial_axes.append(
+                [slice(i, i + 1, None) for i in range(len(old_axis))]
+            )
+            new_partial_axes.append(
+                [slice(i, i + 1, None) for i in range(len(new_axis))]
+            )
             continue
 
         old_offsets = np.cumsum(old_axis)
@@ -247,11 +251,28 @@ def rechunk_p2p_single(
 
     dsk: dict = {}
     local_token = tokenize(x, chunks, old_slice, new_slice)
+    old_offsets = tuple(axis.start for axis in old_slice)
+
+    # The shuffle is a concatenation and produces only a single output
+    if math.prod(slc.stop - slc.start for slc in new_slice) == 1:
+        input_tasks = []
+        for index in np.ndindex(tuple(slc.stop - slc.start for slc in old_slice)):
+            global_index = tuple(
+                int(offset + ix) for offset, ix in zip(old_offsets, index)
+            )
+            input_tasks.append((x.name,) + global_index)
+        global_index = tuple(int(axis.start) for axis in new_slice)
+        dsk[(name,) + global_index] = (
+            concatenate,
+            tuple(slc.stop - slc.start for slc in old_slice),
+            *input_tasks,
+        )
+        return dsk
+
     _barrier_key = barrier_key(ShuffleId(local_token))
     transfer_name = f"rechunk-transfer-{local_token}"
     disk: bool = dask.config.get("distributed.p2p.disk")
     transfer_keys = []
-    old_offsets = tuple(axis.start for axis in old_slice)
     for index in np.ndindex(tuple(slc.stop - slc.start for slc in old_slice)):
         global_index = tuple(int(offset + ix) for offset, ix in zip(old_offsets, index))
         transfer_keys.append((transfer_name,) + global_index)
@@ -330,6 +351,19 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
             old_chunk.sort(key=lambda split: split.slice.start)
         axes.append(old_axis)
     return axes
+
+
+def concatenate(shape: tuple[int, ...], *shards: np.ndarray) -> np.ndarray:
+    import numpy as np
+
+    from dask.array.core import concatenate3
+
+    rec_cat_arg = np.empty(shape, dtype="O")
+    for index, shard in zip(np.ndindex(*shape), shards):
+        rec_cat_arg[index] = shard
+    arrs = rec_cat_arg.tolist()
+
+    return concatenate3(arrs)
 
 
 def convert_chunk(shards: list[list[tuple[NDIndex, np.ndarray]]]) -> np.ndarray:
