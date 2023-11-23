@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import uuid
 import zipfile
 from collections.abc import Awaitable
@@ -651,23 +652,32 @@ class PipInstall(InstallPlugin):
     Parameters
     ----------
     packages
-        A list of packages (with optional versions) to install using pip
+        A list of packages to install using pip.
+        Packages should follow the structure defined for
+        `requirement files <https://pip.pypa.io/en/stable/reference/requirements-file-format/#structure>`_.
+        Packages also may include
+        `environment variables <https://pip.pypa.io/en/stable/reference/requirements-file-format/#using-environment-variables>`_.
     pip_options
         Additional options to pass to pip
     restart_workers
-        Whether or not to restart the worker after installing the packages
-        Only functions if the worker has an attached nanny process
+        Whether or not to restart the worker after installing the packages;
+        only functions if the worker has an attached nanny process.
 
     Examples
     --------
     >>> from dask.distributed import PipInstall
     >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
+    >>> client.register_plugin(plugin)
 
+    Install package from a private repository using a ``TOKEN`` environment variable.
+
+    >>> from dask.distributed import PipInstall
+    >>> plugin = PipInstall(packages=["private_package@git+https://${TOKEN}@github.com/dask/private_package.git])
     >>> client.register_plugin(plugin)
 
     See Also
     --------
-    PackageInstall
+    InstallPlugin
     CondaInstall
     """
 
@@ -697,17 +707,31 @@ class _PipInstaller:
             self.INSTALLER,
             self.packages,
         )
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        _, stderr = proc.communicate()
-        returncode = proc.wait()
-        if returncode != 0:
-            msg = f"pip install failed with '{stderr.decode().strip()}'"
-            logger.error(msg)
-            raise RuntimeError(msg)
+        # Use a requirements file under the hood to support
+        # environment variables
+        # See https://pip.pypa.io/en/stable/reference/requirements-file-format/#using-environment-variables
+        with tempfile.NamedTemporaryFile(mode="w+") as f:
+            f.writelines(self.packages)
+            f.flush()
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *self.pip_options,
+                    "-r",
+                    f.name,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            _, stderr = proc.communicate()
+            returncode = proc.wait()
+            if returncode != 0:
+                msg = f"pip install failed with '{stderr.decode().strip()}'"
+                logger.error(msg)
+                raise RuntimeError(msg)
 
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
