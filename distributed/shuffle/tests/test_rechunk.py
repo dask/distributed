@@ -201,6 +201,66 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     assert np.all(await c.compute(x2) == a)
 
 
+@gen_cluster(client=True)
+async def test_cull_p2p_rechunk_independent_partitions(c, s, *ws):
+    a = np.random.default_rng().uniform(0, 1, 1000).reshape((10, 10, 10))
+    x = da.from_array(a, chunks=(1, 5, 1))
+    new = (5, 1, -1)
+    rechunked = rechunk(x, chunks=new, method="p2p")
+    (dsk,) = dask.optimize(rechunked)
+    culled = rechunked[:5, :2]
+    (dsk_culled,) = dask.optimize(culled)
+
+    # The culled graph requires only 1/2 of the input tasks
+    n_inputs = len(
+        [1 for key in dsk.dask.get_all_dependencies() if key[0].startswith("array-")]
+    )
+    n_culled_inputs = len(
+        [
+            1
+            for key in dsk_culled.dask.get_all_dependencies()
+            if key[0].startswith("array-")
+        ]
+    )
+    assert n_culled_inputs == n_inputs / 4
+    # The culled graph should also have less than 1/4 the tasks
+    assert len(dsk_culled.dask) < len(dsk.dask) / 4
+
+    assert np.all(await c.compute(culled) == a[:5, :2])
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="P2P only splits rechunks into partials if chunk boundaries match between old and new",
+)
+@gen_cluster(client=True)
+async def test_cull_p2p_rechunk_overlapping_partitions(c, s, *ws):
+    a = np.random.default_rng().uniform(0, 1, 1000).reshape((10, 10, 10))
+    x = da.from_array(a, chunks=(1, 5, 1))
+    new = (5, 3, -1)
+    rechunked = rechunk(x, chunks=new, method="p2p")
+    (dsk,) = dask.optimize(rechunked)
+    culled = rechunked[:5, :2]
+    (dsk_culled,) = dask.optimize(culled)
+
+    # The culled graph requires only 1/4 of the input tasks
+    n_inputs = len(
+        [1 for key in dsk.dask.get_all_dependencies() if key[0].startswith("array-")]
+    )
+    n_culled_inputs = len(
+        [
+            1
+            for key in dsk_culled.dask.get_all_dependencies()
+            if key[0].startswith("array-")
+        ]
+    )
+    assert n_culled_inputs == n_inputs / 4
+    # The culled graph should also have less than 1/4 the tasks
+    assert len(dsk_culled.dask) < len(dsk.dask) / 4
+
+    assert np.all(await c.compute(culled) == a[:5, :2])
+
+
 @pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
 async def test_rechunk_2d(c, s, *ws, disk):
