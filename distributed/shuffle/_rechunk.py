@@ -226,7 +226,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     for partial in partials:
         old_slices, new_slices = zip(*partial)
         dsk.update(
-            rechunk_p2p_single(
+            partial_rechunk(
                 x, chunks=chunks, old_slice=old_slices, new_slice=new_slices, name=name
             )
         )
@@ -237,7 +237,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     return arr
 
 
-def rechunk_p2p_single(
+def partial_rechunk(
     x: da.Array,
     chunks: ChunkedAxes,
     old_slice: tuple[slice, ...],
