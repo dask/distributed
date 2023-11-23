@@ -652,7 +652,11 @@ class PipInstall(InstallPlugin):
     Parameters
     ----------
     packages
-        A list of packages (with optional versions) to install using pip
+        A list of packages to install using pip.
+        Packages should follow the structure defined for
+        `requirement files <https://pip.pypa.io/en/stable/reference/requirements-file-format/#structure>`_.
+        Packages also may include
+        `environment variables <https://pip.pypa.io/en/stable/reference/requirements-file-format/#using-environment-variables>`_.
     pip_options
         Additional options to pass to pip
     restart_workers
@@ -666,9 +670,15 @@ class PipInstall(InstallPlugin):
 
     >>> client.register_plugin(plugin)
 
+    Install package from a private GitHub repository
+    >>> from dask.distributed import PipInstall
+    >>> plugin = PipInstall(packages=["private_package@git+https://${GITHUB_TOKEN}@github.com/dask/private_package.git])
+
+    >>> client.register_plugin(plugin)
+
     See Also
     --------
-    PackageInstall
+    InstallPlugin
     CondaInstall
     """
 
