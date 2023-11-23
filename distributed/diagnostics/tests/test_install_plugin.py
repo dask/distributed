@@ -28,8 +28,10 @@ async def test_pip_install(c, s, a):
                 PipInstall(packages=["requests"], pip_options=["--upgrade"])
             )
             assert Popen.call_count > 0
-            python, *args, requirements_file = Popen.call_args[0][0]
+            python, *args, file = Popen.call_args[0][0]
             assert "python" in python
+            # Assert that we install using a requirements file to support
+            # environment variables
             assert args == ["-m", "pip", "install", "--upgrade", "-r"]
             logs = logger.getvalue()
             assert "pip installing" in logs

@@ -698,6 +698,9 @@ class _PipInstaller:
             self.INSTALLER,
             self.packages,
         )
+        # Use a requirements file under the hood to support
+        # environment variables
+        # See https://pip.pypa.io/en/stable/reference/requirements-file-format/#using-environment-variables
         with tempfile.NamedTemporaryFile(mode="w+") as f:
             f.writelines(self.packages)
             f.flush()
