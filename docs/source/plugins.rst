@@ -88,6 +88,7 @@ Built-In Scheduler Plugins
 
 .. autoclass:: distributed.diagnostics.plugin.PipInstall
 .. autoclass:: distributed.diagnostics.plugin.CondaInstall
+.. autoclass:: distributed.diagnostics.plugin.InstallPlugin
 .. autoclass:: distributed.diagnostics.plugin.SchedulerUploadFile
 
 Worker Plugins
