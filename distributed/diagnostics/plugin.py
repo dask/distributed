@@ -660,8 +660,8 @@ class PipInstall(InstallPlugin):
     pip_options
         Additional options to pass to pip
     restart_workers
-        Whether or not to restart the worker after installing the packages
-        Only functions if the worker has an attached nanny process
+        Whether or not to restart the worker after installing the packages;
+        only functions if the worker has an attached nanny process.
 
     Examples
     --------
@@ -669,10 +669,10 @@ class PipInstall(InstallPlugin):
     >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
     >>> client.register_plugin(plugin)
 
-    Install package from a private GitHub repository
+    Install package from a private repository using a ``TOKEN`` environment variable.
 
     >>> from dask.distributed import PipInstall
-    >>> plugin = PipInstall(packages=["private_package@git+https://${GITHUB_TOKEN}@github.com/dask/private_package.git])
+    >>> plugin = PipInstall(packages=["private_package@git+https://${TOKEN}@github.com/dask/private_package.git])
     >>> client.register_plugin(plugin)
 
     See Also
