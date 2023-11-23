@@ -246,7 +246,7 @@ def partial_rechunk(
 ) -> Any:
     import numpy as np
 
-    if x.partitions[*old_slice].size == 0:
+    if x.partitions[old_slice].size == 0:
         return {}
 
     dsk: dict = {}
