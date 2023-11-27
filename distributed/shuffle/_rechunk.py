@@ -202,26 +202,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
 
     chunked_shape = tuple(len(axis) for axis in chunks)
     _old_to_new = old_to_new(x.chunks, chunks)
-    sliced_axes = _slice_into_partials(_old_to_new, chunked_shape)
-
-    partial_axes = []
-    for axis_index, slices in enumerate(sliced_axes):
-        partials = []
-        for slice_ in slices:
-            last_old_chunk: int
-            first_old_chunk, first_old_slice = _old_to_new[axis_index][slice_.start][0]
-            last_old_chunk, last_old_slice = _old_to_new[axis_index][slice_.stop - 1][
-                -1
-            ]
-            partials.append(
-                Partial(
-                    old=slice(first_old_chunk, last_old_chunk + 1),
-                    new=slice_,
-                    left_start=first_old_slice.start,
-                    right_stop=last_old_slice.stop,
-                )
-            )
-        partial_axes.append(partials)
+    partial_axes = _compute_partials(_old_to_new, chunked_shape)
 
     ndpartials = product(*partial_axes)
 
@@ -243,7 +224,31 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     return arr
 
 
-def _slice_into_partials(
+def _compute_partials(
+    old_to_new: list[list[list[tuple[int, slice]]]], chunked_shape: NDIndex
+) -> tuple[tuple[Partial, ...], ...]:
+    sliced_axes = _partial_slices(old_to_new, chunked_shape)
+
+    partial_axes = []
+    for axis_index, slices in enumerate(sliced_axes):
+        partials = []
+        for slice_ in slices:
+            last_old_chunk: int
+            first_old_chunk, first_old_slice = old_to_new[axis_index][slice_.start][0]
+            last_old_chunk, last_old_slice = old_to_new[axis_index][slice_.stop - 1][-1]
+            partials.append(
+                Partial(
+                    old=slice(first_old_chunk, last_old_chunk + 1),
+                    new=slice_,
+                    left_start=first_old_slice.start,
+                    right_stop=last_old_slice.stop,
+                )
+            )
+        partial_axes.append(tuple(partials))
+    return tuple(partial_axes)
+
+
+def _partial_slices(
     old_to_new: list[list[list[tuple[int, slice]]]], chunked_shape: NDIndex
 ) -> tuple[tuple[slice, ...], ...]:
     sliced_axes = []
