@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Iterator, Sized
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.sizeof import sizeof
 
@@ -106,21 +106,22 @@ class ShardsBuffer(Generic[ShardType]):
     async def process(self, id: str, shards: list[ShardType], size: int) -> None:
         try:
             start = time()
-            try:
+            with context_meter.meter("process"):
                 await self._process(id, shards)
-                self.bytes_written += size
+            context_meter.digest_metric("process", size, "bytes")
+            context_meter.digest_metric("process", 1, "count")
+            self.bytes_written += size
 
-            except Exception as e:
-                self._exception = e
-                self._inputs_done = True
             stop = time()
-
             self.diagnostics["avg_size"] = (
                 0.98 * self.diagnostics["avg_size"] + 0.02 * size
             )
             self.diagnostics["avg_duration"] = 0.98 * self.diagnostics[
                 "avg_duration"
             ] + 0.02 * (stop - start)
+        except Exception as e:
+            self._exception = e
+            self._inputs_done = True
         finally:
             await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
@@ -140,35 +141,36 @@ class ShardsBuffer(Generic[ShardType]):
             return bool(self.shards or self._inputs_done)
 
         while True:
-            async with self._shards_available:
-                await self._shards_available.wait_for(_continue)
-                if self._inputs_done and not self.shards:
-                    break
-                part_id = max(self.sizes, key=self.sizes.__getitem__)
-                if self.max_message_size > 0:
-                    size = 0
-                    shards = []
-                    while size < self.max_message_size:
-                        try:
-                            shard = self.shards[part_id].pop()
-                            shards.append(shard)
-                            s = self.sizes_detail[part_id].pop()
-                            size += s
-                            self.sizes[part_id] -= s
-                        except IndexError:
-                            break
-                        finally:
-                            if not self.shards[part_id]:
-                                del self.shards[part_id]
-                                assert not self.sizes[part_id]
-                                del self.sizes[part_id]
-                                assert not self.sizes_detail[part_id]
-                                del self.sizes_detail[part_id]
-                else:
-                    shards = self.shards.pop(part_id)
-                    size = self.sizes.pop(part_id)
-                self._shards_available.notify_all()
-            await self.process(part_id, shards, size)
+            with context_meter.meter("idle"):
+                async with self._shards_available:
+                    await self._shards_available.wait_for(_continue)
+                    if self._inputs_done and not self.shards:
+                        break
+                    part_id = max(self.sizes, key=self.sizes.__getitem__)
+                    if self.max_message_size > 0:
+                        size = 0
+                        shards = []
+                        while size < self.max_message_size:
+                            try:
+                                shard = self.shards[part_id].pop()
+                                shards.append(shard)
+                                s = self.sizes_detail[part_id].pop()
+                                size += s
+                                self.sizes[part_id] -= s
+                            except IndexError:
+                                break
+                            finally:
+                                if not self.shards[part_id]:
+                                    del self.shards[part_id]
+                                    assert not self.sizes[part_id]
+                                    del self.sizes[part_id]
+                                    assert not self.sizes_detail[part_id]
+                                    del self.sizes_detail[part_id]
+                    else:
+                        shards = self.shards.pop(part_id)
+                        size = self.sizes.pop(part_id)
+                    self._shards_available.notify_all()
+                await self.process(part_id, shards, size)
 
     async def write(self, data: dict[str, ShardType]) -> None:
         """
