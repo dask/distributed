@@ -107,7 +107,6 @@ async def test_prometheus(c, s, a, b):
     expected_metrics = {
         "dask_scheduler_clients",
         "dask_scheduler_desired_workers",
-        "dask_scheduler_gil_contention",
         "dask_scheduler_workers",
         "dask_scheduler_last_time",
         "dask_scheduler_tasks",
@@ -120,6 +119,14 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tick_count",
         "dask_scheduler_tick_duration_maximum_seconds",
     }
+
+    try:
+        import gilknocker  # noqa: F401
+
+    except ImportError:
+        pass  # pragma: nocover
+    else:
+        expected_metrics.add("dask_scheduler_gil_contention")
 
     assert set(active_metrics.keys()) == expected_metrics
     assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
@@ -306,18 +313,17 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
     await ev.set()
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
-async def test_health(c, s, a, b):
-    http_client = AsyncHTTPClient()
+@gen_cluster(nthreads=[])
+async def test_health(s):
+    aiohttp = pytest.importorskip("aiohttp")
 
-    response = await http_client.fetch(
-        "http://localhost:%d/health" % s.http_server.port
-    )
-    assert response.code == 200
-    assert response.headers["Content-Type"] == "text/plain"
-
-    txt = response.body.decode("utf8")
-    assert txt == "ok"
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(f"http://localhost:{s.http_server.port}/health") as resp,
+    ):
+        assert resp.status == 200
+        assert resp.headers["Content-Type"] == "text/plain; charset=utf-8"
+        assert (await resp.text()) == "ok"
 
 
 @gen_cluster()
@@ -334,26 +340,82 @@ async def test_sitemap(s, a, b):
     assert "/statics/css/base.css" in out["paths"]
 
 
-@gen_cluster(client=True)
-async def test_task_page(c, s, a, b):
-    future = c.submit(lambda x: x + 1, 1, workers=a.address)
-    x = c.submit(inc, 1)
-    await future
-    http_client = AsyncHTTPClient()
+KEY_EDGE_CASES = [
+    1,
+    "1",
+    "x",
+    "a+b",
+    "a b",
+    ("x", 1),
+    ("a+b", 1),
+    ("a b", 1),
+    ((1, 2), ("x", "y")),
+    "(",
+    "[",
+    "'",
+    '"',
+    b"123",
+    (b"123", 1),
+    ("[", 1),
+    ("(", 1),
+    ("'", 1),
+    ('"', 1),
+]
 
-    "info/task/" + url_escape(future.key) + ".html",
-    response = await http_client.fetch(
-        "http://localhost:%d/info/task/" % s.http_server.port
-        + url_escape(future.key)
-        + ".html"
-    )
+
+@pytest.mark.parametrize("key", KEY_EDGE_CASES)
+@gen_cluster(client=True)
+async def test_task_page(c, s, a, b, key):
+    http_client = AsyncHTTPClient()
+    skey = url_escape(str(key), plus=False)
+    url = f"http://localhost:{s.http_server.port}/info/task/{skey}.html"
+
+    response = await http_client.fetch(url, raise_error=False)
+    assert response.code == 404
+
+    future = c.submit(lambda: 1, key=key, workers=a.address)
+    await future
+    response = await http_client.fetch(url)
     assert response.code == 200
     body = response.body.decode()
 
+    assert a.address in body
     assert str(sizeof(1)) in body
     assert "int" in body
-    assert a.address in body
     assert "memory" in body
+
+
+@pytest.mark.parametrize("key", KEY_EDGE_CASES)
+@gen_cluster(client=True)
+async def test_call_stack_page(c, s, a, b, key):
+    http_client = AsyncHTTPClient()
+    skey = url_escape(str(key), plus=False)
+    url = f"http://localhost:{s.http_server.port}/info/call-stack/{skey}.html"
+
+    response = await http_client.fetch(url, raise_error=False)
+    assert response.code == 404
+
+    ev1 = Event()
+    ev2 = Event()
+
+    def f(ev1, ev2):
+        ev1.set()
+        ev2.wait()
+
+    future = c.submit(f, ev1, ev2, key=key)
+    await ev1.wait()
+
+    response = await http_client.fetch(url)
+    assert response.code == 200
+    body = response.body.decode()
+    assert "test_scheduler_http.py" in body
+
+    await ev2.set()
+    await future
+    response = await http_client.fetch(url)
+    assert response.code == 200
+    body = response.body.decode()
+    assert "Task not actively running" in body
 
 
 @gen_cluster(
@@ -400,23 +462,22 @@ def test_api_disabled_by_default():
 
 
 @gen_cluster(
-    client=True,
-    clean_kwargs={"threads": False},
+    nthreads=[],
     config={
         "distributed.scheduler.http.routes": DEFAULT_ROUTES
         + ["distributed.http.scheduler.api"]
     },
 )
-async def test_api(c, s, a, b):
+async def test_api(s):
     aiohttp = pytest.importorskip("aiohttp")
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            "http://localhost:%d/api/v1" % s.http_server.port
-        ) as resp:
-            assert resp.status == 200
-            assert resp.headers["Content-Type"] == "text/plain"
-            assert (await resp.text()) == "API V1"
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(f"http://localhost:{s.http_server.port}/api/v1") as resp,
+    ):
+        assert resp.status == 200
+        assert resp.headers["Content-Type"] == "text/plain; charset=utf-8"
+        assert (await resp.text()) == "API V1"
 
 
 @gen_cluster(

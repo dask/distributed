@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import collections
+import threading
 import time as timemod
 from collections.abc import Callable, Hashable, Iterator
 from contextlib import contextmanager
@@ -208,6 +210,7 @@ class ContextMeter:
         callback: Callable[[Hashable, float, str], None],
         *,
         key: Hashable | None = None,
+        allow_offload: bool = False,
     ) -> Iterator[None]:
         """Add a callback when entering the context and remove it when exiting it.
         The callback must accept the same parameters as :meth:`digest_metric`.
@@ -219,13 +222,40 @@ class ContextMeter:
         key: Hashable, optional
             Unique key for the callback. If two nested calls to ``add_callback`` use the
             same key, suppress the outermost callback.
+        allow_offload: bool, optional
+            If set to True, this context must be executed inside a running asyncio
+            event loop. If a call to :meth:`digest_metric` is performed from a different
+            thread, e.g. from inside :func:`distributed.utils.offload`, ensure that
+            the callback is executed in the event loop's thread instead.
         """
+        if allow_offload:
+            loop = asyncio.get_running_loop()
+            tid = threading.get_ident()
+
+            def safe_cb(label: Hashable, value: float, unit: str, /) -> None:
+                if threading.get_ident() == tid:
+                    callback(label, value, unit)
+                else:  # We're inside offload()
+                    loop.call_soon_threadsafe(callback, label, value, unit)
+
+        else:
+            safe_cb = callback
+
         if key is None:
             key = object()
         cbs = self._callbacks.get()
         cbs = cbs.copy()
-        cbs[key] = callback
+        cbs[key] = safe_cb
         tok = self._callbacks.set(cbs)
+        try:
+            yield
+        finally:
+            tok.var.reset(tok)
+
+    @contextmanager
+    def clear_callbacks(self) -> Iterator[None]:
+        """Do not trigger any callbacks set outside of this context"""
+        tok = self._callbacks.set({})
         try:
             yield
         finally:

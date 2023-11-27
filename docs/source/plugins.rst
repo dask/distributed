@@ -83,6 +83,14 @@ the scheduler as so:
        plugin = MyPlugin(scheduler)
        scheduler.add_plugin(plugin)
 
+Built-In Scheduler Plugins
+--------------------------
+
+.. autoclass:: distributed.diagnostics.plugin.PipInstall
+.. autoclass:: distributed.diagnostics.plugin.CondaInstall
+.. autoclass:: distributed.diagnostics.plugin.InstallPlugin
+.. autoclass:: distributed.diagnostics.plugin.SchedulerUploadFile
+
 Worker Plugins
 ==============
 
@@ -107,8 +115,6 @@ Watch the video below for an example using a ``WorkerPlugin`` to add a
 Built-In Worker Plugins
 -----------------------
 
-.. autoclass:: distributed.diagnostics.plugin.PipInstall
-.. autoclass:: distributed.diagnostics.plugin.CondaInstall
 .. autoclass:: distributed.diagnostics.plugin.UploadFile
 
 

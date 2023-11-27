@@ -30,7 +30,7 @@ class QueueExtension:
         self.scheduler = scheduler
         self.queues = dict()
         self.client_refcount = dict()
-        self.future_refcount = defaultdict(lambda: 0)
+        self.future_refcount = defaultdict(int)
 
         self.scheduler.handlers.update(
             {

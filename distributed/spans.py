@@ -9,6 +9,7 @@ from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 import dask.config
+from dask.typing import Key
 
 from distributed.collections import sum_mappings
 from distributed.itertools import ffill
@@ -139,7 +140,10 @@ class Span:
         self.children = []
         self.groups = set()
         self._code = {}
-        self._cumulative_worker_metrics = defaultdict(float)
+
+        # Don't cast int metrics to float
+        self._cumulative_worker_metrics = defaultdict(int)
+
         assert len(total_nthreads_history) > 0
         self._total_nthreads_history = total_nthreads_history
         self._total_nthreads_offset = len(total_nthreads_history) - 1
@@ -473,7 +477,7 @@ class SpansSchedulerExtension:
 
     def observe_tasks(
         self, tss: Iterable[scheduler_module.TaskState], code: tuple[SourceCode, ...]
-    ) -> dict[str, dict]:
+    ) -> dict[Key, dict]:
         """Acknowledge the existence of runnable tasks on the scheduler. These may
         either be new tasks, tasks that were previously unrunnable, or tasks that were
         already fed into this method already.
@@ -489,6 +493,8 @@ class SpansSchedulerExtension:
         default_span = None
 
         for ts in tss:
+            if ts.annotations is None:
+                ts.annotations = dict()
             # You may have different tasks belonging to the same TaskGroup but to
             # different spans. If that happens, arbitrarily force everything onto the
             # span of the earliest encountered TaskGroup.

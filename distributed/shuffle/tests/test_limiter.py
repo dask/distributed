@@ -16,33 +16,33 @@ async def test_limiter_basic():
 
     assert isinstance(repr(res), str)
     res.increase(2)
-    assert res.available() == 3
+    assert res.available == 3
     res.increase(3)
 
-    assert not res.available()
+    assert not res.available
     # This is too much
     res.increase(1)
-    assert not res.available()
+    assert not res.available
     with pytest.raises(asyncio.TimeoutError):
         await wait_for(res.wait_for_available(), 0.1)
 
     await res.decrease(1)
-    assert not res.available()
+    assert not res.available
 
     with pytest.raises(asyncio.TimeoutError):
         await wait_for(res.wait_for_available(), 0.1)
 
     await res.decrease(1)
-    assert res.available() == 1
+    assert res.available == 1
     await res.wait_for_available()
 
     res.increase(1)
-    assert not res.available()
+    assert not res.available
     with pytest.raises(asyncio.TimeoutError):
         await wait_for(res.wait_for_available(), 0.1)
 
     await res.decrease(5)
-    assert res.available() == 5
+    assert res.available == 5
 
     with pytest.raises(RuntimeError, match="more"):
         await res.decrease(1)
@@ -52,10 +52,32 @@ async def test_limiter_basic():
         await wait_for(res.wait_for_available(), 0.1)
 
     await res.decrease(3)
-    assert not res.available()
+    assert not res.available
 
     await res.decrease(5)
-    assert res.available() == 3
+    assert res.available == 3
+
+
+@gen_test()
+async def test_unlimited_limiter():
+    res = ResourceLimiter(None)
+
+    assert res.empty
+    assert res.available is None
+    assert not res.full
+
+    res.increase(3)
+    assert not res.empty
+    assert res.available is None
+    assert not res.full
+
+    res.increase(2**40)
+    assert not res.empty
+    assert res.available is None
+    assert not res.full
+
+    await res.wait_for_available()
+    assert res.time_blocked_total == 0
 
 
 @gen_test()

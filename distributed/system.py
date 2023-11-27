@@ -31,6 +31,7 @@ def memory_limit() -> int:
             "/sys/fs/cgroup/memory/memory.soft_limit_in_bytes",  # cgroups v1 soft limit
             "/sys/fs/cgroup/memory.max",  # cgroups v2 hard limit
             "/sys/fs/cgroup/memory.high",  # cgroups v2 soft limit
+            "/sys/fs/cgroup/memory.low",  # cgroups v2 softest limit
         ]:
             try:
                 with open(path) as f:

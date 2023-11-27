@@ -230,31 +230,30 @@ async def test_stress_steal(c, s, *workers):
 
 
 @pytest.mark.slow
-@gen_cluster(
-    nthreads=[("", 1)] * 10,
-    client=True,
-    timeout=180,
-    scheduler_kwargs={"transition_counter_max": 500_000},
-    worker_kwargs={"transition_counter_max": 500_000},
-)
+@gen_cluster(client=True, nthreads=[("", 1)] * 10)
 async def test_close_connections(c, s, *workers):
+    # Schedule 600 slowinc's interleaved by worker-to-worker data transfers
+    # The minimum time to compute this is (600 * 0.1 / 10 threads) = 6s
     da = pytest.importorskip("dask.array")
-    x = da.random.random(size=(1000, 1000), chunks=(1000, 1))
+    x = da.random.random(size=(100, 100), chunks=(-1, 1))
     for _ in range(3):
-        x = x.rechunk((1, 1000))
-        x = x.rechunk((1000, 1))
+        x = x.rechunk((1, -1))
+        x = x.map_blocks(slowinc, delay=0.1, dtype=x.dtype)
+        x = x.rechunk((-1, 1))
+        x = x.map_blocks(slowinc, delay=0.1, dtype=x.dtype)
+    x = x.sum()
 
-    future = c.compute(x.sum())
-    while any(ws.processing for ws in s.workers.values()):
+    future = c.compute(x)
+    n = 0
+    while not future.done():
+        n += 1
         await asyncio.sleep(0.5)
         worker = random.choice(list(workers))
         for comm in worker._comms:
             comm.abort()
-        # print(frequencies(ts.state for ts in s.tasks.values()))
-        # for w in workers:
-        #     print(w)
 
-    await wait(future)
+    await future
+    assert n > 5
 
 
 @pytest.mark.slow

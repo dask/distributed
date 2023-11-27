@@ -39,12 +39,11 @@ class CommShardsBuffer(ShardsBuffer):
         How to send a list of shards to a worker
         Expects an address of the target worker (string)
         and a payload of shards (list of bytes) to send to that worker
-    memory_limiter : ResourceLimiter, optional
-        Limiter for memory usage (in bytes), or None if no limiting
-        should be applied. If the incoming data that has yet to be
-        processed exceeds this limit, then the buffer will block until
-        below the threshold. See :meth:`.write` for the implementation
-        of this scheme.
+    memory_limiter : ResourceLimiter
+        Limiter for memory usage (in bytes). If the incoming data that
+        has yet to be processed exceeds this limit, then the buffer will
+        block until below the threshold. See :meth:`.write` for the
+        implementation of this scheme.
     concurrency_limit : int
         Number of background tasks to run.
     """
@@ -53,8 +52,8 @@ class CommShardsBuffer(ShardsBuffer):
 
     def __init__(
         self,
-        send: Callable[[str, list[tuple[Any, bytes]]], Awaitable[None]],
-        memory_limiter: ResourceLimiter | None = None,
+        send: Callable[[str, list[tuple[Any, Any]]], Awaitable[None]],
+        memory_limiter: ResourceLimiter,
         concurrency_limit: int = 10,
     ):
         super().__init__(
@@ -64,9 +63,9 @@ class CommShardsBuffer(ShardsBuffer):
         )
         self.send = send
 
-    async def _process(self, address: str, shards: list[tuple[Any, bytes]]) -> None:
+    @log_errors
+    async def _process(self, address: str, shards: list[tuple[Any, Any]]) -> None:
         """Send one message off to a neighboring worker"""
-        with log_errors():
-            # Consider boosting total_size a bit here to account for duplication
-            with self.time("send"):
-                await self.send(address, shards)
+        # Consider boosting total_size a bit here to account for duplication
+        with self.time("send"):
+            await self.send(address, shards)

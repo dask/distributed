@@ -207,7 +207,6 @@ async def test_restart():
                 await asyncio.sleep(0.01)
 
 
-@pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
 @gen_test()
 async def test_broken_worker():
     class BrokenWorkerException(Exception):
@@ -216,7 +215,6 @@ async def test_broken_worker():
     class BrokenWorker(Worker):
         def __await__(self):
             async def _():
-                self.status = Status.closed
                 raise BrokenWorkerException("Worker Broken")
 
             return _().__await__()
@@ -226,13 +224,9 @@ async def test_broken_worker():
         workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
         scheduler=scheduler,
     )
-    try:
-        with pytest.raises(BrokenWorkerException, match=r"Worker Broken"):
-            async with cluster:
-                pass
-    finally:
-        # FIXME: SpecCluster leaks if SpecCluster.__aenter__ raises
-        await cluster.close()
+    with pytest.raises(BrokenWorkerException, match=r"Worker Broken"):
+        async with cluster:
+            pass
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")

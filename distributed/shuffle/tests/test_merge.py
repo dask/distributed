@@ -1,24 +1,28 @@
 from __future__ import annotations
 
+import contextlib
+from unittest import mock
+
 import pytest
 
+from distributed.shuffle._core import id_from_key
 from distributed.shuffle._merge import hash_join
-from distributed.shuffle.tests.utils import invoke_annotation_chaos
 from distributed.utils_test import gen_cluster
 
 dd = pytest.importorskip("dask.dataframe")
 import pandas as pd
 
+import dask
 from dask.dataframe._compat import PANDAS_GE_200, tm
 from dask.dataframe.utils import assert_eq
 from dask.utils_test import hlg_layer_topological
 
+try:
+    import pyarrow as pa
+except ImportError:
+    pa = None
+
 pytestmark = pytest.mark.ci1
-
-
-@pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
-def lose_annotations(request):
-    return request.param
 
 
 def list_eq(aa, bb):
@@ -42,10 +46,27 @@ def list_eq(aa, bb):
     dd._compat.assert_numpy_array_equal(av, bv)
 
 
+@gen_cluster(client=True)
+async def test_minimal_version(c, s, a, b):
+    no_pyarrow_ctx = (
+        mock.patch.dict("sys.modules", {"pyarrow": None})
+        if pa is not None
+        else contextlib.nullcontext()
+    )
+    with no_pyarrow_ctx:
+        A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
+        a = dd.repartition(A, [0, 4, 5])
+
+        B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
+        b = dd.repartition(B, [0, 2, 5])
+
+        with pytest.raises(ModuleNotFoundError, match="requires pyarrow"):
+            await c.compute(dd.merge(a, b, left_on="x", right_on="z", shuffle="p2p"))
+
+
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 @gen_cluster(client=True)
-async def test_basic_merge(c, s, a, b, how, lose_annotations):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_basic_merge(c, s, a, b, how):
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
@@ -79,17 +100,76 @@ async def test_basic_merge(c, s, a, b, how, lose_annotations):
     )
 
 
-@pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
 @gen_cluster(client=True)
-async def test_merge(c, s, a, b, how, lose_annotations):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_merge_p2p_shuffle_reused_dataframe_with_different_parameters(c, s, a, b):
+    pdf1 = pd.DataFrame({"a": range(100), "b": range(0, 200, 2)})
+    pdf2 = pd.DataFrame({"x": range(200), "y": [1, 2, 3, 4] * 50})
+    ddf1 = dd.from_pandas(pdf1, npartitions=5)
+    ddf2 = dd.from_pandas(pdf2, npartitions=10)
+
+    out = (
+        ddf1.merge(ddf2, left_on="a", right_on="x", shuffle="p2p")
+        # Vary the number of output partitions for the shuffles of dd2
+        .repartition(20).merge(ddf2, left_on="b", right_on="x", shuffle="p2p")
+    )
+    # Generate unique shuffle IDs if the input frame is the same but parameters differ
+    assert sum(id_from_key(k) is not None for k in out.dask) == 4
+    result = await c.compute(out)
+    expected = pdf1.merge(pdf2, left_on="a", right_on="x").merge(
+        pdf2, left_on="b", right_on="x"
+    )
+    dd.assert_eq(result, expected, check_index=False)
+
+
+@gen_cluster(client=True)
+async def test_merge_p2p_shuffle_reused_dataframe_with_same_parameters(c, s, a, b):
+    pdf1 = pd.DataFrame({"a": range(100), "b": range(0, 200, 2)})
+    pdf2 = pd.DataFrame({"x": range(200), "y": [1, 2, 3, 4] * 50})
+    ddf1 = dd.from_pandas(pdf1, npartitions=5)
+    ddf2 = dd.from_pandas(pdf2, npartitions=10)
+
+    # This performs two shuffles:
+    #   * ddf1 is shuffled on `a`
+    #   * ddf2 is shuffled on `x`
+    ddf3 = ddf1.merge(
+        ddf2,
+        left_on="a",
+        right_on="x",
+        shuffle="p2p",
+    )
+
+    # This performs one shuffle:
+    #   * ddf3 is shuffled on `b`
+    # We can reuse the shuffle of dd2 on `x` from the previous merge.
+    out = ddf2.merge(
+        ddf3,
+        left_on="x",
+        right_on="b",
+        shuffle="p2p",
+    )
+    # Generate the same shuffle IDs if the input frame is the same and all its parameters match
+    assert sum(id_from_key(k) is not None for k in out.dask) == 3
+    result = await c.compute(out)
+    expected = pdf2.merge(
+        pdf1.merge(pdf2, left_on="a", right_on="x"), left_on="x", right_on="b"
+    )
+    dd.assert_eq(result, expected, check_index=False)
+
+
+@pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
+@pytest.mark.parametrize("disk", [True, False])
+@gen_cluster(client=True)
+async def test_merge(c, s, a, b, how, disk):
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
     B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
     b = dd.repartition(B, [0, 2, 5])
 
-    joined = dd.merge(a, b, left_index=True, right_index=True, how=how, shuffle="p2p")
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        joined = dd.merge(
+            a, b, left_index=True, right_index=True, how=how, shuffle="p2p"
+        )
     res = await c.compute(joined)
     assert_eq(
         res,
