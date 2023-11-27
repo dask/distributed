@@ -229,13 +229,9 @@ async def test_cull_p2p_rechunk_independent_partitions(c, s, *ws):
     assert np.all(await c.compute(culled) == a[:5, :2])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P2P only splits rechunks into partials if chunk boundaries match between old and new",
-)
 @gen_cluster(client=True)
 async def test_cull_p2p_rechunk_overlapping_partitions(c, s, *ws):
-    a = np.random.default_rng().uniform(0, 1, 1000).reshape((10, 10, 10))
+    a = np.random.default_rng().uniform(0, 1, 500).reshape((10, 10, 5))
     x = da.from_array(a, chunks=(1, 5, 1))
     new = (5, 3, -1)
     rechunked = rechunk(x, chunks=new, method="p2p")
