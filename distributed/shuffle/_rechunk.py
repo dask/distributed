@@ -198,11 +198,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
 
-    from dask.array.rechunk import old_to_new
-
-    chunked_shape = tuple(len(axis) for axis in chunks)
-    _old_to_new = old_to_new(x.chunks, chunks)
-    partial_axes = _compute_partials(_old_to_new, chunked_shape)
+    partial_axes = _compute_partials(x, chunks)
 
     ndpartials = product(*partial_axes)
 
@@ -225,18 +221,25 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
 
 
 def _compute_partials(
-    old_to_new: list[list[list[tuple[int, slice]]]], chunked_shape: NDIndex
+    x: da.Array, chunks: ChunkedAxes
 ) -> tuple[tuple[Partial, ...], ...]:
     """Compute the individual partial rechunks that can be performed on each axis."""
-    sliced_axes = _partial_slices(old_to_new, chunked_shape)
+    from dask.array.rechunk import old_to_new
+
+    chunked_shape = tuple(len(axis) for axis in chunks)
+    _old_to_new = old_to_new(x.chunks, chunks)
+
+    sliced_axes = _partial_slices(_old_to_new, chunked_shape)
 
     partial_axes = []
     for axis_index, slices in enumerate(sliced_axes):
         partials = []
         for slice_ in slices:
             last_old_chunk: int
-            first_old_chunk, first_old_slice = old_to_new[axis_index][slice_.start][0]
-            last_old_chunk, last_old_slice = old_to_new[axis_index][slice_.stop - 1][-1]
+            first_old_chunk, first_old_slice = _old_to_new[axis_index][slice_.start][0]
+            last_old_chunk, last_old_slice = _old_to_new[axis_index][slice_.stop - 1][
+                -1
+            ]
             partials.append(
                 Partial(
                     old=slice(first_old_chunk, last_old_chunk + 1),
