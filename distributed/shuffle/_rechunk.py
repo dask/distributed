@@ -227,6 +227,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
 def _compute_partials(
     old_to_new: list[list[list[tuple[int, slice]]]], chunked_shape: NDIndex
 ) -> tuple[tuple[Partial, ...], ...]:
+    """Compute the individual partial rechunks that can be performed on each axis."""
     sliced_axes = _partial_slices(old_to_new, chunked_shape)
 
     partial_axes = []
