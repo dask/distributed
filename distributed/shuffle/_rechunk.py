@@ -659,9 +659,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             raise
 
     def _shard_partition(
-        self,
-        data: np.ndarray,
-        partition_id: NDIndex,
+        self, data: np.ndarray, partition_id: NDIndex
     ) -> dict[str, tuple[NDIndex, Any]]:
         out: dict[str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]] = defaultdict(
             list
@@ -669,9 +667,9 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         ndsplits = product(*(axis[i] for axis, i in zip(self.split_axes, partition_id)))
 
         for ndsplit in ndsplits:
-            chunk_index, shard_index, shard_slice = zip(*ndsplit)
+            chunk_index, shard_index, ndslice = zip(*ndsplit)
 
-            shard = data[shard_slice]
+            shard = data[ndslice]
             # Don't wait until all shards have been transferred over the network
             # before data can be released
             if shard.base is not None:
