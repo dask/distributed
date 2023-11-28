@@ -169,7 +169,7 @@ def rechunk_unpack(
         )
 
 
-class Partial(NamedTuple):
+class _Partial(NamedTuple):
     """Information used to perform a partial rechunk along a single axis"""
 
     #: Slice of the old chunks along this axis that belong to the partial
@@ -186,7 +186,7 @@ class Partial(NamedTuple):
     right_stop: int
 
 
-class NDPartial(NamedTuple):
+class _NDPartial(NamedTuple):
     """Information used to perform a partial rechunk along all axes"""
 
     #: n-dimensional slice of the old chunks along each axis that belong to the partial
@@ -232,16 +232,16 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     return arr
 
 
-def _partials(x: da.Array, chunks: ChunkedAxes) -> Generator[NDPartial, None, None]:
+def _partials(x: da.Array, chunks: ChunkedAxes) -> Generator[_NDPartial, None, None]:
     partials_per_axis = _compute_partials_per_axis(x, chunks)
     for partial_per_axis in product(*partials_per_axis):
         old, new, left_starts, right_stops = zip(*partial_per_axis)
-        yield NDPartial(old, new, left_starts, right_stops)
+        yield _NDPartial(old, new, left_starts, right_stops)
 
 
 def _compute_partials_per_axis(
     x: da.Array, chunks: ChunkedAxes
-) -> tuple[tuple[Partial, ...], ...]:
+) -> tuple[tuple[_Partial, ...], ...]:
     """Compute the individual partial rechunks that can be performed on each axis."""
     from dask.array.rechunk import old_to_new
 
@@ -260,7 +260,7 @@ def _compute_partials_per_axis(
                 -1
             ]
             partials.append(
-                Partial(
+                _Partial(
                     old=slice(first_old_chunk, last_old_chunk + 1),
                     new=slice_,
                     left_start=first_old_slice.start,
@@ -314,7 +314,7 @@ def _global_index(partial_index: NDIndex, partial_offset: NDIndex) -> NDIndex:
 def partial_concatenate(
     x: da.Array,
     chunks: ChunkedAxes,
-    ndpartial: NDPartial,
+    ndpartial: _NDPartial,
     name: str,
 ) -> Any:
     import numpy as np
@@ -330,16 +330,7 @@ def partial_concatenate(
     shape = tuple(slice_.stop - slice_.start for slice_ in ndpartial.old)
     rec_cat_arg = np.empty(shape, dtype="O")
 
-    # TODO: Exctract into fn to avoid duplication and make understandable
-    _partial_old = []
-    for axis_index in range(len(shape)):
-        c: list[int] = []
-        c = list(x.chunks[axis_index][ndpartial.old[axis_index]])
-        c[0] = c[0] - ndpartial.left_starts[axis_index]
-        if (stop := ndpartial.right_stops[axis_index]) is not None:
-            c[-1] = stop
-        _partial_old.append(tuple(c))
-    partial_old = tuple(_partial_old)
+    partial_old = _compute_partial_old_chunks(ndpartial, x.chunks)
 
     for old_partial_index in _partial_ndindex(ndpartial.old):
         old_global_index = _global_index(old_partial_index, old_offset)
@@ -348,20 +339,18 @@ def partial_concatenate(
             old_partial_index, partial_old, ndpartial.left_starts, ndpartial.right_stops
         )
 
-        # TODO: Extract check into fn to avoid duplication and make this meaningful
-        if all(
-            slc.start == 0 and slc.stop == x.chunks[i][ind]
-            for i, (slc, ind) in enumerate(zip(ndslice, old_global_index))
-        ):
-            rec_cat_arg[old_partial_index] = (x.name,) + old_global_index
-        else:
+        original_shape = tuple(
+            axis[index] for index, axis in zip(old_global_index, x.chunks)
+        )
+        if _slicing_is_necessary(ndslice, original_shape):
             rec_cat_arg[old_partial_index] = (slice_name,) + old_global_index
             dsk[(slice_name,) + old_global_index] = (
                 getitem,
                 (x.name,) + old_global_index,
                 ndslice,
             )
-
+        else:
+            rec_cat_arg[old_partial_index] = (x.name,) + old_global_index
     global_index = tuple(int(slice_.start) for slice_ in ndpartial.new)
     dsk[(name,) + global_index] = (
         concatenate3,
@@ -370,10 +359,31 @@ def partial_concatenate(
     return dsk
 
 
+def _compute_partial_old_chunks(
+    partial: _NDPartial, chunks: ChunkedAxes
+) -> ChunkedAxes:
+    _partial_old = []
+    for axis_index in range(len(partial.old)):
+        c = list(chunks[axis_index][partial.old[axis_index]])
+        c[0] = c[0] - partial.left_starts[axis_index]
+        if (stop := partial.right_stops[axis_index]) is not None:
+            c[-1] = stop
+        _partial_old.append(tuple(c))
+    return tuple(_partial_old)
+
+
+def _slicing_is_necessary(slice: NDSlice, shape: tuple[int | None, ...]) -> bool:
+    """Return True if applying the slice alters the shape, False otherwise."""
+    return not all(
+        slc.start == 0 and (size is None and slc.stop is None or slc.stop == size)
+        for slc, size in zip(slice, shape)
+    )
+
+
 def partial_rechunk(
     x: da.Array,
     chunks: ChunkedAxes,
-    ndpartial: NDPartial,
+    ndpartial: _NDPartial,
     name: str,
 ) -> Any:
     from dask.array.chunk import getitem
@@ -390,16 +400,7 @@ def partial_rechunk(
 
     ndim = len(x.shape)
 
-    _partial_old = []
-    for axis_index in range(ndim):
-        c: list[int] = []
-        c = list(x.chunks[axis_index][ndpartial.old[axis_index]])
-        c[0] = c[0] - ndpartial.left_starts[axis_index]
-        if (stop := ndpartial.right_stops[axis_index]) is not None:
-            c[-1] = stop
-        _partial_old.append(tuple(c))
-    partial_old = tuple(_partial_old)
-
+    partial_old = _compute_partial_old_chunks(ndpartial, x.chunks)
     partial_new: ChunkedAxes = tuple(
         chunks[axis_index][ndpartial.new[axis_index]] for axis_index in range(ndim)
     )
@@ -412,18 +413,18 @@ def partial_rechunk(
 
         global_index = _global_index(partial_index, old_partial_offset)
 
-        if all(
-            slc.start == 0 and slc.stop == x.chunks[i][ind]
-            for i, (slc, ind) in enumerate(zip(ndslice, global_index))
-        ):
-            input_task = (x.name,) + global_index
-        else:
+        original_shape = tuple(
+            axis[index] for index, axis in zip(global_index, x.chunks)
+        )
+        if _slicing_is_necessary(ndslice, original_shape):
             input_task = (slice_name,) + global_index
             dsk[(slice_name,) + global_index] = (
                 getitem,
                 (x.name,) + global_index,
                 ndslice,
             )
+        else:
+            input_task = (x.name,) + global_index
 
         transfer_keys.append((transfer_name,) + global_index)
         dsk[(transfer_name,) + global_index] = (
@@ -464,7 +465,7 @@ def ndslice_for(
         stop = (
             right_stops[axis_index]
             if chunk_index == shape[axis_index] - 1
-            else chunked_axis[chunk_index]
+            else chunked_axis[chunk_index] + start
         )
         slices.append(slice(start, stop))
     return tuple(slices)
