@@ -801,7 +801,6 @@ async def test_rechunk_empty_chunks(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@pytest.mark.skip(reason="FIXME: We should avoid P2P in this case")
 @gen_cluster(client=True)
 async def test_rechunk_avoid_needless_chunking(c, s, *ws):
     x = da.ones(16, chunks=2)

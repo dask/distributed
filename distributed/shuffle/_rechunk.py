@@ -100,7 +100,7 @@ import math
 import mmap
 import os
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import product
@@ -111,6 +111,7 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.array.core import concatenate3
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.typing import Key
@@ -149,7 +150,6 @@ def rechunk_transfer(
     input_chunk: NDIndex,
     new: ChunkedAxes,
     old: ChunkedAxes,
-    ndslice: NDSlice,
     disk: bool,
 ) -> int:
     with handle_transfer_errors(id):
@@ -157,7 +157,6 @@ def rechunk_transfer(
             input,
             partition_id=input_chunk,
             spec=ArrayRechunkSpec(id=id, new=new, old=old, disk=disk),
-            ndslice=ndslice,
         )
 
 
@@ -170,8 +169,7 @@ def rechunk_unpack(
         )
 
 
-@dataclass
-class Partial:
+class Partial(NamedTuple):
     """Information used to perform a partial rechunk along a single axis"""
 
     #: Slice of the old chunks along this axis that belong to the partial
@@ -188,7 +186,21 @@ class Partial:
     right_stop: int
 
 
-NDPartial: TypeAlias = tuple[Partial, ...]
+class NDPartial(NamedTuple):
+    """Information used to perform a partial rechunk along all axes"""
+
+    #: n-dimensional slice of the old chunks along each axis that belong to the partial
+    old: NDSlice
+    #: n-dimensional slice of the new chunks along each axis that belong to the partial
+    new: NDSlice
+    #: Indices of the first value of the left-most old chunk along each axis
+    #: to include in this partial. Everything left to this index belongs to
+    #: the previous partial.
+    left_starts: NDIndex
+    #: Indices of the first value of the right-most old chunk along each axis
+    #: to exclude from this partial.
+    #: This corresponds to `left_start` of the subsequent partial.
+    right_stops: NDIndex
 
 
 def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
@@ -198,29 +210,36 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
 
-    partial_axes = _compute_partials(x, chunks)
-
-    ndpartials = product(*partial_axes)
-
     dsk = {}
     token = tokenize(x, chunks)
     name = f"rechunk-p2p-{token}"
-    for ndpartial in ndpartials:
-        p = partial_rechunk(
-            x,
-            chunks=chunks,
-            ndpartial=ndpartial,
-            name=name,
-        )
-        dsk.update(p)
-
+    for ndpartial in _partials(x, chunks):
+        n_new_chunks = math.prod(slc.stop - slc.start for slc in ndpartial.new)
+        if n_new_chunks == 1:
+            dsk.update(partial_concatenate(x, chunks, ndpartial, name))
+        else:
+            dsk.update(
+                partial_rechunk(
+                    x,
+                    chunks=chunks,
+                    ndpartial=ndpartial,
+                    name=name,
+                )
+            )
     layer = MaterializedLayer(dsk)
     graph = HighLevelGraph.from_collections(name, layer, dependencies=[x])
     arr = da.Array(graph, name, chunks, meta=x)
     return arr
 
 
-def _compute_partials(
+def _partials(x: da.Array, chunks: ChunkedAxes) -> Generator[NDPartial, None, None]:
+    partials_per_axis = _compute_partials_per_axis(x, chunks)
+    for partial_per_axis in product(*partials_per_axis):
+        old, new, left_starts, right_stops = zip(*partial_per_axis)
+        yield NDPartial(old, new, left_starts, right_stops)
+
+
+def _compute_partials_per_axis(
     x: da.Array, chunks: ChunkedAxes
 ) -> tuple[tuple[Partial, ...], ...]:
     """Compute the individual partial rechunks that can be performed on each axis."""
@@ -292,41 +311,77 @@ def _global_index(partial_index: NDIndex, partial_offset: NDIndex) -> NDIndex:
     return tuple(index + offset for index, offset in zip(partial_index, partial_offset))
 
 
+def partial_concatenate(
+    x: da.Array,
+    chunks: ChunkedAxes,
+    ndpartial: NDPartial,
+    name: str,
+) -> Any:
+    import numpy as np
+
+    from dask.array.chunk import getitem
+
+    dsk: dict = {}
+
+    partial_token = tokenize(x, chunks, ndpartial.new)
+    slice_name = f"rechunk-slice-{partial_token}"
+    old_offset = tuple(slice_.start for slice_ in ndpartial.old)
+
+    shape = tuple(slice_.stop - slice_.start for slice_ in ndpartial.old)
+    rec_cat_arg = np.empty(shape, dtype="O")
+
+    _partial_old = []
+    for axis_index in range(len(shape)):
+        c: list[int] = []
+        c = list(x.chunks[axis_index][ndpartial.old[axis_index]])
+        c[0] = c[0] - ndpartial.left_starts[axis_index]
+        if (stop := ndpartial.right_stops[axis_index]) is not None:
+            c[-1] = stop
+        _partial_old.append(tuple(c))
+    partial_old = tuple(_partial_old)
+
+    for old_partial_index in _partial_ndindex(ndpartial.old):
+        old_global_index = _global_index(old_partial_index, old_offset)
+        ndslice = ndslice_for(
+            old_partial_index, partial_old, ndpartial.left_starts, ndpartial.right_stops
+        )
+
+        if all(
+            slc.start == 0 and slc.stop == x.chunks[i][ind]
+            for i, (slc, ind) in enumerate(zip(ndslice, old_global_index))
+        ):
+            rec_cat_arg[old_partial_index] = (x.name,) + old_global_index
+        else:
+            rec_cat_arg[old_partial_index] = (slice_name,) + old_global_index
+            dsk[(slice_name,) + old_global_index] = (
+                getitem,
+                (x.name,) + old_global_index,
+                ndslice,
+            )
+
+    global_index = tuple(int(slice_.start) for slice_ in ndpartial.new)
+    dsk[(name,) + global_index] = (
+        concatenate3,
+        rec_cat_arg.tolist(),
+    )
+    return dsk
+
+
 def partial_rechunk(
     x: da.Array,
     chunks: ChunkedAxes,
     ndpartial: NDPartial,
     name: str,
 ) -> Any:
-    old_ndslice = tuple(partial.old for partial in ndpartial)
-    new_ndslice = tuple(partial.new for partial in ndpartial)
-    left_starts = tuple(partial.left_start for partial in ndpartial)
-    right_stops = tuple(partial.right_stop for partial in ndpartial)
+    from dask.array.chunk import getitem
 
     dsk: dict = {}
 
-    old_partial_offset = tuple(slice_.start for slice_ in old_ndslice)
-    n_new_chunks = math.prod(slc.stop - slc.start for slc in new_ndslice)
+    old_partial_offset = tuple(slice_.start for slice_ in ndpartial.old)
 
-    # The shuffle is a concatenation and produces only a single output
-    if n_new_chunks == 1:
-        input_tasks = []
-        for partial_index in _partial_ndindex(old_ndslice):
-            global_index = _global_index(partial_index, old_partial_offset)
-            input_tasks.append((x.name,) + global_index)
-        global_index = tuple(int(axis.start) for axis in new_ndslice)
-        shape = tuple(slc.stop - slc.start for slc in old_ndslice)
-        dsk[(name,) + global_index] = (
-            concatenate,
-            shape,
-            left_starts,
-            right_stops,
-            *input_tasks,
-        )
-        return dsk
-
-    partial_token = tokenize(x, chunks, new_ndslice)
+    partial_token = tokenize(x, chunks, ndpartial.new)
     _barrier_key = barrier_key(ShuffleId(partial_token))
+    slice_name = f"rechunk-slice-{partial_token}"
     transfer_name = f"rechunk-transfer-{partial_token}"
     disk: bool = dask.config.get("distributed.p2p.disk")
 
@@ -334,41 +389,54 @@ def partial_rechunk(
 
     _partial_old = []
     for axis_index in range(ndim):
-        partial = ndpartial[axis_index]
         c: list[int] = []
-        c = list(x.chunks[axis_index][partial.old])
-        c[0] = c[0] - partial.left_start
-        if (stop := partial.right_stop) is not None:
+        c = list(x.chunks[axis_index][ndpartial.old[axis_index]])
+        c[0] = c[0] - ndpartial.left_starts[axis_index]
+        if (stop := ndpartial.right_stops[axis_index]) is not None:
             c[-1] = stop
         _partial_old.append(tuple(c))
     partial_old = tuple(_partial_old)
 
     partial_new: ChunkedAxes = tuple(
-        chunks[axis_index][ndpartial[axis_index].new] for axis_index in range(ndim)
+        chunks[axis_index][ndpartial.new[axis_index]] for axis_index in range(ndim)
     )
 
-    shape = tuple(partial.old.stop - partial.old.start for partial in ndpartial)
     transfer_keys = []
-    for partial_index in _partial_ndindex(old_ndslice):
-        ndslice = ndslice_for(partial_index, shape, left_starts, right_stops)
+    for partial_index in _partial_ndindex(ndpartial.old):
+        ndslice = ndslice_for(
+            partial_index, partial_old, ndpartial.left_starts, ndpartial.right_stops
+        )
 
         global_index = _global_index(partial_index, old_partial_offset)
+
+        if all(
+            slc.start == 0 and slc.stop == x.chunks[i][ind]
+            for i, (slc, ind) in enumerate(zip(ndslice, global_index))
+        ):
+            input_task = (x.name,) + global_index
+        else:
+            input_task = (slice_name,) + global_index
+            dsk[(slice_name,) + global_index] = (
+                getitem,
+                (x.name,) + global_index,
+                ndslice,
+            )
+
         transfer_keys.append((transfer_name,) + global_index)
         dsk[(transfer_name,) + global_index] = (
             rechunk_transfer,
-            (x.name,) + global_index,
+            input_task,
             partial_token,
             partial_index,
             partial_new,
             partial_old,
-            ndslice,
             disk,
         )
 
     dsk[_barrier_key] = (shuffle_barrier, partial_token, transfer_keys)
 
-    new_partial_offset = tuple(axis.start for axis in new_ndslice)
-    for partial_index in _partial_ndindex(new_ndslice):
+    new_partial_offset = tuple(axis.start for axis in ndpartial.new)
+    for partial_index in _partial_ndindex(ndpartial.new):
         global_index = _global_index(partial_index, new_partial_offset)
         dsk[(name,) + global_index] = (
             rechunk_unpack,
@@ -380,13 +448,21 @@ def partial_rechunk(
 
 
 def ndslice_for(
-    partial_index: NDIndex, shape: NDIndex, left_starts: NDIndex, right_stops: NDIndex
+    partial_index: NDIndex,
+    chunks: ChunkedAxes,
+    left_starts: NDIndex,
+    right_stops: NDIndex,
 ) -> NDSlice:
     slices = []
-    for axis in range(len(shape)):
-        index = partial_index[axis]
-        start = left_starts[axis] if index == 0 else 0
-        stop = right_stops[axis] if index == shape[axis] - 1 else None
+    shape = tuple(len(axis) for axis in chunks)
+    for axis_index, chunked_axis in enumerate(chunks):
+        chunk_index = partial_index[axis_index]
+        start = left_starts[axis_index] if chunk_index == 0 else 0
+        stop = (
+            right_stops[axis_index]
+            if chunk_index == shape[axis_index] - 1
+            else chunked_axis[chunk_index]
+        )
         slices.append(slice(start, stop))
     return tuple(slices)
 
@@ -447,25 +523,6 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
             old_chunk.sort(key=lambda split: split.slice.start)
         axes.append(old_axis)
     return axes
-
-
-def concatenate(
-    shape: tuple[int, ...],
-    left_starts: NDIndex,
-    right_stops: NDIndex,
-    *shards: np.ndarray,
-) -> np.ndarray:
-    import numpy as np
-
-    from dask.array.core import concatenate3
-
-    rec_cat_arg = np.empty(shape, dtype="O")
-    for shard_index, shard in zip(np.ndindex(*shape), shards):
-        ndslice = ndslice_for(shard_index, shape, left_starts, right_stops)
-        rec_cat_arg[shard_index] = shard[ndslice]
-    arrs = rec_cat_arg.tolist()
-
-    return concatenate3(arrs)
 
 
 def convert_chunk(shards: list[list[tuple[NDIndex, np.ndarray]]]) -> np.ndarray:
@@ -601,16 +658,10 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         self,
         data: np.ndarray,
         partition_id: NDIndex,
-        ndslice: NDSlice | None = None,
-        **kwargs: Any,
     ) -> dict[str, tuple[NDIndex, Any]]:
-        assert ndslice is not None
         out: dict[str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]] = defaultdict(
             list
         )
-        data = data[ndslice]
-
-        pass
         ndsplits = product(*(axis[i] for axis, i in zip(self.split_axes, partition_id)))
 
         for ndsplit in ndsplits:
