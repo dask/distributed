@@ -283,12 +283,12 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Receive shards belonging to output partitions of this shuffle run"""
 
     def add_partition(
-        self, data: _T_partition_type, partition_id: _T_partition_id, **kwargs: Any
+        self, data: _T_partition_type, partition_id: _T_partition_id
     ) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
-        shards = self._shard_partition(data, partition_id, **kwargs)
+        shards = self._shard_partition(data, partition_id)
         sync(self._loop, self._write_to_comm, shards)
         return self.run_id
 
