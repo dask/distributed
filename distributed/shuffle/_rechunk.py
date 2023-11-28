@@ -330,6 +330,7 @@ def partial_concatenate(
     shape = tuple(slice_.stop - slice_.start for slice_ in ndpartial.old)
     rec_cat_arg = np.empty(shape, dtype="O")
 
+    # TODO: Exctract into fn to avoid duplication and make understandable
     _partial_old = []
     for axis_index in range(len(shape)):
         c: list[int] = []
@@ -342,10 +343,12 @@ def partial_concatenate(
 
     for old_partial_index in _partial_ndindex(ndpartial.old):
         old_global_index = _global_index(old_partial_index, old_offset)
+        # TODO: Precompute slicing to avoid duplicate work
         ndslice = ndslice_for(
             old_partial_index, partial_old, ndpartial.left_starts, ndpartial.right_stops
         )
 
+        # TODO: Extract check into fn to avoid duplication and make this meaningful
         if all(
             slc.start == 0 and slc.stop == x.chunks[i][ind]
             for i, (slc, ind) in enumerate(zip(ndslice, old_global_index))
