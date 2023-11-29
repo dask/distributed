@@ -3499,6 +3499,9 @@ class Scheduler(SchedulerState, ServerNode):
         report results
     * **task_duration:** ``{key-prefix: time}``
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
+
+    * **no_worker_since** ``float``
+        Time since tasks were in no worker state and no worker is processing
     """
 
     default_port = 8786
@@ -3574,7 +3577,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.idle_timeout_no_worker = parse_timedelta(
             dask.config.get("distributed.scheduler.idle-timeout-no-worker")
         )
-        self.no_worker_since = time()
+        self.no_worker_since = None
         self.time_started = self.idle_since  # compatibility for dask-gateway
         self._replica_lock = RLock()
         self.bandwidth_workers = defaultdict(float)

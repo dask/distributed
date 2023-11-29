@@ -2390,7 +2390,6 @@ async def test_idle_timeout_no_workers(c, s):
     config={"distributed.scheduler.idle-timeout-no-worker": "1s"},
 )
 async def test_idle_timeout_unrunnable(c, s, a):
-    s.no_worker_since = None
     future = c.submit(inc, 1, workers="127.0.0.5:9999")
 
     while not s.tasks:
