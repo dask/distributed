@@ -103,6 +103,7 @@ from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -722,9 +723,9 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
 
     def _pin_output_workers(self, plugin: ShuffleSchedulerPlugin) -> dict[NDIndex, str]:
         parts_out = product(*(range(len(c)) for c in self.new))
-        return plugin._pin_output_workers(
-            self.id, parts_out, _get_worker_for_hash_sharding
-        )
+
+        pick_worker = partial(_get_worker_for_hash_sharding, self.new)
+        return plugin._pin_output_workers(self.id, parts_out, pick_worker)
 
     def create_run_on_worker(
         self,
@@ -754,8 +755,16 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
 
 
 def _get_worker_for_hash_sharding(
-    output_partition: NDIndex, workers: Sequence[str]
+    new: ChunkedAxes, partition: NDIndex, workers: Sequence[str]
 ) -> str:
-    """Get address of target worker for this output partition using hash sharding"""
-    i = hash(output_partition) % len(workers)
+    npartitions = 1
+    for c in new:
+        npartitions *= len(c)
+    ix = 0
+    for dim, pos in enumerate(partition):
+        if dim > 0:
+            ix += len(new[dim - 1]) * pos
+        else:
+            ix += pos
+    i = len(workers) * ix // npartitions
     return workers[i]
