@@ -3571,8 +3571,8 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self.idle_timeout = None
         self.idle_since = time()
-        self.idle_timeout_no_worker = dask.config.get(
-            "distributed.scheduler.idle-timeout-no-worker"
+        self.idle_timeout_no_worker = parse_timedelta(
+            dask.config.get("distributed.scheduler.idle-timeout-no-worker")
         )
         self.no_worker_since = time()
         self.time_started = self.idle_since  # compatibility for dask-gateway

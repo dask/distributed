@@ -2384,6 +2384,37 @@ async def test_idle_timeout_no_workers(c, s):
     assert s.check_idle()
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)],
+    config={"distributed.scheduler.idle-timeout-no-worker": "1s"},
+)
+async def test_idle_timeout_unrunnable(c, s, a):
+    s.no_worker_since = None
+    future = c.submit(inc, 1, workers="127.0.0.5:9999")
+
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+
+    assert s.tasks[future.key] in s.unrunnable
+    assert not s.check_idle()
+
+    while not s.no_worker_since:
+        await asyncio.sleep(0.01)
+
+    # still not idle
+    assert not s.check_idle()
+
+    for _ in range(10):
+        # wait for idle-timeout-no-worker
+        await asyncio.sleep(0.1)
+
+    assert s.check_idle()
+
+    # task still waiting to be processed
+    assert s.tasks[future.key] in s.unrunnable
+
+
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
 async def test_bandwidth(c, s, a, b):
     start = s.bandwidth
