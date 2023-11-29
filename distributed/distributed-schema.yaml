@@ -78,6 +78,16 @@ properties:
 
               This can be helpful to reduce costs and stop zombie processes from roaming the earth.
 
+          idle-timeout-no-worker:
+            type:
+            - string:
+            description: |
+              Consider the scheduler idle after this duration if all remaining tasks have no workers.
+
+              This works in conjuction with idle-timeout. This prevents the scheduler from running
+              indefinitely if there exists tasks that still need to be process but no workers are 
+              processing them.
+
           work-stealing:
             type: boolean
             description: |

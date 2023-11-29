@@ -3571,7 +3571,10 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self.idle_timeout = None
         self.idle_since = time()
-        self.no_worker_timeout = None
+        self.idle_timeout_no_worker = dask.config.get(
+            "distributed.scheduler.idle-timeout-no-worker"
+        )
+        self.no_worker_since = time()
         self.time_started = self.idle_since  # compatibility for dask-gateway
         self._replica_lock = RLock()
         self.bandwidth_workers = defaultdict(float)
@@ -8150,17 +8153,17 @@ class Scheduler(SchedulerState, ServerNode):
 
         if self.queued or any(ws.processing for ws in self.workers.values()):
             self.idle_since = None
-            self.no_worker_timeout = None
+            self.no_worker_since = None
             return None
 
-        if self.unrunnable and not self.no_worker_timeout:
+        if self.unrunnable and not self.no_worker_since:
             self.idle_since = None
-            self.no_worker_timeout = time()
+            self.no_worker_since = time()
             return None
 
-        if self.no_worker_timeout:
-            # if no worker process task for 5 min, consider it idle
-            if time() < self.no_worker_timeout + 300:
+        if self.no_worker_since:
+            # if no worker process task after given time, consider it idle
+            if time() < self.no_worker_since + self.idle_timeout_no_worker:
                 return None
 
         if not self.idle_since:
