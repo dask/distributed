@@ -711,7 +711,7 @@ class _PipInstaller:
         # environment variables
         # See https://pip.pypa.io/en/stable/reference/requirements-file-format/#using-environment-variables
         with tempfile.NamedTemporaryFile(mode="w+") as f:
-            f.writelines(self.packages)
+            f.write("\n".join(self.packages))
             f.flush()
             proc = subprocess.Popen(
                 [
