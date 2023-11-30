@@ -308,11 +308,12 @@ distributed:
         delay:
           min: 1s  # the first non-zero delay between re-tries
           max: 30s  # the maximum delay between re-tries
+      concurrency: 4
     storage:
       buffer: 500 MiB
       disk: True
+      concurrency: 1
     threads: 1
-    io-threads: 1
 
   ###################
   # Bokeh dashboard #
