@@ -585,15 +585,15 @@ async def test_release_failure(c, s, a, b, caplog):
             await pool.close()
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_unpickle_without_client(c, s):
+@gen_cluster(nthreads=[])
+async def test_unpickle_without_client(s):
     """Ensure that the object properly pickle roundtrips even if no client, worker, etc. is active in the given context.
 
     This typically happens if the object is being deserialized on the scheduler.
     """
-    sem = await Semaphore()
-    pickled = pickle.dumps(sem)
-    await c.close()
+    async with Client(s.address, asynchronous=True) as c:
+        sem = await Semaphore()
+        pickled = pickle.dumps(sem)
 
     # We do not want to initialize a client during unpickling
     with pytest.raises(ValueError):

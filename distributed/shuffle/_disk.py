@@ -3,10 +3,93 @@ from __future__ import annotations
 import contextlib
 import pathlib
 import shutil
+import threading
+from collections.abc import Callable, Generator, Iterable
+from contextlib import contextmanager
+from typing import Any
+
+from toolz import concat
 
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.utils import log_errors
+from distributed.shuffle._pickle import pickle_bytelist
+from distributed.utils import Deadline, log_errors
+
+
+class ReadWriteLock:
+    _condition: threading.Condition
+    _n_reads: int
+    _write_pending: bool
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition(threading.Lock())
+        self._n_reads = 0
+        self._write_pending = False
+        self._write_active = False
+
+    def acquire_write(self, timeout: float = -1) -> bool:
+        deadline = Deadline.after(timeout if timeout >= 0 else None)
+        with self._condition:
+            result = self._condition.wait_for(
+                lambda: not self._write_pending, timeout=deadline.remaining
+            )
+            if result is False:
+                return False
+
+            self._write_pending = True
+            result = self._condition.wait_for(
+                lambda: self._n_reads == 0, timeout=deadline.remaining
+            )
+
+            if result is False:
+                self._write_pending = False
+                self._condition.notify_all()
+                return False
+            self._write_active = True
+            return True
+
+    def release_write(self) -> None:
+        with self._condition:
+            if self._write_active is False:
+                raise RuntimeError("Tried releasing unlocked write lock")
+            self._write_pending = False
+            self._write_active = False
+            self._condition.notify_all()
+
+    def acquire_read(self, timeout: float = -1) -> bool:
+        deadline = Deadline.after(timeout if timeout >= 0 else None)
+        with self._condition:
+            result = self._condition.wait_for(
+                lambda: not self._write_pending, timeout=deadline.remaining
+            )
+            if result is False:
+                return False
+            self._n_reads += 1
+            return True
+
+    def release_read(self) -> None:
+        with self._condition:
+            if self._n_reads == 0:
+                raise RuntimeError("Tired releasing unlocked read lock")
+            self._n_reads -= 1
+            if self._n_reads == 0:
+                self._condition.notify_all()
+
+    @contextmanager
+    def write(self) -> Generator[None, None, None]:
+        self.acquire_write()
+        try:
+            yield
+        finally:
+            self.release_write()
+
+    @contextmanager
+    def read(self) -> Generator[None, None, None]:
+        self.acquire_read()
+        try:
+            yield
+        finally:
+            self.release_read()
 
 
 class DiskShardsBuffer(ShardsBuffer):
@@ -30,7 +113,7 @@ class DiskShardsBuffer(ShardsBuffer):
     ----------
     directory : str or pathlib.Path
         Where to write and read data.  Ideally points to fast disk.
-    memory_limiter : ResourceLimiter, optional
+    memory_limiter : ResourceLimiter
         Limiter for in-memory buffering (at most this much data)
         before writes to disk occur. If the incoming data that has yet
         to be processed exceeds this limit, then the buffer will block
@@ -41,7 +124,8 @@ class DiskShardsBuffer(ShardsBuffer):
     def __init__(
         self,
         directory: str | pathlib.Path,
-        memory_limiter: ResourceLimiter | None = None,
+        read: Callable[[pathlib.Path], tuple[Any, int]],
+        memory_limiter: ResourceLimiter,
     ):
         super().__init__(
             memory_limiter=memory_limiter,
@@ -50,8 +134,12 @@ class DiskShardsBuffer(ShardsBuffer):
         )
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
+        self._closed = False
+        self._read = read
+        self._directory_lock = ReadWriteLock()
 
-    async def _process(self, id: str, shards: list[bytes]) -> None:
+    @log_errors
+    async def _process(self, id: str, shards: list[Any]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -64,17 +152,27 @@ class DiskShardsBuffer(ShardsBuffer):
         future then we should consider simplifying this considerably and
         dropping the write into communicate above.
         """
+        # Consider boosting total_size a bit here to account for duplication
+        with self.time("write"):
+            # We only need shared (i.e., read) access to the directory to write
+            # to a file inside of it.
+            with self._directory_lock.read():
+                if self._closed:
+                    raise RuntimeError("Already closed")
 
-        with log_errors():
-            # Consider boosting total_size a bit here to account for duplication
-            with self.time("write"):
-                with open(
-                    self.directory / str(id), mode="ab", buffering=100_000_000
-                ) as f:
-                    for shard in shards:
-                        f.write(shard)
+                frames: Iterable[bytes | bytearray | memoryview]
 
-    def read(self, id: int | str) -> bytes:
+                if isinstance(shards[0], bytes):
+                    # Manually serialized dataframes
+                    frames = shards
+                else:
+                    # Unserialized numpy arrays
+                    frames = concat(pickle_bytelist(shard) for shard in shards)
+
+                with open(self.directory / str(id), mode="ab") as f:
+                    f.writelines(frames)
+
+    def read(self, id: str) -> Any:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:
@@ -82,11 +180,10 @@ class DiskShardsBuffer(ShardsBuffer):
 
         try:
             with self.time("read"):
-                with open(
-                    self.directory / str(id), mode="rb", buffering=100_000_000
-                ) as f:
-                    data = f.read()
-                    size = f.tell()
+                with self._directory_lock.read():
+                    if self._closed:
+                        raise RuntimeError("Already closed")
+                    data, size = self._read((self.directory / str(id)).resolve())
         except FileNotFoundError:
             raise KeyError(id)
 
@@ -98,5 +195,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
     async def close(self) -> None:
         await super().close()
-        with contextlib.suppress(FileNotFoundError):
-            shutil.rmtree(self.directory)
+        with self._directory_lock.write():
+            self._closed = True
+            with contextlib.suppress(FileNotFoundError):
+                shutil.rmtree(self.directory)

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from io import BytesIO
+from collections.abc import Iterable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from packaging.version import parse
+
+from dask.utils import parse_bytes
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -29,65 +32,75 @@ def check_minimal_arrow_version() -> None:
     """Verify that the the correct version of pyarrow is installed to support
     the P2P extension.
 
-    Raises a RuntimeError in case pyarrow is not installed or installed version
-    is not recent enough.
+    Raises a ModuleNotFoundError if pyarrow is not installed or an
+    ImportError if the installed version is not recent enough.
     """
-    # First version to introduce Table.sort_by
     minversion = "7.0.0"
     try:
         import pyarrow as pa
-    except ImportError:
-        raise RuntimeError(f"P2P shuffling requires pyarrow>={minversion}")
-
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(f"P2P shuffling requires pyarrow>={minversion}")
     if parse(pa.__version__) < parse(minversion):
-        raise RuntimeError(
+        raise ImportError(
             f"P2P shuffling requires pyarrow>={minversion} but only found {pa.__version__}"
         )
 
 
-def convert_partition(data: bytes, meta: pd.DataFrame) -> pd.DataFrame:
-    import pandas as pd
+def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
     import pyarrow as pa
 
-    file = BytesIO(data)
-    end = len(data)
-    shards = []
-    while file.tell() < end:
-        sr = pa.RecordBatchStreamReader(file)
-        shards.append(sr.read_all())
-    table = pa.concat_tables(shards, promote=True)
-    df = table.to_pandas(self_destruct=True)
+    if parse(pa.__version__) >= parse("14.0.0"):
+        return pa.concat_tables(tables, promote_options="permissive")
+    try:
+        return pa.concat_tables(tables, promote=True)
+    except pa.ArrowNotImplementedError as e:
+        if parse(pa.__version__) >= parse("12.0.0"):
+            raise e
+        raise
 
-    def default_types_mapper(pyarrow_dtype: pa.DataType) -> object:
-        # Avoid converting strings from `string[pyarrow]` to `string[python]`
-        # if we have *some* `string[pyarrow]`
-        if (
-            pyarrow_dtype in {pa.large_string(), pa.string()}
-            and pd.StringDtype("pyarrow") in meta.dtypes.values
+
+def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
+    import pandas as pd
+    from pandas.core.dtypes.cast import find_common_type  # type: ignore[attr-defined]
+
+    from dask.dataframe.dispatch import from_pyarrow_table_dispatch
+
+    table = concat_tables(shards)
+
+    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
+    reconciled_dtypes = {}
+    for column, dtype in meta.dtypes.items():
+        actual = df[column].dtype
+        if actual == dtype:
+            continue
+        # Use the specific string dtype from meta (e.g., string[pyarrow])
+        if isinstance(actual, pd.StringDtype) and isinstance(dtype, pd.StringDtype):
+            reconciled_dtypes[column] = dtype
+            continue
+        # meta might not be aware of the actual categories so the two dtype objects are not equal
+        # Also, the categories_dtype does not properly roundtrip through Arrow
+        if isinstance(actual, pd.CategoricalDtype) and isinstance(
+            dtype, pd.CategoricalDtype
         ):
-            return pd.StringDtype("pyarrow")
-        return None
-
-    df = table.to_pandas(self_destruct=True, types_mapper=default_types_mapper)
-    return df.astype(meta.dtypes, copy=False)
+            continue
+        reconciled_dtypes[column] = find_common_type([actual, dtype])
+    return df.astype(reconciled_dtypes, copy=False)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
-    import pyarrow as pa
 
-    return pa.concat_tables(deserialize_table(buffer) for buffer in data)
+    tables = (deserialize_table(buffer) for buffer in data)
+    return concat_tables(tables)
 
 
 def serialize_table(table: pa.Table) -> bytes:
-    import io
-
     import pyarrow as pa
 
-    stream = io.BytesIO()
+    stream = pa.BufferOutputStream()
     with pa.ipc.new_stream(stream, table.schema) as writer:
         writer.write_table(table)
-    return stream.getvalue()
+    return stream.getvalue().to_pybytes()
 
 
 def deserialize_table(buffer: bytes) -> pa.Table:
@@ -95,3 +108,54 @@ def deserialize_table(buffer: bytes) -> pa.Table:
 
     with pa.ipc.open_stream(pa.py_buffer(buffer)) as reader:
         return reader.read_all()
+
+
+def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
+    import pyarrow as pa
+
+    batch_size = parse_bytes("1 MiB")
+    batch = []
+    shards = []
+
+    with pa.OSFile(str(path), mode="rb") as f:
+        size = f.seek(0, whence=2)
+        f.seek(0)
+        prev = 0
+        offset = f.tell()
+        while offset < size:
+            sr = pa.RecordBatchStreamReader(f)
+            shard = sr.read_all()
+            offset = f.tell()
+            batch.append(shard)
+
+            if offset - prev >= batch_size:
+                table = concat_tables(batch)
+                shards.append(_copy_table(table))
+                batch = []
+                prev = offset
+    if batch:
+        table = concat_tables(batch)
+        shards.append(_copy_table(table))
+    return shards, size
+
+
+def concat_arrays(arrays: Iterable[pa.Array]) -> pa.Array:
+    import pyarrow as pa
+
+    try:
+        return pa.concat_arrays(arrays)
+    except pa.ArrowNotImplementedError as e:
+        if parse(pa.__version__) >= parse("12.0.0"):
+            raise
+        if e.args[0].startswith("concatenation of extension"):
+            raise RuntimeError(
+                "P2P shuffling requires pyarrow>=12.0.0 to support extension types."
+            ) from e
+        raise
+
+
+def _copy_table(table: pa.Table) -> pa.Table:
+    import pyarrow as pa
+
+    arrs = [concat_arrays(column.chunks) for column in table.columns]
+    return pa.table(data=arrs, schema=table.schema)

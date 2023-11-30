@@ -637,6 +637,7 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
             "distributed.worker.memory.target": False,
             "distributed.worker.memory.spill": False,
             "distributed.worker.memory.pause": False,
+            "distributed.worker.memory.terminate": False,
         },
     ),
 )

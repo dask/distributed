@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+import distributed
 from distributed import Nanny
 from distributed.client import wait
 from distributed.compatibility import LINUX
@@ -14,7 +15,16 @@ from distributed.diagnostics.progress import (
     Progress,
     SchedulerPlugin,
 )
-from distributed.utils_test import dec, div, gen_cluster, inc, nodebug, slowdec, slowinc
+from distributed.utils_test import (
+    dec,
+    div,
+    gen_cluster,
+    inc,
+    nodebug,
+    slowdec,
+    slowinc,
+    wait_for_state,
+)
 
 
 def f(*args):
@@ -70,6 +80,49 @@ async def test_multiprogress(c, s, a, b):
     assert p.keys == {"f": set(), "g": set()}
 
     assert p.status == "finished"
+
+
+@gen_cluster(client=True)
+async def test_multiprogress_cancel(c, s, a, b):
+    lock = distributed.Lock()
+    await lock.acquire()
+
+    async def wait_and_raise(*args, **kwargs):
+        async with lock:
+            raise RuntimeError()
+
+    f = c.submit(wait_and_raise, key="cancel", workers=[a.address])
+    p = MultiProgress([f], scheduler=s, complete=True)
+    await p.setup()
+    await wait_for_state(f.key, "executing", a)
+    f.release()
+    await wait_for_state(f.key, "cancelled", a)
+    assert p.status == "error"
+    assert p.all_keys.keys() == {"cancel"}
+
+
+@gen_cluster(client=True)
+async def test_multiprogress_with_spans(c, s, a, b):
+    x = c.submit(inc, 1)
+    p = MultiProgress([x], scheduler=s, complete=True, group_by="spans")
+    await p.setup()
+    group_names = {k[0] for k in p.all_keys}
+    assert group_names == {"default"}
+
+
+@gen_cluster(client=True)
+async def test_multiprogress_with_prefix(c, s, a, b):
+    x = c.submit(inc, 1)
+    p = MultiProgress([x], scheduler=s, complete=True, group_by="prefix")
+    await p.setup()
+    group_names = {k for k in p.all_keys}
+    assert group_names == {"inc"}
+
+
+def test_multiprogress_warns():
+    with pytest.warns(DeprecationWarning, match="func` is deprecated, use `group_by"):
+        p = MultiProgress([], complete=True, func="spans")
+        assert p.group_by == "spans"
 
 
 @gen_cluster(client=True)

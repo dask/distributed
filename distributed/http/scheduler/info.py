@@ -5,17 +5,22 @@ import logging
 import os
 import os.path
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from tlz import first, merge
 from tornado import escape
 from tornado.websocket import WebSocketHandler
 
+from dask.typing import Key
 from dask.utils import format_bytes, format_time
 
 from distributed.diagnostics.websocket import WebsocketPlugin
 from distributed.http.utils import RequestHandler, redirect
 from distributed.metrics import time
 from distributed.utils import log_errors
+
+if TYPE_CHECKING:
+    from distributed import Scheduler
 
 ns = {
     func.__name__: func
@@ -85,18 +90,49 @@ class Exceptions(RequestHandler):
         )
 
 
+def _get_actual_scheduler_key(key: str, scheduler: Scheduler) -> Key:
+    key = escape.url_unescape(key, plus=False)
+
+    if key in scheduler.tasks:
+        return key  # Basic str key
+
+    # Tuple, bytes, or int key
+    # First try safely reverting str(Key)
+    def lists_to_tuples(o: object) -> Any:
+        if isinstance(o, list):
+            return tuple(lists_to_tuples(i) for i in o)
+        else:
+            return o
+
+    key2 = key.replace("(", "[").replace(")", "]").replace("'", '"')
+    try:
+        key2 = lists_to_tuples(json.loads(key2))
+        if key2 in scheduler.tasks:
+            return key2
+    except json.JSONDecodeError:
+        pass
+
+    # Edge case of keys with string elements containing [ ] ( ) ' " or bytes
+    for key3 in scheduler.tasks:
+        if str(key3) == key:
+            return key3
+
+    raise KeyError(key)
+
+
 class Task(RequestHandler):
     @log_errors
-    def get(self, task):
-        task = escape.url_unescape(task)
-        if task not in self.server.tasks:
+    def get(self, task: str) -> None:
+        try:
+            key = _get_actual_scheduler_key(task, self.server)
+        except KeyError:
             self.send_error(404)
             return
 
         self.render(
             "task.html",
-            title="Task: " + task,
-            Task=task,
+            title=f"Task: {key!r}",
+            Task=key,
             scheduler=self.server,
             **merge(
                 self.server.__dict__,
@@ -124,7 +160,13 @@ class WorkerLogs(RequestHandler):
     @log_errors
     async def get(self, worker):
         worker = escape.url_unescape(worker)
-        logs = await self.server.get_worker_logs(workers=[worker])
+        try:
+            logs = await self.server.get_worker_logs(workers=[worker])
+        except Exception:
+            if not any(worker == w.address for w in self.server.workers.values()):
+                self.send_error(404)
+                return
+            raise
         logs = logs[worker]
         self.render(
             "logs.html",
@@ -138,7 +180,11 @@ class WorkerCallStacks(RequestHandler):
     @log_errors
     async def get(self, worker):
         worker = escape.url_unescape(worker)
-        keys = {ts.key for ts in self.server.workers[worker].processing}
+        try:
+            keys = {ts.key for ts in self.server.workers[worker].processing}
+        except KeyError:
+            self.send_error(404)
+            return
         call_stack = await self.server.get_call_stack(keys=keys)
         self.render(
             "call-stack.html",
@@ -150,8 +196,13 @@ class WorkerCallStacks(RequestHandler):
 
 class TaskCallStack(RequestHandler):
     @log_errors
-    async def get(self, key):
-        key = escape.url_unescape(key)
+    async def get(self, task: str) -> None:
+        try:
+            key = _get_actual_scheduler_key(task, self.server)
+        except KeyError:
+            self.send_error(404)
+            return
+
         call_stack = await self.server.get_call_stack(keys=[key])
         if not call_stack:
             self.write(
@@ -161,7 +212,7 @@ class TaskCallStack(RequestHandler):
         else:
             self.render(
                 "call-stack.html",
-                title="Call Stack: " + key,
+                title=f"Call Stack: {key!r}",
                 call_stack=call_stack,
                 **merge(self.extra, rel_path_statics),
             )

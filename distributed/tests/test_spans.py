@@ -4,17 +4,18 @@ import asyncio
 
 import pytest
 
+import dask
 from dask import delayed
 
-from distributed import Client, Event, Future, Worker, wait
-from distributed.compatibility import WINDOWS
-from distributed.metrics import time
-from distributed.spans import span
+import distributed
+from distributed import Client, Event, Future, Worker, span, wait
+from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.utils_test import (
     NoSchedulerDelayWorker,
     async_poll_for,
     gen_cluster,
     inc,
+    padded_time,
     slowinc,
     wait_for_state,
 )
@@ -24,14 +25,11 @@ from distributed.utils_test import (
 async def test_spans(c, s, a):
     x = delayed(inc)(1)  # Default span
 
-    @span("p2")
-    def f(i):
-        return i * 2
-
     with span("my workflow") as mywf_id:
         with span("p1") as p1_id:
             y = x + 1
-        z = f(y)
+        with span("p2") as p2_id:
+            z = y * 2
 
     zp = c.persist(z)
     assert await c.compute(zp) == 6
@@ -40,13 +38,22 @@ async def test_spans(c, s, a):
 
     assert mywf_id
     assert p1_id
+    assert p2_id
     assert s.tasks[y.key].group.span_id == p1_id
+    assert s.tasks[z.key].group.span_id == p2_id
+    assert mywf_id != p1_id != p2_id
+
+    expect_annotations = {
+        x: {},
+        y: {"span": {"name": ("my workflow", "p1"), "ids": (mywf_id, p1_id)}},
+        z: {"span": {"name": ("my workflow", "p2"), "ids": (mywf_id, p2_id)}},
+    }
 
     for fut in (x, y, z):
         sts = s.tasks[fut.key]
         wts = a.state.tasks[fut.key]
-        assert sts.annotations == {}
-        assert wts.annotations == {}
+        assert sts.annotations == expect_annotations[fut]
+        assert wts.annotations == expect_annotations[fut]
         assert sts.group.span_id == wts.span_id
         assert sts.group.span_id in ext.spans
         assert sts.group in ext.spans[sts.group.span_id].groups
@@ -82,6 +89,10 @@ async def test_spans(c, s, a):
     assert ext.root_spans == [mywf, default]
     assert ext.spans_search_by_name["my workflow",] == [mywf]
     assert ext.spans_search_by_tag["my workflow"] == [mywf, p2, p1]
+
+    assert default.annotation is None
+    assert mywf.annotation == {"name": ("my workflow",), "ids": (mywf.id,)}
+    assert p1.annotation == {"name": ("my workflow", "p1"), "ids": (mywf.id, p1.id)}
 
     # Test that spans survive their tasks
     prev_span_ids = set(ext.spans)
@@ -120,15 +131,12 @@ async def test_repeat_span(c, s, a, b):
     """Opening and closing the same span will result in multiple spans with different
     ids and same name
     """
-
-    @span("foo")
-    def f(x, key):
-        return c.submit(inc, x, key=key)
-
     with span("foo"):
         x = c.submit(inc, 1, key="x")
-    y = f(x, key="y")
-    z = f(y, key="z")
+    with span("foo"):
+        y = c.submit(inc, x, key="y")
+    with span("foo"):
+        z = c.submit(inc, y, key="z")
     assert await z == 4
 
     sbn = s.extensions["spans"].spans_search_by_name["foo",]
@@ -205,8 +213,10 @@ async def test_no_extension(c, s, a, b):
     Worker=NoSchedulerDelayWorker,
     config={"optimization.fuse.active": False},
 )
-async def test_task_groups(c, s, a, b, release):
+async def test_task_groups(c, s, a, b, release, no_time_resync):
     da = pytest.importorskip("dask.array")
+    t0 = await padded_time(before=0)
+
     with span("wf"):
         with span("p1"):
             a = da.ones(10, chunks=5, dtype="int64") + 1
@@ -215,9 +225,8 @@ async def test_task_groups(c, s, a, b, release):
         a = a.sum()  # A TaskGroup attached directly to a non-leaf Span
         finalizer = c.compute(a)
 
-    t0 = time()
     assert await finalizer == 40
-    t1 = time()
+    t1 = await padded_time(after=0)
 
     if release:
         # Test that the information in the Spans survives the tasks
@@ -274,13 +283,13 @@ async def test_task_groups(c, s, a, b, release):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=NoSchedulerDelayWorker)
-async def test_before_first_task_finished(c, s, a):
-    t0 = time()
+async def test_before_first_task_finished(c, s, a, no_time_resync):
+    t0 = await padded_time(before=0)
     ev = Event()
     x = c.submit(ev.wait, key="x")
     await wait_for_state("x", "executing", a)
     sp = s.extensions["spans"].spans_search_by_name["default",][-1]
-    t1 = time()
+    t1 = await padded_time()
     assert t0 < sp.enqueued < t1
     assert sp.start == 0
     assert t1 < sp.stop < t1 + 1
@@ -290,7 +299,7 @@ async def test_before_first_task_finished(c, s, a):
 
     await ev.set()
     await x
-    t2 = time()
+    t2 = await padded_time()
     assert t0 < sp.enqueued < sp.start < t1 < sp.stop < t2
     assert sp.duration > 0
     assert sp.all_durations["compute"] > 0
@@ -319,8 +328,17 @@ async def test_duplicate_task_group(c, s, a, b):
 async def test_mismatched_span(c, s, a, use_default):
     """Test use case of 2+ tasks within the same TaskGroup, but different spans.
     All tasks are coerced to the span of the first seen task, and the annotations are
-    updated.
+    updated. This includes scheduler plugins.
     """
+
+    class MyPlugin(SchedulerPlugin):
+        annotations = []
+
+        def update_graph(self, scheduler, annotations, **kwargs):
+            self.annotations.append(annotations)
+
+    s.add_plugin(MyPlugin(), name="my-plugin")
+
     if use_default:
         x0 = delayed(inc)(1, dask_key_name=("x", 0)).persist()
     else:
@@ -339,12 +357,25 @@ async def test_mismatched_span(c, s, a, use_default):
     assert len(sbn[span_name][0].groups) == 1
     assert s.task_groups["x"].span_id == sbn[span_name][0].id
 
-    sts0 = s.tasks[str(x0.key)]
-    sts1 = s.tasks[str(x1.key)]
-    wts0 = a.state.tasks[str(x0.key)]
-    wts1 = a.state.tasks[str(x1.key)]
+    sts0 = s.tasks[x0.key]
+    sts1 = s.tasks[x1.key]
+    wts0 = a.state.tasks[x0.key]
+    wts1 = a.state.tasks[x1.key]
     assert sts0.group is sts1.group
     assert wts0.span_id == wts1.span_id
+
+    if use_default:
+        assert s.plugins["my-plugin"].annotations == [{}, {}]
+        for ts in (sts0, sts1, wts0, wts1):
+            assert "span" not in ts.annotations
+    else:
+        expect = {"ids": (wts0.span_id,), "name": ("p1",)}
+        assert s.plugins["my-plugin"].annotations == [
+            {"span": {("x", 0): expect}},
+            {"span": {("x", 1): expect}},
+        ]
+        for ts in (sts0, sts1, wts0, wts1):
+            assert ts.annotations["span"] == expect
 
 
 def test_no_tags():
@@ -481,14 +512,12 @@ async def test_worker_metrics(c, s, a, b):
 
     # metrics for foo include self and its child bar
     assert list(foo_metrics) == [
-        ("execute", "x", "deserialize", "seconds"),
         ("execute", "x", "thread-cpu", "seconds"),
         ("execute", "x", "thread-noncpu", "seconds"),
         ("execute", "x", "executor", "seconds"),
         ("execute", "x", "other", "seconds"),
         ("execute", "x", "memory-read", "count"),
         ("execute", "x", "memory-read", "bytes"),
-        ("execute", "y", "deserialize", "seconds"),
         ("execute", "y", "thread-cpu", "seconds"),
         ("execute", "y", "thread-noncpu", "seconds"),
         ("execute", "y", "executor", "seconds"),
@@ -499,7 +528,6 @@ async def test_worker_metrics(c, s, a, b):
         list(bar0_metrics)
         == list(bar1_metrics)
         == [
-            ("execute", "y", "deserialize", "seconds"),
             ("execute", "y", "thread-cpu", "seconds"),
             ("execute", "y", "thread-noncpu", "seconds"),
             ("execute", "y", "executor", "seconds"),
@@ -508,9 +536,13 @@ async def test_worker_metrics(c, s, a, b):
         ]
     )
 
-    if not WINDOWS:
-        for metrics in (foo_metrics, bar0_metrics, bar1_metrics):
-            assert all(v > 0 for v in metrics.values()), metrics
+    for metrics in (foo_metrics, bar0_metrics, bar1_metrics):
+        # On OSes other than Windows, time metrics are, 99.9% of the time, strictly
+        # greater than zero. However adjustments in the wall clock can occasionally
+        # cause them to be exactly zero. Here we're testing that there is a floor to
+        # zero implemented.
+        for k, v in metrics.items():
+            assert v >= 0, (k, v)
 
     # Metrics have been synchronized from scheduler to spans
     for k, v in foo_metrics.items():
@@ -607,7 +639,6 @@ async def test_code(c, s, a, b):
 
     # Identical code stacks have been deduplicated
     assert len(code) == 3
-    assert "def _run(self)" in code[0][-2].code
     assert "inc, 1" in code[0][-1].code
     assert code[0][-1].lineno_relative == 10
     assert code[1][-1].lineno_relative == 11
@@ -643,7 +674,7 @@ async def test_merge_nothing(s):
 
 @gen_cluster(client=True)
 async def test_active_cpu_seconds_trivial(c, s, a, b):
-    await c.submit(slowinc, 1, delay=0.1, key="x")
+    await c.submit(slowinc, 1, delay=0.2, key="x")
     await a.heartbeat()
     await b.heartbeat()
     span = s.extensions["spans"].spans_search_by_name["default",][0]
@@ -651,13 +682,17 @@ async def test_active_cpu_seconds_trivial(c, s, a, b):
     assert span.done
     assert span.nthreads_intervals == [(span.enqueued, span.stop, 3)]
     assert span.active_cpu_seconds == (span.stop - span.enqueued) * 3
-    k = "execute", "N/A", "idle or other spans", "seconds"
-    assert 0.15 < span.cumulative_worker_metrics[k] < span.active_cpu_seconds
+    idle_time = span.cumulative_worker_metrics[
+        "execute", "N/A", "idle or other spans", "seconds"
+    ]
+    # Allow for some very generous margins to compensate for occasional corrections in
+    # the wall clock (much more frequent in Windows)
+    assert 0.15 < idle_time <= span.active_cpu_seconds
 
 
 @pytest.mark.parametrize("some_done", [False, True])
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
-async def test_active_cpu_seconds_not_done(c, s, a, some_done):
+async def test_active_cpu_seconds_not_done(c, s, a, some_done, no_time_resync):
     ev = Event()
     x0 = c.submit(ev.wait, key="x-0", workers=[a.address])
     if some_done:
@@ -667,7 +702,7 @@ async def test_active_cpu_seconds_not_done(c, s, a, some_done):
 
     span = s.extensions["spans"].spans_search_by_name["default",][0]
     assert not span.done
-    now = time()
+    now = await padded_time()
 
     intervals = span.nthreads_intervals
     assert len(intervals) == 1
@@ -685,7 +720,7 @@ async def test_active_cpu_seconds_not_done(c, s, a, some_done):
 
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker)
-async def test_active_cpu_seconds_change_nthreads(c, s, a, b):
+async def test_active_cpu_seconds_change_nthreads(c, s, a, b, no_time_resync):
     ev = Event()
     x = c.submit(ev.wait, key="x", workers=[a.address])
     await wait_for_state("x", "executing", a)
@@ -738,7 +773,7 @@ async def test_active_cpu_seconds_change_nthreads(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
-async def test_active_cpu_seconds_merged(c, s, a):
+async def test_active_cpu_seconds_merged(c, s, a, no_time_resync):
     """Overlapping input spans are not double-counted
     Empty gap between input spans is not counted
     """
@@ -787,3 +822,22 @@ async def test_active_cpu_seconds_merged(c, s, a):
     assert merged.active_cpu_seconds == pytest.approx(
         (bar.stop - foo.enqueued + baz.stop - baz.enqueued) * 2
     )
+
+
+@gen_cluster(client=True)
+async def test_spans_are_visible_from_tasks(c, s, a, b):
+    def f():
+        client = distributed.get_client()
+        with span("bar"):
+            return client.submit(inc, 1).result()
+
+    with span("foo") as foo_id:
+        annotations = await c.submit(dask.get_annotations)
+        assert annotations == {"span": {"name": ("foo",), "ids": (foo_id,)}}
+        assert await c.submit(f) == 2
+
+    ext = s.extensions["spans"]
+    assert list(ext.spans_search_by_name) == [("foo",), ("foo", "bar")]
+
+    # No annotation is created for the default span
+    assert await c.submit(dask.get_annotations) == {}

@@ -6,3 +6,5 @@ git+https://github.com/dask/dask
 sphinx
 dask-sphinx-theme>=3.0.0
 sphinx-click
+memray
+sphinx_design

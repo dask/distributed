@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import collections
+import threading
 import time as timemod
 from collections.abc import Callable, Hashable, Iterator
 from contextlib import contextmanager
@@ -189,10 +191,10 @@ class ContextMeter:
       A->B comms: network-write 0.567 seconds
     """
 
-    _callbacks: ContextVar[list[Callable[[Hashable, float, str], None]]]
+    _callbacks: ContextVar[dict[Hashable, Callable[[Hashable, float, str], None]]]
 
     def __init__(self):
-        self._callbacks = ContextVar(f"MetricHook<{id(self)}>._callbacks", default=[])
+        self._callbacks = ContextVar(f"MetricHook<{id(self)}>._callbacks", default={})
 
     def __reduce__(self):
         assert self is context_meter, "Found copy of singleton"
@@ -204,13 +206,56 @@ class ContextMeter:
 
     @contextmanager
     def add_callback(
-        self, callback: Callable[[Hashable, float, str], None]
+        self,
+        callback: Callable[[Hashable, float, str], None],
+        *,
+        key: Hashable | None = None,
+        allow_offload: bool = False,
     ) -> Iterator[None]:
         """Add a callback when entering the context and remove it when exiting it.
         The callback must accept the same parameters as :meth:`digest_metric`.
+
+        Parameters
+        ----------
+        callback: Callable
+            ``f(label, value, unit)`` to be executed
+        key: Hashable, optional
+            Unique key for the callback. If two nested calls to ``add_callback`` use the
+            same key, suppress the outermost callback.
+        allow_offload: bool, optional
+            If set to True, this context must be executed inside a running asyncio
+            event loop. If a call to :meth:`digest_metric` is performed from a different
+            thread, e.g. from inside :func:`distributed.utils.offload`, ensure that
+            the callback is executed in the event loop's thread instead.
         """
+        if allow_offload:
+            loop = asyncio.get_running_loop()
+            tid = threading.get_ident()
+
+            def safe_cb(label: Hashable, value: float, unit: str, /) -> None:
+                if threading.get_ident() == tid:
+                    callback(label, value, unit)
+                else:  # We're inside offload()
+                    loop.call_soon_threadsafe(callback, label, value, unit)
+
+        else:
+            safe_cb = callback
+
+        if key is None:
+            key = object()
         cbs = self._callbacks.get()
-        tok = self._callbacks.set(cbs + [callback])
+        cbs = cbs.copy()
+        cbs[key] = safe_cb
+        tok = self._callbacks.set(cbs)
+        try:
+            yield
+        finally:
+            tok.var.reset(tok)
+
+    @contextmanager
+    def clear_callbacks(self) -> Iterator[None]:
+        """Do not trigger any callbacks set outside of this context"""
+        tok = self._callbacks.set({})
         try:
             yield
         finally:
@@ -221,7 +266,7 @@ class ContextMeter:
         metric.
         """
         cbs = self._callbacks.get()
-        for cb in cbs:
+        for cb in cbs.values():
             cb(label, value, unit)
 
     @contextmanager
@@ -234,9 +279,10 @@ class ContextMeter:
     ) -> Iterator[MeterOutput]:
         """Convenience context manager or decorator which calls func() before and after
         the wrapped code, calculates the delta, and finally calls :meth:`digest_metric`.
-        It also subtracts any other calls to :meth:`meter` or :meth:`digest_metric` with
-        the same unit performed within the context, so that the total is strictly
-        additive.
+
+        If unit=='seconds', it also subtracts any other calls to :meth:`meter` or
+        :meth:`digest_metric` with the same unit performed within the context, so that
+        the total is strictly additive.
 
         Parameters
         ----------
@@ -256,10 +302,19 @@ class ContextMeter:
         nested calls to :meth:`meter`, then delta (for seconds only) is reduced by the
         inner metrics, to a minimum of ``floor``.
         """
+        if unit != "seconds":
+            try:
+                with meter(func, floor=floor) as m:
+                    yield m
+            finally:
+                self.digest_metric(label, m.delta, unit)
+            return
+
+        # If unit=="seconds", subtract time metered from the sub-contexts
         offsets = []
 
         def callback(label2: Hashable, value2: float, unit2: str) -> None:
-            if unit2 == unit == "seconds":
+            if unit2 == unit:
                 # This must be threadsafe to support callbacks invoked from
                 # distributed.utils.offload; '+=' on a float would not be threadsafe!
                 offsets.append(value2)
@@ -316,14 +371,20 @@ class DelayedMetricsLedger:
         self.start = func()
         self.metrics = []
 
+    def _callback(self, label: Hashable, value: float, unit: str) -> None:
+        self.metrics.append((label, value, unit))
+
     @contextmanager
-    def record(self) -> Iterator[None]:
+    def record(self, *, key: Hashable | None = None) -> Iterator[None]:
         """Ingest metrics logged with :meth:`ContextMeter.digest_metric` or
         :meth:`ContextMeter.meter` and temporarily store them in :ivar:`metrics`.
+
+        Parameters
+        ----------
+        key: Hashable, optional
+            See :meth:`ContextMeter.add_callback`
         """
-        with context_meter.add_callback(
-            lambda label, value, unit: self.metrics.append((label, value, unit))
-        ):
+        with context_meter.add_callback(self._callback, key=key):
             yield
 
     def finalize(

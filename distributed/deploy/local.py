@@ -49,7 +49,7 @@ class LocalCluster(SpecCluster):
     threads_per_worker: int
         Number of threads per each worker
     scheduler_port: int
-        Port of the scheduler.  8786 by default, use 0 to choose a random port
+        Port of the scheduler. Use 0 to choose a random port (default). 8786 is a common choice.
     silence_logs: logging level
         Level of logs to print out to stdout.  ``logging.WARN`` by default.
         Use a falsey value like False or None for no change.

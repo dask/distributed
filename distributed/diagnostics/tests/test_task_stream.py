@@ -94,16 +94,20 @@ async def test_no_startstops(c, s, a, b):
     await wait(future)
     assert len(tasks.buffer) == 1
 
-    tasks.transition(future.key, "processing", "erred")
+    tasks.transition(future.key, "processing", "erred", stimulus_id="s1")
     # Transition was not recorded because it didn't contain `startstops`
     assert len(tasks.buffer) == 1
 
-    tasks.transition(future.key, "processing", "erred", startstops=[])
+    tasks.transition(future.key, "processing", "erred", stimulus_id="s2", startstops=[])
     # Transition was not recorded because `startstops` was empty
     assert len(tasks.buffer) == 1
 
     tasks.transition(
-        future.key, "processing", "erred", startstops=[dict(start=time(), stop=time())]
+        future.key,
+        "processing",
+        "erred",
+        stimulus_id="s3",
+        startstops=[dict(start=time(), stop=time())],
     )
     assert len(tasks.buffer) == 2
 

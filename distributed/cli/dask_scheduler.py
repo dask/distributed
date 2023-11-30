@@ -13,6 +13,8 @@ import click
 
 from distributed import Scheduler
 from distributed._signals import wait_for_signals
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -227,8 +229,8 @@ def main(
 
         async def wait_for_signals_and_close():
             """Wait for SIGINT or SIGTERM and close the scheduler upon receiving one of those signals"""
-            await wait_for_signals()
-            await scheduler.close()
+            signum = await wait_for_signals()
+            await scheduler.close(reason=f"signal-{signum}")
 
         wait_for_signals_and_close_task = asyncio.create_task(
             wait_for_signals_and_close()
@@ -246,7 +248,7 @@ def main(
         logger.info("Stopped scheduler at %r", scheduler.address)
 
     try:
-        asyncio.run(run())
+        asyncio_run(run(), loop_factory=get_loop_factory())
     finally:
         logger.info("End scheduler")
 

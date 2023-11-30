@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import math
 import os
 import sys
 import tempfile
@@ -13,10 +14,17 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Callable, Container, Coroutine, Generator, Hashable
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Container,
+    Coroutine,
+    Generator,
+    Hashable,
+)
 from enum import Enum
 from functools import wraps
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, TypeVar, final
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, TypeVar, final
 
 import tblib
 from tlz import merge
@@ -26,7 +34,6 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed import profile, protocol
-from distributed.collections import LRU
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -36,11 +43,11 @@ from distributed.comm import (
     normalize_address,
     unparse_host_port,
 )
+from distributed.comm.core import Listener
 from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.metrics import context_meter, time
-from distributed.protocol import pickle
 from distributed.system_monitor import SystemMonitor
 from distributed.utils import (
     NoOpAwaitable,
@@ -58,25 +65,12 @@ from distributed.utils import (
 if TYPE_CHECKING:
     from typing_extensions import ParamSpec, Self
 
+    from distributed.counter import Digest
+
     P = ParamSpec("P")
     R = TypeVar("R")
     T = TypeVar("T")
     Coro = Coroutine[Any, Any, T]
-
-
-cache_loads: LRU[bytes, Callable[..., Any]] = LRU(maxsize=100)
-
-
-def loads_function(bytes_object):
-    """Load a function from bytes, cache bytes"""
-    if len(bytes_object) < 100000:
-        try:
-            result = cache_loads[bytes_object]
-        except KeyError:
-            result = pickle.loads(bytes_object)
-            cache_loads[bytes_object] = result
-        return result
-    return pickle.loads(bytes_object)
 
 
 class Status(Enum):
@@ -324,11 +318,54 @@ class Server:
 
     """
 
-    default_ip = ""
-    default_port = 0
+    default_ip: ClassVar[str] = ""
+    default_port: ClassVar[int] = 0
+
+    id: str
+    blocked_handlers: list[str]
+    handlers: dict[str, Callable]
+    stream_handlers: dict[str, Callable]
+    listeners: list[Listener]
+    counters: defaultdict[str, Counter]
+    deserialize: bool
+
     local_directory: str
+
+    monitor: SystemMonitor
+    io_loop: IOLoop
+    thread_id: int
+
+    periodic_callbacks: dict[str, PeriodicCallback]
+    digests: defaultdict[Hashable, Digest] | None
+    digests_total: defaultdict[Hashable, float]
+    digests_total_since_heartbeat: defaultdict[Hashable, float]
+    digests_max: defaultdict[Hashable, float]
+
+    _last_tick: float
+    _tick_counter: int
+    _last_tick_counter: int
+    _tick_interval: float
+    _tick_interval_observed: float
+
+    _status: Status
+
+    _address: str | None
+    _listen_address: str | None
+    _host: str | None
+    _port: int | None
+
+    _comms: dict[Comm, str | None]
+
+    _ongoing_background_tasks: AsyncTaskGroup
+    _event_finished: asyncio.Event
+
+    _original_local_dir: str
+    _updated_sys_path: bool
     _workspace: WorkSpace
     _workdir: None | WorkDir
+
+    _startup_lock: asyncio.Lock
+    __startup_exc: Exception | None
 
     def __init__(
         self,
@@ -441,11 +478,12 @@ class Server:
         except ImportError:
             self.digests = None
 
-        # In case crick is not installed, also log cumulative totals (reset at server
-        # restart) and local maximums (reset by prometheus poll)
-        self.digests_total = defaultdict(float)
-        self.digests_total_since_heartbeat = defaultdict(float)
-        self.digests_max = defaultdict(float)
+        # Also log cumulative totals (reset at server restart)
+        # and local maximums (reset by prometheus poll)
+        # Don't cast int metrics to float
+        self.digests_total = defaultdict(int)
+        self.digests_total_since_heartbeat = defaultdict(int)
+        self.digests_max = defaultdict(int)
 
         self.counters = defaultdict(Counter)
         pc = PeriodicCallback(self._shift_counters, 5000)
@@ -519,7 +557,6 @@ class Server:
         if load:
             try:
                 import_file(out_filename)
-                cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
                 raise e
@@ -618,7 +655,7 @@ class Server:
             timeout = getattr(self, "death_timeout", None)
 
             async def _close_on_failure(exc: Exception) -> None:
-                await self.close()
+                await self.close(reason=f"failure-to-start-{str(type(exc))}")
                 self.status = Status.failed
                 self.__startup_exc = exc
 
@@ -658,37 +695,38 @@ class Server:
             if not pc.is_running():
                 pc.start()
 
-    def stop(self):
-        if self.__stopped:
-            return
+    def _stop_listeners(self) -> asyncio.Future:
+        listeners_to_stop: set[Awaitable] = set()
 
-        if self._workdir is not None:
-            self._workdir.release()
-
-        self.monitor.close()
-
-        self.__stopped = True
-        _stops = set()
         for listener in self.listeners:
             future = listener.stop()
             if inspect.isawaitable(future):
-                _stops.add(future)
-            try:
-                abort_handshaking_comms = listener.abort_handshaking_comms
-            except AttributeError:
-                pass
-            else:
-                abort_handshaking_comms()
+                warnings.warn(
+                    f"{type(listener)} is using an asynchronous `stop` method. "
+                    "Support for asynchronous `Listener.stop` has been deprecated and "
+                    "will be removed in a future version",
+                    DeprecationWarning,
+                )
+                listeners_to_stop.add(future)
+            elif hasattr(listener, "abort_handshaking_comms"):
+                listener.abort_handshaking_comms()
 
-        if _stops:
+        return asyncio.gather(*listeners_to_stop)
 
-            async def background_stops():
-                await asyncio.gather(*_stops)
-
-            self._ongoing_background_tasks.call_soon(background_stops)
+    def stop(self) -> None:
+        if self.__stopped:
+            return
+        self.__stopped = True
+        self.monitor.close()
+        if not (stop_listeners := self._stop_listeners()).done():
+            self._ongoing_background_tasks.call_soon(
+                asyncio.wait_for(stop_listeners, timeout=None)  # type: ignore[arg-type]
+            )
+        if self._workdir is not None:
+            self._workdir.release()
 
     @property
-    def listener(self):
+    def listener(self) -> Listener | None:
         if self.listeners:
             return self.listeners[0]
         else:
@@ -731,6 +769,7 @@ class Server:
             if self.listener is None:
                 raise ValueError("cannot get address of non-running Server")
             self._address = self.listener.contact_address
+            assert self._address
         return self._address
 
     @property
@@ -783,7 +822,7 @@ class Server:
     def identity(self) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -793,7 +832,7 @@ class Server:
         Client.dump_cluster_state
         distributed.utils.recursive_to_dict
         """
-        info = self.identity()
+        info: dict[str, Any] = self.identity()
         extra = {
             "address": self.address,
             "status": self.status.name,
@@ -825,7 +864,7 @@ class Server:
         )
         self.listeners.append(listener)
 
-    def handle_comm(self, comm):
+    def handle_comm(self, comm: Comm) -> NoOpAwaitable:
         """Start a background task that dispatches new communications to coroutine-handlers"""
         try:
             self._ongoing_background_tasks.call_soon(self._handle_comm, comm)
@@ -833,7 +872,7 @@ class Server:
             comm.abort()
         return NoOpAwaitable()
 
-    async def _handle_comm(self, comm):
+    async def _handle_comm(self, comm: Comm) -> None:
         """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
@@ -972,7 +1011,9 @@ class Server:
                         "Failed while closing connection to %r: %s", address, e
                     )
 
-    async def handle_stream(self, comm, extra=None):
+    async def handle_stream(
+        self, comm: Comm, extra: dict[str, Any] | None = None
+    ) -> None:
         extra = extra or {}
         logger.info("Starting established connection to %s", comm.peer_address)
 
@@ -1006,10 +1047,7 @@ class Server:
                             break
                         handler = self.stream_handlers[op]
                         if iscoroutinefunction(handler):
-                            self._ongoing_background_tasks.call_soon(
-                                handler, **merge(extra, msg)
-                            )
-                            await asyncio.sleep(0)
+                            await handler(**merge(extra, msg))
                         else:
                             handler(**merge(extra, msg))
                     else:
@@ -1025,32 +1063,14 @@ class Server:
             await comm.close()
             assert comm.closed()
 
-    async def close(self, timeout=None):
+    async def close(self, timeout: float | None = None, reason: str = "") -> None:
         try:
             for pc in self.periodic_callbacks.values():
                 pc.stop()
 
-            if not self.__stopped:
-                self.monitor.close()
-                self.__stopped = True
-                _stops = set()
-                for listener in self.listeners:
-                    future = listener.stop()
-                    if inspect.isawaitable(future):
-                        warnings.warn(
-                            f"{type(listener)} is using an asynchronous `stop` method. "
-                            "Support for asynchronous `Listener.stop` will be removed in a future version",
-                            PendingDeprecationWarning,
-                        )
-                        _stops.add(future)
-                    try:
-                        abort_handshaking_comms = listener.abort_handshaking_comms
-                    except AttributeError:
-                        pass
-                    else:
-                        abort_handshaking_comms()
-                if _stops:
-                    await asyncio.gather(*_stops)
+            self.__stopped = True
+            self.monitor.close()
+            await self._stop_listeners()
 
             # TODO: Deal with exceptions
             await self._ongoing_background_tasks.stop()
@@ -1086,16 +1106,13 @@ def context_meter_to_server_digest(digest_tag: str) -> Callable:
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(self: Server, *args: Any, **kwargs: Any) -> Any:
-            loop = asyncio.get_running_loop()
-
             def metrics_callback(label: Hashable, value: float, unit: str) -> None:
                 if not isinstance(label, tuple):
                     label = (label,)
                 name = (digest_tag, *label, unit)
-                # This callback could be called from another thread through offload()
-                loop.call_soon_threadsafe(self.digest_metric, name, value)
+                self.digest_metric(name, value)
 
-            with context_meter.add_callback(metrics_callback):
+            with context_meter.add_callback(metrics_callback, allow_offload=True):
                 return await func(self, *args, **kwargs)
 
         return wrapper
@@ -1471,13 +1488,12 @@ class ConnectionPool:
         # _connecting contains futures actively trying to establish a connection
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
-        self._connecting: defaultdict[str, set[asyncio.Task[Comm]]] = defaultdict(set)
+        self._connecting: defaultdict[str, set[Callable[[str], None]]] = defaultdict(
+            set
+        )
         self._pending_count = 0
         self._connecting_count = 0
         self.status = Status.init
-        self._reasons: weakref.WeakKeyDictionary[
-            asyncio.Task[Any], str
-        ] = weakref.WeakKeyDictionary()
 
     def _validate(self) -> None:
         """
@@ -1521,6 +1537,14 @@ class ConnectionPool:
 
         return _().__await__()
 
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+        return
+
     async def start(self) -> None:
         # Invariant: semaphore._value == limit - open - _n_connecting
         self.semaphore = asyncio.Semaphore(self.limit)
@@ -1555,11 +1579,6 @@ class ConnectionPool:
                 raise
             finally:
                 self._connecting_count -= 1
-        except asyncio.CancelledError:
-            current_task = asyncio.current_task()
-            assert current_task
-            reason = self._reasons.pop(current_task, "ConnectionPool closing.")
-            raise CommClosedError(reason)
         finally:
             self._pending_count -= 1
 
@@ -1582,42 +1601,78 @@ class ConnectionPool:
         if self.semaphore.locked():
             self.collect()
 
-        # This construction is there to ensure that cancellation requests from
-        # the outside can be distinguished from cancellations of our own.
-        # Once the CommPool closes, we'll cancel the connect_attempt which will
-        # raise an OSError
-        # If the ``connect`` is cancelled from the outside, the Event.wait will
-        # be cancelled instead which we'll reraise as a CancelledError and allow
-        # it to propagate
-        connect_attempt = asyncio.create_task(self._connect(addr, timeout))
-        done = asyncio.Event()
-        connecting = self._connecting[addr]
-        connecting.add(connect_attempt)
-
-        def callback(task: asyncio.Task[Comm]) -> None:
-            done.set()
-            connecting = self._connecting[addr]
-            connecting.discard(task)
-
-            if not connecting:
-                try:
-                    del self._connecting[addr]
-                except KeyError:  # pragma: no cover
-                    pass
-
-        connect_attempt.add_done_callback(callback)
-
-        try:
-            await done.wait()
-        except asyncio.CancelledError:
-            # This is an outside cancel attempt
-            connect_attempt.cancel()
+        # on 3.11 this uses asyncio.timeout as a cancel scope to avoid having
+        # to track inner and outer CancelledError exceptions and correctly
+        # call .uncancel() when a CancelledError is caught.
+        if sys.version_info >= (3, 11):
+            reason: str | None = None
             try:
+                async with asyncio.timeout(math.inf) as scope:
+
+                    def cancel_timeout_cb(reason_: str) -> None:
+                        nonlocal reason
+                        reason = reason_
+                        scope.reschedule(-1)
+
+                    self._connecting[addr].add(cancel_timeout_cb)
+                    try:
+                        return await self._connect(addr=addr, timeout=timeout)
+                    finally:
+                        connecting = self._connecting[addr]
+                        connecting.discard(cancel_timeout_cb)
+                        if not connecting:
+                            try:
+                                del self._connecting[addr]
+                            except KeyError:
+                                pass
+            except TimeoutError:
+                if reason is None:
+                    raise
+                raise CommClosedError(reason)
+        else:
+            # This construction is there to ensure that cancellation requests from
+            # the outside can be distinguished from cancellations of our own.
+            # Once the CommPool closes, we'll cancel the connect_attempt which will
+            # raise an OSError
+            # If the ``connect`` is cancelled from the outside, the Event.wait will
+            # be cancelled instead which we'll reraise as a CancelledError and allow
+            # it to propagate
+            connect_attempt = asyncio.create_task(self._connect(addr, timeout))
+            done = asyncio.Event()
+            reason = "ConnectionPool closing."
+
+            def cancel_task_cb(reason_: str) -> None:
+                nonlocal reason
+                reason = reason_
+                connect_attempt.cancel()
+
+            connecting = self._connecting[addr]
+            connecting.add(cancel_task_cb)
+
+            def callback(task: asyncio.Task[Comm]) -> None:
+                done.set()
+                connecting = self._connecting[addr]
+                connecting.discard(cancel_task_cb)
+
+                if not connecting:
+                    try:
+                        del self._connecting[addr]
+                    except KeyError:  # pragma: no cover
+                        pass
+
+            connect_attempt.add_done_callback(callback)
+
+            try:
+                await done.wait()
+            except asyncio.CancelledError:
+                # This is an outside cancel attempt
+                connect_attempt.cancel()
                 await connect_attempt
-            except CommClosedError:
-                pass
-            raise
-        return await connect_attempt
+                raise
+            try:
+                return connect_attempt.result()
+            except asyncio.CancelledError:
+                raise CommClosedError(reason)
 
     def reuse(self, addr: str, comm: Comm) -> None:
         """
@@ -1658,7 +1713,7 @@ class ConnectionPool:
         """
         Remove all Comms to a given address.
         """
-        logger.info("Removing comms to %s", addr)
+        logger.debug("Removing comms to %s", addr)
         if addr in self.available:
             comms = self.available.pop(addr)
             for comm in comms:
@@ -1671,19 +1726,18 @@ class ConnectionPool:
                 self.semaphore.release()
 
         if addr in self._connecting:
-            tasks = self._connecting[addr]
-            for task in tasks:
-                self._reasons[task] = reason
-                task.cancel()
+            cbs = self._connecting[addr]
+            for cb in cbs:
+                cb(reason)
 
     async def close(self) -> None:
         """
         Close all communications
         """
         self.status = Status.closed
-        for tasks in self._connecting.values():
-            for task in tasks:
-                task.cancel()
+        for cbs in self._connecting.values():
+            for cb in cbs:
+                cb("ConnectionPool closing.")
         for d in [self.available, self.occupied]:
             comms = set()
             while d:
@@ -1721,6 +1775,10 @@ class ErrorMessage(TypedDict):
     traceback: protocol.Serialize | None
     exception_text: str
     traceback_text: str
+
+
+class OKMessage(TypedDict):
+    status: Literal["OK"]
 
 
 def error_message(e: BaseException, status: str = "error") -> ErrorMessage:

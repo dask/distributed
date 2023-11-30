@@ -14,7 +14,7 @@ from dask.utils import tmpdir
 from distributed import profile
 from distributed.protocol import deserialize, serialize
 from distributed.protocol.pickle import (
-    CLOUDPICKLE_GTE_20,
+    CLOUDPICKLE_GE_20,
     HIGHEST_PROTOCOL,
     dumps,
     loads,
@@ -201,7 +201,7 @@ def test_pickle_functions(protocol):
 
 
 @pytest.mark.skipif(
-    not CLOUDPICKLE_GTE_20, reason="Pickle by value registration not supported"
+    not CLOUDPICKLE_GE_20, reason="Pickle by value registration not supported"
 )
 def test_pickle_by_value_when_registered():
     with save_sys_modules():

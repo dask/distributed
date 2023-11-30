@@ -26,7 +26,7 @@ from tlz import first, pluck, sliding_window
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import delayed, istask
+from dask import delayed
 from dask.system import CPU_COUNT
 from dask.utils import tmpfile
 
@@ -47,12 +47,7 @@ from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
-from distributed.diagnostics.plugin import (
-    CondaInstall,
-    ForwardOutput,
-    PackageInstall,
-    PipInstall,
-)
+from distributed.diagnostics.plugin import ForwardOutput
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
@@ -96,8 +91,6 @@ from distributed.worker_state_machine import (
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     RemoveReplicasEvent,
-    SerializedTask,
-    StealRequestEvent,
 )
 
 pytestmark = pytest.mark.ci1
@@ -467,7 +460,7 @@ async def test_base_exception_in_task(c, s, a, sync, exc_type):
 
 @gen_test()
 async def test_plugin_exception():
-    class MyPlugin:
+    class MyPlugin(WorkerPlugin):
         def setup(self, worker=None):
             raise ValueError("Setup failed")
 
@@ -481,11 +474,11 @@ async def test_plugin_exception():
 
 @gen_test()
 async def test_plugin_multiple_exceptions():
-    class MyPlugin1:
+    class MyPlugin1(WorkerPlugin):
         def setup(self, worker=None):
             raise ValueError("MyPlugin1 Error")
 
-    class MyPlugin2:
+    class MyPlugin2(WorkerPlugin):
         def setup(self, worker=None):
             raise RuntimeError("MyPlugin2 Error")
 
@@ -548,7 +541,7 @@ async def test_gather_missing_keys(c, s, a, b):
     async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], "y": [b.address]})
 
-    assert resp == {"status": "partial-fail", "keys": {"y": (b.address,)}}
+    assert resp == {"status": "partial-fail", "keys": ("y",)}
     assert a.data[x.key] == b.data[x.key] == "x"
 
 
@@ -564,21 +557,31 @@ async def test_gather_missing_workers(c, s, a, b):
     async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], "y": [bad_addr]})
 
-    assert resp == {"status": "partial-fail", "keys": {"y": (bad_addr,)}}
+    assert resp == {"status": "partial-fail", "keys": ("y",)}
     assert a.data[x.key] == b.data[x.key] == "x"
 
 
-@pytest.mark.parametrize("missing_first", [False, True])
-@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
-async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
+@pytest.mark.slow
+@pytest.mark.parametrize("know_real", [False, True, True, True, True])  # Read below
+@gen_cluster(client=True, worker_kwargs={"timeout": "1s"}, config=NO_AMM)
+async def test_gather_missing_workers_replicated(c, s, a, b, know_real):
     """A worker owning a redundant copy of a key is missing.
     The key is successfully gathered from other workers.
+
+    know_real=False
+        gather() will try to connect to the bad address, fail, and then query the
+        scheduler who will respond with the good address. Then gather will successfully
+        retrieve the key from the good address.
+    know_real=True
+        50% of the times, gather() will try to connect to the bad address, fail, and
+        immediately connect to the good address.
+        The other 50% of the times it will directly connect to the good address,
+        hence why this test is repeated.
     """
     assert b.address.startswith("tcp://127.0.0.1:")
     x = await c.scatter("x", workers=[b.address])
     bad_addr = "tcp://127.0.0.1:12345"
-    # Order matters! Test both
-    addrs = [bad_addr, b.address] if missing_first else [b.address, bad_addr]
+    addrs = [bad_addr, b.address] if know_real else [bad_addr]
     async with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: addrs})
     assert resp == {"status": "OK"}
@@ -593,16 +596,13 @@ async def test_io_loop(s):
 
 @gen_cluster(nthreads=[])
 async def test_io_loop_alternate_loop(s, loop):
-    async def main():
-        with pytest.warns(
-            DeprecationWarning,
-            match=r"The `loop` argument to `Worker` is ignored, and will be "
-            r"removed in a future release. The Worker always binds to the current loop",
-        ):
-            async with Worker(s.address, loop=loop) as w:
-                assert w.io_loop is w.loop is IOLoop.current()
-
-    await asyncio.to_thread(asyncio.run, main())
+    with pytest.warns(
+        DeprecationWarning,
+        match=r"The `loop` argument to `Worker` is ignored, and will be "
+        r"removed in a future release. The Worker always binds to the current loop",
+    ):
+        async with Worker(s.address, loop=loop) as w:
+            assert w.io_loop is w.loop is IOLoop.current()
 
 
 @gen_cluster(client=True)
@@ -1265,7 +1265,7 @@ async def test_statistical_profiling_2(c, s, a, b):
     client=True,
     config={
         "distributed.worker.profile.enabled": True,
-        "distributed.worker.profile.cycle": "100ms",
+        "distributed.worker.profile.cycle": "10ms",
     },
 )
 async def test_statistical_profiling_cycle(c, s, a, b):
@@ -1602,6 +1602,37 @@ async def test_close_gracefully(c, s, a, b):
         assert_amm_transfer_story(key, b, a)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_close_gracefully_no_suspicious_tasks(c, s, a, b):
+    workers = {a.worker_address: a, b.worker_address: b}
+    started = Event()
+    block_task = Event()
+
+    def blocking_task():
+        started.set()
+        block_task.wait()
+
+    fut = c.submit(blocking_task)
+    await started.wait()
+
+    to_close = s.tasks[fut.key].processing_on.address
+
+    async def close_gracefully(dask_worker):
+        await asyncio.shield(dask_worker.close_gracefully())
+
+    try:
+        await c.run(close_gracefully, workers=[to_close])
+    except CommClosedError:
+        pass
+    await async_poll_for(lambda: to_close not in s.workers, 5)
+
+    assert b.address not in s.workers
+    assert s.tasks[fut.key].suspicious == 0
+    await block_task.set()
+    await fut
+
+
 @pytest.mark.parametrize("sync", [False, pytest.param(True, marks=[pytest.mark.slow])])
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_close_while_executing(c, s, a, sync):
@@ -1622,7 +1653,7 @@ async def test_close_while_executing(c, s, a, sync):
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
     task = next(
-        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+        task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
     )
     await a.close()
     assert task.done()
@@ -1644,7 +1675,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
     task = next(
-        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+        task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
     )
     with captured_logger(
         "distributed.worker.state_machine", level=logging.ERROR
@@ -1711,199 +1742,6 @@ async def test_bad_startup(s):
 
     async with Worker(s.address, startup_information={"bad": bad_startup}):
         pass
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_pip_install(c, s, a):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        mocked = mock.Mock()
-        mocked.configure_mock(
-            **{"communicate.return_value": (b"", b""), "wait.return_value": 0}
-        )
-        with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
-        ) as Popen:
-            await c.register_worker_plugin(
-                PipInstall(packages=["requests"], pip_options=["--upgrade"])
-            )
-            assert Popen.call_count == 1
-            args = Popen.call_args[0][0]
-            assert "python" in args[0]
-            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
-            logs = logger.getvalue()
-            assert "pip installing" in logs
-            assert "failed" not in logs
-            assert "restart" not in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_conda_install(c, s, a):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(return_value=(b"", b"", 0))
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            await c.register_worker_plugin(
-                CondaInstall(packages=["requests"], conda_options=["--update-deps"])
-            )
-            assert run_command_mock.call_count == 1
-            command = run_command_mock.call_args[0][0]
-            assert command == "INSTALL"
-            arguments = run_command_mock.call_args[0][1]
-            assert arguments == ["--update-deps", "requests"]
-            logs = logger.getvalue()
-            assert "conda installing" in logs
-            assert "failed" not in logs
-            assert "restart" not in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_pip_install_fails(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        mocked = mock.Mock()
-        mocked.configure_mock(
-            **{
-                "communicate.return_value": (
-                    b"",
-                    b"Could not find a version that satisfies the requirement not-a-package",
-                ),
-                "wait.return_value": 1,
-            }
-        )
-        with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
-        ) as Popen:
-            with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
-
-            assert Popen.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-            assert "not-a-package" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_when_conda_not_found(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        with mock.patch.dict("sys.modules", {"conda": None}):
-            with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(CondaInstall(packages=["not-a-package"]))
-            logs = logger.getvalue()
-            assert "install failed" in logs
-            assert "conda could not be found" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_when_conda_raises(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(side_effect=RuntimeError)
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(CondaInstall(packages=["not-a-package"]))
-            assert run_command_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_on_returncode(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(return_value=(b"", b"", 1))
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            with pytest.raises(RuntimeError):
-                await c.register_worker_plugin(CondaInstall(packages=["not-a-package"]))
-            assert run_command_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-
-
-class StubInstall(PackageInstall):
-    INSTALLER = "stub"
-
-    def __init__(self, packages: list[str], restart: bool = False):
-        super().__init__(packages=packages, restart=restart)
-
-    def install(self) -> None:
-        pass
-
-
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        install_mock = mock.Mock(name="install")
-        with mock.patch.object(StubInstall, "install", install_mock):
-            await c.register_worker_plugin(
-                StubInstall(
-                    packages=["requests"],
-                )
-            )
-            assert install_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "already been installed" in logs
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_package_install_restarts_on_nanny(c, s, a):
-    (addr,) = s.workers
-    await c.register_worker_plugin(
-        StubInstall(
-            packages=["requests"],
-            restart=True,
-        )
-    )
-    # Wait until the worker is restarted
-    while len(s.workers) != 1 or set(s.workers) == {addr}:
-        await asyncio.sleep(0.01)
-
-
-class FailingInstall(PackageInstall):
-    INSTALLER = "fail"
-
-    def __init__(self, packages: list[str], restart: bool = False):
-        super().__init__(packages=packages, restart=restart)
-
-    def install(self) -> None:
-        raise RuntimeError()
-
-
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_package_install_failing_does_not_restart_on_nanny(c, s, a):
-    (addr,) = s.workers
-    with pytest.raises(RuntimeError):
-        await c.register_worker_plugin(
-            FailingInstall(
-                packages=["requests"],
-                restart=True,
-            )
-        )
-    # Nanny does not restart
-    assert a.status is Status.running
-    assert set(s.workers) == {addr}
 
 
 @gen_cluster(nthreads=[])
@@ -2063,7 +1901,7 @@ async def test_bad_local_directory(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_taskstate_metadata(c, s):
     async with Worker(s.address) as a:
-        await c.register_worker_plugin(TaskStateMetadataPlugin())
+        await c.register_plugin(TaskStateMetadataPlugin())
 
         f = c.submit(inc, 1)
         await f
@@ -2087,7 +1925,7 @@ async def test_executor_offload(c, s, monkeypatch):
             self._thread_ident = threading.get_ident()
             return self
 
-    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
+    monkeypatch.setattr("distributed.comm.utils.OFFLOAD_THRESHOLD", 1)
 
     async with Worker(s.address, executor="offload") as w:
         from distributed.utils import _offload_executor
@@ -2124,7 +1962,7 @@ async def test_stimulus_story(c, s, a):
 
     assert isinstance(story[0], ComputeTaskEvent)
     assert story[0].key == "f1"
-    assert story[0].run_spec == SerializedTask(task=None)  # Not logged
+    assert story[0].run_spec is None  # Not logged
 
     assert isinstance(story[1], ExecuteSuccessEvent)
     assert story[1].key == "f1"
@@ -2134,7 +1972,7 @@ async def test_stimulus_story(c, s, a):
     assert isinstance(story[2], ComputeTaskEvent)
     assert story[2].key == "f2"
     assert story[2].who_has == {"f1": (a.address,)}
-    assert story[2].run_spec == SerializedTask(task=None)  # Not logged
+    assert story[2].run_spec is None  # Not logged
     assert story[2].handled >= story[1].handled
 
     assert isinstance(story[3], ExecuteFailureEvent)
@@ -2823,39 +2661,6 @@ async def test_forget_dependents_after_release(c, s, a):
     assert fut2.key not in {d.key for d in a.state.tasks[fut.key].dependents}
 
 
-@pytest.mark.filterwarnings("ignore:Sending large graph of size")
-@pytest.mark.filterwarnings("ignore:Large object of size")
-@gen_cluster(client=True)
-async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
-    stealing_ext = s.extensions["stealing"]
-    await stealing_ext.stop()
-
-    in_deserialize = asyncio.Event()
-    wait_in_deserialize = asyncio.Event()
-
-    async def custom_worker_offload(func, *args):
-        res = func(*args)
-        if not istask(args) and istask(res):
-            in_deserialize.set()
-            await wait_in_deserialize.wait()
-        return res
-
-    monkeypatch.setattr("distributed.worker.offload", custom_worker_offload)
-    obj = random.randbytes(OFFLOAD_THRESHOLD + 1)
-    fut = c.submit(lambda _: 41, obj, workers=[a.address], allow_other_workers=True)
-
-    await in_deserialize.wait()
-    ts = s.tasks[fut.key]
-    a.handle_stimulus(StealRequestEvent(key=fut.key, stimulus_id="test"))
-    stealing_ext.scheduler.send_task_to_worker(b.address, ts)
-
-    fut2 = c.submit(inc, fut, workers=[a.address])
-    fut3 = c.submit(inc, fut2, workers=[a.address])
-    wait_in_deserialize.set()
-    assert await fut2 == 42
-    await fut3
-
-
 @gen_cluster(client=True, config=NO_AMM)
 async def test_acquire_replicas(c, s, a, b):
     fut = c.submit(inc, 1, workers=[a.address])
@@ -3355,11 +3160,7 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a)
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    config={"distributed.comm.recent-messages-log-length": 1000},
-)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
     async with BlockedGatherDep(s.address) as b:
         fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
@@ -3383,6 +3184,39 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         assert f1_story
         assert f2_story
         assert not any("missing-dep" in msg for msg in f2_story)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], timeout=5)
+async def test_get_data_cancelled_error(c, s, a):
+    """Something somewhere in the networking stack raises CancelledError while
+    get_data is running
+
+    See Also
+    --------
+    https://github.com/dask/distributed/issues/8006
+    """
+
+    class FlakyInboundRPC(Worker):
+        flake = 0
+
+        def handle_comm(self, comm):
+            if self.flake:
+                self.flake -= 1
+
+                async def write(*args, **kwargs):
+                    raise asyncio.CancelledError()
+
+                comm.write = write
+
+            return super().handle_comm(comm)
+
+    async with FlakyInboundRPC(s.address) as b:
+        x = c.submit(inc, 1, key="x", workers=[b.address])
+        await wait(x)
+        b.flake = 2
+        y = c.submit(inc, x, key="y", workers=[a.address])
+        assert await y == 3
+        assert b.flake == 0
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -3587,7 +3421,7 @@ async def test_worker_running_before_running_plugins(c, s, caplog):
         def teardown(self, worker):
             pass
 
-    await c.register_worker_plugin(InitWorkerNewThread())
+    await c.register_plugin(InitWorkerNewThread())
     async with Worker(s.address) as worker:
         assert await c.submit(inc, 1) == 2
         assert worker.plugins[InitWorkerNewThread.name].setup_status is Status.running
@@ -3614,7 +3448,6 @@ async def test_execute_preamble_abort_retirement(c, s):
     """
     async with BlockedExecute(s.address) as a:
         await c.wait_for_workers(1)
-        a.block_deserialize_task.set()  # Uninteresting in this test
 
         x = await c.scatter({"x": 1}, workers=[a.address])
         y = c.submit(inc, 1, key="y", workers=[a.address])
@@ -3698,7 +3531,7 @@ async def test_forward_output(c, s, a, b, capsys):
     assert "" == err
 
     # After installing, output should be forwarded
-    await c.register_worker_plugin(plugin, "forward")
+    await c.register_plugin(plugin, "forward")
     await asyncio.sleep(0.1)  # Let setup messages come in
     capsys.readouterr()
 
@@ -3740,7 +3573,7 @@ async def test_forward_output(c, s, a, b, capsys):
 
     # Registering the plugin is idempotent
     other_plugin = ForwardOutput()
-    await c.register_worker_plugin(other_plugin, "forward")
+    await c.register_plugin(other_plugin, "forward")
     await asyncio.sleep(0.1)  # Let teardown/setup messages come in
     out, err = capsys.readouterr()
 
@@ -3815,3 +3648,31 @@ async def test_startstops(c, s, a, b):
         < ss[1]["stop"]
         < t1 + b.scheduler_delay
     )
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+@pytest.mark.parametrize("state", ["cancelled", "resumed"])
+async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
+    async with BlockedExecute(s.address) as b:
+        with captured_logger("distributed.worker", level=logging.ERROR) as log:
+            x = (await c.scatter({"x": 1}))["x"]
+            y = c.submit(inc, x, key="y", workers=[b.address])
+            await b.in_execute.wait()
+            del x, y
+            await async_poll_for(lambda: "x" not in b.data, timeout=5)
+
+            if state == "resumed":
+                y = c.submit(inc, 1, key="y", workers=[a.address])
+                z = c.submit(inc, y, key="z", workers=[b.address])
+                await wait_for_state("y", "resumed", b)
+
+            b.block_execute.set()
+            b.block_execute_exit.set()
+
+            if state == "resumed":
+                assert await z == 3
+                del y, z
+
+            await async_poll_for(lambda: not b.state.tasks, timeout=5)
+
+    assert not log.getvalue()

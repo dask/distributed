@@ -118,6 +118,8 @@ Contents
    tls
    active_memory_manager
    prometheus
+   fine-performance-metrics
+   spans
 
 .. toctree::
    :maxdepth: 1

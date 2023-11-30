@@ -1,0 +1,50 @@
+name: dask-distributed
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - packaging
+  - pip
+  - asyncssh
+  - bokeh
+  - click
+  - cloudpickle
+  - coverage
+  - dask  # overridden by git tip below
+  - filesystem-spec  # overridden by git tip below
+  - gilknocker
+  - h5py
+  - ipykernel <6.22.0  # https://github.com/dask/distributed/issues/7688
+  - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
+  - jinja2
+  - locket
+  - msgpack-python
+  - netcdf4
+  - paramiko
+  - pre-commit
+  - prometheus_client
+  - psutil
+  - pyarrow
+  - pytest
+  - pytest-cov
+  - pytest-faulthandler
+  - pytest-repeat
+  - pytest-rerunfailures
+  - pytest-timeout
+  - requests
+  - s3fs  # overridden by git tip below
+  - scikit-learn
+  - scipy
+  - sortedcollections
+  - tblib
+  - toolz
+  - tornado
+  - zict  # overridden by git tip below
+  - zstandard
+  - pip:
+      - git+https://github.com/dask/dask
+      - git+https://github.com/dask/s3fs
+      - git+https://github.com/dask/zict
+      - git+https://github.com/fsspec/filesystem_spec
+      - keras

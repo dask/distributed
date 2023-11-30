@@ -16,6 +16,7 @@ import socket
 import sys
 import tempfile
 import threading
+import traceback
 import warnings
 import weakref
 import xml.etree.ElementTree
@@ -51,6 +52,9 @@ from typing import ClassVar, TypeVar, overload
 import click
 import psutil
 import tblib.pickling_support
+
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 
 try:
     import resource
@@ -91,8 +95,6 @@ if TYPE_CHECKING:
 
     P = ParamSpec("P")
     T = TypeVar("T")
-
-no_default = "__no_default__"
 
 _forkserver_preload_set = False
 
@@ -370,40 +372,50 @@ def in_async_call(loop, default=False):
         return False
 
 
-def sync(loop, func, *args, callback_timeout=None, **kwargs):
+def sync(
+    loop: IOLoop,
+    func: Callable[..., Awaitable[T]],
+    *args: AnyType,
+    callback_timeout: str | float | timedelta | None = None,
+    **kwargs: AnyType,
+) -> T:
     """
     Run coroutine in loop running in separate thread.
     """
-    callback_timeout = _parse_timedelta(callback_timeout, "s")
-    if loop.asyncio_loop.is_closed():
+    timeout = _parse_timedelta(callback_timeout, "s")
+    if loop.asyncio_loop.is_closed():  # type: ignore[attr-defined]
         raise RuntimeError("IOLoop is closed")
 
     e = threading.Event()
     main_tid = threading.get_ident()
-    result = error = future = None  # set up non-locals
+
+    # set up non-locals
+    result: T
+    error: BaseException | None = None
+    future: asyncio.Future[T]
 
     @gen.coroutine
-    def f():
+    def f() -> Generator[AnyType, AnyType, None]:
         nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = wait_for(future, callback_timeout)
-            future = asyncio.ensure_future(future)
+            awaitable = func(*args, **kwargs)
+            if timeout is not None:
+                awaitable = wait_for(awaitable, timeout)
+            future = asyncio.ensure_future(awaitable)
             result = yield future
-        except Exception:
-            error = sys.exc_info()
+        except Exception as exception:
+            error = exception
         finally:
             e.set()
 
-    def cancel():
+    def cancel() -> None:
         if future is not None:
             future.cancel()
 
-    def wait(timeout):
+    def wait(timeout: float | None) -> bool:
         try:
             return e.wait(timeout)
         except KeyboardInterrupt:
@@ -411,16 +423,15 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             raise
 
     loop.add_callback(f)
-    if callback_timeout is not None:
-        if not wait(callback_timeout):
-            raise TimeoutError(f"timed out after {callback_timeout} s.")
+    if timeout is not None:
+        if not wait(timeout):
+            raise TimeoutError(f"timed out after {timeout} s.")
     else:
         while not e.is_set():
             wait(10)
 
-    if error:
-        typ, exc, tb = error
-        raise exc.with_traceback(tb)
+    if error is not None:
+        raise error
     else:
         return result
 
@@ -569,7 +580,7 @@ class LoopRunner:
         def run_loop() -> None:
             nonlocal start_exc
             try:
-                asyncio.run(amain())
+                asyncio_run(amain(), loop_factory=get_loop_factory())
             except BaseException as e:
                 if start_evt.is_set():
                     raise
@@ -745,7 +756,7 @@ def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
     ...
 
 
-def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
+def log_errors(func=None, /, *, pdb=False, unroll_stack=0):
     """Log any errors and then reraise them.
 
     This can be used:
@@ -773,11 +784,32 @@ def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
         Set to True to break into the debugger in case of exception
     unroll_stack: int, optional
         Number of levels of stack to unroll when determining the module's name for the
-        purpose of logging. Normally you should omit this. Set to 2 if you are writing a
+        purpose of logging. Normally you should omit this. Set to 1 if you are writing a
         helper function, context manager, or decorator.
     """
     le = _LogErrors(pdb=pdb, unroll_stack=unroll_stack)
     return le(func) if func else le
+
+
+_getmodulename_with_path_map: dict[str, str] = {}
+
+
+def _getmodulename_with_path(fname: str) -> str:
+    """Variant of inspect.getmodulename that returns the full module path"""
+    try:
+        return _getmodulename_with_path_map[fname]
+    except KeyError:
+        pass
+
+    for modname, mod in sys.modules.items():
+        fname2 = getattr(mod, "__file__", None)
+        if fname2:
+            _getmodulename_with_path_map[fname2] = modname
+
+    try:
+        return _getmodulename_with_path_map[fname]
+    except KeyError:  # pragma: nocover
+        return os.path.splitext(os.path.basename(fname))[0]
 
 
 class _LogErrors:
@@ -810,16 +842,15 @@ class _LogErrors:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, tb):
         from distributed.comm import CommClosedError
 
         if not exc_type or issubclass(exc_type, (CommClosedError, gen.Return)):
             return
 
-        stack = inspect.stack()
+        stack = traceback.extract_tb(tb)
         frame = stack[self.unroll_stack]
-        mod = inspect.getmodule(frame[0])
-        modname = mod.__name__
+        modname = _getmodulename_with_path(frame.filename)
 
         try:
             logger = logging.getLogger(modname)
@@ -934,13 +965,6 @@ def truncate_exception(e, n=10000):
             return Exception("Long error message", type(e), str(e)[:n])
     else:
         return e
-
-
-def validate_key(k):
-    """Validate a key as received on a stream."""
-    typ = type(k)
-    if typ is not str and typ is not bytes:
-        raise TypeError(f"Unexpected key type {typ} (value: {k!r})")
 
 
 def _maybe_complex(task):
@@ -1609,15 +1633,7 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
 
 
 _deprecations = {
-    "deserialize_for_cli": "dask.config.deserialize",
-    "serialize_for_cli": "dask.config.serialize",
-    "format_bytes": "dask.utils.format_bytes",
-    "format_time": "dask.utils.format_time",
-    "funcname": "dask.utils.funcname",
-    "parse_bytes": "dask.utils.parse_bytes",
-    "parse_timedelta": "dask.utils.parse_timedelta",
-    "typename": "dask.utils.typename",
-    "tmpfile": "dask.utils.tmpfile",
+    "no_default": "dask.typing.no_default",
 }
 
 
@@ -1922,3 +1938,38 @@ else:
 
     async def wait_for(fut: Awaitable[T], timeout: float) -> T:
         return await asyncio.wait_for(fut, timeout)
+
+
+class TupleComparable:
+    """Wrap object so that we can compare tuple, int or None
+
+    When comparing two objects of different types Python fails
+
+    >>> (1, 2) < 1
+    Traceback (most recent call last):
+        ...
+    TypeError: '<' not supported between instances of 'tuple' and 'int'
+
+    This class replaces None with 0, and wraps ints with tuples
+
+    >>> TupleComparable((1, 2)) < TupleComparable(1)
+    False
+    """
+
+    __slots__ = ("obj",)
+
+    def __init__(self, obj):
+        if obj is None:
+            self.obj = (0,)
+        elif isinstance(obj, tuple):
+            self.obj = obj
+        elif isinstance(obj, (int, float)):
+            self.obj = (obj,)
+        else:
+            raise ValueError(f"Object must be tuple, int, float or None, got {obj}")
+
+    def __eq__(self, other):
+        return self.obj == other.obj
+
+    def __lt__(self, other):
+        return self.obj < other.obj

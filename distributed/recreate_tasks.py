@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 
-from dask.utils import stringify
+from dask.core import validate_key
 
-from distributed.client import futures_of, wait
+from distributed.client import Future, futures_of, wait
+from distributed.protocol.serialize import ToPickle
 from distributed.utils import sync
 from distributed.utils_comm import pack_data
-from distributed.worker import _deserialize
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,6 @@ class ReplayTaskScheduler:
     def _process_key(self, key):
         if isinstance(key, list):
             key = tuple(key)  # ensure not a list from msgpack
-        key = stringify(key)
         return key
 
     def get_error_cause(self, *args, keys=(), **kwargs):
@@ -42,7 +41,10 @@ class ReplayTaskScheduler:
     def get_runspec(self, *args, key=None, **kwargs):
         key = self._process_key(key)
         ts = self.scheduler.tasks.get(key)
-        return {"task": ts.run_spec, "deps": [dts.key for dts in ts.dependencies]}
+        return {
+            "task": ToPickle(ts.run_spec),
+            "deps": [dts.key for dts in ts.dependencies],
+        }
 
 
 class ReplayTaskClient:
@@ -77,19 +79,14 @@ class ReplayTaskClient:
         For a given future return the func, args and kwargs and future
         deps that would be executed remotely.
         """
-        if isinstance(future, str):
-            key = future
-        else:
+        if isinstance(future, Future):
             await wait(future)
             key = future.key
-        spec = await self.scheduler.get_runspec(key=key)
-        deps, task = spec["deps"], spec["task"]
-        if isinstance(task, dict):
-            function, args, kwargs = _deserialize(**task)
-            return (function, args, kwargs, deps)
         else:
-            function, args, kwargs = _deserialize(task=task)
-            return (function, args, kwargs, deps)
+            validate_key(future)
+            key = future
+        spec = await self.scheduler.get_runspec(key=key)
+        return (*spec["task"], spec["deps"])
 
     async def _prepare_raw_components(self, raw_components):
         """

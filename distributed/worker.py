@@ -39,7 +39,6 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
-    overload,
 )
 
 from tlz import keymap, pluck
@@ -48,6 +47,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.core import istask
 from dask.system import CPU_COUNT
+from dask.typing import Key
 from dask.utils import (
     apply,
     format_bytes,
@@ -65,22 +65,22 @@ from distributed.collections import LRU
 from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
-from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
+    ErrorMessage,
+    OKMessage,
     PooledRPCCall,
     Status,
     coerce_to_address,
     context_meter_to_server_digest,
     error_message,
-    loads_function,
     pingpong,
 )
 from distributed.core import rpc as RPCType
 from distributed.core import send_recv
 from distributed.diagnostics import nvml, rmm
-from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
 from distributed.http import get_handlers
@@ -91,7 +91,6 @@ from distributed.protocol import pickle, to_serialize
 from distributed.protocol.serialize import _is_dumpable
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
-from distributed.shuffle import ShuffleWorkerExtension
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.spans import SpansWorkerExtension
 from distributed.threadpoolexecutor import ThreadPoolExecutor
@@ -125,7 +124,6 @@ from distributed.worker_memory import (
     WorkerMemoryManager,
 )
 from distributed.worker_state_machine import (
-    NO_VALUE,
     AcquireReplicasEvent,
     BaseWorker,
     CancelComputeEvent,
@@ -160,8 +158,8 @@ if TYPE_CHECKING:
 
     # Circular imports
     from distributed.client import Client
-    from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.nanny import Nanny
+    from distributed.scheduler import T_runspec
 
     P = ParamSpec("P")
     T = TypeVar("T")
@@ -172,7 +170,6 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 DEFAULT_EXTENSIONS: dict[str, type] = {
     "pubsub": PubSubWorkerExtension,
-    "shuffle": ShuffleWorkerExtension,
     "spans": SpansWorkerExtension,
 }
 
@@ -193,7 +190,7 @@ class GetDataBusy(TypedDict):
 
 class GetDataSuccess(TypedDict):
     status: Literal["OK"]
-    data: dict[str, object]
+    data: dict[Key, object]
 
 
 def fail_hard(method: Callable[P, T]) -> Callable[P, T]:
@@ -415,10 +412,10 @@ class Worker(BaseWorker, ServerNode):
     nanny: Nanny | None
     _lock: threading.Lock
     transfer_outgoing_count_limit: int
-    threads: dict[str, int]  # {ts.key: thread ID}
+    threads: dict[Key, int]  # {ts.key: thread ID}
     active_threads_lock: threading.Lock
-    active_threads: dict[int, str]  # {thread ID: ts.key}
-    active_keys: set[str]
+    active_threads: dict[int, Key]  # {thread ID: ts.key}
+    active_keys: set[Key]
     profile_keys: defaultdict[str, dict[str, Any]]
     profile_keys_history: deque[tuple[float, dict[str, dict[str, Any]]]]
     profile_recent: dict[str, Any]
@@ -440,7 +437,7 @@ class Worker(BaseWorker, ServerNode):
     _client: Client | None
     bandwidth_workers: defaultdict[str, tuple[float, int]]
     bandwidth_types: defaultdict[type, tuple[float, int]]
-    preloads: list[preloading.Preload]
+    preloads: preloading.PreloadManager
     contact_address: str | None
     _start_port: int | str | Collection[int] | None = None
     _start_host: str | None
@@ -571,15 +568,16 @@ class Worker(BaseWorker, ServerNode):
         self.active_threads = {}
         self.active_keys = set()
         self.profile_keys = defaultdict(profile.create)
-        self.profile_keys_history = deque(maxlen=3600)
+        maxlen = dask.config.get("distributed.admin.low-level-log-length")
+        self.profile_keys_history = deque(maxlen=maxlen)
+        self.profile_history = deque(maxlen=maxlen)
         self.profile_recent = profile.create()
-        self.profile_history = deque(maxlen=3600)
 
         if validate is None:
             validate = dask.config.get("distributed.worker.validate")
 
-        self.transfer_incoming_log = deque(maxlen=100000)
-        self.transfer_outgoing_log = deque(maxlen=100000)
+        self.transfer_incoming_log = deque(maxlen=maxlen)
+        self.transfer_outgoing_log = deque(maxlen=maxlen)
         self.transfer_outgoing_count_total = 0
         self.transfer_outgoing_bytes_total = 0
         self.transfer_outgoing_bytes = 0
@@ -855,7 +853,7 @@ class Worker(BaseWorker, ServerNode):
     memory_manager: WorkerMemoryManager
 
     @property
-    def data(self) -> MutableMapping[str, object]:
+    def data(self) -> MutableMapping[Key, object]:
         """{task key: task payload} of all completed tasks, whether they were computed
         on this Worker or computed somewhere else and then transferred here over the
         network.
@@ -1044,7 +1042,8 @@ class Worker(BaseWorker, ServerNode):
             spans_ext.collect_digests()
 
         # Send metrics with squashed span_id
-        digests: defaultdict[Hashable, float] = defaultdict(float)
+        # Don't cast int metrics to float
+        digests: defaultdict[Hashable, float] = defaultdict(int)
         for k, v in self.digests_total_since_heartbeat.items():
             if isinstance(k, tuple) and k[0] == "execute":
                 k = k[:1] + k[2:]
@@ -1052,7 +1051,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.digests_total_since_heartbeat.clear()
 
-        out = dict(
+        out: dict = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
             bandwidth={
                 "total": self.bandwidth,
@@ -1305,33 +1304,52 @@ class Worker(BaseWorker, ServerNode):
         finally:
             await self.close(reason="worker-handle-scheduler-connection-broken")
 
-    def keys(self) -> list[str]:
+    def keys(self) -> list[Key]:
         return list(self.data)
 
-    async def gather(self, who_has: dict[str, list[str]]) -> dict[str, Any]:
-        who_has = {
-            k: [coerce_to_address(addr) for addr in v]
-            for k, v in who_has.items()
-            if k not in self.data
-        }
-        result, missing_keys, missing_workers = await gather_from_workers(
-            who_has=who_has, rpc=self.rpc, who=self.address
-        )
-        self.update_data(data=result)
-        if missing_keys:
-            logger.warning(
-                "Could not find data: %s on workers: %s (who_has: %s)",
+    async def gather(self, who_has: dict[Key, list[str]]) -> dict[Key, object]:
+        """Endpoint used by Scheduler.rebalance() and Scheduler.replicate()"""
+        missing_keys = [k for k in who_has if k not in self.data]
+        failed_keys = []
+        missing_workers: set[str] = set()
+        stimulus_id = f"gather-{time()}"
+
+        while missing_keys:
+            to_gather = {}
+            for k in missing_keys:
+                workers = set(who_has[k]) - missing_workers
+                if workers:
+                    to_gather[k] = workers
+                else:
+                    failed_keys.append(k)
+            if not to_gather:
+                break
+
+            (
+                data,
                 missing_keys,
-                missing_workers,
-                who_has,
+                new_failed_keys,
+                new_missing_workers,
+            ) = await gather_from_workers(
+                who_has=to_gather, rpc=self.rpc, who=self.address
             )
-            return {"status": "partial-fail", "keys": missing_keys}
+            self.update_data(data, stimulus_id=stimulus_id)
+            del data
+            failed_keys += new_failed_keys
+            missing_workers.update(new_missing_workers)
+
+            if missing_keys:
+                who_has = await retry_operation(
+                    self.scheduler.who_has, keys=missing_keys
+                )
+
+        if failed_keys:
+            logger.error("Could not find data: %s", failed_keys)
+            return {"status": "partial-fail", "keys": list(failed_keys)}
         else:
             return {"status": "OK"}
 
-    def get_monitor_info(
-        self, recent: bool = False, start: int = 0
-    ) -> dict[str, float]:
+    def get_monitor_info(self, recent: bool = False, start: int = 0) -> dict[str, Any]:
         result = dict(
             range_query=(
                 self.monitor.recent()
@@ -1410,11 +1428,7 @@ class Worker(BaseWorker, ServerNode):
         if self.name is None:
             self.name = self.address
 
-        for preload in self.preloads:
-            try:
-                await preload.start()
-            except Exception:
-                logger.exception("Failed to start preload")
+        await self.preloads.start()
 
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
@@ -1524,6 +1538,12 @@ class Worker(BaseWorker, ServerNode):
         disable_gc_diagnosis()
 
         try:
+            self.log_event(self.address, {"action": "closing-worker", "reason": reason})
+        except Exception:
+            # This can happen when the Server is not up yet
+            logger.exception("Failed to log closing event")
+
+        try:
             logger.info("Stopping worker at %s. Reason: %s", self.address, reason)
         except ValueError:  # address not available if already closed
             logger.info("Stopping worker. Reason: %s", reason)
@@ -1531,21 +1551,24 @@ class Worker(BaseWorker, ServerNode):
             logger.info("Closed worker has not yet started: %s", self.status)
         if not executor_wait:
             logger.info("Not waiting on executor to close")
-        self.status = Status.closing
 
-        # Stop callbacks before giving up control in any `await`.
-        # We don't want to heartbeat while closing.
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
+        # This also informs the scheduler about the status update
+        self.status = Status.closing
+        setproctitle("dask worker [closing]")
+
+        if nanny and self.nanny:
+            with self.rpc(self.nanny) as r:
+                await r.close_gracefully(reason=reason)
 
         # Cancel async instructions
         await BaseWorker.close(self, timeout=timeout)
 
-        for preload in self.preloads:
-            try:
-                await preload.teardown()
-            except Exception:
-                logger.exception("Failed to tear down preload")
+        teardowns = [
+            plugin.teardown(self)
+            for plugin in self.plugins.values()
+            if hasattr(plugin, "teardown")
+        ]
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
@@ -1553,19 +1576,12 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     await result
 
-        if nanny and self.nanny:
-            with self.rpc(self.nanny) as r:
-                await r.close_gracefully(reason=reason)
+        self.stop_services()
 
-        setproctitle("dask worker [closing]")
+        await self.preloads.teardown()
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
 
         if self._client:
             # If this worker is the last one alive, clean up the worker
@@ -1589,9 +1605,8 @@ class Worker(BaseWorker, ServerNode):
                         # otherwise
                         c.close()
 
-        await self.scheduler.close_rpc()
-
-        self.stop_services()
+        await self._stop_listeners()
+        await self.rpc.close()
 
         # Give some time for a UCX scheduler to complete closing endpoints
         # before closing self.batched_stream, otherwise the local endpoint
@@ -1641,13 +1656,12 @@ class Worker(BaseWorker, ServerNode):
                     )  # Just run it directly
 
         self.stop()
-        await self.rpc.close()
-
         self.status = Status.closed
+        setproctitle("dask worker [closed]")
+
         await ServerNode.close(self)
 
         self.__exit_stack.__exit__(None, None, None)
-        setproctitle("dask worker [closed]")
         return "OK"
 
     async def close_gracefully(
@@ -1671,7 +1685,7 @@ class Worker(BaseWorker, ServerNode):
         await self.scheduler.retire_workers(
             workers=[self.address],
             close_workers=False,
-            remove=False,
+            remove=True,
             stimulus_id=f"worker-close-gracefully-{time()}",
         )
         if restart is None:
@@ -1709,23 +1723,13 @@ class Worker(BaseWorker, ServerNode):
     async def get_data(
         self,
         comm: Comm,
-        keys: Collection[str] | None = None,
+        keys: Collection[str],
         who: str | None = None,
         serializers: list[str] | None = None,
-        max_connections: int | None = None,
     ) -> GetDataBusy | Literal[Status.dont_reply]:
-        if max_connections is None:
-            max_connections = self.transfer_outgoing_count_limit
-
-        if keys is None:
-            keys = set()
-
+        max_connections = self.transfer_outgoing_count_limit
         # Allow same-host connections more liberally
-        if (
-            max_connections
-            and comm
-            and get_address_host(comm.peer_address) == get_address_host(self.address)
-        ):
+        if get_address_host(comm.peer_address) == get_address_host(self.address):
             max_connections = max_connections * 2
 
         if self.status == Status.paused:
@@ -1816,7 +1820,7 @@ class Worker(BaseWorker, ServerNode):
 
     def update_data(
         self,
-        data: dict[str, object],
+        data: dict[Key, object],
         stimulus_id: str | None = None,
     ) -> dict[str, Any]:
         if stimulus_id is None:
@@ -1846,15 +1850,20 @@ class Worker(BaseWorker, ServerNode):
         plugin: WorkerPlugin | bytes,
         name: str | None = None,
         catch_errors: bool = True,
-    ) -> dict[str, Any]:
+    ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
-            # Note: historically we have accepted duck-typed classes that don't
-            # inherit from WorkerPlugin. Don't do `assert isinstance`.
-            plugin = cast("WorkerPlugin", pickle.loads(plugin))
+            plugin = pickle.loads(plugin)
+        if not isinstance(plugin, WorkerPlugin):
+            warnings.warn(
+                "Registering duck-typed plugins has been deprecated. "
+                "Please make sure your plugin subclasses `WorkerPlugin`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        plugin = cast(WorkerPlugin, plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
-
         assert name
 
         if name in self.plugins:
@@ -1871,13 +1880,12 @@ class Worker(BaseWorker, ServerNode):
             except Exception as e:
                 if not catch_errors:
                     raise
-                msg = error_message(e)
-                return cast("dict[str, Any]", msg)
+                return error_message(e)
 
         return {"status": "OK"}
 
     @log_errors
-    async def plugin_remove(self, name: str) -> dict[str, Any]:
+    async def plugin_remove(self, name: str) -> ErrorMessage | OKMessage:
         logger.info(f"Removing Worker plugin {name}")
         try:
             plugin = self.plugins.pop(name)
@@ -1886,8 +1894,7 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     result = await result
         except Exception as e:
-            msg = error_message(e)
-            return cast("dict[str, Any]", msg)
+            return error_message(e)
 
         return {"status": "OK"}
 
@@ -1954,7 +1961,7 @@ class Worker(BaseWorker, ServerNode):
     # Dependencies gathering #
     ##########################
 
-    def _get_cause(self, keys: Iterable[str]) -> TaskState:
+    def _get_cause(self, keys: Iterable[Key]) -> TaskState:
         """For diagnostics, we want to attach a transfer to a single task. This task is
         typically the next to be executed but since we're fetching tasks for potentially
         many dependents, an exact match is not possible. Additionally, if a key was
@@ -1977,7 +1984,7 @@ class Worker(BaseWorker, ServerNode):
         self,
         start: float,
         stop: float,
-        data: dict[str, object],
+        data: dict[Key, object],
         cause: TaskState,
         worker: str,
     ) -> None:
@@ -2024,7 +2031,7 @@ class Worker(BaseWorker, ServerNode):
     async def gather_dep(
         self,
         worker: str,
-        to_gather: Collection[str],
+        to_gather: Collection[Key],
         total_nbytes: int,
         *,
         stimulus_id: str,
@@ -2082,7 +2089,6 @@ class Worker(BaseWorker, ServerNode):
                 data=response["data"],
                 stimulus_id=f"gather-dep-success-{time()}",
             )
-
         except OSError:
             logger.exception("Worker stream died during communication: %s", worker)
             self.state.log.append(
@@ -2096,6 +2102,8 @@ class Worker(BaseWorker, ServerNode):
 
         except Exception as e:
             # e.g. data failed to deserialize
+            # FIXME this will deadlock the cluster
+            #       https://github.com/dask/distributed/issues/6705
             logger.exception(e)
             self.state.log.append(
                 ("gather-dep-failed", worker, to_gather, stimulus_id, time())
@@ -2199,26 +2207,8 @@ class Worker(BaseWorker, ServerNode):
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
 
-    async def _maybe_deserialize_task(
-        self, ts: TaskState
-    ) -> tuple[Callable, tuple, dict[str, Any]]:
-        assert ts.run_spec is not None
-        start = time()
-        # Offload deserializing large tasks
-        if sizeof(ts.run_spec) > OFFLOAD_THRESHOLD:
-            function, args, kwargs = await offload(_deserialize, *ts.run_spec)
-        else:
-            function, args, kwargs = _deserialize(*ts.run_spec)
-        stop = time()
-
-        if stop - start > 0.010:
-            ts.startstops.append(
-                {"action": "deserialize", "start": start, "stop": stop}
-            )
-        return function, args, kwargs
-
     @fail_hard
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: Key, *, stimulus_id: str) -> StateMachineEvent:
         """Execute a task. Implements BaseWorker abstract method.
 
         See also
@@ -2236,21 +2226,12 @@ class Worker(BaseWorker, ServerNode):
         run_id = ts.run_id
 
         try:
-            function, args, kwargs = await self._maybe_deserialize_task(ts)
-        except Exception as exc:
-            logger.error("Could not deserialize task %s", key, exc_info=True)
-            return ExecuteFailureEvent.from_exception(
-                exc,
-                key=key,
-                stimulus_id=f"run-spec-deserialize-failed-{time()}",
-            )
-
-        try:
             if self.state.validate:
                 assert not ts.waiting_for_data
                 assert ts.state in ("executing", "cancelled", "resumed"), ts
-                assert ts.run_spec is not None
+            assert ts.run_spec is not None
 
+            function, args, kwargs = ts.run_spec
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
             assert ts.annotations is not None
@@ -2264,6 +2245,15 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             self.active_keys.add(key)
+            # Propagate span (see distributed.spans). This is useful when spawning
+            # more tasks using worker_client() and for logging.
+            span_ctx = (
+                dask.annotate(span=ts.annotations["span"])
+                if "span" in ts.annotations
+                else contextlib.nullcontext()
+            )
+            span_ctx.__enter__()
+
             try:
                 ts.start_time = time()
                 if iscoroutinefunction(function):
@@ -2312,6 +2302,7 @@ class Worker(BaseWorker, ServerNode):
                         )
             finally:
                 self.active_keys.discard(key)
+                span_ctx.__exit__(None, None, None)
 
             self.threads[key] = result["thread"]
 
@@ -2366,16 +2357,29 @@ class Worker(BaseWorker, ServerNode):
             return ExecuteFailureEvent.from_exception(
                 result,
                 key=key,
+                run_id=run_id,
                 start=result["start"],
                 stop=result["stop"],
                 stimulus_id=f"task-erred-{time()}",
             )
 
         except Exception as exc:
-            logger.error("Exception during execution of task %s.", key, exc_info=True)
+            # Some legitimate use cases that will make us reach this point:
+            # - User specified an invalid executor;
+            # - Task transitioned to cancelled or resumed(fetch) before the start of
+            #   execute() and its dependencies were released. This caused
+            #   _prepare_args_for_execution() to raise KeyError;
+            # - A dependency was unspilled but failed to deserialize due to a bug in
+            #   user-defined or third party classes.
+            if ts.state == "executing":
+                logger.error(
+                    f"Exception during execution of task {key!r}",
+                    exc_info=True,
+                )
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
+                run_id=run_id,
                 stimulus_id=f"execute-unknown-error-{time()}",
             )
 
@@ -2392,8 +2396,8 @@ class Worker(BaseWorker, ServerNode):
                 from distributed.actor import Actor  # TODO: create local actor
 
                 data[k] = Actor(type(self.state.actors[k]), self.address, k, self)
-        args2 = pack_data(args, data, key_types=(bytes, str))
-        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
+        args2 = pack_data(args, data, key_types=(bytes, str, tuple))
+        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str, tuple))
         stop = time()
         if stop - start > 0.005:
             ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
@@ -2452,7 +2456,7 @@ class Worker(BaseWorker, ServerNode):
     ):
         now = time() + self.scheduler_delay
         if server:
-            history = self.io_loop.profile
+            history = self.io_loop.profile  # type: ignore[attr-defined]
         elif key is None:
             history = self.profile_history
         else:
@@ -2513,7 +2517,7 @@ class Worker(BaseWorker, ServerNode):
             )
         return result
 
-    def get_call_stack(self, keys: Collection[str] | None = None) -> dict[str, Any]:
+    def get_call_stack(self, keys: Collection[Key] | None = None) -> dict[Key, Any]:
         with self.active_threads_lock:
             sys_frames = sys._current_frames()
             frames = {key: sys_frames[tid] for tid, key in self.active_threads.items()}
@@ -2605,7 +2609,7 @@ class Worker(BaseWorker, ServerNode):
 
         return self._client
 
-    def get_current_task(self) -> str:
+    def get_current_task(self) -> Key:
         """Get the key of the task we are currently running
 
         This only makes sense to run within a task
@@ -2856,41 +2860,12 @@ def secede():
     )
 
 
-@overload
 async def get_data_from_worker(
     rpc: ConnectionPool,
-    keys: Collection[str],
+    keys: Collection[Key],
     worker: str,
     *,
     who: str | None = None,
-    max_connections: Literal[False],
-    serializers: list[str] | None = None,
-    deserializers: list[str] | None = None,
-) -> GetDataSuccess:
-    ...
-
-
-@overload
-async def get_data_from_worker(
-    rpc: ConnectionPool,
-    keys: Collection[str],
-    worker: str,
-    *,
-    who: str | None = None,
-    max_connections: bool | int | None = None,
-    serializers: list[str] | None = None,
-    deserializers: list[str] | None = None,
-) -> GetDataBusy | GetDataSuccess:
-    ...
-
-
-async def get_data_from_worker(
-    rpc: ConnectionPool,
-    keys: Collection[str],
-    worker: str,
-    *,
-    who: str | None = None,
-    max_connections: bool | int | None = None,
     serializers: list[str] | None = None,
     deserializers: list[str] | None = None,
 ) -> GetDataBusy | GetDataSuccess:
@@ -2920,7 +2895,6 @@ async def get_data_from_worker(
             op="get_data",
             keys=keys,
             who=who,
-            max_connections=max_connections,
         )
         try:
             status = response["status"]
@@ -2934,27 +2908,14 @@ async def get_data_from_worker(
         rpc.reuse(worker, comm)
 
 
-job_counter = [0]
+def _normalize_task(task: Any) -> T_runspec:
+    if istask(task):
+        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
+            return task[1], task[2], task[3] if len(task) == 4 else {}
+        elif not any(map(_maybe_complex, task[1:])):
+            return task[0], task[1:], {}
 
-
-@context_meter.meter("deserialize")
-def _deserialize(function=None, args=None, kwargs=None, task=NO_VALUE):
-    """Deserialize task inputs and regularize to func, args, kwargs"""
-    # Some objects require threadlocal state during deserialization, e.g. to
-    # detect the current worker
-    if function is not None:
-        function = loads_function(function)
-    if args and isinstance(args, bytes):
-        args = pickle.loads(args)
-    if kwargs and isinstance(kwargs, bytes):
-        kwargs = pickle.loads(kwargs)
-
-    if task is not NO_VALUE:
-        assert not function and not args and not kwargs
-        function = execute_task
-        args = (task,)
-
-    return function, args or (), kwargs or {}
+    return execute_task, (task,), {}
 
 
 def execute_task(task):
@@ -2993,62 +2954,6 @@ def dumps_function(func) -> bytes:
     except TypeError:  # Unhashable function
         result = pickle.dumps(func)
     return result
-
-
-def dumps_task(task):
-    """Serialize a dask task
-
-    Returns a dict of bytestrings that can each be loaded with ``loads``
-
-    Examples
-    --------
-    Either returns a task as a function, args, kwargs dict
-
-    >>> from operator import add
-    >>> dumps_task((add, 1))  # doctest: +SKIP
-    {'function': b'\x80\x04\x95\x00\x8c\t_operator\x94\x8c\x03add\x94\x93\x94.'
-     'args': b'\x80\x04\x95\x07\x00\x00\x00K\x01K\x02\x86\x94.'}
-
-    Or as a single task blob if it can't easily decompose the result.  This
-    happens either if the task is highly nested, or if it isn't a task at all
-
-    >>> dumps_task(1)  # doctest: +SKIP
-    {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
-    """
-    if istask(task):
-        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
-            if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
-            return d
-        elif not any(map(_maybe_complex, task[1:])):
-            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
-    return to_serialize(task)
-
-
-_warn_dumps_warned = [False]
-
-
-def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
-    """Dump an object to bytes, warn if those bytes are large"""
-    b = dumps(obj)
-    if not _warn_dumps_warned[0] and len(b) > limit:
-        _warn_dumps_warned[0] = True
-        s = str(obj)
-        if len(s) > 70:
-            s = s[:50] + " ... " + s[-15:]
-        warnings.warn(
-            "Large object of size %s detected in task graph: \n"
-            "  %s\n"
-            "Consider scattering large objects ahead of time\n"
-            "with client.scatter to reduce scheduler burden and \n"
-            "keep data on workers\n\n"
-            "    future = client.submit(func, big_data)    # bad\n\n"
-            "    big_future = client.scatter(big_data)     # good\n"
-            "    future = client.submit(func, big_future)  # good"
-            % (format_bytes(len(b)), s)
-        )
-    return b
 
 
 def apply_function(
