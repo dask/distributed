@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from distributed import Nanny, NannyPlugin
+from distributed.protocol.pickle import dumps
 from distributed.utils_test import gen_cluster
 
 
@@ -58,11 +59,12 @@ async def test_duck_typed_register_nanny_plugin_is_deprecated(c, s, a):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_register_idempotent_plugins(c, s, a):
+async def test_register_idempotent_plugin(c, s, a):
     class IdempotentPlugin(NannyPlugin):
         def __init__(self, instance=None):
             self.name = "idempotentplugin"
             self.instance = instance
+            self.idempotent = True
 
         def setup(self, nanny):
             if self.instance != "first":
@@ -71,27 +73,83 @@ async def test_register_idempotent_plugins(c, s, a):
                 )
 
     first = IdempotentPlugin(instance="first")
-    await c.register_plugin(first, idempotent=True)
+    await c.register_plugin(first)
     assert "idempotentplugin" in a.plugins
 
     second = IdempotentPlugin(instance="second")
-    await c.register_plugin(second, idempotent=True)
+    await c.register_plugin(second)
     assert "idempotentplugin" in a.plugins
     assert a.plugins["idempotentplugin"].instance == "first"
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_register_non_idempotent_plugins(c, s, a):
+async def test_register_non_idempotent_plugin(c, s, a):
     class NonIdempotentPlugin(NannyPlugin):
         def __init__(self, instance=None):
             self.name = "nonidempotentplugin"
             self.instance = instance
 
     first = NonIdempotentPlugin(instance="first")
-    await c.register_plugin(first, idempotent=False)
+    await c.register_plugin(first)
     assert "nonidempotentplugin" in a.plugins
 
     second = NonIdempotentPlugin(instance="second")
-    await c.register_plugin(second, idempotent=False)
+    await c.register_plugin(second)
     assert "nonidempotentplugin" in a.plugins
     assert a.plugins["nonidempotentplugin"].instance == "second"
+
+    third = NonIdempotentPlugin(instance="third")
+    with pytest.warns(
+        FutureWarning,
+        match="`Scheduler.register_nanny_plugin` now requires `idempotent`",
+    ):
+        await s.register_nanny_plugin(
+            comm=None, plugin=dumps(third), name="nonidempotentplugin"
+        )
+    assert "nonidempotentplugin" in a.plugins
+    assert a.plugins["nonidempotentplugin"].instance == "third"
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_register_plugin_with_idempotent_keyword_is_deprecated(c, s, a):
+    class NonIdempotentPlugin(NannyPlugin):
+        def __init__(self, instance=None):
+            self.name = "nonidempotentplugin"
+            self.instance = instance
+            # We want to overrule this
+            self.idempotent = True
+
+    first = NonIdempotentPlugin(instance="first")
+    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
+        await c.register_plugin(first, idempotent=False)
+    assert "nonidempotentplugin" in a.plugins
+
+    second = NonIdempotentPlugin(instance="second")
+    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
+        await c.register_plugin(second, idempotent=False)
+    assert "nonidempotentplugin" in a.plugins
+    assert a.plugins["nonidempotentplugin"].instance == "second"
+
+    class IdempotentPlugin(NannyPlugin):
+        def __init__(self, instance=None):
+            self.name = "idempotentplugin"
+            self.instance = instance
+            # We want to overrule this
+            self.idempotent = False
+
+        def setup(self, nanny):
+            if self.instance != "first":
+                raise RuntimeError(
+                    "Only the first plugin should be started when idempotent is set"
+                )
+
+    first = IdempotentPlugin(instance="first")
+    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
+        await c.register_plugin(first, idempotent=True)
+    assert "idempotentplugin" in a.plugins
+
+    second = IdempotentPlugin(instance="second")
+    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
+        await c.register_plugin(second, idempotent=True)
+    assert "idempotentplugin" in a.plugins
+    assert a.plugins["idempotentplugin"].instance == "first"

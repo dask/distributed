@@ -47,12 +47,7 @@ from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics import nvml
-from distributed.diagnostics.plugin import (
-    CondaInstall,
-    ForwardOutput,
-    PackageInstall,
-    PipInstall,
-)
+from distributed.diagnostics.plugin import ForwardOutput
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
@@ -1239,7 +1234,7 @@ async def test_statistical_profiling_2(c, s, a, b):
     client=True,
     config={
         "distributed.worker.profile.enabled": True,
-        "distributed.worker.profile.cycle": "100ms",
+        "distributed.worker.profile.cycle": "10ms",
     },
 )
 async def test_statistical_profiling_cycle(c, s, a, b):
@@ -1576,6 +1571,37 @@ async def test_close_gracefully(c, s, a, b):
         assert_amm_transfer_story(key, b, a)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_close_gracefully_no_suspicious_tasks(c, s, a, b):
+    workers = {a.worker_address: a, b.worker_address: b}
+    started = Event()
+    block_task = Event()
+
+    def blocking_task():
+        started.set()
+        block_task.wait()
+
+    fut = c.submit(blocking_task)
+    await started.wait()
+
+    to_close = s.tasks[fut.key].processing_on.address
+
+    async def close_gracefully(dask_worker):
+        await asyncio.shield(dask_worker.close_gracefully())
+
+    try:
+        await c.run(close_gracefully, workers=[to_close])
+    except CommClosedError:
+        pass
+    await async_poll_for(lambda: to_close not in s.workers, 5)
+
+    assert b.address not in s.workers
+    assert s.tasks[fut.key].suspicious == 0
+    await block_task.set()
+    await fut
+
+
 @pytest.mark.parametrize("sync", [False, pytest.param(True, marks=[pytest.mark.slow])])
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_close_while_executing(c, s, a, sync):
@@ -1596,7 +1622,7 @@ async def test_close_while_executing(c, s, a, sync):
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
     task = next(
-        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+        task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
     )
     await a.close()
     assert task.done()
@@ -1618,7 +1644,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
     task = next(
-        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+        task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
     )
     with captured_logger(
         "distributed.worker.state_machine", level=logging.ERROR
@@ -1685,199 +1711,6 @@ async def test_bad_startup(s):
 
     async with Worker(s.address, startup_information={"bad": bad_startup}):
         pass
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_pip_install(c, s, a):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        mocked = mock.Mock()
-        mocked.configure_mock(
-            **{"communicate.return_value": (b"", b""), "wait.return_value": 0}
-        )
-        with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
-        ) as Popen:
-            await c.register_plugin(
-                PipInstall(packages=["requests"], pip_options=["--upgrade"])
-            )
-            assert Popen.call_count == 1
-            args = Popen.call_args[0][0]
-            assert "python" in args[0]
-            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
-            logs = logger.getvalue()
-            assert "pip installing" in logs
-            assert "failed" not in logs
-            assert "restart" not in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_conda_install(c, s, a):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(return_value=(b"", b"", 0))
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            await c.register_plugin(
-                CondaInstall(packages=["requests"], conda_options=["--update-deps"])
-            )
-            assert run_command_mock.call_count == 1
-            command = run_command_mock.call_args[0][0]
-            assert command == "INSTALL"
-            arguments = run_command_mock.call_args[0][1]
-            assert arguments == ["--update-deps", "requests"]
-            logs = logger.getvalue()
-            assert "conda installing" in logs
-            assert "failed" not in logs
-            assert "restart" not in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_pip_install_fails(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        mocked = mock.Mock()
-        mocked.configure_mock(
-            **{
-                "communicate.return_value": (
-                    b"",
-                    b"Could not find a version that satisfies the requirement not-a-package",
-                ),
-                "wait.return_value": 1,
-            }
-        )
-        with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
-        ) as Popen:
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(PipInstall(packages=["not-a-package"]))
-
-            assert Popen.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-            assert "not-a-package" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_when_conda_not_found(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        with mock.patch.dict("sys.modules", {"conda": None}):
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
-            logs = logger.getvalue()
-            assert "install failed" in logs
-            assert "conda could not be found" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_when_conda_raises(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(side_effect=RuntimeError)
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
-            assert run_command_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_on_returncode(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(return_value=(b"", b"", 1))
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
-            assert run_command_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-
-
-class StubInstall(PackageInstall):
-    INSTALLER = "stub"
-
-    def __init__(self, packages: list[str], restart: bool = False):
-        super().__init__(packages=packages, restart=restart)
-
-    def install(self) -> None:
-        pass
-
-
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        install_mock = mock.Mock(name="install")
-        with mock.patch.object(StubInstall, "install", install_mock):
-            await c.register_plugin(
-                StubInstall(
-                    packages=["requests"],
-                )
-            )
-            assert install_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "already been installed" in logs
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_package_install_restarts_on_nanny(c, s, a):
-    (addr,) = s.workers
-    await c.register_plugin(
-        StubInstall(
-            packages=["requests"],
-            restart=True,
-        )
-    )
-    # Wait until the worker is restarted
-    while len(s.workers) != 1 or set(s.workers) == {addr}:
-        await asyncio.sleep(0.01)
-
-
-class FailingInstall(PackageInstall):
-    INSTALLER = "fail"
-
-    def __init__(self, packages: list[str], restart: bool = False):
-        super().__init__(packages=packages, restart=restart)
-
-    def install(self) -> None:
-        raise RuntimeError()
-
-
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_package_install_failing_does_not_restart_on_nanny(c, s, a):
-    (addr,) = s.workers
-    with pytest.raises(RuntimeError):
-        await c.register_plugin(
-            FailingInstall(
-                packages=["requests"],
-                restart=True,
-            )
-        )
-    # Nanny does not restart
-    assert a.status is Status.running
-    assert set(s.workers) == {addr}
 
 
 @gen_cluster(nthreads=[])
@@ -3296,11 +3129,7 @@ async def test_gather_dep_do_not_handle_response_of_not_requested_tasks(c, s, a)
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    config={"distributed.comm.recent-messages-log-length": 1000},
-)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
     async with BlockedGatherDep(s.address) as b:
         fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
@@ -3788,3 +3617,31 @@ async def test_startstops(c, s, a, b):
         < ss[1]["stop"]
         < t1 + b.scheduler_delay
     )
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+@pytest.mark.parametrize("state", ["cancelled", "resumed"])
+async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
+    async with BlockedExecute(s.address) as b:
+        with captured_logger("distributed.worker", level=logging.ERROR) as log:
+            x = (await c.scatter({"x": 1}))["x"]
+            y = c.submit(inc, x, key="y", workers=[b.address])
+            await b.in_execute.wait()
+            del x, y
+            await async_poll_for(lambda: "x" not in b.data, timeout=5)
+
+            if state == "resumed":
+                y = c.submit(inc, 1, key="y", workers=[a.address])
+                z = c.submit(inc, y, key="z", workers=[b.address])
+                await wait_for_state("y", "resumed", b)
+
+            b.block_execute.set()
+            b.block_execute_exit.set()
+
+            if state == "resumed":
+                assert await z == 3
+                del y, z
+
+            await async_poll_for(lambda: not b.state.tasks, timeout=5)
+
+    assert not log.getvalue()

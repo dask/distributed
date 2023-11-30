@@ -51,7 +51,7 @@ template_variables = {"pages": ["status", "system", "profile"]}
 
 def standard_doc(title, active_page, *, template="simple.html"):
     def decorator(f):
-        @log_errors(unroll_stack=2)
+        @log_errors(unroll_stack=1)
         def wrapper(arg, extra, doc):
             doc.title = title
             doc.template = env.get_template(template)

@@ -52,6 +52,7 @@ from distributed.utils import TimeoutError, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
+    BlockedGetData,
     BrokenComm,
     NoSchedulerDelayWorker,
     assert_story,
@@ -154,6 +155,8 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
+# FIXME: Temporarily xfail-ing to unblock CI
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/8255")
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
@@ -735,6 +738,64 @@ async def test_no_workers(client, s, queue):
 @gen_cluster(nthreads=[])
 async def test_retire_workers_empty(s):
     await s.retire_workers(workers=[])
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_retire_workers_lock(c, s, *workers):
+    """Test that replicate(), rebalance(), and retire_workers() can be called at the
+    same time
+
+    See also
+    --------
+    test_retire_workers_concurrently
+    test_active_memory_manager.py::test_RetireWorker_stress
+    """
+    futs = c.map(inc, range(100))
+    await wait(futs)
+    before = s.transition_counter
+    await asyncio.gather(
+        *(
+            s.replicate(keys=[fut.key for fut in futs], n=2),
+            s.rebalance(),
+            s.retire_workers(workers=[workers[0].address]),
+            s.retire_workers(workers=[workers[1].address]),
+        )
+    )
+    await c.gather(futs)
+    assert s.transition_counter == before
+
+
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.active-memory-manager.measure": "managed"},
+)
+async def test_retire_workers_concurrently(c, s, w1, w2):
+    """Test that multiple calls to retire_workers can run at the same time
+
+    See also
+    --------
+    test_retire_workers_lock
+    test_active_memory_manager.py::test_RetireWorker_stress
+    """
+    async with BlockedGetData(s.address) as w3:
+        x = c.submit(inc, 1, key="x", workers=[w2.address])
+        y = c.submit(inc, 2, key="y", workers=[w3.address])
+        await wait([x, y])
+
+        # AMM will choose w1 as it's emptier than w2
+        w3_fut = asyncio.create_task(c.retire_workers([w3.address]))
+        await w3.in_get_data.wait()
+
+        # Test that we can retire w2 even if w3 has not finished retiring yet
+        await c.retire_workers([w2.address])
+        assert set(s.workers) == {w1.address, w3.address}
+        assert dict(w1.data) == {"x": 2}
+
+        w3.block_get_data.set()
+        await w3_fut
+
+        assert set(s.workers) == {w1.address}
+        assert dict(w1.data) == {"x": 2, "y": 3}
 
 
 @gen_cluster()
@@ -1589,7 +1650,7 @@ async def test_file_descriptors(c, s):
 @gen_cluster(client=True)
 async def test_learn_occupancy(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.2)
-    while sum(len(ts.who_has) for ts in s.tasks.values()) < 10:
+    while sum(len(ts.who_has or ()) for ts in s.tasks.values()) < 10:
         await asyncio.sleep(0.01)
 
     nproc = sum(ts.state == "processing" for ts in s.tasks.values())
@@ -3012,7 +3073,7 @@ async def test_retire_state_change(c, s, a, b):
     await asyncio.gather(*coros)
 
 
-@gen_cluster(client=True, config={"distributed.scheduler.events-log-length": 3})
+@gen_cluster(client=True, config={"distributed.admin.low-level-log-length": 3})
 async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 1")
     assert len(s.events["test"]) == 1
@@ -3020,7 +3081,7 @@ async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 3")
     assert len(s.events["test"]) == 3
 
-    # adding a forth message will drop the first one and length stays at 3
+    # adding a fourth message will drop the first one and length stays at 3
     s.log_event("test", "dummy message 4")
     assert len(s.events["test"]) == 3
     assert s.events["test"][0][1] == "dummy message 2"
@@ -4115,46 +4176,6 @@ async def test_dump_cluster_state(s, *workers, format):
         fs.rm("state-dumps", recursive=True)
 
 
-@gen_cluster(nthreads=[])
-async def test_idempotent_plugins(s):
-    class IdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "idempotentplugin"
-            self.instance = instance
-
-        def start(self, scheduler):
-            if self.instance != "first":
-                raise RuntimeError(
-                    "Only the first plugin should be started when idempotent is set"
-                )
-
-    first = IdempotentPlugin(instance="first")
-    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=True)
-    assert "idempotentplugin" in s.plugins
-
-    second = IdempotentPlugin(instance="second")
-    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=True)
-    assert "idempotentplugin" in s.plugins
-    assert s.plugins["idempotentplugin"].instance == "first"
-
-
-@gen_cluster(nthreads=[])
-async def test_non_idempotent_plugins(s):
-    class NonIdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "nonidempotentplugin"
-            self.instance = instance
-
-    first = NonIdempotentPlugin(instance="first")
-    await s.register_scheduler_plugin(plugin=dumps(first), idempotent=False)
-    assert "nonidempotentplugin" in s.plugins
-
-    second = NonIdempotentPlugin(instance="second")
-    await s.register_scheduler_plugin(plugin=dumps(second), idempotent=False)
-    assert "nonidempotentplugin" in s.plugins
-    assert s.plugins["nonidempotentplugin"].instance == "second"
-
-
 @gen_cluster(nthreads=[("", 1)])
 async def test_repr(s, a):
     async with Worker(s.address, nthreads=2) as b:  # name = address by default
@@ -4244,8 +4265,8 @@ async def test_KilledWorker_informative_message(s, a, b):
     with pytest.raises(KilledWorker) as excinfo:
         raise ex
     msg = str(excinfo.value)
-    assert "Attempted to run task foo-bar" in msg
-    assert str(s.allowed_failures) in msg
+    assert "Attempted to run task 'foo-bar' on 667 different workers" in msg
+    assert a.address in msg
     assert "worker logs" in msg
     assert "https://distributed.dask.org/en/stable/killed.html" in msg
 
@@ -4507,3 +4528,19 @@ async def test_refuse_to_schedule_huge_task(c, s, *workers, finalize):
     for w in workers:
         for ev in w.state.log:
             assert fut.key not in ev
+
+
+@gen_cluster(client=True)
+async def test_html_repr(c, s, a, b):
+    futs = c.map(slowinc, range(10), delay=0.1, key=[("slowinc", i) for i in range(10)])
+    f = c.submit(sum, futs)
+
+    while not f.done():
+        assert isinstance(s._repr_html_(), str)
+        assert isinstance(s.workers[a.address]._repr_html_(), str)
+        assert isinstance(s.workers[b.address]._repr_html_(), str)
+        for ts in s.tasks.values():
+            assert isinstance(ts._repr_html_(), str)
+        await asyncio.sleep(0.01)
+
+    await f

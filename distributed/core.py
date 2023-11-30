@@ -43,6 +43,7 @@ from distributed.comm import (
     normalize_address,
     unparse_host_port,
 )
+from distributed.comm.core import Listener
 from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
 from distributed.diskutils import WorkDir, WorkSpace
@@ -63,6 +64,8 @@ from distributed.utils import (
 
 if TYPE_CHECKING:
     from typing_extensions import ParamSpec, Self
+
+    from distributed.counter import Digest
 
     P = ParamSpec("P")
     R = TypeVar("R")
@@ -315,11 +318,54 @@ class Server:
 
     """
 
-    default_ip = ""
-    default_port = 0
+    default_ip: ClassVar[str] = ""
+    default_port: ClassVar[int] = 0
+
+    id: str
+    blocked_handlers: list[str]
+    handlers: dict[str, Callable]
+    stream_handlers: dict[str, Callable]
+    listeners: list[Listener]
+    counters: defaultdict[str, Counter]
+    deserialize: bool
+
     local_directory: str
+
+    monitor: SystemMonitor
+    io_loop: IOLoop
+    thread_id: int
+
+    periodic_callbacks: dict[str, PeriodicCallback]
+    digests: defaultdict[Hashable, Digest] | None
+    digests_total: defaultdict[Hashable, float]
+    digests_total_since_heartbeat: defaultdict[Hashable, float]
+    digests_max: defaultdict[Hashable, float]
+
+    _last_tick: float
+    _tick_counter: int
+    _last_tick_counter: int
+    _tick_interval: float
+    _tick_interval_observed: float
+
+    _status: Status
+
+    _address: str | None
+    _listen_address: str | None
+    _host: str | None
+    _port: int | None
+
+    _comms: dict[Comm, str | None]
+
+    _ongoing_background_tasks: AsyncTaskGroup
+    _event_finished: asyncio.Event
+
+    _original_local_dir: str
+    _updated_sys_path: bool
     _workspace: WorkSpace
     _workdir: None | WorkDir
+
+    _startup_lock: asyncio.Lock
+    __startup_exc: Exception | None
 
     def __init__(
         self,
@@ -432,11 +478,12 @@ class Server:
         except ImportError:
             self.digests = None
 
-        # In case crick is not installed, also log cumulative totals (reset at server
-        # restart) and local maximums (reset by prometheus poll)
-        self.digests_total = defaultdict(float)
-        self.digests_total_since_heartbeat = defaultdict(float)
-        self.digests_max = defaultdict(float)
+        # Also log cumulative totals (reset at server restart)
+        # and local maximums (reset by prometheus poll)
+        # Don't cast int metrics to float
+        self.digests_total = defaultdict(int)
+        self.digests_total_since_heartbeat = defaultdict(int)
+        self.digests_max = defaultdict(int)
 
         self.counters = defaultdict(Counter)
         pc = PeriodicCallback(self._shift_counters, 5000)
@@ -673,13 +720,13 @@ class Server:
         self.monitor.close()
         if not (stop_listeners := self._stop_listeners()).done():
             self._ongoing_background_tasks.call_soon(
-                asyncio.wait_for(stop_listeners, timeout=None)
+                asyncio.wait_for(stop_listeners, timeout=None)  # type: ignore[arg-type]
             )
         if self._workdir is not None:
             self._workdir.release()
 
     @property
-    def listener(self):
+    def listener(self) -> Listener | None:
         if self.listeners:
             return self.listeners[0]
         else:
@@ -722,6 +769,7 @@ class Server:
             if self.listener is None:
                 raise ValueError("cannot get address of non-running Server")
             self._address = self.listener.contact_address
+            assert self._address
         return self._address
 
     @property
@@ -774,7 +822,7 @@ class Server:
     def identity(self) -> dict[str, str]:
         return {"type": type(self).__name__, "id": self.id}
 
-    def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -784,7 +832,7 @@ class Server:
         Client.dump_cluster_state
         distributed.utils.recursive_to_dict
         """
-        info = self.identity()
+        info: dict[str, Any] = self.identity()
         extra = {
             "address": self.address,
             "status": self.status.name,
@@ -816,7 +864,7 @@ class Server:
         )
         self.listeners.append(listener)
 
-    def handle_comm(self, comm):
+    def handle_comm(self, comm: Comm) -> NoOpAwaitable:
         """Start a background task that dispatches new communications to coroutine-handlers"""
         try:
             self._ongoing_background_tasks.call_soon(self._handle_comm, comm)
@@ -824,7 +872,7 @@ class Server:
             comm.abort()
         return NoOpAwaitable()
 
-    async def _handle_comm(self, comm):
+    async def _handle_comm(self, comm: Comm) -> None:
         """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
@@ -963,7 +1011,9 @@ class Server:
                         "Failed while closing connection to %r: %s", address, e
                     )
 
-    async def handle_stream(self, comm, extra=None):
+    async def handle_stream(
+        self, comm: Comm, extra: dict[str, Any] | None = None
+    ) -> None:
         extra = extra or {}
         logger.info("Starting established connection to %s", comm.peer_address)
 
@@ -1056,16 +1106,13 @@ def context_meter_to_server_digest(digest_tag: str) -> Callable:
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(self: Server, *args: Any, **kwargs: Any) -> Any:
-            loop = asyncio.get_running_loop()
-
             def metrics_callback(label: Hashable, value: float, unit: str) -> None:
                 if not isinstance(label, tuple):
                     label = (label,)
                 name = (digest_tag, *label, unit)
-                # This callback could be called from another thread through offload()
-                loop.call_soon_threadsafe(self.digest_metric, name, value)
+                self.digest_metric(name, value)
 
-            with context_meter.add_callback(metrics_callback):
+            with context_meter.add_callback(metrics_callback, allow_offload=True):
                 return await func(self, *args, **kwargs)
 
         return wrapper

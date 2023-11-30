@@ -96,8 +96,8 @@ the same output brick.
 
 from __future__ import annotations
 
+import mmap
 import os
-import pickle
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -106,9 +106,12 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from tornado.ioloop import IOLoop
+
 import dask
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
+from dask.typing import Key
 
 from distributed.core import PooledRPCCall
 from distributed.shuffle._core import (
@@ -121,6 +124,7 @@ from distributed.shuffle._core import (
     handle_unpack_errors,
 )
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._pickle import unpickle_bytestream
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -142,12 +146,13 @@ def rechunk_transfer(
     input_chunk: NDIndex,
     new: ChunkedAxes,
     old: ChunkedAxes,
+    disk: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
-            spec=ArrayRechunkSpec(id=id, new=new, old=old),
+            spec=ArrayRechunkSpec(id=id, new=new, old=old, disk=disk),
         )
 
 
@@ -173,6 +178,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     token = tokenize(x, chunks)
     _barrier_key = barrier_key(ShuffleId(token))
     name = f"rechunk-transfer-{token}"
+    disk: bool = dask.config.get("distributed.p2p.disk")
     transfer_keys = []
     for index in np.ndindex(tuple(len(dim) for dim in x.chunks)):
         transfer_keys.append((name,) + index)
@@ -183,6 +189,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
             index,
             chunks,
             x.chunks,
+            disk,
         )
 
     dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
@@ -257,15 +264,15 @@ def split_axes(old: ChunkedAxes, new: ChunkedAxes) -> SplitAxes:
     return axes
 
 
-def convert_chunk(shards: list[tuple[NDIndex, np.ndarray]]) -> np.ndarray:
+def convert_chunk(shards: list[list[tuple[NDIndex, np.ndarray]]]) -> np.ndarray:
     import numpy as np
 
     from dask.array.core import concatenate3
 
     indexed: dict[NDIndex, np.ndarray] = {}
-    for index, shard in shards:
-        indexed[index] = shard
-    del shards
+    for sublist in shards:
+        for index, shard in sublist:
+            indexed[index] = shard
 
     subshape = [max(dim) + 1 for dim in zip(*indexed.keys())]
     assert len(indexed) == np.prod(subshape)
@@ -274,6 +281,9 @@ def convert_chunk(shards: list[tuple[NDIndex, np.ndarray]]) -> np.ndarray:
     for index, shard in indexed.items():
         rec_cat_arg[tuple(index)] = shard
     arrs = rec_cat_arg.tolist()
+
+    # This may block for several seconds, as it physically reads the memory-mapped
+    # buffers from disk
     return concatenate3(arrs)
 
 
@@ -332,6 +342,8 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
+        disk: bool,
+        loop: IOLoop,
     ):
         super().__init__(
             id=id,
@@ -343,6 +355,8 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
+            disk=disk,
+            loop=loop,
         )
         self.old = old
         self.new = new
@@ -353,89 +367,84 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         self.worker_for = worker_for
         self.split_axes = split_axes(old, new)
 
-    async def _receive(self, data: list[tuple[NDIndex, bytes]]) -> None:
+    async def _receive(
+        self,
+        data: list[tuple[NDIndex, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]]],
+    ) -> None:
         self.raise_if_closed()
 
-        filtered = []
+        # Repartition shards and filter out already received ones
+        shards = defaultdict(list)
         for d in data:
-            id, payload = d
-            if id in self.received:
+            id1, payload = d
+            if id1 in self.received:
                 continue
-            filtered.append(payload)
-            self.received.add(id)
+            self.received.add(id1)
+            for id2, shard in payload:
+                shards[id2].append(shard)
             self.total_recvd += sizeof(d)
         del data
-        if not filtered:
+        if not shards:
             return
+
         try:
-            shards = await self.offload(self._repartition_shards, filtered)
-            del filtered
             await self._write_to_disk(shards)
         except Exception as e:
             self._exception = e
             raise
 
-    def _repartition_shards(self, data: list[bytes]) -> dict[NDIndex, bytes]:
-        repartitioned: defaultdict[
-            NDIndex, list[tuple[NDIndex, np.ndarray]]
-        ] = defaultdict(list)
-        for buffer in data:
-            for id, shard in pickle.loads(buffer):
-                repartitioned[id].append(shard)
-        return {k: pickle.dumps(v) for k, v in repartitioned.items()}
+    def _shard_partition(
+        self, data: np.ndarray, partition_id: NDIndex
+    ) -> dict[str, tuple[NDIndex, Any]]:
+        out: dict[str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]] = defaultdict(
+            list
+        )
+        ndsplits = product(*(axis[i] for axis, i in zip(self.split_axes, partition_id)))
 
-    async def _add_partition(
-        self, data: np.ndarray, partition_id: NDIndex, **kwargs: Any
-    ) -> int:
-        def _() -> dict[str, tuple[NDIndex, bytes]]:
-            """Return a mapping of worker addresses to a tuple of input partition
-            IDs and shard data.
+        for ndsplit in ndsplits:
+            chunk_index, shard_index, ndslice = zip(*ndsplit)
 
+            shard = data[ndslice]
+            # Don't wait until all shards have been transferred over the network
+            # before data can be released
+            if shard.base is not None:
+                shard = shard.copy()
 
-            TODO: Overhaul!
-            As shard data, we serialize the payload together with the sub-index of the
-            slice within the new chunk. To assemble the new chunk from its shards, it
-            needs the sub-index to know where each shard belongs within the chunk.
-            Adding the sub-index into the serialized payload on the sender allows us to
-            write the serialized payload directly to disk on the receiver.
-            """
-            out: dict[
-                str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]
-            ] = defaultdict(list)
-            from itertools import product
-
-            ndsplits = product(
-                *(axis[i] for axis, i in zip(self.split_axes, partition_id))
+            out[self.worker_for[chunk_index]].append(
+                (chunk_index, (shard_index, shard))
             )
+        return {k: (partition_id, v) for k, v in out.items()}
 
-            for ndsplit in ndsplits:
-                chunk_index, shard_index, ndslice = zip(*ndsplit)
-                out[self.worker_for[chunk_index]].append(
-                    (chunk_index, (shard_index, data[ndslice]))
-                )
-            return {k: (partition_id, pickle.dumps(v)) for k, v in out.items()}
-
-        out = await self.offload(_)
-        await self._write_to_comm(out)
-        return self.run_id
-
-    async def _get_output_partition(
-        self, partition_id: NDIndex, key: str, **kwargs: Any
+    def _get_output_partition(
+        self, partition_id: NDIndex, key: Key, **kwargs: Any
     ) -> np.ndarray:
-        def _(partition_id: NDIndex) -> np.ndarray:
-            data = self._read_from_disk(partition_id)
+        # Quickly read metadata from disk.
+        # This is a bunch of seek()'s interleaved with short reads.
+        data = self._read_from_disk(partition_id)
+        # Copy the memory-mapped buffers from disk into memory.
+        # This is where we'll spend most time.
+        with self._disk_buffer.time("read"):
             return convert_chunk(data)
 
-        return await self.offload(_, partition_id)
+    def deserialize(self, buffer: Any) -> Any:
+        return buffer
 
-    def read(self, path: Path) -> tuple[Any, int]:
-        shards: list[tuple[NDIndex, np.ndarray]] = []
-        with path.open(mode="rb") as f:
-            size = f.seek(0, os.SEEK_END)
-            f.seek(0)
-            while f.tell() < size:
-                shards.extend(pickle.load(f))
-        return shards, size
+    def read(self, path: Path) -> tuple[list[list[tuple[NDIndex, np.ndarray]]], int]:
+        """Open a memory-mapped file descriptor to disk, read all metadata, and unpickle
+        all arrays. This is a fast sequence of short reads interleaved with seeks.
+        Do not read in memory the actual data; the arrays' buffers will point to the
+        memory-mapped area.
+
+        The file descriptor will be automatically closed by the kernel when all the
+        returned arrays are dereferenced, which will happen after the call to
+        concatenate3.
+        """
+        with path.open(mode="r+b") as fh:
+            buffer = memoryview(mmap.mmap(fh.fileno(), 0))
+
+        # The file descriptor has *not* been closed!
+        shards = list(unpickle_bytestream(buffer))
+        return shards, buffer.nbytes
 
     def _get_assigned_worker(self, id: NDIndex) -> str:
         return self.worker_for[id]
@@ -485,4 +494,6 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
             scheduler=plugin.worker.scheduler,
             memory_limiter_disk=plugin.memory_limiter_disk,
             memory_limiter_comms=plugin.memory_limiter_comms,
+            disk=self.disk,
+            loop=plugin.worker.loop,
         )

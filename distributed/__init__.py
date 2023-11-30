@@ -45,8 +45,8 @@ from distributed.deploy import (
 from distributed.diagnostics.plugin import (
     CondaInstall,
     Environ,
+    InstallPlugin,
     NannyPlugin,
-    PackageInstall,
     PipInstall,
     SchedulerPlugin,
     UploadDirectory,
@@ -136,7 +136,7 @@ __all__ = [
     "MultiLock",
     "Nanny",
     "NannyPlugin",
-    "PackageInstall",
+    "InstallPlugin",
     "PipInstall",
     "Pub",
     "Queue",

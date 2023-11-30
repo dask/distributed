@@ -554,16 +554,16 @@ def dask_setup(worker):
 
 def test_multiple_workers(loop):
     scheduler_address = f"127.0.0.1:{open_port()}"
-    with popen(
-        ["dask", "scheduler", "--no-dashboard", "--host", scheduler_address]
-    ) as s:
-        with popen(["dask", "worker", scheduler_address, "--no-dashboard"]) as a:
-            with popen(["dask", "worker", scheduler_address, "--no-dashboard"]) as b:
-                with Client(scheduler_address, loop=loop) as c:
-                    start = time()
-                    while len(c.nthreads()) < 2:
-                        sleep(0.1)
-                        assert time() < start + 10
+    with (
+        popen(["dask", "scheduler", "--no-dashboard", "--host", scheduler_address]),
+        popen(["dask", "worker", scheduler_address, "--no-dashboard"]),
+        popen(["dask", "worker", scheduler_address, "--no-dashboard"]),
+        Client(scheduler_address, loop=loop) as c,
+    ):
+        start = time()
+        while len(c.nthreads()) < 2:
+            sleep(0.1)
+            assert time() < start + 10
 
 
 @pytest.mark.slow

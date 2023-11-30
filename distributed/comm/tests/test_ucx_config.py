@@ -108,10 +108,9 @@ async def test_ucx_config(ucx_loop, cleanup):
         assert ucx_environment == {"UCX_MEMTRACK_DEST": "stdout"}
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
     env = os.environ.copy()
-    env["DASK_RMM__POOL_SIZE"] = "1000.00 MB"
+    env["DASK_DISTRIBUTED__RMM__POOL_SIZE"] = "1000.00 MB"
 
     port = str(open_port())
     # Using localhost appears to be less flaky than {HOST}. Additionally, this is
@@ -136,7 +135,7 @@ def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
             ],
             env=env,
         ):
-            with Client(sched_addr, loop=loop, timeout=60) as c:
+            with Client(sched_addr, loop=loop, timeout=30) as c:
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 

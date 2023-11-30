@@ -330,16 +330,16 @@ async def test_local_directory(c, s, nanny, tmp_path):
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_scheduler_file(loop, nanny):
-    with tmpfile() as fn:
-        with popen(["dask", "scheduler", "--no-dashboard", "--scheduler-file", fn]):
-            with popen(
-                ["dask", "worker", "--scheduler-file", fn, nanny, "--no-dashboard"]
-            ):
-                with Client(scheduler_file=fn, loop=loop) as c:
-                    start = time()
-                    while not c.scheduler_info()["workers"]:
-                        sleep(0.1)
-                        assert time() < start + 10
+    with (
+        tmpfile() as fn,
+        popen(["dask", "scheduler", "--no-dashboard", "--scheduler-file", fn]),
+        popen(["dask", "worker", "--scheduler-file", fn, nanny, "--no-dashboard"]),
+        Client(scheduler_file=fn, loop=loop) as c,
+    ):
+        start = time()
+        while not c.scheduler_info()["workers"]:
+            sleep(0.1)
+            assert time() < start + 10
 
 
 @pytest.mark.slow

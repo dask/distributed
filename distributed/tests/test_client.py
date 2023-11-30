@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import array
 import asyncio
 import concurrent.futures
 import functools
@@ -5964,14 +5965,24 @@ async def test_config_scheduler_address(s, a, b):
     assert sio.getvalue() == f"Config value `scheduler-address` found: {s.address}\n"
 
 
-@pytest.mark.filterwarnings("ignore:Large object:UserWarning")
-@gen_cluster(client=True)
-async def test_warn_when_submitting_large_values(c, s, a, b):
-    with pytest.warns(
-        UserWarning,
-        match="Sending large graph of size",
-    ):
+@gen_cluster(client=True, nthreads=[])
+async def test_warn_when_submitting_large_values(c, s):
+    with pytest.warns(UserWarning, match="Sending large graph of size"):
         future = c.submit(lambda x: x + 1, b"0" * 10_000_000)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_warn_when_submitting_large_values_memoryview(c, s):
+    """When sending numpy or parquet data, len(memoryview(obj)) returns the number of
+    elements, not the number of bytes. Make sure we're reading memoryview.nbytes.
+    """
+    # The threshold is 10MB
+    a = array.array("d", b"0" * 9_500_000)
+    c.submit(lambda: a)
+
+    a = array.array("d", b"0" * 10_000_000)
+    with pytest.warns(UserWarning, match="Sending large graph of size"):
+        c.submit(lambda: a)
 
 
 @gen_cluster(client=True)
@@ -7314,7 +7325,10 @@ def test_computation_code_walk_frames():
             code = Client._get_computation_code()
 
     with dask.config.set(
-        {"distributed.diagnostics.computations.ignore-modules": ["test_client"]}
+        {
+            "distributed.diagnostics.computations.ignore-modules": ["test_client"],
+            "distributed.diagnostics.computations.ignore-files": [],
+        }
     ):
         import sys
 
@@ -7413,10 +7427,8 @@ def test_computation_object_code_dask_compute(client):
         return comp.code[0]
 
     code = client.run_on_scheduler(fetch_comp_code)
-
-    assert len(code) == 2
-    assert code[-1].code == test_function_code
-    assert code[-2].code == inspect.getsource(sys._getframe(1))
+    assert len(code) == 1
+    assert code[0].code == test_function_code
 
 
 def test_computation_object_code_dask_compute_no_frames_default(client):

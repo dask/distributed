@@ -35,6 +35,7 @@ from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
+from dask.typing import no_default
 from dask.utils import (
     apply,
     ensure_dict,
@@ -101,7 +102,7 @@ from distributed.utils import (
     import_term,
     is_python_shutting_down,
     log_errors,
-    no_default,
+    nbytes,
     sync,
     thread_state,
 )
@@ -854,14 +855,14 @@ class Client(SyncMethodMixin):
         connection_limit=512,
         **kwargs,
     ):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = dask.config.get("distributed.comm.timeouts.connect")
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
         self._timeout = timeout
 
         self.futures = dict()
-        self.refcount = defaultdict(lambda: 0)
+        self.refcount = defaultdict(int)
         self._handle_report_task = None
         if name is None:
             name = dask.config.get("client-name", None)
@@ -1248,7 +1249,7 @@ class Client(SyncMethodMixin):
 
         await self.rpc.start()
 
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
@@ -1666,6 +1667,7 @@ class Client(SyncMethodMixin):
             with suppress(TimeoutError, asyncio.CancelledError):
                 await wait_for(handle_report_task, 0 if fast else 2)
 
+    @log_errors
     async def _close(self, fast=False):
         """
         Send close signal and wait until scheduler completes
@@ -1687,51 +1689,49 @@ class Client(SyncMethodMixin):
             for pc in self._periodic_callbacks.values():
                 pc.stop()
 
-        with log_errors():
-            _del_global_client(self)
-            self._scheduler_identity = {}
-            if self._set_as_default and not _get_global_client():
-                with suppress(AttributeError):
-                    # clear the dask.config set keys
-                    with self._set_config:
-                        pass
-            if self.get == dask.config.get("get", None):
-                del dask.config.config["get"]
+        _del_global_client(self)
+        self._scheduler_identity = {}
+        if self._set_as_default and not _get_global_client():
+            with suppress(AttributeError):
+                # clear the dask.config set keys
+                with self._set_config:
+                    pass
+        if self.get == dask.config.get("get", None):
+            del dask.config.config["get"]
 
+        if (
+            self.scheduler_comm
+            and self.scheduler_comm.comm
+            and not self.scheduler_comm.comm.closed()
+        ):
+            self._send_to_scheduler({"op": "close-client"})
+            self._send_to_scheduler({"op": "close-stream"})
+        async with self._wait_for_handle_report_task(fast=fast):
             if (
                 self.scheduler_comm
                 and self.scheduler_comm.comm
                 and not self.scheduler_comm.comm.closed()
             ):
-                self._send_to_scheduler({"op": "close-client"})
-                self._send_to_scheduler({"op": "close-stream"})
-            async with self._wait_for_handle_report_task(fast=fast):
-                if (
-                    self.scheduler_comm
-                    and self.scheduler_comm.comm
-                    and not self.scheduler_comm.comm.closed()
-                ):
-                    await self.scheduler_comm.close()
+                await self.scheduler_comm.close()
 
-                for key in list(self.futures):
-                    self._release_key(key=key)
+            for key in list(self.futures):
+                self._release_key(key=key)
 
-                if self._start_arg is None:
-                    with suppress(AttributeError):
-                        await self.cluster.close()
+            if self._start_arg is None:
+                with suppress(AttributeError):
+                    await self.cluster.close()
 
-                await self.rpc.close()
+            await self.rpc.close()
 
-                self.status = "closed"
+            self.status = "closed"
 
-                if _get_global_client() is self:
-                    _set_global_client(None)
+            if _get_global_client() is self:
+                _set_global_client(None)
 
-            with suppress(AttributeError):
-                await self.scheduler.close_rpc()
+        with suppress(AttributeError):
+            await self.scheduler.close_rpc()
 
-            self.scheduler = None
-
+        self.scheduler = None
         self.status = "closed"
 
     def close(self, timeout=no_default):
@@ -1753,7 +1753,7 @@ class Client(SyncMethodMixin):
         --------
         Client.restart
         """
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout * 2
         # XXX handling of self.status here is not thread-safe
         if self.status in ["closed", "newly-created"]:
@@ -2399,7 +2399,7 @@ class Client(SyncMethodMixin):
         timeout=no_default,
         hash=True,
     ):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -2588,7 +2588,7 @@ class Client(SyncMethodMixin):
         --------
         Client.gather : Gather data back to local process
         """
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout
         if isinstance(data, pyQueue) or isinstance(data, Iterator):
             raise TypeError(
@@ -3022,6 +3022,7 @@ class Client(SyncMethodMixin):
         """
         if nframes <= 0:
             return ()
+
         ignore_modules = dask.config.get(
             "distributed.diagnostics.computations.ignore-modules"
         )
@@ -3030,10 +3031,26 @@ class Client(SyncMethodMixin):
                 "Ignored modules must be a list. Instead got "
                 f"({type(ignore_modules)}, {ignore_modules})"
             )
-        pattern: re.Pattern | None = None
+        ignore_files = dask.config.get(
+            "distributed.diagnostics.computations.ignore-files"
+        )
+        if not isinstance(ignore_files, list):
+            raise TypeError(
+                "Ignored files must be a list. Instead got "
+                f"({type(ignore_files)}, {ignore_files})"
+            )
+
+        mod_pattern: re.Pattern | None = None
+        fname_pattern: re.Pattern | None = None
         if stacklevel is None:
             if ignore_modules:
-                pattern = re.compile("|".join([f"(?:{mod})" for mod in ignore_modules]))
+                mod_pattern = re.compile(
+                    "|".join([f"(?:{mod})" for mod in ignore_modules])
+                )
+            if ignore_files:
+                fname_pattern = re.compile(
+                    r".*[\\/](" + "|".join(mod for mod in ignore_files) + r")([\\/]|$)"
+                )
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
             stacklevel = stacklevel if stacklevel > 0 else 1
@@ -3044,12 +3061,13 @@ class Client(SyncMethodMixin):
         ):
             if len(code) >= nframes:
                 break
-            elif stacklevel is not None and i != stacklevel:
+            if stacklevel is not None and i != stacklevel:
                 continue
-            elif pattern is not None and (
-                pattern.match(fr.f_globals.get("__name__", ""))
-                or fr.f_code.co_name in ("<listcomp>", "<dictcomp>")
-            ):
+            if fr.f_code.co_name in ("<listcomp>", "<dictcomp>"):
+                continue
+            if mod_pattern and mod_pattern.match(fr.f_globals.get("__name__", "")):
+                continue
+            if fname_pattern and fname_pattern.match(fr.f_code.co_filename):
                 continue
 
             kwargs = dict(
@@ -3073,11 +3091,15 @@ class Client(SyncMethodMixin):
 
                 break
 
-            # Ignore IPython related wrapping functions to user code
             if hasattr(fr.f_back, "f_globals"):
-                module_name = sys.modules[fr.f_back.f_globals["__name__"]].__name__  # type: ignore
+                module_name = fr.f_back.f_globals["__name__"]  # type: ignore
+                if module_name == "__channelexec__":
+                    break  # execnet; pytest-xdist  # pragma: nocover
+                # Ignore IPython related wrapping functions to user code
+                module_name = sys.modules[module_name].__name__
                 if module_name.endswith("interactiveshell"):
                     break
+
         return tuple(reversed(code))
 
     def _graph_to_futures(
@@ -3134,10 +3156,11 @@ class Client(SyncMethodMixin):
             from distributed.protocol.serialize import ToPickle
 
             header, frames = serialize(ToPickle(dsk), on_error="raise")
-            nbytes = len(header) + sum(map(len, frames))
-            if nbytes > 10_000_000:
+
+            pickled_size = sum(map(nbytes, [header] + frames))
+            if pickled_size > 10_000_000:
                 warnings.warn(
-                    f"Sending large graph of size {format_bytes(nbytes)}.\n"
+                    f"Sending large graph of size {format_bytes(pickled_size)}.\n"
                     "This may cause some slowdown.\n"
                     "Consider scattering data ahead of time and using futures."
                 )
@@ -3577,7 +3600,7 @@ class Client(SyncMethodMixin):
             return result
 
     async def _restart(self, timeout=no_default, wait_for_workers=True):
-        if timeout == no_default:
+        if timeout is no_default:
             timeout = self._timeout * 4
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
@@ -4810,7 +4833,7 @@ class Client(SyncMethodMixin):
         self,
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
         name: str | None = None,
-        idempotent: bool = False,
+        idempotent: bool | None = None,
     ):
         """Register a plugin.
 
@@ -4825,11 +4848,21 @@ class Client(SyncMethodMixin):
             plugin instance or automatically generated if not present.
         idempotent :
             Do not re-register if a plugin of the given name already exists.
+            If None, ``plugin.idempotent`` is taken if defined, False otherwise.
         """
         if name is None:
             name = _get_plugin_name(plugin)
         assert name
-
+        if idempotent is not None:
+            warnings.warn(
+                "The `idempotent` argument is deprecated and will be removed in a "
+                "future version. Please mark your plugin as idempotent by setting its "
+                "`.idempotent` atrribute to `True`.",
+                FutureWarning,
+            )
+        else:
+            idempotent = getattr(plugin, "idempotent", False)
+        assert isinstance(idempotent, bool)
         return self._register_plugin(plugin, name, idempotent)
 
     @singledispatchmethod
@@ -5515,7 +5548,7 @@ class as_completed:
     ):
         if futures is None:
             futures = []
-        self.futures = defaultdict(lambda: 0)
+        self.futures = defaultdict(int)
         self.queue = pyQueue()
         self.lock = threading.Lock()
         self.loop = loop or default_client().loop
