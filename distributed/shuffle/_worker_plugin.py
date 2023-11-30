@@ -308,9 +308,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self._executor = self._exit_stack.enter_context(
             _executor_context(n_threads, thread_name_prefix="P2P-Threads")
         )
-        n_io_threads = dask.config.get("distributed.p2p.io-threads")
-        self._io_executor = self._exit_stack.enter_context(
-            _executor_context(n_io_threads, thread_name_prefix="P2P-IO-Threads")
+        n_disk_concurrency = dask.config.get("distributed.p2p.disk.concurrency")
+        self._disk_executor = self._exit_stack.enter_context(
+            _executor_context(n_disk_concurrency, thread_name_prefix="P2P-Disk-Threads")
         )
 
     def __str__(self) -> str:

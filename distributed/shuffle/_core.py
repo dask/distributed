@@ -106,11 +106,12 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         message_bytes_limit = parse_bytes(
             dask.config.get("distributed.p2p.comm.message-bytes-limit")
         )
+        n_comm_concurrency = dask.config.get("distributed.p2p.comm.concurrency")
         self._comm_buffer = CommShardsBuffer(
             send=self.send,
             memory_limiter=memory_limiter_comms,
             message_bytes_limit=message_bytes_limit,
-            concurrency_limit=io_executor._max_workers,
+            concurrency_limit=n_comm_concurrency,
         )
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
