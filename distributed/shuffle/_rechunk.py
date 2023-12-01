@@ -214,18 +214,11 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     token = tokenize(x, chunks)
     name = f"rechunk-p2p-{token}"
     for ndpartial in _split_partials(x, chunks):
-        n_new_chunks = math.prod(slc.stop - slc.start for slc in ndpartial.new)
-        if n_new_chunks == 1:
+        if all(slc.stop == slc.start + 1 for slc in ndpartial.new):
+            # Single output chunk
             dsk.update(partial_concatenate(x, chunks, ndpartial, name))
         else:
-            dsk.update(
-                partial_rechunk(
-                    x,
-                    chunks=chunks,
-                    ndpartial=ndpartial,
-                    name=name,
-                )
-            )
+            dsk.update(partial_rechunk(x, chunks, ndpartial, name))
     layer = MaterializedLayer(dsk)
     graph = HighLevelGraph.from_collections(name, layer, dependencies=[x])
     arr = da.Array(graph, name, chunks, meta=x)
@@ -285,9 +278,9 @@ def _partial_slices(
         # Two consecutive output chunks A and B belong to the same partial rechunk
         # if B is fully included in the right-most input chunk of A, i.e.,
         # separating A and B would not allow us to cull more input tasks.
-        last_old_chunk: int | None = (
-            None  # Index of the last input chunk of this partial rechunk
-        )
+        
+        # Index of the last input chunk of this partial rechunk
+        last_old_chunk: int | None = None
         partial_splits = [0]
         recipe: list[tuple[int, slice]]
         for new_chunk_index, recipe in enumerate(old_to_new_axis):
@@ -321,12 +314,12 @@ def partial_concatenate(
     chunks: ChunkedAxes,
     ndpartial: _NDPartial,
     name: str,
-) -> Any:
+) -> dict[Key, Any]:
     import numpy as np
 
     from dask.array.chunk import getitem
 
-    dsk: dict = {}
+    dsk: dict[Key, Any] = {}
 
     partial_token = tokenize(x, chunks, ndpartial.new)
     slice_name = f"rechunk-slice-{partial_token}"
@@ -390,10 +383,10 @@ def partial_rechunk(
     chunks: ChunkedAxes,
     ndpartial: _NDPartial,
     name: str,
-) -> Any:
+) -> dict[Key, Any]:
     from dask.array.chunk import getitem
 
-    dsk: dict = {}
+    dsk: dict[Key, Any] = {}
 
     old_partial_offset = tuple(slice_.start for slice_ in ndpartial.old)
 
