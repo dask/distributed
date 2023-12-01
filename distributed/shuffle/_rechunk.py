@@ -235,7 +235,7 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
 def _split_partials(
     x: da.Array, chunks: ChunkedAxes
 ) -> Generator[_NDPartial, None, None]:
-    """Split the rechunking into partials that can be performed independently."""
+    """Split the rechunking into partials that can be performed separately"""
     partials_per_axis = _split_partials_per_axis(x, chunks)
     for partial_per_axis in product(*partials_per_axis):
         old, new, left_starts, right_stops = zip(*partial_per_axis)
@@ -245,8 +245,8 @@ def _split_partials(
 def _split_partials_per_axis(
     x: da.Array, chunks: ChunkedAxes
 ) -> tuple[tuple[_Partial, ...], ...]:
-    """Split the rechunking into partials that can be performed independently
-    on each axis."""
+    """Split the rechunking into partials that can be performed separately
+    on each axis"""
     from dask.array.rechunk import old_to_new
 
     chunked_shape = tuple(len(axis) for axis in chunks)
@@ -278,6 +278,7 @@ def _split_partials_per_axis(
 def _partial_slices(
     old_to_new: list[list[list[tuple[int, slice]]]], chunked_shape: NDIndex
 ) -> tuple[tuple[slice, ...], ...]:
+    """Compute the slices of the new chunks that can be computed separately"""
     sliced_axes = []
 
     for axis_index, old_to_new_axis in enumerate(old_to_new):
