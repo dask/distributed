@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from functools import partial
+from functools import partial, cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -187,11 +187,17 @@ def rearrange_by_column_p2p(
         meta_input=meta,
         disk=disk,
     )
+    _barrier_key = layer._tokens[1]
     return new_dd_object(
         HighLevelGraph.from_collections(name, layer, [df]),
         name,
         meta,
         [None] * (npartitions + 1),
+    ).map_partitions(
+        _get_partition_data,
+        _barrier_key,
+        meta=meta,
+        enforce_metadata=False,
     )
 
 
@@ -312,10 +318,15 @@ class P2PShuffleLayer(Layer):
         else:
             return self, culled_deps
 
-    def _construct_graph(self) -> _T_LowLevelGraph:
+    @cached_property
+    def _tokens(self):
         token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
-        dsk: _T_LowLevelGraph = {}
         _barrier_key = barrier_key(ShuffleId(token))
+        return token, _barrier_key
+
+    def _construct_graph(self) -> _T_LowLevelGraph:
+        token, _barrier_key = self._tokens
+        dsk: _T_LowLevelGraph = {}
         name = "shuffle-transfer-" + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
@@ -334,21 +345,12 @@ class P2PShuffleLayer(Layer):
 
         dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
 
-        name_lazy = f"lazy-{self.name}"
-        for part_out in self.parts_out:
-            dsk[(name_lazy, part_out)] = (
-                shuffle_unpack,
-                token,
-                part_out,
-                _barrier_key,
-            )
-
-        # TODO: Do this in a Blockwise layer after the shuffle
         name = self.name
         for part_out in self.parts_out:
             dsk[(name, part_out)] = (
-                _get_partition_data,
-                (name_lazy, part_out),
+                shuffle_unpack,
+                token,
+                part_out,
                 _barrier_key,
             )
         return dsk
