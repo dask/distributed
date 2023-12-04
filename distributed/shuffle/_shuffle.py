@@ -57,107 +57,104 @@ if TYPE_CHECKING:
     from dask.dataframe import DataFrame
 
 
-class GetPartition:
-    """Wrap/Delay partition-loading logic
+class UnloadedPartition:
+    """Wrap unloaded shuffle output
 
     The purpose of this class is to keep a shuffled partition
     on disk until it is needed by one of its dependent tasks.
     Otherwise, the in-memory partition may need to be spilled
     back to disk before the dependent task is executed anyway.
 
-    If ``shuffle_unpack`` returns a ``GetPartition`` object,
+    If ``shuffle_unpack`` returns an ``UnloadedPartition`` object,
     ``P2PShuffleLayer`` must be followed by an extra ``Blockwise``
-    call to ``_get_partition_data`` (to unwrap the data). We want
-    an extra ``Blockwise`` layer here so that the unwrap step can
-    be fused into down-stream tasks. We do NOT want the original
-    ``shuffle_unpack`` tasks to be fused into dependent tasks,
-    because this would prevent effective load balancing after the
-    shuffle (long-running post-shuffle tasks may be pinned to
-    specific workers, while others sit idle).
-    ````
+    call to ``_get_partition_data`` (to load and covert the data).
+    We want an extra ``Blockwise`` layer here so that the loading
+    and conversion can be fused into down-stream tasks. We do NOT
+    want the original ``shuffle_unpack`` tasks to be fused into
+    dependent tasks, because this would prevent effective load
+    balancing after the shuffle (long-running post-shuffle tasks
+    may be pinned to specific workers, while others sit idle).
+
+    Note that serialization automatically converts to
+    ``LoadedPartition``, because the object may be moved to a
+    worker that doesn't have access to the same local storage.
     """
+
     def __init__(
         self,
-        shuffle_run: DataFrameShuffleRun | None,
+        shuffle_run: DataFrameShuffleRun,
         partition_id: int,
-        empty: bool = False,
-        meta: Any = None,
-        loaded_data: Any = None,
-        converted_data: Any = None,
     ):
         self.shuffle_run = shuffle_run
         self.partition_id = partition_id
-        self.empty = empty
-        self._meta = meta
-        self._loaded_data = loaded_data
-        self._converted_data = converted_data
 
-    def load_data(self):
-        if self._loaded_data is None and not self.empty:
-            with handle_unpack_errors(self.partition_id):
-                try:
-                    self._loaded_data = self.shuffle_run._read_from_disk((self.partition_id,))
-                except KeyError:
-                    self.empty = True
-    
-    def convert_data(self):
-        if self._converted_data is None:
-            if self.empty:
-                self._converted_data = self.meta.copy()
+    def load(self) -> LoadedPartition:
+        with handle_unpack_errors(self.partition_id):
+            try:
+                data = self.shuffle_run._read_from_disk((self.partition_id,))
+            except KeyError:
+                data = None
+        return LoadedPartition(data, self.shuffle_run.meta, self.partition_id)
+
+
+class LoadedPartition:
+    def __init__(
+        self,
+        data: list[pa.Table],
+        meta: pd.DataFrame,
+        partition_id: int,
+    ):
+        self.data = data
+        self.meta = meta
+        self.partition_id = partition_id
+
+    def convert(self) -> pd.DataFrame:
+        with handle_unpack_errors(self.partition_id):
+            if self.data is None:
+                data = self.meta.copy()
             else:
-                self.load_data()
-                with handle_unpack_errors(self.partition_id):
-                    self._converted_data = convert_shards(self._loaded_data, self.meta)
-                self._loaded_data = None  # No longer needed
-
-    @property
-    def meta(self):
-        if self.shuffle_run is not None:
-            return self.shuffle_run.meta
-        return self._meta
-
-    @property
-    def data(self):
-        if self._converted_data is None:
-            self.convert_data()
-        return self._converted_data
-
-    def __reduce__(self):
-        # Always load data when this class is serialized
-        return (
-            self.__class__, (
-                None,
-                self.partition_id,
-                self.empty,
-                self.meta,
-                self._loaded_data,
-                self._converted_data,
-            )
-        )
+                data = convert_shards(self.data, self.meta)
+        return data
 
 
-@dask_serialize.register(GetPartition)
-def _serialize_get_partition(obj: GetPartition):
+@dask_serialize.register(UnloadedPartition)
+def _serialize_unloaded(obj: UnloadedPartition):
     import pickle
 
-    obj.load_data()
-    return (obj.partition_id, obj.empty), [pickle.dumps(obj.meta), pickle.dumps(obj._loaded_data)]
+    # Convert to LoadedPartition when serialized. Note that
+    # we don't convert all the way to DataFrame, because this
+    # adds unnecessary overhead and memory pressure for the
+    # cudf backend (and minor overhead for pandas)
+    loaded = obj.load()
+    return (loaded.partition_id,), [pickle.dumps(loaded.meta), pickle.dumps(loaded.data)]
 
 
-@dask_deserialize.register(GetPartition)
-def _deserialize_get_partition(header, frames):
+@dask_serialize.register(LoadedPartition)
+def _serialize_loaded(obj: LoadedPartition):
     import pickle
 
-    partition_id, empty = header[:2]
+    return (obj.partition_id,), [pickle.dumps(obj.meta), pickle.dumps(obj.data)]
+
+
+@dask_deserialize.register((UnloadedPartition, LoadedPartition))
+def _deserialize_loaded(header, frames):
+    import pickle
+
+    partition_id = header[0]
     meta = pickle.loads(frames[0])
-    loaded_data = pickle.loads(frames[1])
-    return GetPartition(None, partition_id, empty, meta, loaded_data, None)
+    data = pickle.loads(frames[1])
+    return LoadedPartition(data, meta, partition_id)
 
 
 def _get_partition_data(part, barrier_key):
+    # Used by rearrange_by_column_p2p to "unwrap"
+    # UnloadedPartition/LoadedPartition data after
+    # a P2PShuffleLayer
     assert barrier_key
-    if isinstance(part, GetPartition):
-        return part.data
+    if isinstance(part, UnloadedPartition):
+        part = part.load()
+    if isinstance(part, LoadedPartition):
+        part = part.convert()
     return part
 
 
@@ -617,7 +614,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         key: Key,
         **kwargs: Any,
     ) -> pd.DataFrame:
-        return GetPartition(self, partition_id)
+        return UnloadedPartition(self, partition_id)
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
