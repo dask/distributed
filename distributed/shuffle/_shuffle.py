@@ -91,7 +91,7 @@ def shuffle_unpack(
         )
 
 
-def shuffle_unpack_unloaded(
+def delayed_shuffle_unpack(
     id: ShuffleId, output_partition: int, barrier_run_id: int
 ) -> pd.DataFrame:
     with handle_unpack_errors(id):
@@ -305,7 +305,7 @@ class P2PShuffleLayer(Layer):
         name = self.name
         for part_out in self.parts_out:
             dsk[(name, part_out)] = (
-                shuffle_unpack_unloaded,
+                delayed_shuffle_unpack,
                 token,
                 part_out,
                 _barrier_key,
