@@ -476,19 +476,20 @@ class UnloadedPartition:
     Otherwise, the in-memory partition may need to be spilled
     back to disk before the dependent task is executed anyway.
 
-    If ``shuffle_unpack`` returns an ``UnloadedPartition`` object,
-    ``P2PShuffleLayer`` must be followed by an extra ``Blockwise``
-    call to ``_get_partition_data`` (to load and covert the data).
-    We want an extra ``Blockwise`` layer here so that the loading
-    and conversion can be fused into down-stream tasks. We do NOT
-    want the original ``shuffle_unpack`` tasks to be fused into
-    dependent tasks, because this would prevent effective load
-    balancing after the shuffle (long-running post-shuffle tasks
-    may be pinned to specific workers, while others sit idle).
+    If the output tasks of a ``P2PShuffleLayer`` return objects
+    of type ``UnloadedPartition``, that layer must be followed
+    by an extra ``Blockwise`` call to ``load_output_partition``
+    (to ensure the partitions are actually loaded). We want this
+    extra layer to be ``Blockwise`` so that the loading can be
+    fused into down-stream tasks. We do NOT want the original
+    ``shuffle_unpack`` tasks to be fused into dependent tasks,
+    because this would prevent load balancing after the shuffle
+    (long-running post-shuffle tasks may be pinned to specific
+    workers, while others sit idle).
 
-    Note that serialization automatically converts to
-    ``LoadedPartition``, because the object may be moved to a
-    worker that doesn't have access to the same local storage.
+    Note that serialization automatically loads the wrapped
+    data, because the object may be moved to a worker that
+    doesn't have access to the same local storage.
     """
 
     def __init__(
