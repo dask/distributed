@@ -24,7 +24,7 @@ from dask.utils import parse_timedelta
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
-from distributed.protocol import to_serialize
+from distributed.protocol import dask_deserialize, dask_serialize, to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
@@ -298,14 +298,17 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     ) -> dict[str, tuple[_T_partition_id, Any]]:
         """Shard an input partition by the assigned output workers"""
 
-    def get_output_partition(
-        self, partition_id: _T_partition_id, key: Key, **kwargs: Any
-    ) -> _T_partition_type:
+    def _sync_output_partition(self, partition_id: _T_partition_id, key: Key) -> None:
         self.raise_if_closed()
         sync(self._loop, self._ensure_output_worker, partition_id, key)
         if not self.transferred:
             raise RuntimeError("`get_output_partition` called before barrier task")
         sync(self._loop, self.flush_receive)
+
+    def get_output_partition(
+        self, partition_id: _T_partition_id, key: Key, **kwargs: Any
+    ) -> _T_partition_type:
+        self._sync_output_partition(partition_id, key)
         return self._get_output_partition(partition_id, key, **kwargs)
 
     @abc.abstractmethod
@@ -313,6 +316,12 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self, partition_id: _T_partition_id, key: Key, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
+
+    def get_unloaded_output_partition(
+        self, partition_id: _T_partition_id, key: Key, **kwargs: Any
+    ) -> UnloadedPartition:
+        self._sync_output_partition(partition_id, key)
+        return UnloadedPartition(self, partition_id, key, **kwargs)
 
     @abc.abstractmethod
     def read(self, path: Path) -> tuple[Any, int]:
@@ -457,3 +466,71 @@ def _mean_shard_size(shards: Iterable) -> int:
             if count == 10:
                 break
     return size // count if count else 0
+
+
+class UnloadedPartition:
+    """Wrap unloaded shuffle output
+
+    The purpose of this class is to keep a shuffled partition
+    on disk until it is needed by one of its dependent tasks.
+    Otherwise, the in-memory partition may need to be spilled
+    back to disk before the dependent task is executed anyway.
+
+    If ``shuffle_unpack`` returns an ``UnloadedPartition`` object,
+    ``P2PShuffleLayer`` must be followed by an extra ``Blockwise``
+    call to ``_get_partition_data`` (to load and covert the data).
+    We want an extra ``Blockwise`` layer here so that the loading
+    and conversion can be fused into down-stream tasks. We do NOT
+    want the original ``shuffle_unpack`` tasks to be fused into
+    dependent tasks, because this would prevent effective load
+    balancing after the shuffle (long-running post-shuffle tasks
+    may be pinned to specific workers, while others sit idle).
+
+    Note that serialization automatically converts to
+    ``LoadedPartition``, because the object may be moved to a
+    worker that doesn't have access to the same local storage.
+    """
+
+    def __init__(
+        self,
+        shuffle_run: ShuffleRun,
+        partition_id: _T_partition_id,
+        key: Key,
+        **kwargs: Any,
+    ):
+        self.shuffle_run = shuffle_run
+        self.partition_id = partition_id
+        self.key = key
+        self.kwargs = kwargs
+
+    def load(self) -> Any:
+        with handle_unpack_errors(self.shuffle_run.id):
+            return self.shuffle_run._get_output_partition(
+                self.partition_id, self.key, **self.kwargs
+            )
+
+
+@dask_serialize.register(UnloadedPartition)
+def _serialize_unloaded(obj: UnloadedPartition) -> tuple[None, list[bytes]]:
+    # Convert to LoadedPartition before serializing. Note that
+    # we don't convert all the way to DataFrame, because this
+    # adds unnecessary overhead and memory pressure for the
+    # cudf backend (and minor overhead for pandas)
+    return None, [pickle.dumps(obj.load())]
+
+
+@dask_deserialize.register(UnloadedPartition)
+def _deserialize_unloaded(header: None, frames: list[bytes]) -> Any:
+    return pickle.loads(frames[0])
+
+
+def load_output_partition(
+    data: UnloadedPartition | _T_partition_type, barrier_key: int
+) -> _T_partition_type:
+    # Used by rearrange_by_column_p2p to "unwrap"
+    # UnloadedPartition/LoadedPartition data after
+    # a P2PShuffleLayer
+    assert barrier_key
+    if isinstance(data, UnloadedPartition):
+        data = data.load()
+    return data

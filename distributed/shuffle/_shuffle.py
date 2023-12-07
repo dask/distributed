@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import pickle
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -22,7 +21,6 @@ from dask.typing import Key
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
-from distributed.protocol import dask_deserialize, dask_serialize
 from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
@@ -41,6 +39,7 @@ from distributed.shuffle._core import (
     get_worker_plugin,
     handle_transfer_errors,
     handle_unpack_errors,
+    load_output_partition,
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
@@ -56,108 +55,6 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
     from dask.dataframe import DataFrame
-
-
-class UnloadedPartition:
-    """Wrap unloaded shuffle output
-
-    The purpose of this class is to keep a shuffled partition
-    on disk until it is needed by one of its dependent tasks.
-    Otherwise, the in-memory partition may need to be spilled
-    back to disk before the dependent task is executed anyway.
-
-    If ``shuffle_unpack`` returns an ``UnloadedPartition`` object,
-    ``P2PShuffleLayer`` must be followed by an extra ``Blockwise``
-    call to ``_get_partition_data`` (to load and covert the data).
-    We want an extra ``Blockwise`` layer here so that the loading
-    and conversion can be fused into down-stream tasks. We do NOT
-    want the original ``shuffle_unpack`` tasks to be fused into
-    dependent tasks, because this would prevent effective load
-    balancing after the shuffle (long-running post-shuffle tasks
-    may be pinned to specific workers, while others sit idle).
-
-    Note that serialization automatically converts to
-    ``LoadedPartition``, because the object may be moved to a
-    worker that doesn't have access to the same local storage.
-    """
-
-    def __init__(
-        self,
-        shuffle_run: DataFrameShuffleRun,
-        partition_id: int,
-    ):
-        self.shuffle_run = shuffle_run
-        self.partition_id = partition_id
-
-    def load(self) -> LoadedPartition:
-        with handle_unpack_errors(self.shuffle_run.id):
-            try:
-                data = self.shuffle_run._read_from_disk((self.partition_id,))
-            except KeyError:
-                data = None
-        return LoadedPartition(data, self.shuffle_run.meta, self.shuffle_run.id)
-
-
-class LoadedPartition:
-    def __init__(
-        self,
-        data: list[pa.Table] | None,
-        meta: pd.DataFrame,
-        shuffle_id: ShuffleId,
-    ):
-        self.data = data
-        self.meta = meta
-        self.shuffle_id = shuffle_id
-
-    def convert(self) -> pd.DataFrame:
-        with handle_unpack_errors(self.shuffle_id):
-            if self.data is None:
-                data = self.meta.copy()
-            else:
-                data = convert_shards(self.data, self.meta)
-        return data
-
-
-@dask_serialize.register(UnloadedPartition)
-def _serialize_unloaded(obj: UnloadedPartition) -> tuple[tuple[ShuffleId], list[bytes]]:
-    # Convert to LoadedPartition before serializing. Note that
-    # we don't convert all the way to DataFrame, because this
-    # adds unnecessary overhead and memory pressure for the
-    # cudf backend (and minor overhead for pandas)
-    loaded = obj.load()
-    return (loaded.shuffle_id,), [
-        pickle.dumps(loaded.meta),
-        pickle.dumps(loaded.data),
-    ]
-
-
-@dask_serialize.register(LoadedPartition)
-def _serialize_loaded(obj: LoadedPartition) -> tuple[tuple[ShuffleId], list[bytes]]:
-    return (obj.shuffle_id,), [pickle.dumps(obj.meta), pickle.dumps(obj.data)]
-
-
-@dask_deserialize.register((UnloadedPartition, LoadedPartition))
-def _deserialize_loaded(
-    header: tuple[ShuffleId], frames: list[bytes]
-) -> LoadedPartition:
-    shuffle_id = header[0]
-    meta = pickle.loads(frames[0])
-    data = pickle.loads(frames[1])
-    return LoadedPartition(data, meta, shuffle_id)
-
-
-def _get_partition_data(
-    part: UnloadedPartition | LoadedPartition | pd.DataFrame, barrier_key: int
-) -> pd.DataFrame:
-    # Used by rearrange_by_column_p2p to "unwrap"
-    # UnloadedPartition/LoadedPartition data after
-    # a P2PShuffleLayer
-    assert barrier_key
-    if isinstance(part, UnloadedPartition):
-        part = part.load()
-    if isinstance(part, LoadedPartition):
-        part = part.convert()
-    return part
 
 
 def shuffle_transfer(
@@ -191,6 +88,15 @@ def shuffle_unpack(
     with handle_unpack_errors(id):
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_partition
+        )
+
+
+def shuffle_unpack_unloaded(
+    id: ShuffleId, output_partition: int, barrier_run_id: int
+) -> pd.DataFrame:
+    with handle_unpack_errors(id):
+        return get_worker_plugin().get_output_partition(
+            id, barrier_run_id, output_partition, load=False
         )
 
 
@@ -239,15 +145,14 @@ def rearrange_by_column_p2p(
         meta_input=meta,
         disk=disk,
     )
-    _barrier_key = layer._tokens[1]
     return new_dd_object(
         HighLevelGraph.from_collections(name, layer, [df]),
         name,
         meta,
         [None] * (npartitions + 1),
     ).map_partitions(
-        _get_partition_data,
-        _barrier_key,
+        load_output_partition,
+        layer._tokens[1],
         meta=meta,
         enforce_metadata=False,
     )
@@ -400,7 +305,7 @@ class P2PShuffleLayer(Layer):
         name = self.name
         for part_out in self.parts_out:
             dsk[(name, part_out)] = (
-                shuffle_unpack,
+                shuffle_unpack_unloaded,
                 token,
                 part_out,
                 _barrier_key,
@@ -616,7 +521,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         key: Key,
         **kwargs: Any,
     ) -> pd.DataFrame:
-        return UnloadedPartition(self, partition_id)
+        try:
+            data = self._read_from_disk((partition_id,))
+            return convert_shards(data, self.meta)
+        except KeyError:
+            return self.meta.copy()
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]

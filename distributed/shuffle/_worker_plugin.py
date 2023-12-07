@@ -417,6 +417,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         run_id: int,
         partition_id: int | NDIndex,
         meta: pd.DataFrame | None = None,
+        load: bool = True,
     ) -> Any:
         """
         Task: Retrieve a shuffled output partition from the ShuffleWorkerPlugin.
@@ -425,7 +426,13 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         """
         shuffle_run = self.get_shuffle_run(shuffle_id, run_id)
         key = thread_state.key
-        return shuffle_run.get_output_partition(
+        if load:
+            return shuffle_run.get_output_partition(
+                partition_id=partition_id,
+                key=key,
+                meta=meta,
+            )
+        return shuffle_run.get_unloaded_output_partition(
             partition_id=partition_id,
             key=key,
             meta=meta,
