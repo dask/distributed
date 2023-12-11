@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import pathlib
 import signal
@@ -27,7 +28,7 @@ from distributed.comm.core import connect
 from distributed.compatibility import WINDOWS, asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import Server, Status, rpc
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
 from distributed.tests.test_batched import EchoServer
 from distributed.utils import get_mp_context, wait_for
 from distributed.utils_test import (
@@ -35,6 +36,7 @@ from distributed.utils_test import (
     _LockedCommPool,
     _UnhashableCallable,
     assert_story,
+    captured_context_meter,
     captured_logger,
     check_process_leak,
     check_thread_leak,
@@ -1129,3 +1131,36 @@ def test_cluster_uses_config_for_test(nanny):
             w_remote = next(iter(w_remote.values()))
             assert w_remote != local
             assert w_remote == s_remote
+
+
+def test_captured_logger():
+    log1 = logging.getLogger("test_captured_logger")
+    log2 = logging.getLogger("test_captured_logger.child")
+    log3 = logging.getLogger("test_unrelated_logger")
+
+    with captured_logger("test_captured_logger", level=logging.WARNING) as cap:
+        log1.info("A")
+        log1.warning("B")
+        log1.error("C")
+        log2.error("D")
+        log3.error("E")
+
+    assert cap.getvalue() == "B\nC\nD\n"
+
+
+def test_captured_context_meter():
+    with captured_context_meter() as metrics:
+        assert metrics == {}
+        context_meter.digest_metric("foo", 1, "s")
+        context_meter.digest_metric("foo", 2, "s")  # Addition
+        context_meter.digest_metric("foo", 4, "t")  # Addition
+        context_meter.digest_metric(123, 5.1, "t")  # Non-string label
+        context_meter.digest_metric(("a", "o"), 6, "u")  # tuple label
+
+    assert metrics == {
+        ("foo", "s"): 3,
+        ("foo", "t"): 4,
+        (123, "t"): 5.1,
+        ("a", "o", "u"): 6,
+    }
+    assert isinstance(metrics["foo", "s"], int)

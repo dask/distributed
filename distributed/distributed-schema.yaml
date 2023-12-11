@@ -969,13 +969,6 @@ properties:
 
                   For a full list of supported UCX environment
                   variables, run ``ucx_info -f``.
-          tcp:
-            type: object
-            properties:
-              backend:
-                type: string
-                description: |
-                  The TCP backend implementation to use. Must be either `tornado` or `asyncio`.
 
           websockets:
             type: object
@@ -1074,7 +1067,7 @@ properties:
                         description: The maximum delay between retries
           disk:
             type: boolean
-            description: | 
+            description: |
               Whether or not P2P stores intermediate data on disk instead of memory
 
       dashboard:

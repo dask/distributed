@@ -2652,18 +2652,22 @@ class WorkerState:
         return recs, instructions
 
     def _resource_restrictions_satisfied(self, ts: TaskState) -> bool:
+        if not ts.resource_restrictions:
+            return True
         return all(
             self.available_resources[resource] >= needed
             for resource, needed in ts.resource_restrictions.items()
         )
 
     def _acquire_resources(self, ts: TaskState) -> None:
-        for resource, needed in ts.resource_restrictions.items():
-            self.available_resources[resource] -= needed
+        if ts.resource_restrictions:
+            for resource, needed in ts.resource_restrictions.items():
+                self.available_resources[resource] -= needed
 
     def _release_resources(self, ts: TaskState) -> None:
-        for resource, needed in ts.resource_restrictions.items():
-            self.available_resources[resource] += needed
+        if ts.resource_restrictions:
+            for resource, needed in ts.resource_restrictions.items():
+                self.available_resources[resource] += needed
 
     def _transitions(self, recommendations: Recs, *, stimulus_id: str) -> Instructions:
         """Process transitions until none are left
@@ -3574,9 +3578,10 @@ class WorkerState:
             assert v > -1e-9, self.available_resources
             total[k] -= v
         for ts in self.all_running_tasks:
-            for k, v in ts.resource_restrictions.items():
-                assert v >= 0, (ts, ts.resource_restrictions)
-                total[k] -= v
+            if ts.resource_restrictions:
+                for k, v in ts.resource_restrictions.items():
+                    assert v >= 0, (ts, ts.resource_restrictions)
+                    total[k] -= v
 
         assert all((abs(v) < 1e-9) for v in total.values()), total
 

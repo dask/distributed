@@ -5,8 +5,9 @@ import warnings
 
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
-from bokeh.server.server import BokehTornado
+from bokeh.resources import Resources
 from bokeh.server.util import create_hosts_allowlist
+from packaging.version import parse as parse_version
 
 import dask
 
@@ -31,6 +32,16 @@ else:
     from bokeh.models import TabPanel  # noqa: F401
 
 
+if BOKEH_VERSION < parse_version("3.3.0"):
+    from bokeh.server.server import BokehTornado as DaskBokehTornado
+else:
+    from bokeh.server.server import BokehTornado
+
+    class DaskBokehTornado(BokehTornado):  # type: ignore[no-redef]
+        def resources(self, absolute_url: str | bool | None = True) -> Resources:
+            return super().resources(absolute_url)
+
+
 def BokehApplication(applications, server, prefix="/", template_variables=None):
     template_variables = template_variables or {}
     prefix = "/" + prefix.strip("/") + "/" if prefix else "/"
@@ -45,10 +56,11 @@ def BokehApplication(applications, server, prefix="/", template_variables=None):
         kwargs.pop("allow_websocket_origin"), server.http_server.port
     )
 
-    return BokehTornado(
+    return DaskBokehTornado(
         apps,
         prefix=prefix,
         use_index=False,
         extra_websocket_origins=extra_websocket_origins,
+        absolute_url="",
         **kwargs,
     )

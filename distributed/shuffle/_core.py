@@ -4,17 +4,21 @@ import abc
 import asyncio
 import contextlib
 import itertools
+import pickle
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
+
+from tornado.ioloop import IOLoop
 
 import dask.config
+from dask.core import flatten
 from dask.typing import Key
 from dask.utils import parse_timedelta
 
@@ -26,6 +30,7 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
+from distributed.utils import sync
 from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
@@ -58,6 +63,16 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     _disk_buffer: DiskShardsBuffer | MemoryShardsBuffer
     _comm_buffer: CommShardsBuffer
     diagnostics: dict[str, float]
+    received: set[_T_partition_id]
+    total_recvd: int
+    start_time: float
+    _exception: Exception | None
+    _closed_event: asyncio.Event
+    _loop: IOLoop
+
+    RETRY_COUNT: int
+    RETRY_DELAY_MIN: float
+    RETRY_DELAY_MAX: float
 
     def __init__(
         self,
@@ -71,6 +86,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
         disk: bool,
+        loop: IOLoop,
     ):
         self.id = id
         self.run_id = run_id
@@ -94,13 +110,22 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
 
-        self.diagnostics: dict[str, float] = defaultdict(float)
+        self.diagnostics = defaultdict(float)
         self.transferred = False
-        self.received: set[_T_partition_id] = set()
+        self.received = set()
         self.total_recvd = 0
         self.start_time = time.time()
-        self._exception: Exception | None = None
+        self._exception = None
         self._closed_event = asyncio.Event()
+        self._loop = loop
+
+        self.RETRY_COUNT = dask.config.get("distributed.p2p.comm.retry.count")
+        self.RETRY_DELAY_MIN = parse_timedelta(
+            dask.config.get("distributed.p2p.comm.retry.delay.min"), default="s"
+        )
+        self.RETRY_DELAY_MAX = parse_timedelta(
+            dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
+        )
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: id={self.id!r}, run_id={self.run_id!r}, local_address={self.local_address!r}, closed={self.closed!r}, transferred={self.transferred!r}>"
@@ -129,7 +154,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         return self.run_id
 
     async def _send(
-        self, address: str, shards: list[tuple[_T_partition_id, bytes]]
+        self, address: str, shards: list[tuple[_T_partition_id, Any]] | bytes
     ) -> None:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
@@ -139,20 +164,23 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         )
 
     async def send(
-        self, address: str, shards: list[tuple[_T_partition_id, bytes]]
+        self, address: str, shards: list[tuple[_T_partition_id, Any]]
     ) -> None:
-        retry_count = dask.config.get("distributed.p2p.comm.retry.count")
-        retry_delay_min = parse_timedelta(
-            dask.config.get("distributed.p2p.comm.retry.delay.min"), default="s"
-        )
-        retry_delay_max = parse_timedelta(
-            dask.config.get("distributed.p2p.comm.retry.delay.max"), default="s"
-        )
+        if _mean_shard_size(shards) < 65536:
+            # Don't send buffers individually over the tcp comms.
+            # Instead, merge everything into an opaque bytes blob, send it all at once,
+            # and unpickle it on the other side.
+            # Performance tests informing the size threshold:
+            # https://github.com/dask/distributed/pull/8318
+            shards_or_bytes: list | bytes = pickle.dumps(shards)
+        else:
+            shards_or_bytes = shards
+
         return await retry(
-            partial(self._send, address, shards),
-            count=retry_count,
-            delay_min=retry_delay_min,
-            delay_max=retry_delay_max,
+            partial(self._send, address, shards_or_bytes),
+            count=self.RETRY_COUNT,
+            delay_min=self.RETRY_DELAY_MIN,
+            delay_max=self.RETRY_DELAY_MAX,
         )
 
     async def offload(
@@ -175,12 +203,12 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         }
 
     async def _write_to_comm(
-        self, data: dict[str, tuple[_T_partition_id, bytes]]
+        self, data: dict[str, tuple[_T_partition_id, Any]]
     ) -> None:
         self.raise_if_closed()
         await self._comm_buffer.write(data)
 
-    async def _write_to_disk(self, data: dict[NDIndex, bytes]) -> None:
+    async def _write_to_disk(self, data: dict[NDIndex, Any]) -> None:
         self.raise_if_closed()
         await self._disk_buffer.write(
             {"_".join(str(i) for i in k): v for k, v in data.items()}
@@ -228,10 +256,13 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.raise_if_closed()
         return self._disk_buffer.read("_".join(str(i) for i in id))
 
-    async def receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
+    async def receive(self, data: list[tuple[_T_partition_id, Any]] | bytes) -> None:
+        if isinstance(data, bytes):
+            # Unpack opaque blob. See send()
+            data = cast(list[tuple[_T_partition_id, Any]], pickle.loads(data))
         await self._receive(data)
 
-    async def _ensure_output_worker(self, i: _T_partition_id, key: str) -> None:
+    async def _ensure_output_worker(self, i: _T_partition_id, key: Key) -> None:
         assigned_worker = self._get_assigned_worker(i)
 
         if assigned_worker != self.local_address:
@@ -248,36 +279,38 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Get the address of the worker assigned to the output partition"""
 
     @abc.abstractmethod
-    async def _receive(self, data: list[tuple[_T_partition_id, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[_T_partition_id, Any]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
-    async def add_partition(
+    def add_partition(
         self, data: _T_partition_type, partition_id: _T_partition_id
     ) -> int:
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
-        return await self._add_partition(data, partition_id)
+        shards = self._shard_partition(data, partition_id)
+        sync(self._loop, self._write_to_comm, shards)
+        return self.run_id
 
     @abc.abstractmethod
-    async def _add_partition(
+    def _shard_partition(
         self, data: _T_partition_type, partition_id: _T_partition_id
-    ) -> int:
-        """Add an input partition to the shuffle run"""
+    ) -> dict[str, tuple[_T_partition_id, Any]]:
+        """Shard an input partition by the assigned output workers"""
 
-    async def get_output_partition(
-        self, partition_id: _T_partition_id, key: str, **kwargs: Any
+    def get_output_partition(
+        self, partition_id: _T_partition_id, key: Key, **kwargs: Any
     ) -> _T_partition_type:
         self.raise_if_closed()
-        await self._ensure_output_worker(partition_id, key)
+        sync(self._loop, self._ensure_output_worker, partition_id, key)
         if not self.transferred:
             raise RuntimeError("`get_output_partition` called before barrier task")
-        await self.flush_receive()
-        return await self._get_output_partition(partition_id, key, **kwargs)
+        sync(self._loop, self.flush_receive)
+        return self._get_output_partition(partition_id, key, **kwargs)
 
     @abc.abstractmethod
-    async def _get_output_partition(
-        self, partition_id: _T_partition_id, key: str, **kwargs: Any
+    def _get_output_partition(
+        self, partition_id: _T_partition_id, key: Key, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
 
@@ -286,7 +319,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Read shards from disk"""
 
     @abc.abstractmethod
-    def deserialize(self, buffer: bytes) -> Any:
+    def deserialize(self, buffer: Any) -> Any:
         """Deserialize shards"""
 
 
@@ -328,7 +361,7 @@ class ShuffleType(Enum):
 
 @dataclass(frozen=True)
 class ShuffleRunSpec(Generic[_T_partition_id]):
-    run_id: int = field(init=False, default_factory=partial(next, itertools.count(1)))  # type: ignore
+    run_id: int = field(init=False, default_factory=partial(next, itertools.count(1)))
     spec: ShuffleSpec
     worker_for: dict[_T_partition_id, str]
 
@@ -409,3 +442,18 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
         raise Reschedule()
     except Exception as e:
         raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
+
+
+def _mean_shard_size(shards: Iterable) -> int:
+    """Return estimated mean size in bytes of each shard"""
+    size = 0
+    count = 0
+    for shard in flatten(shards, container=(tuple, list)):
+        if not isinstance(shard, int):
+            # This also asserts that shard is a Buffer and that we didn't forget
+            # a container or metadata type above
+            size += memoryview(shard).nbytes
+            count += 1
+            if count == 10:
+                break
+    return size // count if count else 0

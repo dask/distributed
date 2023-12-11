@@ -1234,7 +1234,7 @@ async def test_statistical_profiling_2(c, s, a, b):
     client=True,
     config={
         "distributed.worker.profile.enabled": True,
-        "distributed.worker.profile.cycle": "100ms",
+        "distributed.worker.profile.cycle": "10ms",
     },
 )
 async def test_statistical_profiling_cycle(c, s, a, b):

@@ -622,3 +622,25 @@ async def test_delayed_ledger_is_not_reentrant(c, s, a):
 
     out = await c.gather(c.map(f, range(1000)))
     assert max(out) < 10
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_int_metrics(c, s, a):
+    """Test that int metrics are not cast to float"""
+
+    def f():
+        context_meter.digest_metric("foo", 1, "u")
+
+    await c.submit(f, key="x")
+    await a.heartbeat()
+
+    span = s.extensions["spans"].spans_search_by_name["default",][0]
+
+    def assert_int(d, k):
+        assert d[k] == 1
+        assert isinstance(d[k], int)
+
+    assert_int(a.digests_total, ("execute", span.id, "x", "foo", "u"))
+    assert_int(a.digests_max, ("execute", span.id, "x", "foo", "u"))
+    assert_int(s.cumulative_worker_metrics, ("execute", "x", "foo", "u"))
+    assert_int(span.cumulative_worker_metrics, ("execute", "x", "foo", "u"))

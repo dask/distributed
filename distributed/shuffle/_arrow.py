@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,8 +35,7 @@ def check_minimal_arrow_version() -> None:
     Raises a ModuleNotFoundError if pyarrow is not installed or an
     ImportError if the installed version is not recent enough.
     """
-    # First version that supports concatenating extension arrays (apache/arrow#14463)
-    minversion = "12.0.0"
+    minversion = "7.0.0"
     try:
         import pyarrow as pa
     except ModuleNotFoundError:
@@ -46,22 +46,52 @@ def check_minimal_arrow_version() -> None:
         )
 
 
-def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
+def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
     import pyarrow as pa
+
+    if parse(pa.__version__) >= parse("14.0.0"):
+        return pa.concat_tables(tables, promote_options="permissive")
+    try:
+        return pa.concat_tables(tables, promote=True)
+    except pa.ArrowNotImplementedError as e:
+        if parse(pa.__version__) >= parse("12.0.0"):
+            raise e
+        raise
+
+
+def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
+    import pandas as pd
+    from pandas.core.dtypes.cast import find_common_type  # type: ignore[attr-defined]
 
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
-    table = pa.concat_tables(shards)
+    table = concat_tables(shards)
 
     df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
-    return df.astype(meta.dtypes, copy=False)
+    reconciled_dtypes = {}
+    for column, dtype in meta.dtypes.items():
+        actual = df[column].dtype
+        if actual == dtype:
+            continue
+        # Use the specific string dtype from meta (e.g., string[pyarrow])
+        if isinstance(actual, pd.StringDtype) and isinstance(dtype, pd.StringDtype):
+            reconciled_dtypes[column] = dtype
+            continue
+        # meta might not be aware of the actual categories so the two dtype objects are not equal
+        # Also, the categories_dtype does not properly roundtrip through Arrow
+        if isinstance(actual, pd.CategoricalDtype) and isinstance(
+            dtype, pd.CategoricalDtype
+        ):
+            continue
+        reconciled_dtypes[column] = find_common_type([actual, dtype])
+    return df.astype(reconciled_dtypes, copy=False)
 
 
 def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
-    import pyarrow as pa
 
-    return pa.concat_tables(deserialize_table(buffer) for buffer in data)
+    tables = (deserialize_table(buffer) for buffer in data)
+    return concat_tables(tables)
 
 
 def serialize_table(table: pa.Table) -> bytes:
@@ -99,18 +129,33 @@ def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
             batch.append(shard)
 
             if offset - prev >= batch_size:
-                table = pa.concat_tables(batch)
+                table = concat_tables(batch)
                 shards.append(_copy_table(table))
                 batch = []
                 prev = offset
     if batch:
-        table = pa.concat_tables(batch)
+        table = concat_tables(batch)
         shards.append(_copy_table(table))
     return shards, size
+
+
+def concat_arrays(arrays: Iterable[pa.Array]) -> pa.Array:
+    import pyarrow as pa
+
+    try:
+        return pa.concat_arrays(arrays)
+    except pa.ArrowNotImplementedError as e:
+        if parse(pa.__version__) >= parse("12.0.0"):
+            raise
+        if e.args[0].startswith("concatenation of extension"):
+            raise RuntimeError(
+                "P2P shuffling requires pyarrow>=12.0.0 to support extension types."
+            ) from e
+        raise
 
 
 def _copy_table(table: pa.Table) -> pa.Table:
     import pyarrow as pa
 
-    arrs = [pa.concat_arrays(column.chunks) for column in table.columns]
+    arrs = [concat_arrays(column.chunks) for column in table.columns]
     return pa.table(data=arrs, schema=table.schema)

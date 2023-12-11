@@ -11,22 +11,20 @@ from distributed.utils import log_errors
 
 
 class MemoryShardsBuffer(ShardsBuffer):
-    _deserialize: Callable[[bytes], Any]
-    _shards: defaultdict[str, deque[bytes]]
+    _deserialize: Callable[[Any], Any]
+    _shards: defaultdict[str, deque[Any]]
 
-    def __init__(self, deserialize: Callable[[bytes], Any]) -> None:
-        super().__init__(
-            memory_limiter=ResourceLimiter(None),
-        )
+    def __init__(self, deserialize: Callable[[Any], Any]) -> None:
+        super().__init__(memory_limiter=ResourceLimiter(None))
         self._deserialize = deserialize
         self._shards = defaultdict(deque)
 
-    async def _process(self, id: str, shards: list[bytes]) -> None:
+    @log_errors
+    async def _process(self, id: str, shards: list[Any]) -> None:
         # TODO: This can be greatly simplified, there's no need for
         # background threads at all.
-        with log_errors():
-            with self.time("write"):
-                self._shards[id].extend(shards)
+        with self.time("write"):
+            self._shards[id].extend(shards)
 
     def read(self, id: str) -> Any:
         self.raise_on_exception()

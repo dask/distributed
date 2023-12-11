@@ -197,17 +197,18 @@ class ProfileTimePlot(DashboardComponent):
         changing = [False]  # avoid repeated changes from within callback
 
         @without_property_validation
+        @log_errors
         def cb(attr, old, new):
             if changing[0] or len(new) == 0:
                 return
-            with log_errors():
-                data = profile.plot_data(self.states[new[0]], profile_interval)
-                del self.states[:]
-                self.states.extend(data.pop("states"))
-                changing[0] = True  # don't recursively trigger callback
-                update(self.source, data)
-                self.source.selected.indices = old
-                changing[0] = False
+
+            data = profile.plot_data(self.states[new[0]], profile_interval)
+            del self.states[:]
+            self.states.extend(data.pop("states"))
+            changing[0] = True  # don't recursively trigger callback
+            update(self.source, data)
+            self.source.selected.indices = old
+            changing[0] = False
 
         self.source.selected.on_change("indices", cb)
 

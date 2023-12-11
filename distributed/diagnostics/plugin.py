@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import abc
 import asyncio
 import contextlib
 import functools
@@ -9,10 +8,11 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import uuid
 import zipfile
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from dask.typing import Key
 from dask.utils import funcname, tmpfile
@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 class SchedulerPlugin:
     """Interface to extend the Scheduler
 
-    A plugin enables custom hooks to run when specific events occur.  The    scheduler will run the methods of this plugin whenever the corresponding
+    A plugin enables custom hooks to run when specific events occur.
+    The scheduler will run the methods of this plugin whenever the corresponding
     method of the scheduler is run.  This runs user code within the scheduler
     thread that can perform arbitrary operations in synchrony with the scheduler
     itself.
@@ -45,6 +46,11 @@ class SchedulerPlugin:
     1. inherit from this class
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
+
+    The ``idempotent`` attribute is used to control whether or not the plugin should
+    be ignored upon registration if a scheduler plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
+    Defaults to ``False``.
 
     Examples
     --------
@@ -62,6 +68,8 @@ class SchedulerPlugin:
     >>> plugin = Counter()
     >>> scheduler.add_plugin(plugin)  # doctest: +SKIP
     """
+
+    idempotent: bool = False
 
     async def start(self, scheduler: Scheduler) -> None:
         """Run when the scheduler starts up
@@ -217,6 +225,11 @@ class WorkerPlugin:
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
+    The ``idempotent`` attribute is used to control whether or not the plugin should
+    be ignored upon registration if a worker plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
+    Defaults to ``False``.
+
     Examples
     --------
     >>> class ErrorLogger(WorkerPlugin):
@@ -239,6 +252,8 @@ class WorkerPlugin:
     >>> plugin = ErrorLogger(logging)
     >>> client.register_plugin(plugin)  # doctest: +SKIP
     """
+
+    idempotent: bool = False
 
     def setup(self, worker: Worker) -> None | Awaitable[None]:
         """
@@ -298,6 +313,11 @@ class NannyPlugin:
     2. override some of its methods
     3. register the plugin using :meth:`Client.register_plugin<distributed.Client.register_plugin>`.
 
+    The ``idempotent`` attribute is used to control whether or not the plugin should
+    be ignored upon registration if a nanny plugin with the same name already exists.
+    If ``True``, the plugin is ignored, otherwise the existing plugin is replaced.
+    Defaults to ``False``.
+
     The ``restart`` attribute is used to control whether or not a running ``Worker``
     needs to be restarted when registering the plugin.
 
@@ -307,7 +327,8 @@ class NannyPlugin:
     SchedulerPlugin
     """
 
-    restart = False
+    idempotent: bool = False
+    restart: bool = False
 
     def setup(self, nanny):
         """
@@ -348,24 +369,24 @@ class SchedulerUploadFile(SchedulerPlugin):
         await scheduler.upload_file(self.filename, self.data, load=self.load)
 
 
-class PackageInstall(SchedulerPlugin, abc.ABC):
-    """Abstract parent class for a scheduler plugin to install a set of packages
+class InstallPlugin(SchedulerPlugin):
+    """Scheduler plugin to install software on the cluster
 
-    This accepts a set of packages to install on the scheduler and all workers.
-    You can also optionally ask for the worker to restart itself after
-    performing this installation.
+    This accepts an function that installs software on the scheduler and
+    all workers. You can also optionally ask for the worker to restart
+    after performing this installation.
 
     .. note::
 
        This will increase the time it takes to start up
        each worker. If possible, we recommend including the
-       libraries in the worker environment or image. This is
+       software in the worker environment or image. This is
        primarily intended for experimentation and debugging.
 
     Parameters
     ----------
-    packages
-        A list of packages (with optional versions) to install
+    install_fn
+        Callable used to install the software; must be idempotent.
     restart_workers
         Whether or not to restart the worker after installing the packages
         Only functions if the worker has an attached nanny process
@@ -376,110 +397,137 @@ class PackageInstall(SchedulerPlugin, abc.ABC):
     PipInstall
     """
 
+    idempotent = True
     _lock: ClassVar[asyncio.Lock | None] = None
-    WORKER_PLUGIN_CLASS: ClassVar[type]
 
-    installer: _PackageInstaller
+    _install_fn: Callable[[], None]
     name: str
     restart_workers: bool
     _scheduler: Scheduler
 
     def __init__(
         self,
-        installer: _PackageInstaller,
+        install_fn: Callable[[], None],
         restart_workers: bool,
     ):
-        self.installer = installer
+        self._install_fn = install_fn
         self.restart_workers = restart_workers
-        self.name = f"{self.installer.INSTALLER}-install-{uuid.uuid4()}"
+        self.name = f"{self.__class__.__name__}-{uuid.uuid4()}"
 
     async def start(self, scheduler: Scheduler) -> None:
         self._scheduler = scheduler
 
-        if PackageInstall._lock is None:
-            PackageInstall._lock = asyncio.Lock()
+        if InstallPlugin._lock is None:
+            InstallPlugin._lock = asyncio.Lock()
 
-        async with PackageInstall._lock:
-            if not self._is_installed(scheduler):
-                logger.info(
-                    "%s installing the following packages on the scheduler: %s",
-                    self.installer.INSTALLER,
-                    self.installer.packages,
-                )
-                self.installer.install()
-                self._set_installed(scheduler)
+        async with InstallPlugin._lock:
+            self._install_fn()
 
-                worker_plugin = _PackageInstallWorker(
-                    self.installer, self.restart_workers, self.name
-                )
-                await scheduler.register_worker_plugin(
-                    comm=None, plugin=dumps(worker_plugin), name=self.name
+            if self.restart_workers:
+                nanny_plugin = _InstallNannyPlugin(self._install_fn, self.name)
+                await scheduler.register_nanny_plugin(
+                    comm=None,
+                    plugin=dumps(nanny_plugin),
+                    name=self.name,
+                    idempotent=True,
                 )
             else:
-                logger.info(
-                    "The following packages have already been installed on the scheduler: %s",
-                    self.installer.packages,
+                worker_plugin = _InstallWorkerPlugin(self._install_fn, self.name)
+                await scheduler.register_worker_plugin(
+                    comm=None,
+                    plugin=dumps(worker_plugin),
+                    name=self.name,
+                    idempotent=True,
                 )
 
     async def close(self) -> None:
-        assert PackageInstall._lock is not None
+        assert InstallPlugin._lock is not None
 
-        async with PackageInstall._lock:
-            await self._scheduler.unregister_worker_plugin(comm=None, name=self.name)
-
-    def _is_installed(self, scheduler: Scheduler) -> bool:
-        return scheduler.get_metadata(self._compose_installed_key(), default=False)
-
-    def _set_installed(self, scheduler: Scheduler) -> None:
-        scheduler.set_metadata(
-            self._compose_installed_key(),
-            True,
-        )
-
-    def _compose_installed_key(self) -> list[Key]:
-        return [
-            self.name,
-            "installed",
-            socket.gethostname(),
-        ]
+        async with InstallPlugin._lock:
+            if self.restart_workers:
+                await self._scheduler.unregister_nanny_plugin(comm=None, name=self.name)
+            else:
+                await self._scheduler.unregister_worker_plugin(
+                    comm=None, name=self.name
+                )
 
 
-class _PackageInstallWorker(WorkerPlugin):
-    """Worker plugin to install a set of packages
+class _InstallNannyPlugin(NannyPlugin):
+    """Nanny plugin to install software on the nanny and then restart the workers
 
-    This accepts an installer which will install a set of packages on all workers.
-    You can also optionally ask for the worker to restart itself after
-    performing this installation.
+    This accepts an installer which will installs software on all nannies.
 
     .. note::
 
        This will increase the time it takes to start up
-       each worker. If possible, we recommend including the
-       libraries in the worker environment or image. This is
+       the cluster. If possible, we recommend including the
+       software in the cluster environment or image. This is
        primarily intended for experimentation and debugging.
 
     Parameters
     ----------
-    installer
-        Installer that installs a set of packages
-    restart
-        Whether or not to restart the worker after installing the packages
-        Only functions if the worker has an attached nanny process
+    install_fn
+        Function that installs software
     name:
         Name of the plugin
 
     See Also
     --------
-    PackageInstall
+    InstallPlugin
     """
 
-    installer: _PackageInstaller
+    _install_fn: Callable[[], None]
     name: str
-    restart: bool
+    restart = True
 
-    def __init__(self, installer: _PackageInstaller, restart: bool, name: str):
-        self.installer = installer
-        self.restart = restart
+    def __init__(self, _install_fn: Callable[[], None], name: str):
+        self._install_fn = _install_fn
+        self.name = name
+
+    async def setup(self, nanny):
+        from distributed.semaphore import Semaphore
+
+        async with (
+            await Semaphore(
+                max_leases=1,
+                name=socket.gethostname(),
+                register=True,
+                scheduler_rpc=nanny.scheduler,
+                loop=nanny.loop,
+            )
+        ):
+            self._install_fn()
+
+
+class _InstallWorkerPlugin(WorkerPlugin):
+    """Worker plugin to install software on the worker
+
+    This accepts an installer which will installs software on all workers.
+
+    .. note::
+
+       This will increase the time it takes to start up
+       the cluster. If possible, we recommend including the
+       software in the cluster environment or image. This is
+       primarily intended for experimentation and debugging.
+
+    Parameters
+    ----------
+    install_fn
+        Callable that installs software
+    name:
+        Name of the plugin
+
+    See Also
+    --------
+    InstallPlugin
+    """
+
+    _install_fn: Callable[[], None]
+    name: str
+
+    def __init__(self, install_fn: Callable[[], None], name: str):
+        self._install_fn = install_fn
         self.name = name
 
     async def setup(self, worker):
@@ -494,86 +542,23 @@ class _PackageInstallWorker(WorkerPlugin):
                 loop=worker.loop,
             )
         ):
-            if not await self._is_installed(worker):
-                logger.info(
-                    "%s installing the following packages: %s",
-                    self.installer.INSTALLER,
-                    self.installer.packages,
-                )
-                await self._set_installed(worker)
-                self.installer.install()
-            else:
-                logger.info(
-                    "The following packages have already been installed: %s",
-                    self.installer.packages,
-                )
-
-            if self.restart and worker.nanny and not await self._is_restarted(worker):
-                logger.info("Restarting worker to refresh interpreter.")
-                await self._set_restarted(worker)
-                worker.loop.add_callback(
-                    worker.close_gracefully, restart=True, reason=f"{self.name}-setup"
-                )
-
-    async def _is_installed(self, worker):
-        return await worker.client.get_metadata(
-            self._compose_installed_key(), default=False
-        )
-
-    async def _set_installed(self, worker):
-        await worker.client.set_metadata(
-            self._compose_installed_key(),
-            True,
-        )
-
-    def _compose_installed_key(self):
-        return [
-            self.name,
-            "installed",
-            socket.gethostname(),
-        ]
-
-    async def _is_restarted(self, worker):
-        return await worker.client.get_metadata(
-            self._compose_restarted_key(worker),
-            default=False,
-        )
-
-    async def _set_restarted(self, worker):
-        await worker.client.set_metadata(
-            self._compose_restarted_key(worker),
-            True,
-        )
-
-    def _compose_restarted_key(self, worker):
-        return [self.name, "restarted", worker.nanny]
+            self._install_fn()
 
 
-class _PackageInstaller(abc.ABC):
-    INSTALLER: ClassVar[str]
-    packages: list[str]
+class CondaInstall(InstallPlugin):
+    """A plugin to conda install a set of packages
 
-    def __init__(self, packages: list[str]):
-        self.packages = packages
+    This accepts a set of packages to install on the scheduler and all
+    workers as well as options to use when installing.
 
-    @abc.abstractmethod
-    def install(self) -> None:
-        """Install the requested packages"""
-
-
-class CondaInstall(PackageInstall):
-    """A Worker Plugin to conda install a set of packages
-
-    This accepts a set of packages to install on all workers as well as
-    options to use when installing.
-    You can also optionally ask for the worker to restart itself after
+    You can also optionally ask for the workers to restart after
     performing this installation.
 
     .. note::
 
        This will increase the time it takes to start up
-       each worker. If possible, we recommend including the
-       libraries in the worker environment or image. This is
+       the cluster. If possible, we recommend including the
+       libraries in the cluster environment or image. This is
        primarily intended for experimentation and debugging.
 
     Parameters
@@ -584,7 +569,7 @@ class CondaInstall(PackageInstall):
         Additional options to pass to conda
     restart_workers
         Whether or not to restart the worker after installing the packages
-        Only functions if the worker has an attached nanny process
+        Only functions if the workers have an attached nanny process
 
     Examples
     --------
@@ -595,7 +580,7 @@ class CondaInstall(PackageInstall):
 
     See Also
     --------
-    PackageInstall
+    InstallPlugin
     PipInstall
     """
 
@@ -609,16 +594,22 @@ class CondaInstall(PackageInstall):
         super().__init__(installer, restart_workers=restart_workers)
 
 
-class _CondaInstaller(_PackageInstaller):
+class _CondaInstaller:
     INSTALLER = "conda"
 
+    packages: list[str]
     conda_options: list[str]
 
     def __init__(self, packages: list[str], conda_options: list[str] | None = None):
-        super().__init__(packages)
+        self.packages = packages
         self.conda_options = conda_options or []
 
-    def install(self) -> None:
+    def __call__(self) -> None:
+        logger.info(
+            "%s installing the following packages: %s",
+            self.INSTALLER,
+            self.packages,
+        )
         try:
             from conda.cli.python_api import Commands, run_command
         except ModuleNotFoundError as e:  # pragma: nocover
@@ -643,8 +634,8 @@ class _CondaInstaller(_PackageInstaller):
             raise RuntimeError(msg)
 
 
-class PipInstall(PackageInstall):
-    """A Worker Plugin to pip install a set of packages
+class PipInstall(InstallPlugin):
+    """A plugin to pip install a set of packages
 
     This accepts a set of packages to install on all workers as well as
     options to use when installing.
@@ -661,23 +652,32 @@ class PipInstall(PackageInstall):
     Parameters
     ----------
     packages
-        A list of packages (with optional versions) to install using pip
+        A list of packages to install using pip.
+        Packages should follow the structure defined for
+        `requirement files <https://pip.pypa.io/en/stable/reference/requirements-file-format/#structure>`_.
+        Packages also may include
+        `environment variables <https://pip.pypa.io/en/stable/reference/requirements-file-format/#using-environment-variables>`_.
     pip_options
         Additional options to pass to pip
     restart_workers
-        Whether or not to restart the worker after installing the packages
-        Only functions if the worker has an attached nanny process
+        Whether or not to restart the worker after installing the packages;
+        only functions if the worker has an attached nanny process.
 
     Examples
     --------
     >>> from dask.distributed import PipInstall
     >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
+    >>> client.register_plugin(plugin)
 
+    Install package from a private repository using a ``TOKEN`` environment variable.
+
+    >>> from dask.distributed import PipInstall
+    >>> plugin = PipInstall(packages=["private_package@git+https://${TOKEN}@github.com/dask/private_package.git])
     >>> client.register_plugin(plugin)
 
     See Also
     --------
-    PackageInstall
+    InstallPlugin
     CondaInstall
     """
 
@@ -691,27 +691,47 @@ class PipInstall(PackageInstall):
         super().__init__(installer, restart_workers=restart_workers)
 
 
-class _PipInstaller(_PackageInstaller):
+class _PipInstaller:
     INSTALLER = "pip"
 
+    packages: list[str]
     pip_options: list[str]
 
     def __init__(self, packages: list[str], pip_options: list[str] | None = None):
-        super().__init__(packages)
+        self.packages = packages
         self.pip_options = pip_options or []
 
-    def install(self) -> None:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install"] + self.pip_options + self.packages,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+    def __call__(self) -> None:
+        logger.info(
+            "%s installing the following packages: %s",
+            self.INSTALLER,
+            self.packages,
         )
-        _, stderr = proc.communicate()
-        returncode = proc.wait()
-        if returncode != 0:
-            msg = f"pip install failed with '{stderr.decode().strip()}'"
-            logger.error(msg)
-            raise RuntimeError(msg)
+        # Use a requirements file under the hood to support
+        # environment variables
+        # See https://pip.pypa.io/en/stable/reference/requirements-file-format/#using-environment-variables
+        with tempfile.NamedTemporaryFile(mode="w+") as f:
+            f.write("\n".join(self.packages))
+            f.flush()
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *self.pip_options,
+                    "-r",
+                    f.name,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            _, stderr = proc.communicate()
+            returncode = proc.wait()
+            if returncode != 0:
+                msg = f"pip install failed with '{stderr.decode().strip()}'"
+                logger.error(msg)
+                raise RuntimeError(msg)
 
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
