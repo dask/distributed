@@ -4857,7 +4857,7 @@ class Client(SyncMethodMixin):
             warnings.warn(
                 "The `idempotent` argument is deprecated and will be removed in a "
                 "future version. Please mark your plugin as idempotent by setting its "
-                "`.idempotent` atrribute to `True`.",
+                "`.idempotent` attribute to `True`.",
                 FutureWarning,
             )
         else:
