@@ -4335,16 +4335,12 @@ class Shuffling(DashboardComponent):
                 "comm_memory": [],
                 "comm_memory_limit": [],
                 "comm_buckets": [],
-                "comm_avg_duration": [],
-                "comm_avg_size": [],
                 "comm_read": [],
                 "comm_written": [],
                 "comm_color": [],
                 "disk_memory": [],
                 "disk_memory_limit": [],
                 "disk_buckets": [],
-                "disk_avg_duration": [],
-                "disk_avg_size": [],
                 "disk_read": [],
                 "disk_written": [],
                 "disk_color": [],
@@ -4374,11 +4370,8 @@ class Shuffling(DashboardComponent):
         hover = HoverTool(
             tooltips=[
                 ("Memory Used", "@comm_memory{0.00 b}"),
-                ("Average Write", "@comm_avg_size{0.00 b}"),
                 ("# Buckets", "@comm_buckets"),
-                ("Average Duration", "@comm_avg_duration"),
             ],
-            formatters={"@comm_avg_duration": "datetime"},
             mode="hline",
         )
         self.comm_memory.add_tools(hover)
@@ -4406,11 +4399,8 @@ class Shuffling(DashboardComponent):
         hover = HoverTool(
             tooltips=[
                 ("Memory Used", "@disk_memory{0.00 b}"),
-                ("Average Write", "@disk_avg_size{0.00 b}"),
                 ("# Buckets", "@disk_buckets"),
-                ("Average Duration", "@disk_avg_duration"),
             ],
-            formatters={"@disk_avg_duration": "datetime"},
             mode="hline",
         )
         self.disk_memory.add_tools(hover)
@@ -4471,12 +4461,6 @@ class Shuffling(DashboardComponent):
                 data[f"{prefix}_memory"].append(d[prefix]["memory"])
                 data[f"{prefix}_memory_limit"].append(memory_limit)
                 data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
-                data[f"{prefix}_avg_duration"].append(
-                    d[prefix]["diagnostics"].get("avg_duration", 0)
-                )
-                data[f"{prefix}_avg_size"].append(
-                    d[prefix]["diagnostics"].get("avg_size", 0)
-                )
                 data[f"{prefix}_read"].append(d[prefix]["read"])
                 data[f"{prefix}_written"].append(d[prefix]["written"])
                 if self.scheduler.workers[worker].last_seen < now - 5:

@@ -167,7 +167,6 @@ class DiskShardsBuffer(ShardsBuffer):
 
         with (
             self._directory_lock.read(),
-            self.time("write"),
             context_meter.meter("disk-write"),
             serialize_meter_ctx,
         ):
@@ -198,8 +197,7 @@ class DiskShardsBuffer(ShardsBuffer):
                 # measure seconds here, as it would shadow "p2p-get-output-cpu" and
                 # "p2p-get-output-noncpu". Also, for rechunk it would not measure
                 # the whole disk access, as _read returns memory-mapped buffers.
-                with self.time("read"):
-                    data, size = self._read(fname)
+                data, size = self._read(fname)
                 context_meter.digest_metric("p2p-disk-read", 1, "count")
                 context_meter.digest_metric("p2p-disk-read", size, "bytes")
         except FileNotFoundError:

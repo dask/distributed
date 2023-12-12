@@ -6,7 +6,6 @@ import contextlib
 import itertools
 import pickle
 import time
-from collections import defaultdict
 from collections.abc import Callable, Generator, Hashable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -64,7 +63,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     closed: bool
     _disk_buffer: DiskShardsBuffer | MemoryShardsBuffer
     _comm_buffer: CommShardsBuffer
-    diagnostics: dict[str, float]
     received: set[_T_partition_id]
     total_recvd: int
     start_time: float
@@ -124,7 +122,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
 
-        self.diagnostics = defaultdict(float)
         self.transferred = False
         self.received = set()
         self.total_recvd = 0
@@ -182,13 +179,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         with context_meter.add_callback(callback, allow_offload="background" in where):
             yield
 
-    @contextlib.contextmanager
-    def time(self, name: str) -> Iterator[None]:
-        start = time.time()
-        yield
-        stop = time.time()
-        self.diagnostics[name] += stop - start
-
     async def barrier(self, run_ids: Sequence[int]) -> int:
         self.raise_if_closed()
         consistent = all(run_id == self.run_id for run_id in run_ids)
@@ -233,7 +223,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self, func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
         self.raise_if_closed()
-        with self.time("cpu"), context_meter.meter("offload"):
+        with context_meter.meter("offload"):
             return await run_in_executor_with_context(
                 self.executor, func, *args, **kwargs
             )
@@ -244,7 +234,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         return {
             "disk": self._disk_buffer.heartbeat(),
             "comm": comm_heartbeat,
-            "diagnostics": self.diagnostics,
             "start": self.start_time,
         }
 

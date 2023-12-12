@@ -442,8 +442,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         data = self._read_from_disk(partition_id)
         # Copy the memory-mapped buffers from disk into memory.
         # This is where we'll spend most time.
-        with self._disk_buffer.time("read"):
-            return convert_chunk(data)
+        return convert_chunk(data)
 
     def deserialize(self, buffer: Any) -> Any:
         return buffer

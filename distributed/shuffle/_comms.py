@@ -68,5 +68,5 @@ class CommShardsBuffer(ShardsBuffer):
     async def _process(self, address: str, shards: list[tuple[Any, Any]]) -> None:
         """Send one message off to a neighboring worker"""
         # Consider boosting total_size a bit here to account for duplication
-        with self.time("send"), context_meter.meter("send"):
+        with context_meter.meter("send"):
             await self.send(address, shards)

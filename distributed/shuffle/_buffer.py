@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections import defaultdict
-from collections.abc import Iterator, Sized
+from collections.abc import Sized
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from distributed.metrics import context_meter, time
+from distributed.metrics import context_meter
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.sizeof import sizeof
 
@@ -49,7 +48,6 @@ class ShardsBuffer(Generic[ShardType]):
     sizes_detail: defaultdict[str, list[int]]
     concurrency_limit: int
     memory_limiter: ResourceLimiter
-    diagnostics: dict[str, float]
     max_message_size: int
 
     bytes_total: int
@@ -78,7 +76,6 @@ class ShardsBuffer(Generic[ShardType]):
         self.concurrency_limit = concurrency_limit
         self._inputs_done = False
         self.memory_limiter = memory_limiter
-        self.diagnostics: dict[str, float] = defaultdict(float)
         self._tasks = [
             asyncio.create_task(self._background_task())
             for _ in range(concurrency_limit)
@@ -99,26 +96,17 @@ class ShardsBuffer(Generic[ShardType]):
             "buckets": len(self.shards),
             "written": self.bytes_written,
             "read": self.bytes_read,
-            "diagnostics": self.diagnostics,
             "memory_limit": self.memory_limiter.limit,
         }
 
     async def process(self, id: str, shards: list[ShardType], size: int) -> None:
         try:
-            start = time()
             with context_meter.meter("process"):
                 await self._process(id, shards)
             context_meter.digest_metric("process", size, "bytes")
             context_meter.digest_metric("process", 1, "count")
             self.bytes_written += size
 
-            stop = time()
-            self.diagnostics["avg_size"] = (
-                0.98 * self.diagnostics["avg_size"] + 0.02 * size
-            )
-            self.diagnostics["avg_duration"] = 0.98 * self.diagnostics[
-                "avg_duration"
-            ] + 0.02 * (stop - start)
         except Exception as e:
             self._exception = e
             self._inputs_done = True
@@ -262,10 +250,3 @@ class ShardsBuffer(Generic[ShardType]):
 
     async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:
         await self.close()
-
-    @contextlib.contextmanager
-    def time(self, name: str) -> Iterator[None]:
-        start = time()
-        yield
-        stop = time()
-        self.diagnostics[name] += stop - start
