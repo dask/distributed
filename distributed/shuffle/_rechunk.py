@@ -99,7 +99,7 @@ from __future__ import annotations
 import mmap
 import os
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import product
@@ -125,7 +125,6 @@ from distributed.shuffle._core import (
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import unpickle_bytestream
-from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -456,11 +455,22 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
     new: ChunkedAxes
     old: ChunkedAxes
 
-    def _pin_output_workers(self, plugin: ShuffleSchedulerPlugin) -> dict[NDIndex, str]:
-        parts_out = product(*(range(len(c)) for c in self.new))
-        return plugin._pin_output_workers(
-            self.id, parts_out, _get_worker_for_hash_sharding
-        )
+    @property
+    def output_partitions(self) -> Generator[NDIndex, None, None]:
+        yield from product(*(range(len(c)) for c in self.new))
+
+    def pick_worker(self, partition: NDIndex, workers: Sequence[str]) -> str:
+        npartitions = 1
+        for c in self.new:
+            npartitions *= len(c)
+        ix = 0
+        for dim, pos in enumerate(partition):
+            if dim > 0:
+                ix += len(self.new[dim - 1]) * pos
+            else:
+                ix += pos
+        i = len(workers) * ix // npartitions
+        return workers[i]
 
     def create_run_on_worker(
         self,
@@ -487,11 +497,3 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
             disk=self.disk,
             loop=plugin.worker.loop,
         )
-
-
-def _get_worker_for_hash_sharding(
-    output_partition: NDIndex, workers: Sequence[str]
-) -> str:
-    """Get address of target worker for this output partition using hash sharding"""
-    i = hash(output_partition) % len(workers)
-    return workers[i]

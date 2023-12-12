@@ -26,8 +26,8 @@ from distributed.shuffle._core import ShuffleId
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._rechunk import (
     ArrayRechunkRun,
+    ArrayRechunkSpec,
     Split,
-    _get_worker_for_hash_sharding,
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
@@ -103,11 +103,12 @@ async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk)
 
     worker_for_mapping = {}
 
+    spec = ArrayRechunkSpec(id=ShuffleId("foo"), disk=disk, new=new, old=old)
     new_indices = list(product(*(range(len(dim)) for dim in new)))
-    for i, idx in enumerate(new_indices):
-        worker_for_mapping[idx] = _get_worker_for_hash_sharding(i, workers)
-
+    for idx in new_indices:
+        worker_for_mapping[idx] = spec.pick_worker(idx, workers)
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
+    # scheduler_state = spec.create_new_run(worker_for_mapping)
 
     with ArrayRechunkTestPool() as local_shuffle_pool:
         shuffles = []
@@ -1200,3 +1201,18 @@ async def test_rechunk_in_memory_shards_dont_share_buffer(c, s, a, b):
     buf_ids = {id(get_host_array(shard)) for shard in shards}
     assert len(buf_ids) == len(shards)
     await block_map.set()
+
+
+@pytest.mark.parametrize("nworkers", [1, 2, 41, 50])
+def test_worker_for_homogeneous_distribution(nworkers):
+    old = ((1, 2, 3, 4), (5,) * 6)
+    new = ((5, 5), (12, 18))
+    workers = [str(i) for i in range(nworkers)]
+    spec = ArrayRechunkSpec(ShuffleId("foo"), disk=False, new=new, old=old)
+    count = {w: 0 for w in workers}
+    for nidx in spec.output_partitions:
+        count[spec.pick_worker(nidx, workers)] += 1
+
+    assert sum(count.values()) > 0
+    assert sum(count.values()) == len(list(spec.output_partitions))
+    assert abs(max(count.values()) - min(count.values())) <= 1
