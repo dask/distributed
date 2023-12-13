@@ -136,7 +136,7 @@ class SpillBuffer(zict.Buffer[Key, object]):
             logger.error("Spill to disk failed; keeping data in memory", exc_info=True)
             raise HandledError()
         except PickleError as e:
-            key_e, orig_e = e.args
+            (key_e,) = e.args
             assert key_e in self.fast
             assert key_e not in self.slow
             if key_e == key:
@@ -146,7 +146,7 @@ class SpillBuffer(zict.Buffer[Key, object]):
                 # The exception will be caught by Worker and logged; the status of
                 # the task will be set to error.
                 del self[key]
-                raise orig_e
+                raise
             else:
                 # The key we just inserted is smaller than target, but it caused
                 # another, unrelated key to be spilled out of the LRU, and that key
@@ -324,7 +324,7 @@ class Slow(zict.Func[Key, object, bytes]):
             # zict.LRU ensures that the key remains in fast if we raise.
             # Wrap the exception so that it's recognizable by SpillBuffer,
             # which will then unwrap it.
-            raise PickleError(key, e)
+            raise PickleError(key) from e
 
         # Thanks to Buffer.__setitem__, we never update existing
         # keys in slow, but always delete them and reinsert them.
