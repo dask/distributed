@@ -20,7 +20,6 @@ from distributed import Client, Event, KilledWorker, Nanny, Scheduler, Worker, w
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import monotonic
-from distributed.spill import PickleError
 from distributed.utils import RateLimiterFilter
 from distributed.utils_test import (
     NO_AMM,
@@ -28,7 +27,6 @@ from distributed.utils_test import (
     captured_logger,
     gen_cluster,
     inc,
-    raises_with_cause,
     wait_for_state,
 )
 from distributed.worker_memory import parse_memory_limit
@@ -176,7 +174,7 @@ async def test_fail_to_pickle_execute_1(c, s, a, b):
 
     assert x.status == "error"
 
-    with raises_with_cause(PickleError, "x", TypeError, "Could not serialize"):
+    with pytest.raises(TypeError, match="Failed to pickle"):
         await x
 
     await assert_basic_futures(c)

@@ -14,9 +14,9 @@ from dask.sizeof import sizeof
 from distributed import profile
 from distributed.compatibility import WINDOWS
 from distributed.metrics import meter
-from distributed.spill import PickleError, SpillBuffer
+from distributed.spill import SpillBuffer
 from distributed.utils import RateLimiterFilter
-from distributed.utils_test import captured_logger, raises_with_cause
+from distributed.utils_test import captured_logger
 
 
 def psize(tmp_path: Path, **objs: object) -> tuple[int, int]:
@@ -219,7 +219,7 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
     a = Bad(size=201)
 
     # Exception caught in the worker
-    with raises_with_cause(PickleError, "a", TypeError, "Could not serialize"):
+    with pytest.raises(TypeError, match="Failed to pickle"):
         with captured_logger("distributed.spill") as logs_bad_key:
             buf["a"] = a
 
