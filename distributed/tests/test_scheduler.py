@@ -155,8 +155,6 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
-# FIXME: Temporarily xfail-ing to unblock CI
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/8255")
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
