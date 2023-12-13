@@ -4,8 +4,6 @@ import logging
 
 import msgpack
 
-import dask.config
-
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.serialize import (
@@ -117,8 +115,6 @@ def dumps(  # type: ignore[no-untyped-def]
 def loads(frames, deserialize=True, deserializers=None):
     """Transform bytestream back into Python value"""
 
-    allow_pickle = dask.config.get("distributed.scheduler.pickle")
-
     try:
 
         def _decode_default(obj):
@@ -148,13 +144,7 @@ def loads(frames, deserialize=True, deserializers=None):
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
                 if "compression" in sub_header:
                     sub_frames = decompress(sub_header, sub_frames)
-                if allow_pickle:
-                    return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
-                else:
-                    raise ValueError(
-                        "Unpickle on the Scheduler isn't allowed, set `distributed.scheduler.pickle=true`"
-                    )
-
+                return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
             return msgpack_decode_default(obj)
 
         return msgpack.loads(

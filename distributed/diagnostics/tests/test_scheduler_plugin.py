@@ -402,23 +402,6 @@ async def test_register_scheduler_plugin_deprecated(c, s, a, b):
         assert s.foo == "bar"
 
 
-@gen_cluster(client=True, config={"distributed.scheduler.pickle": False})
-async def test_register_plugin_pickle_disabled(c, s, a, b):
-    class Dummy1(SchedulerPlugin):
-        def start(self, scheduler):
-            scheduler.foo = "bar"
-
-    n_plugins = len(s.plugins)
-    with pytest.raises(ValueError) as excinfo:
-        await c.register_plugin(Dummy1())
-
-    msg = str(excinfo.value)
-    assert "disallowed from deserializing" in msg
-    assert "distributed.scheduler.pickle" in msg
-
-    assert n_plugins == len(s.plugins)
-
-
 @gen_cluster(nthreads=[])
 async def test_unregister_scheduler_plugin(s):
     class Plugin(SchedulerPlugin):
