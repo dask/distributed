@@ -289,6 +289,7 @@ async def test_override_is_rootish(c, s):
     ts_x = s.tasks["x"]
     assert ts_x._rootish is None
     assert s.is_rootish(ts_x)
+
     ts_x._rootish = False
     assert not s.is_rootish(ts_x)
 
@@ -297,6 +298,7 @@ async def test_override_is_rootish(c, s):
     ts_y = s.tasks["y"]
     assert ts_y._rootish is None
     assert not s.is_rootish(ts_y)
+
     ts_y._rootish = True
     assert s.is_rootish(ts_y)
 
