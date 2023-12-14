@@ -219,9 +219,10 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
     a = Bad(size=201)
 
     # Exception caught in the worker
-    with pytest.raises(TypeError, match="Could not serialize"):
+    with pytest.raises(TypeError, match="Failed to pickle 'a'") as e:
         with captured_logger("distributed.spill") as logs_bad_key:
             buf["a"] = a
+    assert isinstance(e.value.__cause__.__cause__, MyError)
 
     # spill.py must remain silent because we're already logging in worker.py
     assert not logs_bad_key.getvalue()
@@ -240,7 +241,7 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
 
     # worker.py won't intercept the exception here, so spill.py must dump the traceback
     logs_value = logs_bad_key_mem.getvalue()
-    assert "Failed to pickle" in logs_value  # from distributed.spill
+    assert "Failed to pickle 'b'" in logs_value  # from distributed.spill
     assert "Traceback" in logs_value  # from distributed.spill
     assert_buf(buf, tmp_path, {"b": b, "c": c}, {})
 
