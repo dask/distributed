@@ -636,10 +636,6 @@ class Worker(BaseWorker, ServerNode):
             "offload": utils._offload_executor,
             "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
         }
-        if nvml.device_get_count() > 0:
-            self.executors["gpu"] = ThreadPoolExecutor(
-                1, thread_name_prefix="Dask-GPU-Threads"
-            )
 
         # Find the default executor
         if executor == "offload":
