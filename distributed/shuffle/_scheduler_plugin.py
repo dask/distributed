@@ -145,6 +145,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._raise_if_barrier_unknown(spec.id)
             self._raise_if_task_not_processing(key)
             worker_for = self._calculate_worker_for(spec)
+            self._ensure_output_tasks_are_non_rootish(spec)
             state = spec.create_new_run(worker_for)
             self.active_shuffles[spec.id] = state
             self._shuffles[spec.id].add(state)
@@ -193,6 +194,11 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             worker = spec.pick_worker(partition, workers)
             mapping[partition] = worker
         return mapping
+
+    def _ensure_output_tasks_are_non_rootish(self, spec: ShuffleSpec) -> None:
+        barrier = self.scheduler.tasks[barrier_key(spec.id)]
+        for dependent in barrier.dependents:
+            dependent._rootish = False
 
     @log_errors()
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
