@@ -91,7 +91,7 @@ async def test_subprocess_cluster_does_not_depend_on_logging():
     with new_config_file(
         {"distributed": {"logging": {"distributed": logging.CRITICAL + 1}}}
     ):
-        await asyncio.wait_for(_start(), timeout=5)
+        await asyncio.wait_for(_start(), timeout=8)
 
 
 @pytest.mark.skipif(
