@@ -96,7 +96,6 @@ the same output brick.
 
 from __future__ import annotations
 
-import math
 import mmap
 import os
 from collections import defaultdict
@@ -277,7 +276,7 @@ def _partial_slices(
         # Two consecutive output chunks A and B belong to the same partial rechunk
         # if B is fully included in the right-most input chunk of A, i.e.,
         # separating A and B would not allow us to cull more input tasks.
-        
+
         # Index of the last input chunk of this partial rechunk
         last_old_chunk: int | None = None
         partial_splits = [0]
