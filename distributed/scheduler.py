@@ -1373,6 +1373,15 @@ class TaskState:
     #: be rejected.
     run_id: int | None
 
+    #: Whether to consider this task rootish in the context of task queueing
+    #: True
+    #:     Always consider this task rootish
+    #: False
+    #:     Never consider this task rootish
+    #: None
+    #:     Use a heuristic to determine whether this task should be considered rootish
+    _rootish: bool | None
+
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
@@ -1430,6 +1439,7 @@ class TaskState:
         self.metadata = None
         self.annotations = None
         self.erred_on = None
+        self._rootish = None
         self.run_id = None
         TaskState._instances.add(self)
 
@@ -2909,8 +2919,11 @@ class SchedulerState:
         Whether ``ts`` is a root or root-like task.
 
         Root-ish tasks are part of a group that's much larger than the cluster,
-        and have few or no dependencies.
+        and have few or no dependencies. Tasks may also be explicitly marked as rootish
+        to override this heuristic.
         """
+        if ts._rootish is not None:
+            return ts._rootish
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
         tg = ts.group
