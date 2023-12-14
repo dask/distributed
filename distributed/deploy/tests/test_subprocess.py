@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+
 import pytest
 
 from distributed import Client
@@ -9,7 +12,7 @@ from distributed.deploy.subprocess import (
     SubprocessScheduler,
     SubprocessWorker,
 )
-from distributed.utils_test import gen_test
+from distributed.utils_test import gen_test, new_config_file
 
 
 @pytest.mark.skipif(WINDOWS, reason="distributed#7434")
@@ -70,6 +73,24 @@ async def test_raise_if_scheduler_fails_to_start():
     with pytest.raises(RuntimeError, match="Scheduler failed to start"):
         async with SubprocessCluster(scheduler_port=-1, asynchronous=True):
             pass
+
+
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
+@gen_test()
+async def test_subprocess_cluster_does_not_depend_on_logging():
+    async def _start():
+        async with SubprocessCluster(
+            asynchronous=True,
+            dashboard_address=":0",
+            scheduler_kwargs={"idle_timeout": "5s"},
+            worker_kwargs={"death_timeout": "5s"},
+        ):
+            pass
+
+    with new_config_file(
+        {"distributed": {"logging": {"distributed": logging.CRITICAL + 1}}}
+    ):
+        await asyncio.wait_for(_start(), timeout=2)
 
 
 @pytest.mark.skipif(

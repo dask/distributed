@@ -1799,13 +1799,11 @@ async def test_run_on_scheduler(c, s, a, b):
     assert response == s.address
 
 
-@gen_cluster(client=True, config={"distributed.scheduler.pickle": False})
-async def test_run_on_scheduler_disabled(c, s, a, b):
-    def f(dask_scheduler=None):
-        return dask_scheduler.address
-
-    with pytest.raises(ValueError, match="disallowed from deserializing"):
-        await c._run_on_scheduler(f)
+@gen_test()
+async def test_allow_pickle_false():
+    with dask.config.set({"distributed.scheduler.pickle": False}):
+        with pytest.raises(RuntimeError, match="Pickling can no longer be disabled"):
+            await Scheduler()
 
 
 @gen_cluster()

@@ -6,6 +6,10 @@ import copy
 import json
 import logging
 import math
+import os
+import tempfile
+import uuid
+from pathlib import Path
 from typing import Any
 
 import psutil
@@ -16,6 +20,7 @@ from dask.system import CPU_COUNT
 from distributed.compatibility import WINDOWS
 from distributed.deploy.spec import ProcessInterface, SpecCluster
 from distributed.deploy.utils import nprocesses_nthreads
+from distributed.utils import Deadline
 from distributed.worker_memory import parse_memory_limit
 
 logger = logging.getLogger(__name__)
@@ -59,13 +64,20 @@ class SubprocessScheduler(Subprocess):
     """
 
     scheduler_kwargs: dict
+    timeout: int
     address: str | None
 
     def __init__(
         self,
         scheduler_kwargs: dict | None = None,
+        timeout: int = 30,
     ):
-        self.scheduler_kwargs = scheduler_kwargs or {}
+        self.scheduler_kwargs = {
+            "scheduler_file": os.path.join(tempfile.gettempdir(), str(uuid.uuid4()))
+        }
+        if scheduler_kwargs:
+            self.scheduler_kwargs.update(scheduler_kwargs)
+        self.timeout = timeout
         super().__init__()
 
     async def _start(self):
@@ -78,20 +90,32 @@ class SubprocessScheduler(Subprocess):
             ),
         ]
         logger.info(" ".join(cmd))
+        deadline = Deadline.after(self.timeout)
         self.process = await asyncio.create_subprocess_exec(
             *cmd,
             stderr=asyncio.subprocess.PIPE,
         )
 
-        while True:
-            line = (await self.process.stderr.readline()).decode()
-            if not line.strip():
-                raise RuntimeError("Scheduler failed to start")
-            logger.info(line.strip())
-            if "Scheduler at" in line:
-                self.address = line.split("Scheduler at:")[1].strip()
-                break
-        logger.debug(line)
+        scheduler_file = Path(self.scheduler_kwargs["scheduler_file"])
+        while not (
+            deadline.expired
+            or scheduler_file.exists()
+            or self.process.returncode is not None
+        ):
+            await asyncio.sleep(0.1)
+        if deadline.expired or self.process.returncode is not None:
+            assert self.process.stderr
+            logger.error((await self.process.stderr.read()).decode())
+            if deadline.expired:
+                raise RuntimeError(f"Scheduler failed to start within {self.timeout}s")
+            raise RuntimeError(
+                f"Scheduler failed to start and exited with code {self.process.returncode}"
+            )
+
+        with scheduler_file.open(mode="r") as f:
+            identity = json.load(f)
+            self.address = identity["address"]
+        logger.info("Scheduler at %r", self.address)
 
 
 class SubprocessWorker(Subprocess):
