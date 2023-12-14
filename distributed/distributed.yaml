@@ -22,7 +22,6 @@ distributed:
     work-stealing-interval: 100ms  # Callback time for work stealing
     worker-saturation: 1.1 # Send this fraction of nthreads root tasks to workers
     worker-ttl: "5 minutes" # like '60s'. Time to live for workers.  They must heartbeat faster than this
-    pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
     preload: []             # Run custom modules with Scheduler
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
     unknown-task-duration: 500ms  # Default duration for all tasks with unknown durations ("15m", "2h")

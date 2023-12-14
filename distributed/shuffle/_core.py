@@ -7,7 +7,7 @@ import itertools
 import pickle
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     _P = ParamSpec("_P")
 
     # circular dependencies
-    from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
     from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 
 ShuffleId = NewType("ShuffleId", str)
@@ -375,21 +374,23 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
     id: ShuffleId
     disk: bool
 
+    @abc.abstractproperty
+    def output_partitions(self) -> Generator[_T_partition_id, None, None]:
+        """Output partitions"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def pick_worker(self, partition: _T_partition_id, workers: Sequence[str]) -> str:
+        """Pick a worker for a partition"""
+
     def create_new_run(
         self,
-        plugin: ShuffleSchedulerPlugin,
+        worker_for: dict[_T_partition_id, str],
     ) -> SchedulerShuffleState:
-        worker_for = self._pin_output_workers(plugin)
         return SchedulerShuffleState(
             run_spec=ShuffleRunSpec(spec=self, worker_for=worker_for),
             participating_workers=set(worker_for.values()),
         )
-
-    @abc.abstractmethod
-    def _pin_output_workers(
-        self, plugin: ShuffleSchedulerPlugin
-    ) -> dict[_T_partition_id, str]:
-        """Pin output tasks to workers and return the mapping of partition ID to worker."""
 
     @abc.abstractmethod
     def create_run_on_worker(

@@ -3533,6 +3533,10 @@ class Scheduler(SchedulerState, ServerNode):
         jupyter=False,
         **kwargs,
     ):
+        if dask.config.get("distributed.scheduler.pickle", default=True) is False:
+            raise RuntimeError(
+                "Pickling can no longer be disabled with the `distributed.scheduler.pickle` option. Please remove this configuration to start the scheduler."
+            )
         if loop is not None:
             warnings.warn(
                 "the loop kwarg to Scheduler is deprecated",
@@ -5868,13 +5872,6 @@ class Scheduler(SchedulerState, ServerNode):
         idempotent: bool | None = None,
     ) -> None:
         """Register a plugin on the scheduler."""
-        if not dask.config.get("distributed.scheduler.pickle"):
-            raise ValueError(
-                "Cannot register a scheduler plugin as the scheduler "
-                "has been explicitly disallowed from deserializing "
-                "arbitrary bytestrings using pickle via the "
-                "'distributed.scheduler.pickle' configuration setting."
-            )
         if idempotent is None:
             warnings.warn(
                 "The signature of `Scheduler.register_scheduler_plugin` now requires "
@@ -6922,7 +6919,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         if key is None:
             key = operator.attrgetter("address")
-        if isinstance(key, bytes) and dask.config.get("distributed.scheduler.pickle"):
+        if isinstance(key, bytes):
             key = pickle.loads(key)
 
         groups = groupby(key, self.workers.values())
@@ -7262,14 +7259,6 @@ class Scheduler(SchedulerState, ServerNode):
         Caution: this runs arbitrary Python code on the scheduler.  This should
         eventually be phased out.  It is mostly used by diagnostics.
         """
-        if not dask.config.get("distributed.scheduler.pickle"):
-            logger.warning(
-                "Tried to call 'feed' route with custom functions, but "
-                "pickle is disallowed.  Set the 'distributed.scheduler.pickle'"
-                "config value to True to use the 'feed' route (this is mostly "
-                "commonly used with progress bars)"
-            )
-            return
 
         interval = parse_timedelta(interval)
         if function:
@@ -7484,12 +7473,6 @@ class Scheduler(SchedulerState, ServerNode):
         """
         from distributed.worker import run
 
-        if not dask.config.get("distributed.scheduler.pickle"):
-            raise ValueError(
-                "Cannot run function as the scheduler has been explicitly disallowed from "
-                "deserializing arbitrary bytestrings using pickle via the "
-                "'distributed.scheduler.pickle' configuration setting."
-            )
         kwargs = kwargs or {}
         self.log_event("all", {"action": "run-function", "function": function})
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
