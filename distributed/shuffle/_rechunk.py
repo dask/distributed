@@ -110,7 +110,6 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.array.core import concatenate3
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.typing import Key
@@ -316,6 +315,7 @@ def partial_concatenate(
     import numpy as np
 
     from dask.array.chunk import getitem
+    from dask.array.core import concatenate3
 
     dsk: dict[Key, Any] = {}
 
