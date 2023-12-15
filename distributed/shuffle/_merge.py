@@ -361,18 +361,12 @@ class HashJoinP2PLayer(Layer):
 
     def _construct_graph(self) -> dict[tuple | str, tuple]:
         token_left = tokenize(
-            "hash-join",
+            self.name,
             self.name_input_left,
-            self.left_on,
-            self.npartitions,
-            self.parts_out,
         )
         token_right = tokenize(
-            "hash-join",
+            self.name,
             self.name_input_right,
-            self.right_on,
-            self.npartitions,
-            self.parts_out,
         )
         dsk: dict[tuple | str, tuple] = {}
         name_left = "hash-join-transfer-" + token_left
