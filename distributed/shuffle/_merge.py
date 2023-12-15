@@ -363,10 +363,14 @@ class HashJoinP2PLayer(Layer):
         token_left = tokenize(
             self.name,
             self.name_input_left,
+            self.left_on,
+            self.left_index,
         )
         token_right = tokenize(
             self.name,
             self.name_input_right,
+            self.right_on,
+            self.right_index,
         )
         dsk: dict[tuple | str, tuple] = {}
         name_left = "hash-join-transfer-" + token_left
