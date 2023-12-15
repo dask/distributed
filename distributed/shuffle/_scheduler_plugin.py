@@ -196,6 +196,27 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         return mapping
 
     def _ensure_output_tasks_are_non_rootish(self, spec: ShuffleSpec) -> None:
+        """Output tasks are created without worker restrictions and run once with the
+        only purpose of setting the worker restriction and then raising Reschedule, and
+        then running again properly on the correct worker. It would be non-trivial to
+        set the worker restriction before they're first run due to potential task
+        fusion.
+
+        Most times, this lack of initial restrictions would cause output tasks to be
+        labelled as rootish on their first (very fast) run, which in turn would break
+        the design assumption that the worker-side queue of rootish tasks will last long
+        enough to cover the round-trip to the scheduler to receive more tasks, which in
+        turn would cause a measurable slowdown on the overall runtime of the shuffle
+        operation.
+
+        This method ensures that, given M output tasks and N workers, each worker-side
+        queue is pre-loaded with M/N output tasks which can be flushed very fast as
+        they all raise Reschedule() in quick succession.
+
+        See Also
+        --------
+        ShuffleRun._ensure_output_worker
+        """
         barrier = self.scheduler.tasks[barrier_key(spec.id)]
         for dependent in barrier.dependents:
             dependent._rootish = False
