@@ -180,7 +180,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             This function assumes that the barrier task and the output tasks share
             the same worker restrictions.
         """
-        mapping = {}
+        existing = {}
         shuffle_id = spec.id
         barrier = self.scheduler.tasks[barrier_key(shuffle_id)]
 
@@ -189,10 +189,24 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         else:
             workers = list(self.scheduler.workers)
 
+        seen = set()
+        for dependent in barrier.dependents:
+            for possible_barrier in dependent.dependencies:
+                if possible_barrier in seen:
+                    continue
+                seen.add(possible_barrier)
+                if not (other_barrier_key := id_from_key(possible_barrier.key)):
+                    continue
+                if not (shuffle := self.active_shuffles.get(other_barrier_key)):
+                    continue
+                existing.update(shuffle.run_spec.worker_for)
+
+        worker_for = {}
         for partition in spec.output_partitions:
-            worker = spec.pick_worker(partition, workers)
-            mapping[partition] = worker
-        return mapping
+            if (worker := existing.get(partition, None)) is None:
+                worker = spec.pick_worker(partition, workers)
+            worker_for[partition] = worker
+        return worker_for
 
     @log_errors()
     def _set_restriction(self, ts: TaskState, worker: str) -> None:

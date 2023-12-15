@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
+from typing import Any
 from unittest import mock
 
 import pytest
 
-from distributed.shuffle._core import id_from_key
+from dask.typing import Key
+
+from distributed import Worker
+from distributed.shuffle._core import ShuffleId, ShuffleSpec, id_from_key
 from distributed.shuffle._merge import hash_join
+from distributed.shuffle._worker_plugin import ShuffleRun, _ShuffleRunManager
 from distributed.utils_test import gen_cluster
 
 dd = pytest.importorskip("dask.dataframe")
@@ -474,3 +480,51 @@ async def test_index_merge_p2p(c, s, a, b, how):
         ),
         pdf_right.merge(pdf_left, how=how, right_index=True, left_on="a"),
     )
+
+
+class LimitedGetOrCreateShuffleRunManager(_ShuffleRunManager):
+    seen: set[ShuffleId]
+    block_get_or_create: asyncio.Event
+    blocking_get_or_create: asyncio.Event
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.seen = set()
+        self.limit = 1
+        self.blocking_get_or_create = asyncio.Event()
+        self.block_get_or_create = asyncio.Event()
+
+    async def get_or_create(self, spec: ShuffleSpec, key: Key) -> ShuffleRun:
+        if len(self.seen) >= self.limit and spec.id not in self.seen:
+            self.blocking_get_or_create.set()
+            await self.block_get_or_create.wait()
+        self.seen.add(spec.id)
+        return await super().get_or_create(spec, key)
+
+
+@mock.patch(
+    "distributed.shuffle._worker_plugin._ShuffleRunManager",
+    LimitedGetOrCreateShuffleRunManager,
+)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_merge_does_not_deadlock_if_worker_joins(c, s, a):
+    """Regression test for https://github.com/dask/distributed/issues/8411"""
+    pdf1 = pd.DataFrame({"a": range(100), "b": range(0, 200, 2)})
+    pdf2 = pd.DataFrame({"x": range(200), "y": [1, 2, 3, 4] * 50})
+    df1 = dd.from_pandas(pdf1, npartitions=10)
+    df2 = dd.from_pandas(pdf2, npartitions=20)
+
+    run_manager_A = a.plugins["shuffle"].shuffle_runs
+
+    joined = dd.merge(df1, df2, left_on="a", right_on="x", shuffle="p2p")
+    result = c.compute(joined)
+
+    while not run_manager_A.blocking_get_or_create.is_set():
+        await asyncio.sleep(0.05)
+    async with Worker(s.address) as b:
+        run_manager_A.block_get_or_create.set()
+        run_manager_B = b.plugins["shuffle"].shuffle_runs
+        run_manager_B.block_get_or_create.set()
+        result = await result
+    expected = pd.merge(pdf1, pdf2, left_on="a", right_on="x")
+    assert_eq(result, expected, check_index=False)
