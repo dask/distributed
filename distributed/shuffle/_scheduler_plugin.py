@@ -145,6 +145,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._raise_if_barrier_unknown(spec.id)
             self._raise_if_task_not_processing(key)
             worker_for = self._calculate_worker_for(spec)
+            self._ensure_output_tasks_are_non_rootish(spec)
             state = spec.create_new_run(worker_for)
             self.active_shuffles[spec.id] = state
             self._shuffles[spec.id].add(state)
@@ -230,6 +231,32 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 worker = spec.pick_worker(partition, workers)
             worker_for[partition] = worker
         return worker_for
+
+    def _ensure_output_tasks_are_non_rootish(self, spec: ShuffleSpec) -> None:
+        """Output tasks are created without worker restrictions and run once with the
+        only purpose of setting the worker restriction and then raising Reschedule, and
+        then running again properly on the correct worker. It would be non-trivial to
+        set the worker restriction before they're first run due to potential task
+        fusion.
+
+        Most times, this lack of initial restrictions would cause output tasks to be
+        labelled as rootish on their first (very fast) run, which in turn would break
+        the design assumption that the worker-side queue of rootish tasks will last long
+        enough to cover the round-trip to the scheduler to receive more tasks, which in
+        turn would cause a measurable slowdown on the overall runtime of the shuffle
+        operation.
+
+        This method ensures that, given M output tasks and N workers, each worker-side
+        queue is pre-loaded with M/N output tasks which can be flushed very fast as
+        they all raise Reschedule() in quick succession.
+
+        See Also
+        --------
+        ShuffleRun._ensure_output_worker
+        """
+        barrier = self.scheduler.tasks[barrier_key(spec.id)]
+        for dependent in barrier.dependents:
+            dependent._rootish = False
 
     @log_errors()
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
