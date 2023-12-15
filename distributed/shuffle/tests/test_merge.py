@@ -519,8 +519,8 @@ async def test_merge_does_not_deadlock_if_worker_joins(c, s, a):
     joined = dd.merge(df1, df2, left_on="a", right_on="x", shuffle="p2p")
     result = c.compute(joined)
 
-    while not run_manager_A.blocking_get_or_create.is_set():
-        await asyncio.sleep(0.05)
+    await run_manager_A.blocking_get_or_create.wait()
+
     async with Worker(s.address) as b:
         run_manager_A.block_get_or_create.set()
         run_manager_B = b.plugins["shuffle"].shuffle_runs
