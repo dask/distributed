@@ -170,6 +170,11 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     def _calculate_worker_for(self, spec: ShuffleSpec) -> dict[Any, str]:
         """Pin the outputs of a P2P shuffle to specific workers.
 
+        The P2P implementation of a hash join combines the loading of shuffled output
+        partitions for the left and right side with the actual merge operation into a
+        single output task. As a consequence, we need to make sure that shuffles with
+        shared output tasks align on the output mapping.
+
         Parameters
         ----------
         id: ID of the shuffle to pin
@@ -180,7 +185,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             This function assumes that the barrier task and the output tasks share
             the same worker restrictions.
         """
-        existing = {}
+        existing: dict[Any, str] = {}
         shuffle_id = spec.id
         barrier = self.scheduler.tasks[barrier_key(shuffle_id)]
 
@@ -189,7 +194,11 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         else:
             workers = list(self.scheduler.workers)
 
-        seen = set()
+        seen = {barrier}
+
+        # Check if this shuffle shares an output task with a different shuffle that has
+        # already been initialized and needs to be taken into account when
+        # mapping output partitions to workers
         for dependent in barrier.dependents:
             for possible_barrier in dependent.dependencies:
                 if possible_barrier in seen:
@@ -199,6 +208,20 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                     continue
                 if not (shuffle := self.active_shuffles.get(other_barrier_key)):
                     continue
+                current_worker_for = shuffle.run_spec.worker_for
+                # This is a fail-safe for future modifications, there should only ever
+                # be one other shuffle that shares output tasks, so existing is always
+                # empty.
+                if existing:
+                    for shared_key in existing.keys() & current_worker_for.keys():
+                        if existing[shared_key] != current_worker_for[shared_key]:
+                            raise RuntimeError(
+                                f"Failed to initialize shuffle {spec.id} because "
+                                "it cannot align output partition mappings between "
+                                f"existing shuffles {seen}. "
+                                f"Mismatch encountered for output partition {shared_key!r}: "
+                                f"{existing[shared_key]} != {current_worker_for[shared_key]}."
+                            )
                 existing.update(shuffle.run_spec.worker_for)
 
         worker_for = {}
