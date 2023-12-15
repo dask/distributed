@@ -82,14 +82,10 @@ async def test_subprocess_cluster_does_not_depend_on_logging():
         {"distributed": {"logging": {"distributed": logging.CRITICAL + 1}}}
     ):
         async with SubprocessCluster(
-            asynchronous=True,
-            dashboard_address=":0",
-            scheduler_kwargs={"idle_timeout": "5s"},
-            worker_kwargs={"death_timeout": "5s"},
-        ) as cluster:
-            async with Client(cluster, asynchronous=True) as client:
-                result = await client.submit(lambda x: x + 1, 10)
-                assert result == 11
+            asynchronous=True, dashboard_address=":0"
+        ) as cluster, Client(cluster, asynchronous=True) as client:
+            result = await client.submit(lambda x: x + 1, 10)
+            assert result == 11
 
 
 @pytest.mark.skipif(
