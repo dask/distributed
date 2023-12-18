@@ -118,8 +118,26 @@ def test_2_visible_devices(CVD):
     assert s == s2
 
 
+def test_visible_devices_uuid():
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
+    info = nvml.get_device_index_and_uuid(0)
+
+    assert info.uuid
+    os.environ["CUDA_VISIBLE_DEVICES"] = info.uuid.decode("utf-8")
+
+    h = nvml._pynvml_handles()
+    h_expected = pynvml.nvmlDeviceGetHandleByIndex(0)
+
+    s = pynvml.nvmlDeviceGetSerial(h)
+    s_expected = pynvml.nvmlDeviceGetSerial(h_expected)
+
+    assert s == s_expected
+
+
 @pytest.mark.parametrize("index", [0, 1])
-def test_visible_devices_uuid(index):
+def test_2_visible_devices_uuid(index):
     if nvml.device_get_count() < 2:
         pytest.skip("Less than two GPUs available")
 
