@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import random
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
@@ -194,6 +195,11 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             workers = list(barrier.worker_restrictions)
         else:
             workers = list(self.scheduler.workers)
+
+        # Randomize workers order to ensure pseudo-homogeneous cluster usage when
+        # multiple shuffles are running at the same time (for example, during a single
+        # rechunk that's been broken down into multiple partial operations).
+        random.shuffle(workers)
 
         # Check if this shuffle shares output tasks with a different shuffle that has
         # already been initialized and needs to be taken into account when

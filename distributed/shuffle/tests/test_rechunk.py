@@ -19,6 +19,8 @@ import dask
 from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
+from dask.base import flatten
+from dask.utils import key_split
 
 from distributed import Event
 from distributed.protocol.utils_test import get_host_array
@@ -1233,7 +1235,7 @@ async def test_rechunk_in_memory_shards_dont_share_buffer(c, s, a, b):
 
 
 @pytest.mark.parametrize("nworkers", [1, 2, 41, 50])
-def test_worker_for_homogeneous_distribution(nworkers):
+def test_pick_worker_homogeneous_distribution(nworkers):
     old = ((1, 2, 3, 4), (5,) * 6)
     new = ((5, 5), (12, 18))
     workers = [str(i) for i in range(nworkers)]
@@ -1245,3 +1247,32 @@ def test_worker_for_homogeneous_distribution(nworkers):
     assert sum(count.values()) > 0
     assert sum(count.values()) == len(list(spec.output_partitions))
     assert abs(max(count.values()) - min(count.values())) <= 1
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 10,
+    # Future-proof: disable auto-rebalancing
+    config={"distributed.scheduler.active-memory-manager.start": False},
+)
+async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
+    da = pytest.importorskip("dask.array")
+
+    # This rechunk operation can be split into 20 independent shuffles with 4 output
+    # chunks each. This is less than the number of workers, so we are at risk of
+    # choosing the same 4 output workers in each separate shuffle.
+    arr = da.random.random((80, 80), chunks=(4, 4))
+    arr = arr.rechunk((1, -1), method="p2p")
+    # Test that we are, in fact, triggering partial rechunks
+    assert sum(key_split(k) == "shuffle-barrier" for k in arr.__dask_graph__()) == 20
+
+    arr = await c.persist(arr)
+    # Don't count input and intermediate keys that have not been released yet
+    out_keys = set(flatten(arr.__dask_keys__()))
+    nchunks = [len(w.data.keys() & out_keys) for w in workers]
+
+    # There are 80 output chunks and 10 workers.
+    # Expect ~8 chunks per worker, randomly allocated.
+    assert sum(nchunks) == 80
+    assert all(1 <= n <= 15 for n in nchunks), str(nchunks)
