@@ -1605,7 +1605,7 @@ async def test_workers_to_close_never_close_long_running(c, s, a, b, reverse):
         futs = [c.submit(executing, wait_evt, workers=[b.address]) for _ in range(10)]
         assert a.address not in s.workers_to_close(n=2)
         while not b.state.tasks:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.01)
         assert (r := s.workers_to_close()) == []
         assert (r := s.workers_to_close(n=1)) == [b.address]
         assert a.address not in s.workers_to_close(n=2)
