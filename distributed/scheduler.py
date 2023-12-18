@@ -6922,8 +6922,10 @@ class Scheduler(SchedulerState, ServerNode):
         if isinstance(key, bytes):
             key = pickle.loads(key)
 
-        # Long running tasks are typically using a worker_client to
-        # scheduler other tasks. We should never downscale them
+        # Long running tasks typically use a worker_client to schedule
+        # other tasks. We should never shut down the worker they're
+        # running on, as it would cause them to restart from scratch
+        # somewhere else.        
         valid_workers = [ws for ws in self.workers.values() if not ws.long_running]
         groups = groupby(key, valid_workers)
 
