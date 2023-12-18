@@ -6938,7 +6938,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Long running tasks typically use a worker_client to schedule
         # other tasks. We should never shut down the worker they're
         # running on, as it would cause them to restart from scratch
-        # somewhere else.        
+        # somewhere else.
         valid_workers = [ws for ws in self.workers.values() if not ws.long_running]
         groups = groupby(key, valid_workers)
 
