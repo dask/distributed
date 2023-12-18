@@ -6935,7 +6935,12 @@ class Scheduler(SchedulerState, ServerNode):
         if isinstance(key, bytes):
             key = pickle.loads(key)
 
-        groups = groupby(key, self.workers.values())
+        # Long running tasks typically use a worker_client to schedule
+        # other tasks. We should never shut down the worker they're
+        # running on, as it would cause them to restart from scratch
+        # somewhere else.
+        valid_workers = [ws for ws in self.workers.values() if not ws.long_running]
+        groups = groupby(key, valid_workers)
 
         limit_bytes = {k: sum(ws.memory_limit for ws in v) for k, v in groups.items()}
         group_bytes = {k: sum(ws.nbytes for ws in v) for k, v in groups.items()}
