@@ -1604,6 +1604,38 @@ async def test_workers_to_close_grouped(c, s, *workers):
     assert set(s.workers_to_close(key=key)) == {workers[0].address, workers[1].address}
 
 
+@pytest.mark.parametrize("reverse", [True, False])
+@gen_cluster(client=True)
+async def test_workers_to_close_never_close_long_running(c, s, a, b, reverse):
+    if reverse:
+        a, b = b, a
+    wait_evt = Event()
+
+    def executing(evt):
+        evt.wait()
+
+    def long_running_secede(evt):
+        secede()
+        evt.wait()
+
+    assert a.address in s.workers_to_close()
+    assert b.address in s.workers_to_close()
+    long_fut = c.submit(long_running_secede, wait_evt, workers=[a.address])
+    wsA = s.workers[a.address]
+    while not wsA.long_running:
+        await asyncio.sleep(0.01)
+    assert s.workers_to_close() == [b.address]
+    futs = [c.submit(executing, wait_evt, workers=[b.address]) for _ in range(10)]
+    assert a.address not in s.workers_to_close(n=2)
+    while not b.state.tasks:
+        await asyncio.sleep(0.01)
+    assert s.workers_to_close() == []
+    assert s.workers_to_close(n=1) == [b.address]
+    assert s.workers_to_close(n=2) == [b.address]
+
+    await wait_evt.set()
+
+
 @gen_cluster(client=True)
 async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     future = c.submit(

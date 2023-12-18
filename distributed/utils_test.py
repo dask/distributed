@@ -1500,7 +1500,7 @@ def new_config(new_config):
 
 
 @contextmanager
-def new_config_file(c):
+def new_config_file(c: dict[str, Any]) -> Iterator[None]:
     """
     Temporarily change configuration file to match dictionary *c*.
     """
@@ -1508,18 +1508,16 @@ def new_config_file(c):
 
     old_file = os.environ.get("DASK_CONFIG")
     fd, path = tempfile.mkstemp(prefix="dask-config")
+    with os.fdopen(fd, "w") as f:
+        yaml.dump(c, f)
+    os.environ["DASK_CONFIG"] = path
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(yaml.dump(c))
-        os.environ["DASK_CONFIG"] = path
-        try:
-            yield
-        finally:
-            if old_file:
-                os.environ["DASK_CONFIG"] = old_file
-            else:
-                del os.environ["DASK_CONFIG"]
+        yield
     finally:
+        if old_file:
+            os.environ["DASK_CONFIG"] = old_file
+        else:
+            del os.environ["DASK_CONFIG"]
         os.remove(path)
 
 
