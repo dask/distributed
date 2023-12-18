@@ -1373,6 +1373,15 @@ class TaskState:
     #: be rejected.
     run_id: int | None
 
+    #: Whether to consider this task rootish in the context of task queueing
+    #: True
+    #:     Always consider this task rootish
+    #: False
+    #:     Never consider this task rootish
+    #: None
+    #:     Use a heuristic to determine whether this task should be considered rootish
+    _rootish: bool | None
+
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
@@ -1430,6 +1439,7 @@ class TaskState:
         self.metadata = None
         self.annotations = None
         self.erred_on = None
+        self._rootish = None
         self.run_id = None
         TaskState._instances.add(self)
 
@@ -2909,8 +2919,11 @@ class SchedulerState:
         Whether ``ts`` is a root or root-like task.
 
         Root-ish tasks are part of a group that's much larger than the cluster,
-        and have few or no dependencies.
+        and have few or no dependencies. Tasks may also be explicitly marked as rootish
+        to override this heuristic.
         """
+        if ts._rootish is not None:
+            return ts._rootish
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
         tg = ts.group
@@ -6922,7 +6935,12 @@ class Scheduler(SchedulerState, ServerNode):
         if isinstance(key, bytes):
             key = pickle.loads(key)
 
-        groups = groupby(key, self.workers.values())
+        # Long running tasks typically use a worker_client to schedule
+        # other tasks. We should never shut down the worker they're
+        # running on, as it would cause them to restart from scratch
+        # somewhere else.
+        valid_workers = [ws for ws in self.workers.values() if not ws.long_running]
+        groups = groupby(key, valid_workers)
 
         limit_bytes = {k: sum(ws.memory_limit for ws in v) for k, v in groups.items()}
         group_bytes = {k: sum(ws.nbytes for ws in v) for k, v in groups.items()}

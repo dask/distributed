@@ -233,6 +233,13 @@ class Nanny(ServerNode):
         self.Worker = Worker if worker_class is None else worker_class
 
         self.pre_spawn_env = _get_env_variables("distributed.nanny.pre-spawn-environ")
+        # To get consistent hashing on subprocesses, we need to set a consistent seed for
+        # the Python hash algorithm; xref https://github.com/dask/distributed/pull/8400
+        if self.pre_spawn_env.get("PYTHONHASHSEED") in (None, "0"):
+            # This number is arbitrary; it was chosen to commemorate
+            # https://github.com/dask/dask/issues/6640.
+            self.pre_spawn_env.update({"PYTHONHASHSEED": "6640"})
+
         self.env = merge(
             self.pre_spawn_env,
             _get_env_variables("distributed.nanny.environ"),
