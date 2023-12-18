@@ -151,6 +151,12 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self.active_shuffles[spec.id] = state
             self._shuffles[spec.id].add(state)
             state.participating_workers.add(worker)
+            logger.warning(
+                "Shuffle %s initialized by task %r executed on worker %s",
+                spec.id,
+                key,
+                worker,
+            )
             return ToPickle(state.run_spec)
 
     def _raise_if_barrier_unknown(self, id: ShuffleId) -> None:
@@ -383,7 +389,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._fail_on_workers(shuffle, message=f"{shuffle} forgotten")
             self._clean_on_scheduler(shuffle_id, stimulus_id=stimulus_id)
             logger.debug(
-                "Shuffle %s forgotten because task '%s' transitioned to %s due to "
+                "Shuffle %s forgotten because task %r transitioned to %s due to "
                 "stimulus '%s'",
                 shuffle_id,
                 key,
@@ -414,9 +420,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         }
         self.scheduler.send_all({}, worker_msgs)
 
-    def _clean_on_scheduler(self, id: ShuffleId, stimulus_id: str | None) -> None:
+    def _clean_on_scheduler(self, id: ShuffleId, stimulus_id: str) -> None:
         shuffle = self.active_shuffles.pop(id)
-        if not shuffle._archived_by and stimulus_id:
+        logger.warning("Shuffle %s deactivated due to stimulus '%s'", id, stimulus_id)
+        if not shuffle._archived_by:
             shuffle._archived_by = stimulus_id
             self._archived_by_stimulus[stimulus_id].add(shuffle)
 
