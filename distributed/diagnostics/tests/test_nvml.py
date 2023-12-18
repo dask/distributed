@@ -137,7 +137,7 @@ def test_visible_devices_uuid():
 
 
 @pytest.mark.parametrize("index", [0, 1])
-def test_2_visible_devices_uuid(index):
+def test_visible_devices_uuid_2(index):
     if nvml.device_get_count() < 2:
         pytest.skip("Less than two GPUs available")
 
