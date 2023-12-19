@@ -149,14 +149,8 @@ def _pynvml_handles():
     elif count == 0:
         raise RuntimeError("No GPUs available")
     else:
-        try:
-            gpu_idx = next(
-                map(int, os.environ.get("CUDA_VISIBLE_DEVICES", "").split(","))
-            )
-        except ValueError:
-            # CUDA_VISIBLE_DEVICES is not set, take first device
-            gpu_idx = 0
-        return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
+        device = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")[0]  # or 0
+        return _get_handle(device)
 
 
 def _running_process_matches(handle):
@@ -281,16 +275,20 @@ def get_device_mig_mode(device):
         A ``list`` with two integers ``[current_mode, pending_mode]``.
     """
     init_once()
-    try:
-        device_index = int(device)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
-    except ValueError:
-        uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
-        handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
+    handle = _get_handle(device)
     try:
         return pynvml.nvmlDeviceGetMigMode(handle)
     except pynvml.NVMLError_NotSupported:
         return [0, 0]
+
+
+def _get_handle(device):
+    try:
+        device_index = int(device)
+        return pynvml.nvmlDeviceGetHandleByIndex(device_index)
+    except ValueError:
+        uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
+        return pynvml.nvmlDeviceGetHandleByUUID(uuid)
 
 
 def _get_utilization(h):
