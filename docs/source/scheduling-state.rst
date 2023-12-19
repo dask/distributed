@@ -84,17 +84,17 @@ forgotten
     dereferenced from the scheduler.
 
 .. note::
-    When the ``distributed.scheduler.worker_saturation`` config value is set to ``inf``
-    (default), there's no intermediate state between ``waiting`` / ``no-worker`` and
+    Setting ``distributed.scheduler.worker_saturation`` config value to ``1.1``
+    (default) or any other finite value will queue excess root tasks on the scheduler in the ``queued`` state. 
+    These tasks are only assigned to workers when they have capacity for them, reducing 
+    the length of task queues on the workers.
+
+    When the ``distributed.scheduler.worker_saturation`` config value is set to ``inf``, 
+    there's no intermediate state between ``waiting`` / ``no-worker`` and
     ``processing``: as soon as a task has all of its dependencies in memory somewhere on
     the cluster, it is immediately assigned to a worker. This can lead to very long task
     queues on the workers, which are then rebalanced dynamically through
-    :doc:`work-stealing`.
-
-    Setting ``distributed.scheduler.worker_saturation`` to ``1.0`` (or any finite value)
-    will instead queue excess root tasks on the scheduler in the ``queued`` state. These
-    tasks are only assigned to workers when they have capacity for them, reducing the
-    length of task queues on the workers.
+    :doc:`work-stealing`. 
 
 In addition to the literal state, though, other information needs to be
 kept and updated about each task.  Individual task state is stored in an
@@ -105,11 +105,10 @@ not in the "forgotten" state) using several containers:
 
 .. attribute:: tasks: {str: TaskState}
 
-   A dictionary mapping task keys (always strings) to :class:`TaskState`
-   objects.  Task keys are how information about tasks is communicated
-   between the scheduler and clients, or the scheduler and workers; this
-   dictionary is then used to find the corresponding :class:`TaskState`
-   object.
+   A dictionary mapping task keys to :class:`TaskState` objects. Task keys are how
+   information about tasks is communicated between the scheduler and clients, or the
+   scheduler and workers; this dictionary is then used to find the corresponding
+   :class:`TaskState` object.
 
 .. attribute:: unrunnable: {TaskState}
 

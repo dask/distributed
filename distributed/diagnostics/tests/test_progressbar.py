@@ -77,6 +77,16 @@ def test_progress_function_w_kwargs(client, capsys):
     check_bar_completed(capsys)
 
 
+def test_progress_function_warns(client):
+    with pytest.warns(DeprecationWarning, match="`func` is deprecated"):
+        progress(None, func="prefix")
+
+
+def test_progress_function_raises():
+    with pytest.raises(ValueError, match="`group_by` should be "):
+        progress(None, group_by="incorrect")
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_deprecated_loop_properties(c, s):
     class ExampleTextProgressBar(TextProgressBar):

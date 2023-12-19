@@ -5,21 +5,22 @@ import contextlib
 import logging
 from collections import defaultdict
 from collections.abc import Iterator, Sized
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from distributed.metrics import time
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
+if TYPE_CHECKING:
+    # TODO import from collections.abc (requires Python >=3.12)
+    from typing_extensions import Buffer
+else:
+    Buffer = Sized
 
-ShardType = TypeVar("ShardType", bound=Sized)
+ShardType = TypeVar("ShardType", bound=Buffer)
+
 T = TypeVar("T")
-
-
-class _List(list[T]):
-    # This ensures that the distributed.protocol will not iterate over this collection
-    pass
 
 
 class ShardsBuffer(Generic[ShardType]):
@@ -43,10 +44,11 @@ class ShardsBuffer(Generic[ShardType]):
     Flushing will not raise an exception. To ensure that the buffer finished successfully, please call `ShardsBuffer.raise_on_exception`
     """
 
-    shards: defaultdict[str, _List[ShardType]]
+    shards: defaultdict[str, list[ShardType]]
     sizes: defaultdict[str, int]
+    sizes_detail: defaultdict[str, list[int]]
     concurrency_limit: int
-    memory_limiter: ResourceLimiter | None
+    memory_limiter: ResourceLimiter
     diagnostics: dict[str, float]
     max_message_size: int
 
@@ -64,13 +66,14 @@ class ShardsBuffer(Generic[ShardType]):
 
     def __init__(
         self,
-        memory_limiter: ResourceLimiter | None,
+        memory_limiter: ResourceLimiter,
         concurrency_limit: int = 2,
         max_message_size: int = -1,
     ) -> None:
         self._accepts_input = True
-        self.shards = defaultdict(_List)
+        self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
+        self.sizes_detail = defaultdict(list)
         self._exception = None
         self.concurrency_limit = concurrency_limit
         self._inputs_done = False
@@ -97,7 +100,7 @@ class ShardsBuffer(Generic[ShardType]):
             "written": self.bytes_written,
             "read": self.bytes_read,
             "diagnostics": self.diagnostics,
-            "memory_limit": self.memory_limiter._maxvalue if self.memory_limiter else 0,
+            "memory_limit": self.memory_limiter.limit,
         }
 
     async def process(self, id: str, shards: list[ShardType], size: int) -> None:
@@ -119,8 +122,7 @@ class ShardsBuffer(Generic[ShardType]):
                 "avg_duration"
             ] + 0.02 * (stop - start)
         finally:
-            if self.memory_limiter:
-                await self.memory_limiter.decrease(size)
+            await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
 
     async def _process(self, id: str, shards: list[ShardType]) -> None:
@@ -145,12 +147,12 @@ class ShardsBuffer(Generic[ShardType]):
                 part_id = max(self.sizes, key=self.sizes.__getitem__)
                 if self.max_message_size > 0:
                     size = 0
-                    shards: _List[ShardType] = _List()
+                    shards = []
                     while size < self.max_message_size:
                         try:
                             shard = self.shards[part_id].pop()
                             shards.append(shard)
-                            s = sizeof(shard)
+                            s = self.sizes_detail[part_id].pop()
                             size += s
                             self.sizes[part_id] -= s
                         except IndexError:
@@ -160,20 +162,22 @@ class ShardsBuffer(Generic[ShardType]):
                                 del self.shards[part_id]
                                 assert not self.sizes[part_id]
                                 del self.sizes[part_id]
+                                assert not self.sizes_detail[part_id]
+                                del self.sizes_detail[part_id]
                 else:
                     shards = self.shards.pop(part_id)
                     size = self.sizes.pop(part_id)
                 self._shards_available.notify_all()
             await self.process(part_id, shards, size)
 
-    async def write(self, data: dict[str, list[ShardType]]) -> None:
+    async def write(self, data: dict[str, ShardType]) -> None:
         """
-        Writes many objects into the local buffers, blocks until ready for more
+        Writes objects into the local buffers, blocks until ready for more
 
         Parameters
         ----------
         data: dict
-            A dictionary mapping destinations to lists of objects that should
+            A dictionary mapping destinations to the object that should
             be written to that destination
 
         Notes
@@ -193,28 +197,21 @@ class ShardsBuffer(Generic[ShardType]):
         if not data:
             return
 
-        shards = None
-        size = 0
-
-        sizes = {}
-        for id_, shards in data.items():
-            size = sum(map(sizeof, shards))
-            sizes[id_] = size
+        sizes = {worker: sizeof(shard) for worker, shard in data.items()}
         total_batch_size = sum(sizes.values())
         self.bytes_memory += total_batch_size
         self.bytes_total += total_batch_size
 
-        if self.memory_limiter:
-            self.memory_limiter.increase(total_batch_size)
+        self.memory_limiter.increase(total_batch_size)
         async with self._shards_available:
-            for id_, shards in data.items():
-                self.shards[id_].extend(shards)
-                self.sizes[id_] += sizes[id_]
+            for worker, shard in data.items():
+                self.shards[worker].append(shard)
+                self.sizes_detail[worker].append(sizes[worker])
+                self.sizes[worker] += sizes[worker]
             self._shards_available.notify()
-        if self.memory_limiter:
-            await self.memory_limiter.wait_for_available()
-        del data, shards
-        assert size
+        await self.memory_limiter.wait_for_available()
+        del data
+        assert total_batch_size
 
     def raise_on_exception(self) -> None:
         """Raises an exception if something went wrong during writing"""
@@ -258,7 +255,7 @@ class ShardsBuffer(Generic[ShardType]):
             self._shards_available.notify_all()
         await asyncio.gather(*self._tasks)
 
-    async def __aenter__(self) -> "ShardsBuffer":
+    async def __aenter__(self) -> ShardsBuffer:
         return self
 
     async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:

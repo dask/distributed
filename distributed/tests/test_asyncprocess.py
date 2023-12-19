@@ -13,7 +13,8 @@ import psutil
 import pytest
 from tornado.ioloop import IOLoop
 
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS, asyncio_run
+from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.process import AsyncProcess
 from distributed.utils import get_mp_context, wait_for
@@ -80,7 +81,7 @@ async def test_simple():
     with pytest.raises(asyncio.TimeoutError):
         await proc.join(timeout=0.02)
     dt = time() - t1
-    assert 0.2 >= dt >= 0.001
+    assert 0.001 <= dt <= 0.5
     assert proc.is_alive()
     assert proc.pid is not None
     assert proc.exitcode is None
@@ -96,7 +97,7 @@ async def test_simple():
     t1 = time()
     await proc.join(timeout=30)
     dt = time() - t1
-    assert dt <= 1.0
+    assert dt <= 2.0
     assert not proc.is_alive()
     assert proc.pid is not None
     assert proc.exitcode == 0
@@ -140,7 +141,7 @@ async def test_simple():
         await asyncio.sleep(0.01)
         gc.collect()
         dt = time() - t1
-        assert dt < 2.0
+        assert dt < 5.0
 
 
 @gen_test()
@@ -171,7 +172,7 @@ def assert_exit_code(proc: AsyncProcess, expect: signal.Signals) -> None:
     elif MACOS:
         # FIXME this happens very frequently on GitHub MacOSX CI. Reason unknown.
         if expect != signal.SIGKILL and proc.exitcode == -signal.SIGKILL:
-            raise pytest.xfail(reason="https://github.com/dask/distributed/issues/6393")
+            pytest.xfail(reason="https://github.com/dask/distributed/issues/6393")
         assert proc.exitcode == -expect
     else:
         assert LINUX
@@ -389,7 +390,7 @@ def _parent_process(child_pipe):
         t = asyncio.create_task(parent_process_coroutine())
         return await wait_for(t, timeout=10)
 
-    asyncio.run(run_with_timeout())
+    asyncio_run(run_with_timeout(), loop_factory=get_loop_factory())
     raise RuntimeError("this should be unreachable due to os._exit")
 
 

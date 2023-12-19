@@ -16,6 +16,7 @@ import socket
 import sys
 import tempfile
 import threading
+import traceback
 import warnings
 import weakref
 import xml.etree.ElementTree
@@ -51,6 +52,9 @@ from typing import ClassVar, TypeVar, overload
 import click
 import psutil
 import tblib.pickling_support
+
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 
 try:
     import resource
@@ -91,8 +95,6 @@ if TYPE_CHECKING:
 
     P = ParamSpec("P")
     T = TypeVar("T")
-
-no_default = "__no_default__"
 
 _forkserver_preload_set = False
 
@@ -334,7 +336,12 @@ class SyncMethodMixin:
     @property
     def asynchronous(self):
         """Are we running in the event loop?"""
-        return in_async_call(self.loop, default=getattr(self, "_asynchronous", False))
+        try:
+            return in_async_call(
+                self.loop, default=getattr(self, "_asynchronous", False)
+            )
+        except RuntimeError:
+            return False
 
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
         """Call `func` with `args` synchronously or asynchronously depending on
@@ -365,40 +372,50 @@ def in_async_call(loop, default=False):
         return False
 
 
-def sync(loop, func, *args, callback_timeout=None, **kwargs):
+def sync(
+    loop: IOLoop,
+    func: Callable[..., Awaitable[T]],
+    *args: AnyType,
+    callback_timeout: str | float | timedelta | None = None,
+    **kwargs: AnyType,
+) -> T:
     """
     Run coroutine in loop running in separate thread.
     """
-    callback_timeout = _parse_timedelta(callback_timeout, "s")
-    if loop.asyncio_loop.is_closed():
+    timeout = _parse_timedelta(callback_timeout, "s")
+    if loop.asyncio_loop.is_closed():  # type: ignore[attr-defined]
         raise RuntimeError("IOLoop is closed")
 
     e = threading.Event()
     main_tid = threading.get_ident()
-    result = error = future = None  # set up non-locals
+
+    # set up non-locals
+    result: T
+    error: BaseException | None = None
+    future: asyncio.Future[T]
 
     @gen.coroutine
-    def f():
+    def f() -> Generator[AnyType, AnyType, None]:
         nonlocal result, error, future
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = wait_for(future, callback_timeout)
-            future = asyncio.ensure_future(future)
+            awaitable = func(*args, **kwargs)
+            if timeout is not None:
+                awaitable = wait_for(awaitable, timeout)
+            future = asyncio.ensure_future(awaitable)
             result = yield future
-        except Exception:
-            error = sys.exc_info()
+        except Exception as exception:
+            error = exception
         finally:
             e.set()
 
-    def cancel():
+    def cancel() -> None:
         if future is not None:
             future.cancel()
 
-    def wait(timeout):
+    def wait(timeout: float | None) -> bool:
         try:
             return e.wait(timeout)
         except KeyboardInterrupt:
@@ -406,18 +423,74 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             raise
 
     loop.add_callback(f)
-    if callback_timeout is not None:
-        if not wait(callback_timeout):
-            raise TimeoutError(f"timed out after {callback_timeout} s.")
+    if timeout is not None:
+        if not wait(timeout):
+            raise TimeoutError(f"timed out after {timeout} s.")
     else:
         while not e.is_set():
             wait(10)
 
-    if error:
-        typ, exc, tb = error
-        raise exc.with_traceback(tb)
+    if error is not None:
+        raise error
     else:
         return result
+
+
+if sys.version_info >= (3, 10):
+    from asyncio import Event as LateLoopEvent
+else:
+    # In python 3.10 asyncio.Lock and other primitives no longer support
+    # passing a loop kwarg to bind to a loop running in another thread
+    # e.g. calling from Client(asynchronous=False). Instead the loop is bound
+    # as late as possible: when calling any methods that wait on or wake
+    # Future instances. See: https://bugs.python.org/issue42392
+    class LateLoopEvent:
+        _event: asyncio.Event | None
+
+        def __init__(self) -> None:
+            self._event = None
+
+        def set(self) -> None:
+            if self._event is None:
+                self._event = asyncio.Event()
+
+            self._event.set()
+
+        def is_set(self) -> bool:
+            return self._event is not None and self._event.is_set()
+
+        async def wait(self) -> bool:
+            if self._event is None:
+                self._event = asyncio.Event()
+
+            return await self._event.wait()
+
+
+class _CollectErrorThread:
+    def __init__(self, target: Callable[[], None], daemon: bool, name: str):
+        self._exception: BaseException | None = None
+
+        def wrapper() -> None:
+            try:
+                target()
+            except BaseException as e:
+                self._exception = e
+
+        self._thread = thread = threading.Thread(
+            target=wrapper, daemon=daemon, name=name
+        )
+        thread.start()
+
+    def join(self, timeout: float | None = None) -> None:
+        thread = self._thread
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            raise TimeoutError("join timed out")
+        if self._exception is not None:
+            try:
+                raise self._exception
+            finally:  # remove a reference cycle
+                del self._exception
 
 
 class LoopRunner:
@@ -442,36 +515,30 @@ class LoopRunner:
         weakref.WeakKeyDictionary[IOLoop, tuple[int, LoopRunner | None]]
     ] = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
+    _loop_thread: _CollectErrorThread | None
 
-    def __init__(self, loop=None, asynchronous=False):
+    def __init__(self, loop: IOLoop | None = None, asynchronous: bool = False):
         if loop is None:
             if asynchronous:
+                # raises RuntimeError if there's no running loop
                 try:
                     asyncio.get_running_loop()
-                except RuntimeError:
-                    warnings.warn(
-                        "Constructing a LoopRunner(asynchronous=True) without a running loop is deprecated",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
-                self._loop = IOLoop.current()
-            else:
-                # We're expecting the loop to run in another thread,
-                # avoid re-using this thread's assigned loop
-                self._loop = IOLoop()
-        else:
-            if not loop.asyncio_loop.is_running():
-                warnings.warn(
-                    "Constructing LoopRunner(loop=loop) without a running loop is deprecated",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            self._loop = loop
+                except RuntimeError as e:
+                    raise RuntimeError(
+                        "Constructing LoopRunner(asynchronous=True) without a running loop is not supported"
+                    ) from e
+                loop = IOLoop.current()
+        elif not loop.asyncio_loop.is_running():  # type: ignore[attr-defined]
+            # LoopRunner is not responsible for starting a foreign IOLoop
+            raise RuntimeError(
+                "Constructing LoopRunner(loop=loop) without a running loop is not supported"
+            )
+
+        self._loop = loop
         self._asynchronous = asynchronous
         self._loop_thread = None
         self._started = False
-        with self._lock:
-            self._all_loops.setdefault(self._loop, (0, None))
+        self._stop_event = LateLoopEvent()
 
     def start(self):
         """
@@ -483,62 +550,53 @@ class LoopRunner:
         with self._lock:
             self._start_unlocked()
 
-    def _start_unlocked(self):
+    def _start_unlocked(self) -> None:
         assert not self._started
 
-        count, real_runner = self._all_loops[self._loop]
-        if self._asynchronous or real_runner is not None or count > 0:
+        if self._loop is not None:
+            try:
+                count, real_runner = self._all_loops[self._loop]
+            except KeyError:
+                assert self._loop.asyncio_loop.is_running()  # type: ignore[attr-defined]
+                self._started = True
+                return
+
             self._all_loops[self._loop] = count + 1, real_runner
             self._started = True
             return
 
         assert self._loop_thread is None
-        assert count == 0
 
-        loop_evt = threading.Event()
-        done_evt = threading.Event()
-        in_thread = [None]
-        start_exc = [None]
+        start_evt = threading.Event()
+        start_exc = None
+        loop = None
 
-        def loop_cb():
-            in_thread[0] = threading.current_thread()
-            loop_evt.set()
+        async def amain() -> None:
+            nonlocal loop
+            loop = IOLoop.current()
+            start_evt.set()
+            await self._stop_event.wait()
 
-        def run_loop(loop=self._loop):
-            loop.add_callback(loop_cb)
-            # run loop forever if it's not running already
+        def run_loop() -> None:
+            nonlocal start_exc
             try:
-                if not loop.asyncio_loop.is_running():
-                    loop.start()
-            except Exception as e:
-                start_exc[0] = e
-            finally:
-                done_evt.set()
+                asyncio_run(amain(), loop_factory=get_loop_factory())
+            except BaseException as e:
+                if start_evt.is_set():
+                    raise
+                start_exc = e
+                start_evt.set()
 
-        thread = threading.Thread(target=run_loop, name="IO loop")
-        thread.daemon = True
-        thread.start()
-
-        loop_evt.wait(timeout=10)
+        self._loop_thread = _CollectErrorThread(
+            target=run_loop, daemon=True, name="IO loop"
+        )
+        start_evt.wait(timeout=10)
+        if start_exc is not None:
+            raise start_exc
+        assert loop is not None
+        self._loop = loop
         self._started = True
-
-        actual_thread = in_thread[0]
-        if actual_thread is not thread:
-            # Loop already running in other thread (user-launched)
-            done_evt.wait(5)
-            if start_exc[0] is not None and not isinstance(start_exc[0], RuntimeError):
-                if not isinstance(
-                    start_exc[0], Exception
-                ):  # track down infrequent error
-                    raise TypeError(
-                        f"not an exception: {start_exc[0]!r}",
-                    )
-                raise start_exc[0]
-            self._all_loops[self._loop] = count + 1, None
-        else:
-            assert start_exc[0] is None, start_exc
-            self._loop_thread = thread
-            self._all_loops[self._loop] = count + 1, self
+        self._all_loops[loop] = (1, self)
 
     def stop(self, timeout=10):
         """
@@ -554,25 +612,26 @@ class LoopRunner:
 
         self._started = False
 
-        count, real_runner = self._all_loops[self._loop]
+        try:
+            count, real_runner = self._all_loops[self._loop]
+        except KeyError:
+            return
+
         if count > 1:
             self._all_loops[self._loop] = count - 1, real_runner
-        else:
-            assert count == 1
-            del self._all_loops[self._loop]
-            if real_runner is not None:
-                real_runner._real_stop(timeout)
+            return
+
+        assert count == 1
+        del self._all_loops[self._loop]
+        real_runner._real_stop(timeout)
 
     def _real_stop(self, timeout):
         assert self._loop_thread is not None
-        if self._loop_thread is not None:
-            try:
-                self._loop.add_callback(self._loop.stop)
-                self._loop_thread.join(timeout=timeout)
-                with contextlib.suppress(KeyError):  # IOLoop can be missing
-                    self._loop.close()
-            finally:
-                self._loop_thread = None
+        try:
+            self._loop.add_callback(self._stop_event.set)
+            self._loop_thread.join(timeout=timeout)
+        finally:
+            self._loop_thread = None
 
     def is_started(self):
         """
@@ -597,11 +656,9 @@ class LoopRunner:
     @property
     def loop(self):
         loop = self._loop
-        if not loop.asyncio_loop.is_running():
-            warnings.warn(
-                "Accessing the loop property while the loop is not running is deprecated",
-                DeprecationWarning,
-                stacklevel=2,
+        if loop is None or not loop.asyncio_loop.is_running():
+            raise RuntimeError(
+                "Accessing the loop property while the loop is not running is not supported"
             )
         return self._loop
 
@@ -699,7 +756,7 @@ def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
     ...
 
 
-def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
+def log_errors(func=None, /, *, pdb=False, unroll_stack=0):
     """Log any errors and then reraise them.
 
     This can be used:
@@ -727,11 +784,32 @@ def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
         Set to True to break into the debugger in case of exception
     unroll_stack: int, optional
         Number of levels of stack to unroll when determining the module's name for the
-        purpose of logging. Normally you should omit this. Set to 2 if you are writing a
+        purpose of logging. Normally you should omit this. Set to 1 if you are writing a
         helper function, context manager, or decorator.
     """
     le = _LogErrors(pdb=pdb, unroll_stack=unroll_stack)
     return le(func) if func else le
+
+
+_getmodulename_with_path_map: dict[str, str] = {}
+
+
+def _getmodulename_with_path(fname: str) -> str:
+    """Variant of inspect.getmodulename that returns the full module path"""
+    try:
+        return _getmodulename_with_path_map[fname]
+    except KeyError:
+        pass
+
+    for modname, mod in sys.modules.items():
+        fname2 = getattr(mod, "__file__", None)
+        if fname2:
+            _getmodulename_with_path_map[fname2] = modname
+
+    try:
+        return _getmodulename_with_path_map[fname]
+    except KeyError:  # pragma: nocover
+        return os.path.splitext(os.path.basename(fname))[0]
 
 
 class _LogErrors:
@@ -764,16 +842,15 @@ class _LogErrors:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, tb):
         from distributed.comm import CommClosedError
 
         if not exc_type or issubclass(exc_type, (CommClosedError, gen.Return)):
             return
 
-        stack = inspect.stack()
+        stack = traceback.extract_tb(tb)
         frame = stack[self.unroll_stack]
-        mod = inspect.getmodule(frame[0])
-        modname = mod.__name__
+        modname = _getmodulename_with_path(frame.filename)
 
         try:
             logger = logging.getLogger(modname)
@@ -888,13 +965,6 @@ def truncate_exception(e, n=10000):
             return Exception("Long error message", type(e), str(e)[:n])
     else:
         return e
-
-
-def validate_key(k):
-    """Validate a key as received on a stream."""
-    typ = type(k)
-    if typ is not str and typ is not bytes:
-        raise TypeError(f"Unexpected key type {typ} (value: {k!r})")
 
 
 def _maybe_complex(task):
@@ -1563,15 +1633,7 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
 
 
 _deprecations = {
-    "deserialize_for_cli": "dask.config.deserialize",
-    "serialize_for_cli": "dask.config.serialize",
-    "format_bytes": "dask.utils.format_bytes",
-    "format_time": "dask.utils.format_time",
-    "funcname": "dask.utils.funcname",
-    "parse_bytes": "dask.utils.parse_bytes",
-    "parse_timedelta": "dask.utils.parse_timedelta",
-    "typename": "dask.utils.typename",
-    "tmpfile": "dask.utils.tmpfile",
+    "no_default": "dask.typing.no_default",
 }
 
 
@@ -1876,3 +1938,38 @@ else:
 
     async def wait_for(fut: Awaitable[T], timeout: float) -> T:
         return await asyncio.wait_for(fut, timeout)
+
+
+class TupleComparable:
+    """Wrap object so that we can compare tuple, int or None
+
+    When comparing two objects of different types Python fails
+
+    >>> (1, 2) < 1
+    Traceback (most recent call last):
+        ...
+    TypeError: '<' not supported between instances of 'tuple' and 'int'
+
+    This class replaces None with 0, and wraps ints with tuples
+
+    >>> TupleComparable((1, 2)) < TupleComparable(1)
+    False
+    """
+
+    __slots__ = ("obj",)
+
+    def __init__(self, obj):
+        if obj is None:
+            self.obj = (0,)
+        elif isinstance(obj, tuple):
+            self.obj = obj
+        elif isinstance(obj, (int, float)):
+            self.obj = (obj,)
+        else:
+            raise ValueError(f"Object must be tuple, int, float or None, got {obj}")
+
+    def __eq__(self, other):
+        return self.obj == other.obj
+
+    def __lt__(self, other):
+        return self.obj < other.obj

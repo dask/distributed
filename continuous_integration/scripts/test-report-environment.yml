@@ -6,5 +6,6 @@ dependencies:
   - pandas
   - pip
   - requests
+  - urllib3
   - pip:
     - junitparser

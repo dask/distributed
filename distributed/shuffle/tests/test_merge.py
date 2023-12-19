@@ -1,22 +1,34 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from typing import Any
+from unittest import mock
+
 import pytest
 
+from dask.typing import Key
+
+from distributed import Worker
+from distributed.shuffle._core import ShuffleId, ShuffleSpec, id_from_key
 from distributed.shuffle._merge import hash_join
-from distributed.shuffle.tests.utils import invoke_annotation_chaos
+from distributed.shuffle._worker_plugin import ShuffleRun, _ShuffleRunManager
 from distributed.utils_test import gen_cluster
 
 dd = pytest.importorskip("dask.dataframe")
 import pandas as pd
 
-from dask.dataframe._compat import PANDAS_GT_200, tm
+import dask
+from dask.dataframe._compat import PANDAS_GE_200, tm
 from dask.dataframe.utils import assert_eq
 from dask.utils_test import hlg_layer_topological
 
+try:
+    import pyarrow as pa
+except ImportError:
+    pa = None
 
-@pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
-def lose_annotations(request):
-    return request.param
+pytestmark = pytest.mark.ci1
 
 
 def list_eq(aa, bb):
@@ -40,10 +52,27 @@ def list_eq(aa, bb):
     dd._compat.assert_numpy_array_equal(av, bv)
 
 
+@gen_cluster(client=True)
+async def test_minimal_version(c, s, a, b):
+    no_pyarrow_ctx = (
+        mock.patch.dict("sys.modules", {"pyarrow": None})
+        if pa is not None
+        else contextlib.nullcontext()
+    )
+    with no_pyarrow_ctx:
+        A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
+        a = dd.repartition(A, [0, 4, 5])
+
+        B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
+        b = dd.repartition(B, [0, 2, 5])
+
+        with pytest.raises(ModuleNotFoundError, match="requires pyarrow"):
+            await c.compute(dd.merge(a, b, left_on="x", right_on="z", shuffle="p2p"))
+
+
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 @gen_cluster(client=True)
-async def test_basic_merge(c, s, a, b, how, lose_annotations):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_basic_merge(c, s, a, b, how):
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
@@ -77,17 +106,80 @@ async def test_basic_merge(c, s, a, b, how, lose_annotations):
     )
 
 
-@pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
 @gen_cluster(client=True)
-async def test_merge(c, s, a, b, how, lose_annotations):
-    await invoke_annotation_chaos(lose_annotations, c)
+async def test_merge_p2p_shuffle_reused_dataframe_with_different_parameters(c, s, a, b):
+    pdf1 = pd.DataFrame({"a": range(100), "b": range(0, 200, 2)})
+    pdf2 = pd.DataFrame({"x": range(200), "y": [1, 2, 3, 4] * 50})
+    ddf1 = dd.from_pandas(pdf1, npartitions=5)
+    ddf2 = dd.from_pandas(pdf2, npartitions=10)
+
+    out = (
+        ddf1.merge(ddf2, left_on="a", right_on="x", shuffle="p2p")
+        # Vary the number of output partitions for the shuffles of dd2
+        .repartition(20).merge(ddf2, left_on="b", right_on="x", shuffle="p2p")
+    )
+    # Generate unique shuffle IDs if the input frame is the same but
+    # parameters differ. Reusing shuffles in merges is dangerous because of the
+    # required coordination and complexity introduced through dynamic clusters.
+    assert sum(id_from_key(k) is not None for k in out.dask) == 4
+    result = await c.compute(out)
+    expected = pdf1.merge(pdf2, left_on="a", right_on="x").merge(
+        pdf2, left_on="b", right_on="x"
+    )
+    dd.assert_eq(result, expected, check_index=False)
+
+
+@gen_cluster(client=True)
+async def test_merge_p2p_shuffle_reused_dataframe_with_same_parameters(c, s, a, b):
+    pdf1 = pd.DataFrame({"a": range(100), "b": range(0, 200, 2)})
+    pdf2 = pd.DataFrame({"x": range(200), "y": [1, 2, 3, 4] * 50})
+    ddf1 = dd.from_pandas(pdf1, npartitions=5)
+    ddf2 = dd.from_pandas(pdf2, npartitions=10)
+
+    # This performs two shuffles:
+    #   * ddf1 is shuffled on `a`
+    #   * ddf2 is shuffled on `x`
+    ddf3 = ddf1.merge(
+        ddf2,
+        left_on="a",
+        right_on="x",
+        shuffle="p2p",
+    )
+
+    # This performs one shuffle:
+    #   * ddf3 is shuffled on `b`
+    # We can reuse the shuffle of dd2 on `x` from the previous merge.
+    out = ddf2.merge(
+        ddf3,
+        left_on="x",
+        right_on="b",
+        shuffle="p2p",
+    )
+    # Generate unique shuffle IDs if the input frame is the same and all its
+    # parameters match. Reusing shuffles in merges is dangerous because of the
+    # required coordination and complexity introduced through dynamic clusters.
+    assert sum(id_from_key(k) is not None for k in out.dask) == 4
+    result = await c.compute(out)
+    expected = pdf2.merge(
+        pdf1.merge(pdf2, left_on="a", right_on="x"), left_on="x", right_on="b"
+    )
+    dd.assert_eq(result, expected, check_index=False)
+
+
+@pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
+@pytest.mark.parametrize("disk", [True, False])
+@gen_cluster(client=True)
+async def test_merge(c, s, a, b, how, disk):
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
     a = dd.repartition(A, [0, 4, 5])
 
     B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
     b = dd.repartition(B, [0, 2, 5])
 
-    joined = dd.merge(a, b, left_index=True, right_index=True, how=how, shuffle="p2p")
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        joined = dd.merge(
+            a, b, left_index=True, right_index=True, how=how, shuffle="p2p"
+        )
     res = await c.compute(joined)
     assert_eq(
         res,
@@ -249,7 +341,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 # FIXME: There's an discrepancy with an empty index for
                 # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                 # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not (PANDAS_GT_200 and expected.index.empty),
+                check_index=not (PANDAS_GE_200 and expected.index.empty),
             )
 
             expected = pdr.join(pdl, how=how)
@@ -259,7 +351,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 # FIXME: There's an discrepancy with an empty index for
                 # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                 # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not (PANDAS_GT_200 and expected.index.empty),
+                check_index=not (PANDAS_GE_200 and expected.index.empty),
             )
 
             expected = pd.merge(pdl, pdr, how=how, left_index=True, right_index=True)
@@ -278,7 +370,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 # FIXME: There's an discrepancy with an empty index for
                 # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                 # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not (PANDAS_GT_200 and expected.index.empty),
+                check_index=not (PANDAS_GE_200 and expected.index.empty),
             )
 
             expected = pd.merge(pdr, pdl, how=how, left_index=True, right_index=True)
@@ -297,7 +389,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 # FIXME: There's an discrepancy with an empty index for
                 # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                 # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not (PANDAS_GT_200 and expected.index.empty),
+                check_index=not (PANDAS_GE_200 and expected.index.empty),
             )
 
             # hash join
@@ -368,3 +460,75 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 ),
                 pd.merge(pdl, pdr, how=how, left_on=["a", "b"], right_on=["d", "e"]),
             )
+
+
+@pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
+@gen_cluster(client=True)
+async def test_index_merge_p2p(c, s, a, b, how):
+    pdf_left = pd.DataFrame({"a": [4, 2, 3] * 10, "b": 1}).set_index("a")
+    pdf_right = pd.DataFrame({"a": [4, 2, 3] * 10, "c": 1})
+
+    left = dd.from_pandas(pdf_left, npartitions=5, sort=False)
+    right = dd.from_pandas(pdf_right, npartitions=6)
+
+    assert_eq(
+        await c.compute(
+            left.merge(right, how=how, left_index=True, right_on="a", shuffle="p2p")
+        ),
+        pdf_left.merge(pdf_right, how=how, left_index=True, right_on="a"),
+    )
+
+    assert_eq(
+        await c.compute(
+            right.merge(left, how=how, right_index=True, left_on="a", shuffle="p2p")
+        ),
+        pdf_right.merge(pdf_left, how=how, right_index=True, left_on="a"),
+    )
+
+
+class LimitedGetOrCreateShuffleRunManager(_ShuffleRunManager):
+    seen: set[ShuffleId]
+    block_get_or_create: asyncio.Event
+    blocking_get_or_create: asyncio.Event
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.seen = set()
+        self.limit = 1
+        self.blocking_get_or_create = asyncio.Event()
+        self.block_get_or_create = asyncio.Event()
+
+    async def get_or_create(self, spec: ShuffleSpec, key: Key) -> ShuffleRun:
+        if len(self.seen) >= self.limit and spec.id not in self.seen:
+            self.blocking_get_or_create.set()
+            await self.block_get_or_create.wait()
+        self.seen.add(spec.id)
+        return await super().get_or_create(spec, key)
+
+
+@mock.patch(
+    "distributed.shuffle._worker_plugin._ShuffleRunManager",
+    LimitedGetOrCreateShuffleRunManager,
+)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_merge_does_not_deadlock_if_worker_joins(c, s, a):
+    """Regression test for https://github.com/dask/distributed/issues/8411"""
+    pdf1 = pd.DataFrame({"a": range(100), "b": range(0, 200, 2)})
+    pdf2 = pd.DataFrame({"x": range(200), "y": [1, 2, 3, 4] * 50})
+    df1 = dd.from_pandas(pdf1, npartitions=10)
+    df2 = dd.from_pandas(pdf2, npartitions=20)
+
+    run_manager_A = a.plugins["shuffle"].shuffle_runs
+
+    joined = dd.merge(df1, df2, left_on="a", right_on="x", shuffle="p2p")
+    result = c.compute(joined)
+
+    await run_manager_A.blocking_get_or_create.wait()
+
+    async with Worker(s.address) as b:
+        run_manager_A.block_get_or_create.set()
+        run_manager_B = b.plugins["shuffle"].shuffle_runs
+        run_manager_B.block_get_or_create.set()
+        result = await result
+    expected = pd.merge(pdf1, pdf2, left_on="a", right_on="x")
+    assert_eq(result, expected, check_index=False)

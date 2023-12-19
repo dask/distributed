@@ -48,6 +48,8 @@ class WebsocketPlugin(SchedulerPlugin):
             One of released, waiting, processing, memory, error.
         finish : string
             Final state of the transition.
+        stimulus_id: string
+            ID of stimulus causing the transition.
         *args, **kwargs : More options passed when transitioning
             This may include worker ID, compute time, etc.
         """

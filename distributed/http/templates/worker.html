@@ -16,7 +16,7 @@
             </tr>
             {% for ts in ws.has_what %}
             <tr>
-              <td> <a href="../task/{{ url_escape(ts.key) }}.html">{{ts.key}}</a></td>
+              <td> <a href="../task/{{ url_escape(str(ts.key)) }}.html">{{ts.key}}</a></td>
               <td> {{format_bytes(ts.nbytes)}} </td>
             </tr>
             {% end %}
@@ -35,7 +35,7 @@
             </tr>
             {% for ts in sorted(ws.processing, key=lambda ts: ts.priority) %}
             <tr>
-                <td> <a href="../task/{{ url_escape(ts.key) }}.html">{{ts.key}}</a></td>
+                <td> <a href="../task/{{ url_escape(str(ts.key)) }}.html">{{ts.key}}</a></td>
                 <td> {{ts.priority }} </td>
             </tr>
             {% end %}

@@ -45,8 +45,8 @@ from distributed.deploy import (
 from distributed.diagnostics.plugin import (
     CondaInstall,
     Environ,
+    InstallPlugin,
     NannyPlugin,
-    PackageInstall,
     PipInstall,
     SchedulerPlugin,
     UploadDirectory,
@@ -63,6 +63,7 @@ from distributed.queues import Queue
 from distributed.scheduler import KilledWorker, Scheduler
 from distributed.security import Security
 from distributed.semaphore import Semaphore
+from distributed.spans import span
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import CancelledError, TimeoutError, sync
 from distributed.variable import Variable
@@ -135,7 +136,7 @@ __all__ = [
     "MultiLock",
     "Nanny",
     "NannyPlugin",
-    "PackageInstall",
+    "InstallPlugin",
     "PipInstall",
     "Pub",
     "Queue",
@@ -174,6 +175,7 @@ __all__ = [
     "rejoin",
     "rpc",
     "secede",
+    "span",
     "sync",
     "wait",
     "warn",

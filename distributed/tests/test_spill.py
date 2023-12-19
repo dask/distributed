@@ -219,9 +219,10 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
     a = Bad(size=201)
 
     # Exception caught in the worker
-    with pytest.raises(TypeError, match="Could not serialize"):
+    with pytest.raises(TypeError, match="Failed to pickle 'a'") as e:
         with captured_logger("distributed.spill") as logs_bad_key:
             buf["a"] = a
+    assert isinstance(e.value.__cause__.__cause__, MyError)
 
     # spill.py must remain silent because we're already logging in worker.py
     assert not logs_bad_key.getvalue()
@@ -240,7 +241,7 @@ def test_spillbuffer_fail_to_serialize(tmp_path):
 
     # worker.py won't intercept the exception here, so spill.py must dump the traceback
     logs_value = logs_bad_key_mem.getvalue()
-    assert "Failed to pickle" in logs_value  # from distributed.spill
+    assert "Failed to pickle 'b'" in logs_value  # from distributed.spill
     assert "Traceback" in logs_value  # from distributed.spill
     assert_buf(buf, tmp_path, {"b": b, "c": c}, {})
 
@@ -454,3 +455,20 @@ def test_compression_settings(tmp_path, compression, minsize, maxsize):
         x = "x" * 20_000
         buf["x"] = x
         assert minsize <= psize(tmp_path, x=x)[1] <= maxsize
+
+
+def test_str_collision(tmp_path):
+    """keys are converted to strings before landing on disk. In dask, 1 and "1" are two
+    different keys; make sure they don't collide.
+    """
+    buf = SpillBuffer(str(tmp_path), target=100_000)
+    buf[1] = 10
+    buf["1"] = 20
+    assert buf.keys() == {1, "1"}
+    assert dict(buf) == {1: 10, "1": 20}
+    assert not buf.slow
+    buf.evict()
+    buf.evict()
+    assert not buf.fast
+    assert buf.keys() == {1, "1"}
+    assert dict(buf) == {1: 10, "1": 20}

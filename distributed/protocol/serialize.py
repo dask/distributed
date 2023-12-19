@@ -7,7 +7,7 @@ from array import array
 from enum import Enum
 from functools import partial
 from types import ModuleType
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 
 import msgpack
 
@@ -21,12 +21,15 @@ from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.utils import (
     frame_split_size,
+    host_array_from_buffers,
     merge_memoryviews,
     msgpack_opts,
     pack_frames_prelude,
     unpack_frames,
 )
 from distributed.utils import ensure_memoryview, has_keyword
+
+T = TypeVar("T")
 
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
@@ -369,7 +372,11 @@ def serialize(  # type: ignore[no-untyped-def]
 
         return {"serializer": "error"}, frames
     elif on_error == "raise":
-        raise TypeError(msg, str(x)[:10000]) from exc
+        try:
+            str_x = str(x)[:10000]
+        except Exception:
+            raise TypeError(msg) from exc
+        raise TypeError(msg, str_x) from exc
     else:  # pragma: nocover
         raise ValueError(f"{on_error=}; expected 'message' or 'raise'")
 
@@ -498,7 +505,7 @@ def merge_and_deserialize(header, frames, deserializers=None):
             try:
                 merged = merge_memoryviews(subframes)
             except (ValueError, TypeError):
-                merged = bytearray().join(subframes)
+                merged = host_array_from_buffers(subframes)
 
             merged_frames.append(merged)
 
@@ -561,30 +568,25 @@ class Serialized:
         return not (self == other)
 
 
-class ToPickle:
+class ToPickle(Generic[T]):
     """Mark an object that should be pickled
 
     Both the scheduler and workers with automatically unpickle this
     object on arrival.
-
-    Notice, this requires that the scheduler is allowed to use pickle.
-    If the configuration option "distributed.scheduler.pickle" is set
-    to False, the scheduler will raise an exception instead.
     """
 
-    def __init__(self, data):
+    data: T
+
+    def __init__(self, data: T):
         self.data = data
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "<ToPickle: %s>" % str(self.data)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and other.data == self.data
 
-    def __ne__(self, other):
-        return not (self == other)
-
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.data)
 
 
@@ -675,20 +677,21 @@ def serialize_bytelist(
     return frames2
 
 
-def serialize_bytes(x, **kwargs):
+def serialize_bytes(x: object, **kwargs: Any) -> bytes:
     L = serialize_bytelist(x, **kwargs)
     return b"".join(L)
 
 
-def deserialize_bytes(b):
+def deserialize_bytes(b: bytes | bytearray | memoryview) -> Any:
+    """Deserialize the output of :func:`serialize_bytes`"""
     frames = unpack_frames(b)
-    header, frames = frames[0], frames[1:]
-    if header:
-        header = msgpack.loads(header, raw=False, use_list=False)
+    bin_header, frames = frames[0], frames[1:]
+    if bin_header:
+        header = msgpack.loads(bin_header, raw=False, use_list=False)
     else:
         header = {}
-    frames = decompress(header, frames)
-    return merge_and_deserialize(header, frames)
+    frames2 = decompress(header, frames)
+    return merge_and_deserialize(header, frames2)
 
 
 ################################

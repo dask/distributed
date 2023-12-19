@@ -11,7 +11,7 @@ from collections import deque, namedtuple
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
-from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend, backends
 from distributed.protocol import nested_deserialize
 from distributed.utils import get_ip
@@ -257,10 +257,11 @@ class InProc(Comm):
             return False
 
 
-class InProcListener(Listener):
+class InProcListener(BaseListener):
     prefix = "inproc"
 
     def __init__(self, address, comm_handler, deserialize=True):
+        super().__init__()
         self.manager = global_manager
         self.address = address or self.manager.new_address()
         self.comm_handler = comm_handler

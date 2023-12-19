@@ -1,6 +1,405 @@
 Changelog
 =========
 
+.. note::
+
+    Changelog entries for Distributed are now included in the `Dask changelog <https://docs.dask.org/en/stable/changelog.html>`_.
+
+
+.. _v2023.9.3:
+
+2023.9.3
+--------
+
+Released on September 29, 2023
+
+Highlights
+^^^^^^^^^^
+
+Reduce memory consumption during merge and shuffle graph optimizations
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Previously there would be a large memory spike when optimizing task graphs 
+for shuffling and merge operations (see :issue:`8196` for an example).
+This release removes that memory spike.
+
+See :pr:`8197` from `Patrick Hoefler`_ for more details.
+
+Quiet JupyterLab shutdown
+"""""""""""""""""""""""""
+Previously when running Jupyter on a scheduler (e.g. ``--jupyter`` CLI flag),
+an error would be raised when the notebook server was shutdown from the
+web application. This release ensures an error isn't raised and the shutdown
+process is clean. 
+
+See :pr:`8220` from `Thomas Grainger`_ for details.
+
+.. dropdown:: Additional changes
+
+    - Decompress pickled messages (:pr:`8216`) `Mads R. B. Kristensen`_
+    - Fix regression in ``pytest-xdist`` (:pr:`8221`) `crusaderky`_
+    - Hide pytest from code snippets (:pr:`8198`) `crusaderky`_
+    - Python 3.9-style multi-line with statements (:pr:`8211`) `crusaderky`_
+    - Bump ``actions/checkout`` from 4.0.0 to 4.1.0 (:pr:`8209`)
+    - Update gpuCI ``RAPIDS_VER`` to ``23.12`` (:pr:`8206`)
+    - Do not reset CUDA context after UCX tests (:pr:`8201`) `Peter Andreas Entschev`_
+    - Centralize and type ``no_default`` (:pr:`8171`) `crusaderky`_
+    - Off-by-one in the retries count in ``KilledWorker`` (:pr:`8203`) `crusaderky`_
+    - Remove deprecated aliases in ``distributed.utils`` (:pr:`8193`) `crusaderky`_
+    - Remove unspecified ``n_workers`` deprecation in ``wait_for_workers`` (:pr:`8192`) `crusaderky`_
+    - Review log-length configuration (:pr:`8173`) `crusaderky`_
+
+
+.. _v2023.9.2:
+
+2023.9.2
+--------
+
+Released on September 15, 2023
+
+Highlights
+^^^^^^^^^^
+
+Reduce memory footprint of P2P shuffling
+""""""""""""""""""""""""""""""""""""""""
+Significantly reduced the peak and average memory used by P2P shuffling
+(up to a factor of 2x reduction). This change also increases the P2P
+minimum supported verions of ``pyarrow`` to ``pyarrow=12``.
+
+See :pr:`8157` from `Hendrik Makait`_ for details.
+
+Improved plugin API
+"""""""""""""""""""
+
+Two plugin changes have been introduced to provide a more consistent
+and convienent plugin UX:
+
+.. currentmodule:: distributed
+
+1. Plugins must now inherit from :class:`~distributed.diagnostics.plugin.WorkerPlugin`,
+   :class:`~distributed.diagnostics.plugin.SchedulerPlugin`,
+   or :class:`~distributed.diagnostics.plugin.NannyPlugin` base classes.
+   Old-style plugins that don't inherit from a base class will still work,
+   but with a deprecation warning.
+
+2. A new :meth:`Client.register_plugin` method has been introduced in favor
+   of the previous :meth:`Client.register_worker_plugin` and
+   :meth:`Client.register_scheduler_plugin` methods.
+   All plugins should now be registered using the centralized
+   :meth:`Client.register_plugin` method.
+
+.. code-block:: python
+
+    from dask.distributed import WorkerPlugin, SchedulerPlugin
+
+    class MySchedulerPlugin(SchedulerPlugin):      # Inherits from SchedulerPlugin
+        def start(self, scheduler):
+            print("Hello from the scheduler!")
+
+    class MyWorkerPlugin(WorkerPlugin):            # Inherits from WorkerPlugin
+        def setup(self, worker):
+            print(f"Hello from Worker {worker}!")
+
+    client.register_plugin(MySchedulerPlugin())    # Single method to register both types of plugins
+    client.register_plugin(MyWorkerPlugin())
+
+See :pr:`8169` and :pr:`8150` from `Hendrik Makait`_ for details.
+
+
+Emit deprecation warnings for configuration option renames
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+When a Dask configuration option that has been renamed is used,
+users will now get a deprecation warning pointing them to the new
+name.
+
+See :pr:`8179` from `crusaderky`_ for details.
+
+.. dropdown:: Additional changes
+
+    - Skip ``rechunker`` in code samples (:pr:`8178`) `Matthew Rocklin`_
+    - Ensure an error during ``ShuffleRun.close`` cannot block worker shutdown (:pr:`8184`) `Florian Jetter`_
+    - Fix race condition between ``MemorySampler`` and scheduler shutdown (:pr:`8172`) `crusaderky`_
+    - Fix post-stringification info pages (:pr:`8161`) `Florian Jetter`_
+    - Fix validation in unpack phase of P2P shuffle (:pr:`8160`) `Hendrik Makait`_
+    - Use ``config_for_cluster_tests`` in sync fixture (:pr:`8180`) `crusaderky`_
+    - Simplify boilerplate for P2P shuffles (:pr:`8174`) `Hendrik Makait`_
+
+
+.. _v2023.9.1:
+
+2023.9.1
+--------
+
+Released on September 6, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Raise in P2P if ``column`` ``dtype`` is wrong  (:pr:`8167`) `Hendrik Makait`_
+- Auto-fail tasks with deps larger than the worker memory (:pr:`8135`) `crusaderky`_
+- Make workers table sortable (:pr:`8153`) `Jacob Tomlinson`_
+- Support for unsetting environment variables (:pr:`8144`) `crusaderky`_
+
+Deprecations
+^^^^^^^^^^^^
+- Deprecate asynchronous ``Listener.stop()`` (:pr:`8151`) `Hendrik Makait`_
+
+Maintenance
+^^^^^^^^^^^
+- Initial tweaks after Dask key type changes (:pr:`8162`) `crusaderky`_
+- Bump ``actions/checkout`` from 3.6.0 to 4.0.0 (:pr:`8159`)
+- Fix flaky ``test_worker_metrics`` (:pr:`8154`) `crusaderky`_
+
+
+.. _v2023.9.0:
+
+2023.9.0
+--------
+
+Released on September 1, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Don't capture ``functools`` frames in code (:pr:`8146`) `crusaderky`_
+- Ignore ``asyncio`` when scraping code (:pr:`8122`) `Matthew Rocklin`_
+- Remove stringification (:pr:`8083`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Ensure ``NannyPlugin`` are always installed (:pr:`8107`) `Florian Jetter`_
+- Don't use exception hooks to shorten tracebacks (:pr:`8127`) `crusaderky`_
+- Fix P2P shuffle with ``LocalCluster(..., processes=False)`` (:pr:`8125`) `Hendrik Makait`_
+- Merge with P2P shuffle fails if ``left_index`` or ``right_index`` is ``True`` (:pr:`8121`) `Patrick Hoefler`_
+
+Documentation
+^^^^^^^^^^^^^
+- Do not advertise ``@span`` decorator (:pr:`8120`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Assert DF equality in P2P tests (:pr:`8117`) `Hendrik Makait`_
+- Fix warnings from ``pandas=2.1.0`` (:pr:`8145`) `Patrick Hoefler`_
+- Enforce ``dtypes`` early in P2P shuffling (:pr:`8131`) `Hendrik Makait`_
+- Bump ``actions/checkout`` from 3.5.3 to 3.6.0 (:pr:`8139`)
+- Fix flakiness in ``test_spans`` (:pr:`8132`) `crusaderky`_
+- Remove duplicated teardown logic in ``Server.close``, ``Nanny.close``, and ``Server.stop`` (:pr:`8129`) `David Gold`_
+- Fix flaky ``test_task_counter`` (:pr:`8134`) `crusaderky`_
+- Use ``asyncio.timeout()`` in ``ConnectionPool`` where available (:pr:`8109`) `Thomas Grainger`_
+
+
+.. _v2023.8.1:
+
+2023.8.1
+--------
+
+Released on August 18, 2023
+
+New Features
+^^^^^^^^^^^^
+- Add ``memray`` integration (:pr:`8044`) `Florian Jetter`_
+
+Enhancements
+^^^^^^^^^^^^
+- Await ``async`` ``listener.stop`` in ``Worker.close`` (:pr:`8118`) `Hendrik Makait`_
+- Minor fixes in ``memray`` (:pr:`8113`) `Florian Jetter`_
+- Enable basic ``p2p`` shuffle for ``dask-cudf`` (:pr:`7743`) `Richard (Rick) Zamora`_
+- Don't shut down unresponsive workers on ``gather()`` (:pr:`8101`) `crusaderky`_
+- Propagate ``CancelledError`` in ``gather_from_workers`` (:pr:`8089`) `crusaderky`_
+- Better logging for anomalous task termination (:pr:`8082`) `crusaderky`_
+
+Bug Fixes
+^^^^^^^^^
+- Handle null partitions in P2P shuffling (:pr:`8116`) `Hendrik Makait`_
+- Handle ``CancelledError`` properly in ``ConnectionPool`` (:pr:`8110`) `Florian Jetter`_
+- Fix additional race condition that can cause P2P restart to deadlock (:pr:`8094`) `Hendrik Makait`_
+- Ensure x-axis is uniform when plotting (:pr:`8093`) `Florian Jetter`_
+- Fix deadlock in P2P restarts (:pr:`8091`) `Hendrik Makait`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add ``memray`` integration to API docs (:pr:`8115`) `James Bourbeau`_
+- Fix default in description of ``LocalCluster`` s ``scheduler_port`` (:pr:`8073`) `Danferno`_
+
+Maintenance
+^^^^^^^^^^^
+- Remove ``types_mapper`` arg now that it is captured in ``from_pyarrow_table_dispatch`` (:pr:`8114`) `Richard (Rick) Zamora`_
+- Make P2P shuffle extensible (:pr:`8096`) `Hendrik Makait`_
+- Make ``PreloadManager`` a ``Sequence`` (:pr:`8112`) `Hendrik Makait`_
+- Introduce ``PreloadManager`` to handle failures in preload setup/teardown (:pr:`8078`) `Hendrik Makait`_
+- Restructure P2P code (:pr:`8098`) `Hendrik Makait`_
+- Make ``ToPickle`` a ``Generic`` (:pr:`8097`) `Hendrik Makait`_
+- Dedicated job for ``memray`` tests (:pr:`8104`) `Florian Jetter`_
+- Fix ``test_task_groups_update_start_stop``, again (:pr:`8102`) `crusaderky`_
+- Remove ``dumps_task`` (:pr:`8067`) `Florian Jetter`_
+- Simplify usage of queues in nanny (:pr:`6655`) `Florian Jetter`_
+- Fix flakiness in tests caused by ``WindowsTime`` (:pr:`8087`) `crusaderky`_
+- Overhaul ``gather()`` (:pr:`7997`) `crusaderky`_
+- Fix flaky ``test_asyncprocess.py::test_simple`` (:pr:`8085`) `crusaderky`_
+- Skip ``test_client.py::test_file_descriptors_dont_leak`` on Mac OS (:pr:`8080`) `Hendrik Makait`_
+- Reorder operations in ``Worker.close`` (:pr:`8076`) `Hendrik Makait`_
+
+
+.. _v2023.8.0:
+
+2023.8.0
+--------
+
+Released on August 4, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Offload CPU intensive sections of update graph to unblock event loop (:pr:`8049`) `Florian Jetter`_
+- Log worker close reason in events (:pr:`8042`) `Florian Jetter`_
+- Exclude comm handshake from connect timeout (:pr:`7698`) `Florian Jetter`_
+- Automatically restart P2P shuffles when output worker leaves (:pr:`7970`) `Hendrik Makait`_
+- Add ``Client.unregister_scheduler_plugin`` method (:pr:`7968`) `Brian Phillips`_
+- Fix log message (:pr:`8029`) `Hendrik Makait`_
+- Send shards grouped by input chunk in P2P rechunking (:pr:`8010`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Close state machine and add-ins first in ``Worker.close`` (:pr:`8066`) `Hendrik Makait`_
+- Fix ``decide_worker`` picking a closing worker (:pr:`8032`) `crusaderky`_
+- Raise ``CommClosedError`` in ``get_stream_address`` (:pr:`8020`) `jochenott`_
+- Respect average ``nthreads`` in adaptive (:pr:`8041`) `Matthew Rocklin`_
+- Use queued tasks in adaptive target (:pr:`8037`) `Matthew Rocklin`_
+- Restore support for yield unsafe ``Client`` context managers and deprecate that support (:pr:`7987`) `Thomas Grainger`_
+
+Documentation
+^^^^^^^^^^^^^
+- Change ``worker_saturation`` default value to 1.1 in the documention (:pr:`8040`) `minhnguyenxuan60`_
+- Clarified ``concurrent.futures`` section in ``client.rst`` (:pr:`8048`) `mercyo12`_
+
+Maintenance
+^^^^^^^^^^^
+- Fix flaky ``test_worker_metrics`` (:pr:`8069`) `crusaderky`_
+- Use SPDX in ``license`` metadata (:pr:`8065`) `jakirkham`_
+- Rebalance ``ci1`` markers (:pr:`8061`) `Florian Jetter`_
+- Ensure stream messages are always ordered (:pr:`8059`) `Florian Jetter`_
+- Simplify update graph (:pr:`8047`) `Florian Jetter`_
+- Provide close reason when signal is caught (:pr:`8045`) `Florian Jetter`_
+- Allow unclosed comms in tests (:pr:`8057`) `Florian Jetter`_
+- Cosmetic tweak to ``adaptive_target`` (:pr:`8052`) `crusaderky`_
+- Fix linting (:pr:`8046`) `Florian Jetter`_
+- Update gpuCI ``RAPIDS_VER`` to ``23.10`` (:pr:`8033`)
+- Test against more recent ``pyarrow`` versions (:pr:`8021`) `James Bourbeau`_
+- Add a test for ``GraphLayout`` with ``scatter`` (:pr:`8025`) `Irina Truong`_
+- Fix compatibility variable naming  (:pr:`8030`) `Hendrik Makait`_
+
+.. _v2023.7.1:
+
+2023.7.1
+--------
+
+Released on July 20, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- ``gather_dep`` should handle ``CancelledError`` (:pr:`8013`) `crusaderky`_
+- Pass ``stimulus_id`` to ``SchedulerPlugin.remove_worker`` and ``SchedulerPlugin.transition`` (:pr:`7974`) `Hendrik Makait`_
+- Log ``stimulus_id`` in ``retire_worker`` (:pr:`8003`) `crusaderky`_
+- Use ``BufferOutputStream`` in P2P (:pr:`7991`) `Florian Jetter`_
+- Add Coiled to ignored modules for code sniffing (:pr:`7986`) `Matthew Rocklin`_
+- Progress bar can group tasks by span (:pr:`7952`) `Irina Truong`_
+- Improved error messages for P2P shuffling (:pr:`7979`) `Hendrik Makait`_
+- Reduce removing comms log to debug level (:pr:`7972`) `Florian Jetter`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix for ``TypeError: '<' not supported`` in graph dashboard (:pr:`8017`) `Irina Truong`_
+- Fix shuffle code to work with ``pyarrow`` 13 (:pr:`8009`) `Joris Van den Bossche`_
+
+Documentation
+^^^^^^^^^^^^^
+- Add some top-level exposition to the p2p rechunking code (:pr:`7978`) `Lawrence Mitchell`_
+
+Maintenance
+^^^^^^^^^^^
+- Add test when not ``repartitioning`` for ``p2p`` in ``set_index`` (:pr:`8016`) `Patrick Hoefler`_
+- Bump ``JamesIves/github-pages-deploy-action`` from 4.4.2 to 4.4.3 (:pr:`8008`)
+- Configure asyncio loop using ``loop_factory`` kwarg rather than using the ``set_event_loop_policy`` (:pr:`7969`) `Thomas Grainger`_
+- Fix P2P worker cleanup (:pr:`7981`) `Hendrik Makait`_
+- Skip ``click`` v8.1.4 in mypy ``pre-commit`` hook (:pr:`7989`) `Thomas Grainger`_
+- Remove accidental duplicated conversion of ``pyarrow`` ``Table`` to pandas (:pr:`7983`) `Joris Van den Bossche`_
+
+
+.. _v2023.7.0:
+
+2023.7.0
+--------
+
+Released on July 7, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Propagate spans to tasks (:pr:`7898`) `crusaderky`_
+- Make Fine Performance Metrics bar graph horizontal (:pr:`7966`) `crusaderky`_
+- Don't pile up ``context_meter`` callbacks (:pr:`7961`) `crusaderky`_
+- Polish Fine Performance Metrics plot (:pr:`7963`) `crusaderky`_
+- Sign ``task-erred`` with ``run_id`` and reject outdated responses (:pr:`7933`) `Hendrik Makait`_
+- Set ``Client.as_current`` when entering ctx (:pr:`6527`) `Florian Jetter`_
+- Re-run erred task on ``ComputeTaskEvent`` (:pr:`7967`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Fix crash in spans when ``time()`` is not monotonic (:pr:`7960`) `crusaderky`_
+
+Documentation
+^^^^^^^^^^^^^
+- Documentation for Fine Performance Metrics and Spans (:pr:`7945`) `crusaderky`_
+- Update ``client.py`` to be consistent with the docstring (:pr:`7705`) `Sultan Orazbayev`_
+
+Maintenance
+^^^^^^^^^^^
+- Use ``distributed.wait_for`` in ``test_close_async_task_handles_cancellation`` (:pr:`7955`) `Thomas Grainger`_
+- Fix flaky UCX tests (:pr:`7950`) `Peter Andreas Entschev`_
+
+
+.. _v2023.6.1:
+
+2023.6.1
+--------
+
+Released on June 26, 2023
+
+Enhancements
+^^^^^^^^^^^^
+- Add idle time to fine performance metrics (:pr:`7938`) `crusaderky`_
+- Spans: capture code snippets (:pr:`7930`) `crusaderky`_
+- Improve memory footprint of P2P rechunking (:pr:`7897`) `Hendrik Makait`_
+- Improve error message on invalid state in ``_handle_remove_replicas`` (:pr:`7920`) `Hendrik Makait`_
+- Make ``ShuffleSchedulerExtension.remove_worker`` more robust (:pr:`7921`) `Hendrik Makait`_
+- Provide more information if occupancy drops below zero (:pr:`7924`) `Hendrik Makait`_
+- Improved conversion between ``pyarrow`` and ``pandas`` in P2P shuffling (:pr:`7896`) `Hendrik Makait`_
+
+Bug Fixes
+^^^^^^^^^
+- Add ``Cluster.called_from_running_loop`` and fix ``Cluster.asynchronous`` (:pr:`7941`) `Jacob Tomlinson`_
+- Fix annotations and spans leaking between threads (:pr:`7935`) `Irina Truong`_
+- Handle null partitions in P2P shuffling (:pr:`7922`) `Jonathan De Troye`_
+- Fix race condition in Fine Performance Metrics sync (:pr:`7927`) `crusaderky`_
+- Avoid (:pr:`7923`) by starting ``run_id`` at 1 (:pr:`7925`) `Hendrik Makait`_
+- Fix glitches in Fine Performance Metrics stacked graph (:pr:`7919`) `crusaderky`_
+
+Maintenance
+^^^^^^^^^^^
+- Wipe the cache after (:pr:`7935`) (:pr:`7946`) `crusaderky`_
+- Remove grace period for unclosed comms in ``gen_cluster`` (:pr:`7937`) `Thomas Grainger`_
+- ``raise pytest.skip`` is redundant (:pr:`7939`) `crusaderky`_
+- Fix ``test_rechunk_with_{fully|partially}_unknown_dimension`` on CI (:pr:`7934`) `Hendrik Makait`_
+- Fix compatibility with ``numpy`` 1.25 (:pr:`7932`) `crusaderky`_
+- Spans: refactor sums of mappings (:pr:`7918`) `crusaderky`_
+- Fix flaky ``test_send_metrics_to_scheduler`` (:pr:`7931`) `crusaderky`_
+- Avoid calls to ``make_current()`` and ``make_clear()`` by using ``asyncio.run`` in ``LoopRunner`` (:pr:`7467`) `Thomas Grainger`_
+- Add ``needs triage`` label to re/opened PRs and issues (:pr:`7916`) `Miles`_
+- Remove ``span_id`` from global metrics on scheduler (:pr:`7917`) `crusaderky`_
+- Add spans to Fine Performance Metrics bokeh dashboard (:pr:`7911`) `crusaderky`_
+- FinePerformanceMetrics dashboard overhaul (:pr:`7910`) `crusaderky`_
+- Check for ``skip-caching`` label (:pr:`7907`) `Miles`_
+- Fix CI changes from (:pr:`7902`) (:pr:`7905`) `Hendrik Makait`_
+- Rename ``get_default_shuffle_algorithm`` to ``get_default_shuffle_method`` (:pr:`7902`) `Hendrik Makait`_
+- Bump actions/checkout from 3.5.2 to 3.5.3 (:pr:`7904`)
+- Refactor P2P rechunk validation (:pr:`7890`) `Hendrik Makait`_
+
+
 .. _v2023.6.0:
 
 2023.6.0
@@ -5027,3 +5426,11 @@ significantly without many new features.
 .. _`ypogorelova`: https://github.com/ypogorelova
 .. _`Patrick Hoefler`: https://github.com/phofl
 .. _`Irina Truong`: https://github.com/j-bennet
+.. _`Joris Van den Bossche`: https://github.com/jorisvandenbossche
+.. _`Brian Phillips`: https://github.com/bphillips-exos
+.. _`jochenott`: https://github.com/jochenott
+.. _`minhnguyenxuan60`: https://github.com/minhnguyenxuan60
+.. _`mercyo12`: https://github.com/mercyo12
+.. _`Richard (Rick) Zamora`: https://github.com/rjzamora
+.. _`Danferno`: https://github.com/Danferno
+.. _`David Gold`: https://github.com/thedeg123

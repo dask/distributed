@@ -9,13 +9,14 @@ import sys
 import pytest
 
 pytest.importorskip("bokeh")
+from urllib.parse import quote_plus
+
 from bokeh.server.server import BokehTornado
 from tlz import first
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 
 import dask
 from dask.core import flatten
-from dask.utils import stringify
 
 from distributed import Event
 from distributed.client import wait
@@ -342,6 +343,14 @@ async def test_WorkersMemory(c, s, a, b):
 async def test_FinePerformanceMetrics(c, s, a, b):
     cl = FinePerformanceMetrics(s)
 
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+    assert not cl.visible_activities
+    assert not cl.span_tag_selector.options
+    assert not cl.function_selector.options
+    assert cl.unit_selector.options == ["seconds"]
+
     # execute on default span; multiple tasks in same TaskGroup
     x0 = c.submit(inc, 0, key="x-0", workers=[a.address])
     x1 = c.submit(inc, 1, key="x-1", workers=[a.address])
@@ -368,8 +377,9 @@ async def test_FinePerformanceMetrics(c, s, a, b):
 
     # Custom metric with non-string label and custom unit
     def f():
-        context_meter.digest_metric(None, 1, "custom")
-        context_meter.digest_metric(("foo", 1), 2, "custom")
+        context_meter.digest_metric(None, 1, "seconds")
+        context_meter.digest_metric(("foo", 1), 2, "seconds")
+        context_meter.digest_metric("hideme", 1.1, "custom")
 
     v = c.submit(f, key="v")
     await wait([y0, y1, z, v])
@@ -377,14 +387,67 @@ async def test_FinePerformanceMetrics(c, s, a, b):
     await a.heartbeat()
     await b.heartbeat()
 
-    assert not cl.task_exec_data
     cl.update()
-    assert cl.task_exec_data
-    assert set(cl.task_exec_data["functions"]) == {"v", "w", "x", "y", "z"}
-    assert set(cl.unit_selector.options) == {"seconds", "count", "bytes", "custom"}
-    assert "thread-cpu" in cl.task_activities
-    assert "('foo', 1)" in cl.task_activities
-    assert "None" in cl.task_activities
+    assert sorted(cl.visible_functions) == ["N/A", "v", "w", "x", "y", "z"]
+    assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "custom", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+    assert "('foo', 1)" in cl.visible_activities
+    assert "None" in cl.visible_activities
+    assert "hideme" not in cl.visible_activities
+    assert "idle" in cl.visible_activities
+    assert "idle or other spans" not in cl.visible_activities
+    assert sorted(cl.span_tag_selector.options) == ["default", "foo"]
+
+    orig_activities = cl.visible_activities[:]
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "count"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "custom"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["hideme"]
+
+    cl.unit_selector.value = "seconds"
+    cl.update()
+    assert cl.visible_activities == orig_activities
+
+    cl.span_tag_selector.value = ["foo"]
+    cl.update()
+    assert sorted(cl.visible_functions) == ["N/A", "y", "z"]
+    assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+    assert "idle" not in cl.visible_activities
+    assert "idle or other spans" in cl.visible_activities
+
+
+@gen_cluster(
+    client=True,
+    scheduler_kwargs={"extensions": {}},
+    worker_kwargs={"extensions": {}},
+)
+async def test_FinePerformanceMetrics_no_spans(c, s, a, b):
+    cl = FinePerformanceMetrics(s)
+
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+    await c.submit(inc, 0, key="x-0")
+    await a.heartbeat()
+    await b.heartbeat()
+
+    cl.update()
+    assert sorted(cl.visible_functions) == ["x"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["memory-read"]
 
 
 @gen_cluster(client=True)
@@ -848,7 +911,7 @@ async def test_TaskGraph_complex(c, s, a, b):
     gp.update()
     assert set(gp.layout.index.values()) == set(range(len(gp.layout.index)))
     visible = gp.node_source.data["visible"]
-    keys = list(map(stringify, flatten(y.__dask_keys__())))
+    keys = list(flatten(y.__dask_keys__()))
     assert all(visible[gp.layout.index[key]] == "True" for key in keys)
 
 
@@ -1100,6 +1163,74 @@ async def test_memory_by_key(c, s, a, b):
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_worker_info(c, s, a, b):
+    port = s.http_server.port
+    ev1 = Event()
+    ev2 = Event()
+
+    def block_on_event(enter, wait):
+        enter.set()
+        wait.wait()
+
+    f = c.submit(block_on_event, ev1, ev2, workers=[a.address])
+    try:
+        host = f"http://127.0.0.1:{port}"
+        http_client = AsyncHTTPClient()
+        await ev1.wait()
+        response = await http_client.fetch(
+            f"{host}/info/task/foo.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/task/{quote_plus(str(f.key))}.html"
+        )
+        assert response.code == 200
+
+        response = await http_client.fetch(
+            f"{host}/info/call-stack/foo.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/call-stack/{quote_plus(str(f.key))}.html"
+        )
+        assert response.code == 200
+
+        response = await http_client.fetch(f"{host}/info/main/workers.html")
+        assert response.code == 200
+
+        response = await http_client.fetch(
+            f"{host}/info/worker/bar.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/call-stacks/bar.html", raise_error=False
+        )
+        assert response.code == 404
+
+        response = await http_client.fetch(
+            f"{host}/info/logs/bar.html", raise_error=False
+        )
+        assert response.code == 404
+
+        for w in [a, b]:
+            response = await http_client.fetch(
+                f"{host}/info/worker/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+
+            response = await http_client.fetch(
+                f"{host}/info/call-stacks/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+            response = await http_client.fetch(
+                f"{host}/info/logs/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+    finally:
+        await ev2.set()
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_aggregate_action(c, s, a, b):
     mbk = AggregateAction(s)
 
@@ -1168,6 +1299,14 @@ async def test_prefix_bokeh(s, a, b):
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
     assert bokeh_app.prefix == f"/{prefix}"
+
+
+@gen_cluster(scheduler_kwargs={"dashboard": True})
+async def test_bokeh_relative(s, a, b):
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"http://localhost:{s.http_server.port}/status")
+    assert response.code == 200
+    assert '<script type="text/javascript" src="static/' in response.body.decode()
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})

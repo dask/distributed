@@ -6,24 +6,34 @@ import random
 import warnings
 
 import pytest
+from packaging.version import parse as parse_version
 
 np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
 
 from concurrent.futures import ThreadPoolExecutor
 
+from tornado.ioloop import IOLoop
+
 import dask
 from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
 
+from distributed import Event
+from distributed.protocol.utils_test import get_host_array
+from distributed.shuffle._core import ShuffleId
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._rechunk import ShardID, rechunk_slicing
-from distributed.shuffle._scheduler_extension import get_worker_for_hash_sharding
-from distributed.shuffle._shuffle import ShuffleId
-from distributed.shuffle._worker_extension import ArrayRechunkRun
+from distributed.shuffle._rechunk import (
+    ArrayRechunkRun,
+    ArrayRechunkSpec,
+    Split,
+    split_axes,
+)
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
+
+NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 
 
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
@@ -48,12 +58,11 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
         new,
         directory,
         loop,
+        disk,
         Shuffle=ArrayRechunkRun,
     ):
         s = Shuffle(
             worker_for=worker_for_mapping,
-            # FIXME: Is output_workers redundant with worker_for?
-            output_workers=set(worker_for_mapping.values()),
             old=old,
             new=new,
             directory=directory / name,
@@ -65,6 +74,8 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
+            disk=disk,
+            loop=loop,
         )
         self.shuffles[name] = s
         return s
@@ -75,10 +86,10 @@ from itertools import product
 
 @pytest.mark.parametrize("n_workers", [1, 10])
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
+@pytest.mark.parametrize("disk", [True, False])
 @gen_test()
-async def test_lowlevel_rechunk(
-    tmp_path, loop_in_thread, n_workers, barrier_first_worker
-):
+async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk):
+    loop = IOLoop.current()
     old = ((1, 2, 3, 4), (5,) * 6)
     new = ((5, 5), (12, 18))
 
@@ -92,11 +103,12 @@ async def test_lowlevel_rechunk(
 
     worker_for_mapping = {}
 
+    spec = ArrayRechunkSpec(id=ShuffleId("foo"), disk=disk, new=new, old=old)
     new_indices = list(product(*(range(len(dim)) for dim in new)))
-    for i, idx in enumerate(new_indices):
-        worker_for_mapping[idx] = get_worker_for_hash_sharding(i, workers)
-
+    for idx in new_indices:
+        worker_for_mapping[idx] = spec.pick_worker(idx, workers)
     assert len(set(worker_for_mapping.values())) == min(n_workers, len(new_indices))
+    # scheduler_state = spec.create_new_run(worker_for_mapping)
 
     with ArrayRechunkTestPool() as local_shuffle_pool:
         shuffles = []
@@ -108,7 +120,8 @@ async def test_lowlevel_rechunk(
                     old=old,
                     new=new,
                     directory=tmp_path,
-                    loop=loop_in_thread,
+                    loop=loop,
+                    disk=disk,
                 )
             )
         random.seed(42)
@@ -117,12 +130,13 @@ async def test_lowlevel_rechunk(
         else:
             barrier_worker = random.sample(shuffles, k=1)[0]
 
+        run_ids = []
         try:
             for i, (idx, arr) in enumerate(old_chunks.items()):
                 s = shuffles[i % len(shuffles)]
-                await s.add_partition(arr, idx)
+                run_ids.append(await asyncio.to_thread(s.add_partition, arr, idx))
 
-            await barrier_worker.barrier()
+            await barrier_worker.barrier(run_ids)
 
             total_bytes_sent = 0
             total_bytes_recvd = 0
@@ -134,12 +148,19 @@ async def test_lowlevel_rechunk(
                 total_bytes_recvd += metrics["disk"]["total"]
                 total_bytes_recvd_shuffle += s.total_recvd
 
-            assert total_bytes_recvd_shuffle == total_bytes_sent
+            # Allow for some uncertainty due to slight differences in measuring
+            assert (
+                total_bytes_sent * 0.95
+                < total_bytes_recvd_shuffle
+                < total_bytes_sent * 1.05
+            )
 
             all_chunks = np.empty(tuple(len(dim) for dim in new), dtype="O")
             for ix, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
-                all_chunks[ix] = await s.get_output_partition(ix, f"key-{ix}")
+                all_chunks[ix] = await asyncio.to_thread(
+                    s.get_output_partition, ix, f"key-{ix}"
+                )
 
         finally:
             await asyncio.gather(*[s.close() for s in shuffles])
@@ -147,10 +168,11 @@ async def test_lowlevel_rechunk(
         old_cs = np.empty(tuple(len(dim) for dim in old), dtype="O")
         for ix, arr in old_chunks.items():
             old_cs[ix] = arr
+
         np.testing.assert_array_equal(
             concatenate3(old_cs.tolist()),
             concatenate3(all_chunks.tolist()),
-            strict=True,
+            **({"strict": True} if NUMPY_GE_124 else {}),
         )
 
 
@@ -180,8 +202,9 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     assert np.all(await c.compute(x2) == a)
 
 
+@pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_rechunk_2d(c, s, *ws):
+async def test_rechunk_2d(c, s, *ws, disk):
     """Try rechunking a random 2d matrix
 
     See Also
@@ -191,13 +214,15 @@ async def test_rechunk_2d(c, s, *ws):
     a = np.random.default_rng().uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
-    x2 = rechunk(x, chunks=new, method="p2p")
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
 
 
+@pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
-async def test_rechunk_4d(c, s, *ws):
+async def test_rechunk_4d(c, s, *ws, disk):
     """Try rechunking a random 4d matrix
 
     See Also
@@ -213,7 +238,8 @@ async def test_rechunk_4d(c, s, *ws):
         (10,),
         (8, 2),
     )  # This has been altered to return >1 output partition
-    x2 = rechunk(x, chunks=new, method="p2p")
+    with dask.config.set({"distributed.p2p.disk": disk}):
+        x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     await c.compute(x2)
     assert np.all(await c.compute(x2) == a)
@@ -235,7 +261,7 @@ async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
     assert x2.chunks == new
     # FIXME: distributed#7816
     with raises_with_cause(
-        RuntimeError, "rechunk_transfer failed", RuntimeError, "Barrier task"
+        RuntimeError, "failed during transfer", RuntimeError, "Barrier task"
     ):
         await c.compute(x2)
 
@@ -600,9 +626,9 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, 5)),
         (da.ones(shape=(50, 10), chunks=(25, 10)), {1: 5}),
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, (5, 5))),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), (None, 5)),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), {1: 5}),
-        (da.ones(shape=(1000, 10), chunks=(5, 10)), (None, (5, 5))),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), (None, 5)),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), {1: 5}),
+        (da.ones(shape=(100, 10), chunks=(5, 10)), (None, (5, 5))),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
         (da.ones(shape=(10, 10), chunks=(10, 10)), {1: 5}),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, (5, 5))),
@@ -633,20 +659,17 @@ async def test_rechunk_with_fully_unknown_dimension(c, s, *ws, x, chunks):
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, 5)),
         (da.ones(shape=(50, 10), chunks=(25, 10)), {1: 5}),
         (da.ones(shape=(50, 10), chunks=(25, 10)), (None, (5, 5))),
-        pytest.param(
-            da.ones(shape=(1000, 10), chunks=(5, 10)),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
             (None, 5),
-            marks=pytest.mark.skip(reason="distributed#7757"),
         ),
-        pytest.param(
-            da.ones(shape=(1000, 10), chunks=(5, 10)),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
             {1: 5},
-            marks=pytest.mark.skip(reason="distributed#7757"),
         ),
-        pytest.param(
-            da.ones(shape=(1000, 10), chunks=(5, 10)),
+        (
+            da.ones(shape=(100, 10), chunks=(5, 10)),
             (None, (5, 5)),
-            marks=pytest.mark.skip(reason="distributed#7757"),
         ),
         (da.ones(shape=(10, 10), chunks=(10, 10)), (None, 5)),
         (da.ones(shape=(10, 10), chunks=(10, 10)), {1: 5}),
@@ -936,7 +959,7 @@ async def test_rechunk_with_zero(c, s, *ws):
     assert_eq(await c.compute(result), await c.compute(expected))
 
 
-def test_rechunk_slicing_1():
+def test_split_axes_1():
     """
     See Also
     --------
@@ -944,21 +967,20 @@ def test_rechunk_slicing_1():
     """
     old = ((10, 10, 10, 10, 10),)
     new = ((25, 5, 20),)
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0,): [(ShardID((0,), (0,)), (slice(0, 10, None),))],
-        (1,): [(ShardID((0,), (1,)), (slice(0, 10, None),))],
-        (2,): [
-            (ShardID((0,), (2,)), (slice(0, 5, None),)),
-            (ShardID((1,), (0,)), (slice(5, 10, None),)),
-        ],
-        (3,): [(ShardID((2,), (0,)), (slice(0, 10, None),))],
-        (4,): [(ShardID((2,), (1,)), (slice(0, 10, None),))],
-    }
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 10, None))],
+            [Split(0, 1, slice(0, 10, None))],
+            [Split(0, 2, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))],
+            [Split(2, 0, slice(0, 10, None))],
+            [Split(2, 1, slice(0, 10, None))],
+        ]
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_2():
+def test_split_axes_2():
     """
     See Also
     --------
@@ -966,27 +988,20 @@ def test_rechunk_slicing_2():
     """
     old = ((20, 20, 20, 20, 20),)
     new = ((58, 4, 20, 18),)
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0,): [(ShardID((0,), (0,)), (slice(0, 20, None),))],
-        (1,): [(ShardID((0,), (1,)), (slice(0, 20, None),))],
-        (2,): [
-            (ShardID((0,), (2,)), (slice(0, 18, None),)),
-            (ShardID((1,), (0,)), (slice(18, 20, None),)),
-        ],
-        (3,): [
-            (ShardID((1,), (1,)), (slice(0, 2, None),)),
-            (ShardID((2,), (0,)), (slice(2, 20, None),)),
-        ],
-        (4,): [
-            (ShardID((2,), (1,)), (slice(0, 2, None),)),
-            (ShardID((3,), (0,)), (slice(2, 20, None),)),
-        ],
-    }
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 20, None))],
+            [Split(0, 1, slice(0, 20, None))],
+            [Split(0, 2, slice(0, 18, None)), Split(1, 0, slice(18, 20, None))],
+            [Split(1, 1, slice(0, 2, None)), Split(2, 0, slice(2, 20, None))],
+            [Split(2, 1, slice(0, 2, None)), Split(3, 0, slice(2, 20, None))],
+        ]
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan():
+def test_split_axes_nan():
     """
     See Also
     --------
@@ -994,27 +1009,19 @@ def test_rechunk_slicing_nan():
     """
     old_chunks = ((np.nan, np.nan), (8,))
     new_chunks = ((np.nan, np.nan), (4, 4))
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (
-                ShardID((0, 0), (0, 0)),
-                (slice(0, None, None), slice(0, 4, None)),
-            ),
-            (
-                ShardID((0, 1), (0, 0)),
-                (slice(0, None, None), slice(4, 8, None)),
-            ),
+    result = split_axes(old_chunks, new_chunks)
+
+    expected = [
+        [
+            [Split(0, 0, slice(0, None, None))],
+            [Split(1, 0, slice(0, None, None))],
         ],
-        (1, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, None, None), slice(0, 4, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, None, None), slice(4, 8, None))),
-        ],
-    }
+        [[Split(0, 0, slice(0, 4, None)), Split(1, 0, slice(4, 8, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan_single():
+def test_split_axes_nan_single():
     """
     See Also
     --------
@@ -1023,17 +1030,15 @@ def test_rechunk_slicing_nan_single():
     old_chunks = ((np.nan,), (10,))
     new_chunks = ((np.nan,), (5, 5))
 
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-    }
+    result = split_axes(old_chunks, new_chunks)
+    expected = [
+        [[Split(0, 0, slice(0, None, None))]],
+        [[Split(0, 0, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_nan_long():
+def test_split_axes_nan_long():
     """
     See Also
     --------
@@ -1041,29 +1046,22 @@ def test_rechunk_slicing_nan_long():
     """
     old_chunks = (tuple([np.nan] * 4), (10,))
     new_chunks = (tuple([np.nan] * 4), (5, 5))
-    result = rechunk_slicing(old_chunks, new_chunks)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+    result = split_axes(old_chunks, new_chunks)
+    expected = [
+        [
+            [Split(0, 0, slice(0, None, None))],
+            [Split(1, 0, slice(0, None, None))],
+            [Split(2, 0, slice(0, None, None))],
+            [Split(3, 0, slice(0, None, None))],
         ],
-        (1, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
+        [
+            [Split(0, 0, slice(0, 5, None)), Split(1, 0, slice(5, 10, None))],
         ],
-        (2, 0): [
-            (ShardID((2, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-        (3, 0): [
-            (ShardID((3, 0), (0, 0)), (slice(0, None, None), slice(0, 5, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, None, None), slice(5, 10, None))),
-        ],
-    }
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_chunks_with_nonzero():
+def test_split_axes_with_nonzero():
     """
     See Also
     --------
@@ -1071,21 +1069,18 @@ def test_rechunk_slicing_chunks_with_nonzero():
     """
     old = ((4, 4), (2,))
     new = ((8,), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [Split(0, 1, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((0, 0), (1, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (1, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
 
-def test_rechunk_slicing_chunks_with_zero():
+def test_split_axes_with_zero():
     """
     See Also
     --------
@@ -1093,87 +1088,131 @@ def test_rechunk_slicing_chunks_with_zero():
     """
     old = ((4, 4), (2,))
     new = ((4, 0, 0, 4), (1, 1))
-    result = rechunk_slicing(old, new)
+    result = split_axes(old, new)
 
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [
+                Split(1, 0, slice(0, 0, None)),
+                Split(2, 0, slice(0, 0, None)),
+                Split(3, 0, slice(0, 4, None)),
+            ],
         ],
-        (1, 0): [
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((1, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((3, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
     old = ((4, 0, 0, 4), (1, 1))
     new = ((4, 4), (2,))
-    result = rechunk_slicing(old, new)
+    result = split_axes(old, new)
 
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
+    expected = [
+        [
+            [Split(0, 0, slice(0, 4, None))],
+            [],
+            [],
+            [Split(1, 0, slice(0, 4, None))],
         ],
-        (0, 1): [
-            (ShardID((0, 0), (0, 1)), (slice(0, 4, None), slice(0, 1, None))),
+        [
+            [Split(0, 0, slice(0, 1, None))],
+            [Split(0, 1, slice(0, 1, None))],
         ],
-        (3, 0): [
-            (ShardID((1, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-        ],
-        (3, 1): [
-            (ShardID((1, 0), (0, 1)), (slice(0, 4, None), slice(0, 1, None))),
-        ],
-    }
-
+    ]
     assert result == expected
 
     old = ((4, 4), (2,))
     new = ((2, 0, 0, 2, 4), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            (ShardID((0, 0), (0, 0)), (slice(0, 2, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 2, None), slice(1, 2, None))),
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((1, 0), (0, 0)), (slice(2, 2, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(2, 2, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(2, 2, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(2, 2, None), slice(1, 2, None))),
-            (ShardID((3, 0), (0, 0)), (slice(2, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(2, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [
+                Split(0, 0, slice(0, 2, None)),
+                Split(1, 0, slice(2, 2, None)),
+                Split(2, 0, slice(2, 2, None)),
+                Split(3, 0, slice(2, 4)),
+            ],
+            [Split(4, 0, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((4, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((4, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
 
     old = ((4, 4), (2,))
     new = ((0, 0, 4, 4), (1, 1))
-    result = rechunk_slicing(old, new)
-    expected = {
-        (0, 0): [
-            # FIXME: We should probably filter these out to avoid sending empty shards
-            (ShardID((0, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((0, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((1, 0), (0, 0)), (slice(0, 0, None), slice(0, 1, None))),
-            (ShardID((1, 1), (0, 0)), (slice(0, 0, None), slice(1, 2, None))),
-            (ShardID((2, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((2, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
+    result = split_axes(old, new)
+    expected = [
+        [
+            [
+                Split(0, 0, slice(0, 0, None)),
+                Split(1, 0, slice(0, 0, None)),
+                Split(2, 0, slice(0, 4, None)),
+            ],
+            [Split(3, 0, slice(0, 4, None))],
         ],
-        (1, 0): [
-            (ShardID((3, 0), (0, 0)), (slice(0, 4, None), slice(0, 1, None))),
-            (ShardID((3, 1), (0, 0)), (slice(0, 4, None), slice(1, 2, None))),
-        ],
-    }
-
+        [[Split(0, 0, slice(0, 1, None)), Split(1, 0, slice(1, 2, None))]],
+    ]
     assert result == expected
+
+
+@gen_cluster(client=True)
+async def test_preserve_writeable_flag(c, s, a, b):
+    """Make sure that the shuffled array doesn't accidentally become read-only after
+    the round-trip to e.g. read-only file descriptors or byte objects as buffers
+    """
+    arr = da.random.random(10, chunks=5)
+    arr = arr.rechunk(((4, 6),), method="p2p")
+    arr = arr.map_blocks(lambda chunk: chunk.flags["WRITEABLE"])
+    out = await c.compute(arr)
+    assert out.tolist() == [True, True]
+
+
+@gen_cluster(client=True, config={"distributed.p2p.disk": False})
+async def test_rechunk_in_memory_shards_dont_share_buffer(c, s, a, b):
+    """Test that, if two shards are sent in the same RPC call and they contribute to
+    different output chunks, downstream tasks don't need to consume all output chunks in
+    order to release the memory of the output chunks that have already been consumed.
+
+    This can happen if all numpy arrays in the same RPC call share the same buffer
+    coming out of the TCP stack.
+    """
+    in_map = Event()
+    block_map = Event()
+
+    def blocked(chunk, in_map, block_map):
+        in_map.set()
+        block_map.wait()
+        return chunk
+
+    # 8 MiB array, 256 kiB chunks, 8 kiB shards
+    arr = da.random.random((1024, 1024), chunks=(-1, 32))
+    arr = arr.rechunk((32, -1), method="p2p")
+
+    arr = arr.map_blocks(blocked, in_map=in_map, block_map=block_map, dtype=arr.dtype)
+    fut = c.compute(arr)
+    await in_map.wait()
+
+    [run] = a.extensions["shuffle"].shuffle_runs._runs
+    shards = [
+        s3 for s1 in run._disk_buffer._shards.values() for s2 in s1 for _, s3 in s2
+    ]
+    assert shards
+
+    buf_ids = {id(get_host_array(shard)) for shard in shards}
+    assert len(buf_ids) == len(shards)
+    await block_map.set()
+
+
+@pytest.mark.parametrize("nworkers", [1, 2, 41, 50])
+def test_worker_for_homogeneous_distribution(nworkers):
+    old = ((1, 2, 3, 4), (5,) * 6)
+    new = ((5, 5), (12, 18))
+    workers = [str(i) for i in range(nworkers)]
+    spec = ArrayRechunkSpec(ShuffleId("foo"), disk=False, new=new, old=old)
+    count = {w: 0 for w in workers}
+    for nidx in spec.output_partitions:
+        count[spec.pick_worker(nidx, workers)] += 1
+
+    assert sum(count.values()) > 0
+    assert sum(count.values()) == len(list(spec.output_partitions))
+    assert abs(max(count.values()) - min(count.values())) <= 1

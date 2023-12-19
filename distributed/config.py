@@ -4,6 +4,7 @@ import asyncio
 import logging.config
 import os
 import sys
+from collections.abc import Callable
 from typing import Any
 
 import yaml
@@ -21,11 +22,10 @@ with open(fn) as f:
 
 dask.config.update_defaults(defaults)
 
-aliases = {
+deprecations = {
     "allowed-failures": "distributed.scheduler.allowed-failures",
     "bandwidth": "distributed.scheduler.bandwidth",
     "default-data-size": "distributed.scheduler.default-data-size",
-    "transition-log-length": "distributed.scheduler.transition-log-length",
     "work-stealing": "distributed.scheduler.work-stealing",
     "worker-ttl": "distributed.scheduler.worker-ttl",
     "multiprocessing-method": "distributed.worker.multiprocessing-method",
@@ -42,7 +42,6 @@ aliases = {
     "tcp-timeout": "distributed.comm.timeouts.tcp",
     "default-scheme": "distributed.comm.default-scheme",
     "socket-backlog": "distributed.comm.socket-backlog",
-    "recent-messages-log-length": "distributed.comm.recent-messages-log-length",
     "diagnostics-link": "distributed.dashboard.link",
     "bokeh-export-tool": "distributed.dashboard.export-tool",
     "tick-time": "distributed.admin.tick.interval",
@@ -52,9 +51,19 @@ aliases = {
     "pdb-on-err": "distributed.admin.pdb-on-err",
     "ucx": "distributed.comm.ucx",
     "rmm": "distributed.rmm",
+    # low-level-log-length aliases
+    "transition-log-length": "distributed.admin.low-level-log-length",
+    "distributed.scheduler.transition-log-length": "distributed.admin.low-level-log-length",
+    "distributed.scheduler.events-log-length": "distributed.admin.low-level-log-length",
+    "recent-messages-log-length": "distributed.admin.low-level-log-length",
+    "distributed.comm.recent-messages-log-length": "distributed.admin.low-level-log-length",
 }
 
-dask.config.rename(aliases)
+# Affects yaml and env variables configs, as well as calls to dask.config.set()
+# before importing distributed
+dask.config.rename(deprecations)
+# Affects dask.config.set() from now on
+dask.config.deprecations.update(deprecations)
 
 
 #########################
@@ -177,7 +186,7 @@ def initialize_logging(config: dict[Any, Any]) -> None:
             _initialize_logging_old_style(config)
 
 
-def initialize_event_loop(config: dict[Any, Any]) -> None:
+def get_loop_factory() -> Callable[[], asyncio.AbstractEventLoop] | None:
     event_loop = dask.config.get("distributed.admin.event-loop")
     if event_loop == "uvloop":
         uvloop = import_required(
@@ -189,19 +198,18 @@ def initialize_event_loop(config: dict[Any, Any]) -> None:
             "    conda install uvloop\n"
             "    pip install uvloop",
         )
-        uvloop.install()
-    elif event_loop in {"asyncio", "tornado"}:
+        return uvloop.new_event_loop
+    if event_loop in {"asyncio", "tornado"}:
         if sys.platform == "win32":
-            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+            # ProactorEventLoop is not compatible with tornado 6
             # fallback to the pre-3.8 default of Selector
             # https://github.com/tornadoweb/tornado/issues/2608
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    else:
-        raise ValueError(
-            "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
-            % dask.config.get("distributed.admin.event-loop")
-        )
+            return asyncio.SelectorEventLoop
+        return None
+    raise ValueError(
+        "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
+        % dask.config.get("distributed.admin.event-loop")
+    )
 
 
 initialize_logging(dask.config.config)
-initialize_event_loop(dask.config.config)

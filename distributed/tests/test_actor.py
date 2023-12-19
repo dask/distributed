@@ -19,8 +19,8 @@ from distributed import (
     wait,
     worker_client,
 )
-from distributed.actor import _LateLoopEvent
 from distributed.metrics import time
+from distributed.utils import LateLoopEvent
 from distributed.utils_test import cluster, double, gen_cluster, inc
 from distributed.worker import get_worker
 
@@ -263,7 +263,7 @@ def test_sync(client):
 def test_timeout(client):
     class Waiter:
         def __init__(self):
-            self.event = _LateLoopEvent()
+            self.event = LateLoopEvent()
 
         async def set(self):
             self.event.set()
@@ -555,7 +555,7 @@ async def test_actors_in_profile(c, s, a):
 async def test_waiter(c, s, a, b):
     class Waiter:
         def __init__(self):
-            self.event = _LateLoopEvent()
+            self.event = LateLoopEvent()
 
         async def set(self):
             self.event.set()

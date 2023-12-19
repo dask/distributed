@@ -26,6 +26,7 @@ from distributed.diagnostics.nvml import (
     has_cuda_context,
 )
 from distributed.protocol import to_serialize
+from distributed.protocol.utils_test import get_host_array
 from distributed.utils_test import gen_test, inc
 
 try:
@@ -179,8 +180,8 @@ async def test_ucx_deserialize(ucx_loop):
     "g",
     [
         lambda cudf: cudf.Series([1, 2, 3]),
-        lambda cudf: cudf.Series([]),
-        lambda cudf: cudf.DataFrame([]),
+        lambda cudf: cudf.Series([], dtype=object),
+        lambda cudf: cudf.DataFrame([], dtype=object),
         lambda cudf: cudf.DataFrame([1]).head(0),
         lambda cudf: cudf.DataFrame([1.0]).head(0),
         lambda cudf: cudf.DataFrame({"a": []}),
@@ -323,7 +324,9 @@ async def test_stress(
 async def test_simple(
     ucx_loop,
 ):
-    async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
+    async with LocalCluster(
+        protocol="ucx", n_workers=2, threads_per_worker=2, asynchronous=True
+    ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert cluster.scheduler_address.startswith("ucx://")
             assert await client.submit(lambda x: x + 1, 10) == 11
@@ -371,7 +374,9 @@ async def test_transpose(
 ):
     da = pytest.importorskip("dask.array")
 
-    async with LocalCluster(protocol="ucx", asynchronous=True) as cluster:
+    async with LocalCluster(
+        protocol="ucx", n_workers=2, threads_per_worker=2, asynchronous=True
+    ) as cluster:
         async with Client(cluster, asynchronous=True):
             assert cluster.scheduler_address.startswith("ucx://")
             x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
@@ -409,3 +414,49 @@ async def test_comm_closed_on_read_error():
         await wait_for(reader.read(), 0.01)
 
     assert reader.closed()
+
+
+@gen_test()
+async def test_embedded_cupy_array(
+    ucx_loop,
+):
+    cupy = pytest.importorskip("cupy")
+    da = pytest.importorskip("dask.array")
+    np = pytest.importorskip("numpy")
+
+    async with LocalCluster(
+        protocol="ucx", n_workers=1, threads_per_worker=1, asynchronous=True
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            assert cluster.scheduler_address.startswith("ucx://")
+            a = cupy.arange(10000)
+            x = da.from_array(a, chunks=(10000,))
+            b = await client.compute(x)
+            cupy.testing.assert_array_equal(a, b)
+
+
+@gen_test()
+async def test_do_not_share_buffers(ucx_loop):
+    """Test that two objects with buffer interface in the same message do not share
+    their buffer upon deserialization.
+
+    See Also
+    --------
+    test_comms.py::test_do_not_share_buffers
+    """
+    np = pytest.importorskip("numpy")
+
+    com, serv_com = await get_comm_pair()
+    msg = {"data": to_serialize([np.array([1, 2]), np.array([3, 4])])}
+
+    await com.write(msg)
+    result = await serv_com.read()
+    await com.close()
+    await serv_com.close()
+
+    a, b = result["data"]
+    ha = get_host_array(a)
+    hb = get_host_array(b)
+    assert ha is not hb
+    assert ha.nbytes == a.nbytes
+    assert hb.nbytes == a.nbytes

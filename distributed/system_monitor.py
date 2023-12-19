@@ -6,7 +6,9 @@ from typing import Any
 
 import psutil
 
-import dask
+import dask.config
+from dask.typing import NoDefault, no_default
+from dask.utils import parse_timedelta
 
 from distributed.compatibility import WINDOWS
 from distributed.diagnostics import nvml
@@ -34,18 +36,24 @@ class SystemMonitor:
     gpu_name: str | None
     gpu_memory_total: int
 
-    # Defaults to 1h capture time assuming the default
-    # distributed.admin.system_monitor.interval = 500ms
     def __init__(
         self,
-        maxlen: int | None = 7200,
+        maxlen: int | None | NoDefault = no_default,
         monitor_disk_io: bool | None = None,
         monitor_host_cpu: bool | None = None,
         monitor_gil_contention: bool | None = None,
     ):
         self.proc = psutil.Process()
         self.count = 0
+
+        if maxlen is no_default:
+            maxlen = dask.config.get("distributed.admin.system-monitor.log-length")
+        if isinstance(maxlen, int):
+            maxlen = max(1, maxlen)
+        elif maxlen is not None:  # pragma: nocover
+            raise TypeError(f"maxlen must be int or None; got {maxlen!r}")
         self.maxlen = maxlen
+
         self.last_time = monotonic()
 
         self.quantities = {
@@ -110,7 +118,7 @@ class SystemMonitor:
                 raw_interval = dask.config.get(
                     "distributed.admin.system-monitor.gil.interval",
                 )
-                interval = dask.utils.parse_timedelta(raw_interval, default="us") * 1e6
+                interval = parse_timedelta(raw_interval, default="us") * 1e6
 
                 self._gilknocker = KnockKnock(polling_interval_micros=int(interval))
                 self._gilknocker.start()
@@ -130,7 +138,7 @@ class SystemMonitor:
 
         self.update()
 
-    def recent(self) -> dict[str, Any]:
+    def recent(self) -> dict[str, float]:
         return {k: v[-1] for k, v in self.quantities.items()}
 
     def get_process_memory(self) -> int:
@@ -216,7 +224,7 @@ class SystemMonitor:
             "N/A" if WINDOWS else self.quantities["num_fds"][-1],
         )
 
-    def range_query(self, start: int) -> dict[str, list]:
+    def range_query(self, start: int) -> dict[str, list[float | None]]:
         if start >= self.count:
             return {k: [] for k in self.quantities}
 
