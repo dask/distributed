@@ -155,6 +155,16 @@ def test_visible_devices_uuid_2(index):
     assert s == s_expected
 
 
+def test_visible_devices_bad_uuid():
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = "NOT-A-GPU-UUID"
+
+    with pytest.raises(ValueError, match="Devices in CUDA_VISIBLE_DEVICES"):
+        nvml._pynvml_handles()
+
+
 @gen_cluster()
 async def test_gpu_metrics(s, a, b):
     if nvml.device_get_count() < 1:
