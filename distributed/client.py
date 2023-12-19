@@ -3790,6 +3790,14 @@ class Client(SyncMethodMixin):
         >>> client.upload_file('mylibrary.egg')  # doctest: +SKIP
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
+        >>>
+        >>> # Where did that file go? Use `dask_worker.local_directory`.
+        >>> def where_is_mylibrary(dask_worker):
+        >>>     path = pathlib.Path(dask_worker.local_directory) / 'mylibrary.egg'
+        >>>     assert path.exists()
+        >>>     return str(path)
+        >>>
+        >>> client.run(where_is_mylibrary)  # doctest: +SKIP
         """
         name = filename + str(uuid.uuid4())
 
