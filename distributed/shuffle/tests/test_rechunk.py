@@ -1252,27 +1252,24 @@ def test_pick_worker_homogeneous_distribution(nworkers):
 @pytest.mark.slow
 @gen_cluster(
     client=True,
-    nthreads=[("", 1)] * 10,
+    nthreads=[("", 1)] * 5,
     # Future-proof: disable auto-rebalancing
     config={"distributed.scheduler.active-memory-manager.start": False},
 )
 async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
     da = pytest.importorskip("dask.array")
 
-    # This rechunk operation can be split into 20 independent shuffles with 4 output
+    # This rechunk operation can be split into 10 independent shuffles with 4 output
     # chunks each. This is less than the number of workers, so we are at risk of
     # choosing the same 4 output workers in each separate shuffle.
-    arr = da.random.random((80, 80), chunks=(4, 4))
+    arr = da.random.random((40, 40), chunks=(4, 4))
     arr = arr.rechunk((1, -1), method="p2p")
     # Test that we are, in fact, triggering partial rechunks
-    assert sum(key_split(k) == "shuffle-barrier" for k in arr.__dask_graph__()) == 20
+    assert sum(key_split(k) == "shuffle-barrier" for k in arr.__dask_graph__()) == 10
 
     arr = await c.persist(arr)
     # Don't count input and intermediate keys that have not been released yet
     out_keys = set(flatten(arr.__dask_keys__()))
     nchunks = [len(w.data.keys() & out_keys) for w in workers]
-
-    # There are 80 output chunks and 10 workers.
-    # Expect ~8 chunks per worker, randomly allocated.
-    assert sum(nchunks) == 80
-    assert all(1 <= n <= 15 for n in nchunks), str(nchunks)
+    # There are 40 output chunks and 5 workers. Expect exactly 8 chunks per worker.
+    assert nchunks == [8, 8, 8, 8, 8]
