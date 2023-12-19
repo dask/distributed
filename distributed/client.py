@@ -3758,7 +3758,7 @@ class Client(SyncMethodMixin):
         >>> def where_is_mylibrary(dask_worker):
         >>>     path = pathlib.Path(dask_worker.local_directory) / 'mylibrary.egg'
         >>>     assert path.exists()
-        >>>     return path
+        >>>     return str(path)
         >>>
         >>> client.run(where_is_mylibrary)  # doctest: +SKIP
         """
