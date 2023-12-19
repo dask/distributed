@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Generic, TypeVar
 
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
 
 _T = TypeVar("_T", int, None)
 
@@ -26,6 +26,7 @@ class ResourceLimiter(Generic[_T]):
     """
 
     limit: _T
+    metrics_label: str | None
     time_blocked_total: float
     time_blocked_avg: float
 
@@ -33,8 +34,9 @@ class ResourceLimiter(Generic[_T]):
     _condition: asyncio.Condition
     _waiters: int
 
-    def __init__(self, limit: _T):
+    def __init__(self, limit: _T, metrics_label: str | None = None):
         self.limit = limit
+        self.metrics_label = metrics_label
         self._acquired = 0
         self._condition = asyncio.Condition()
         self._waiters = 0
@@ -63,19 +65,24 @@ class ResourceLimiter(Generic[_T]):
 
     async def wait_for_available(self) -> None:
         """Block until the counter drops below limit"""
+        if self.limit is not None:
+            # Include non-blocking calls in the calculation of the average
+            # seconds / count
+            context_meter.digest_metric(self.metrics_label, 1, "count")
+        if not self.full:
+            self.time_blocked_avg *= 0.9
+            return
+
         start = time()
-        duration = 0.0
-        try:
-            if not self.full:
-                return
+        with context_meter.meter(self.metrics_label):
             async with self._condition:
                 self._waiters += 1
                 await self._condition.wait_for(lambda: not self.full)
                 self._waiters -= 1
-                duration = time() - start
-        finally:
-            self.time_blocked_total += duration
-            self.time_blocked_avg = self.time_blocked_avg * 0.9 + duration * 0.1
+
+        duration = time() - start
+        self.time_blocked_total += duration
+        self.time_blocked_avg = self.time_blocked_avg * 0.9 + duration * 0.1
 
     def increase(self, value: int) -> None:
         """Increase the internal counter by value"""
