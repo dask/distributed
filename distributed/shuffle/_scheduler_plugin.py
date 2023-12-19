@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import logging
-import random
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
@@ -50,6 +50,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
     heartbeats: defaultdict[ShuffleId, dict]
     _shuffles: defaultdict[ShuffleId, set[SchedulerShuffleState]]
     _archived_by_stimulus: defaultdict[str, set[SchedulerShuffleState]]
+    _shift_counter: itertools.count[int]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -66,6 +67,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self.scheduler.add_plugin(self, name="shuffle")
         self._shuffles = defaultdict(set)
         self._archived_by_stimulus = defaultdict(set)
+        self._shift_counter = itertools.count()
 
     async def start(self, scheduler: Scheduler) -> None:
         worker_plugin = ShuffleWorkerPlugin()
@@ -202,10 +204,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         else:
             workers = list(self.scheduler.workers)
 
-        # Randomize workers order to ensure pseudo-homogeneous cluster usage when
-        # multiple shuffles are running at the same time (for example, during a single
-        # rechunk that's been broken down into multiple partial operations).
-        random.shuffle(workers)
+        shift_by = next(self._shift_counter) % len(workers)
+        workers = workers[shift_by:] + workers[:shift_by]
 
         # Check if this shuffle shares output tasks with a different shuffle that has
         # already been initialized and needs to be taken into account when
