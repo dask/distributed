@@ -1814,6 +1814,7 @@ def config_for_cluster_tests(**extra_config):
             "distributed.scheduler.validate": True,
             "distributed.worker.validate": True,
             "distributed.worker.profile.enabled": False,
+            "distributed.admin.system-monitor.gil.enabled": False,
         },
         **extra_config,
     ):
