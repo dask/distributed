@@ -156,6 +156,7 @@ def _pynvml_handles():
     return _get_handle(device)
 
 
+# Port from https://github.com/rapidsai/dask-cuda/blob/0f34116c4f3cdf5dfc0df0dbfeba92655f686716/dask_cuda/utils.py#L403-L437
 def _parse_cuda_visible_device(dev):
     """Parses a single CUDA device identifier
 
