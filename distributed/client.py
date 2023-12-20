@@ -31,11 +31,16 @@ from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 
 import dask
-from dask.base import collections_to_dsk, normalize_token, tokenize
+from dask.base import (
+    collections_to_dsk,
+    normalize_token,
+    tokenize,
+    newstyle_collections,
+)
 from dask.core import flatten, validate_key
-from dask.highlevelgraph import HighLevelGraph
+from dask.highlevelgraph import HighLevelGraph, TaskFactoryHLGWrapper
 from dask.optimization import SubgraphCallable
-from dask.typing import no_default
+from dask.typing import no_default, DaskCollection2
 from dask.utils import (
     apply,
     ensure_dict,
@@ -1957,10 +1962,10 @@ class Client(SyncMethodMixin):
             dsk = {key: (apply, func, list(args), kwargs)}
         else:
             dsk = {key: (func,) + tuple(args)}
+        dsk = TaskFactoryHLGWrapper.from_low_level(dsk, [key])
 
         futures = self._graph_to_futures(
             dsk,
-            [key],
             workers=workers,
             allow_other_workers=allow_other_workers,
             internal_priority={key: 0},
@@ -2166,7 +2171,6 @@ class Client(SyncMethodMixin):
 
         futures = self._graph_to_futures(
             dsk,
-            keys,
             workers=workers,
             allow_other_workers=allow_other_workers,
             internal_priority=internal_priority,
@@ -3105,7 +3109,6 @@ class Client(SyncMethodMixin):
     def _graph_to_futures(
         self,
         dsk,
-        keys,
         workers=None,
         allow_other_workers=None,
         internal_priority=None,
@@ -3118,10 +3121,6 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-
-            # Make sure `dsk` is a high level graph
-            if not isinstance(dsk, HighLevelGraph):
-                dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
             annotations = {}
             if user_priority:
@@ -3143,14 +3142,14 @@ class Client(SyncMethodMixin):
             annotations = merge(dask.get_annotations(), annotations)
 
             # Pack the high level graph before sending it to the scheduler
-            keyset = set(keys)
+            keys = dsk.__dask_output_keys__()
 
             # Validate keys
-            for key in keyset:
+            for key in keys:
                 validate_key(key)
 
             # Create futures before sending graph (helps avoid contention)
-            futures = {key: Future(key, self, inform=False) for key in keyset}
+            futures = {key: Future(key, self, inform=False) for key in keys}
             # Circular import
             from distributed.protocol import serialize
             from distributed.protocol.serialize import ToPickle
@@ -3173,7 +3172,7 @@ class Client(SyncMethodMixin):
                     "op": "update-graph",
                     "graph_header": header,
                     "graph_frames": frames,
-                    "keys": list(keys),
+                    "keys": keys,
                     "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
@@ -3257,9 +3256,9 @@ class Client(SyncMethodMixin):
         --------
         Client.compute : Compute asynchronous collections
         """
+        dsk = TaskFactoryHLGWrapper.from_low_level(dsk, list(flatten(keys)))
         futures = self._graph_to_futures(
             dsk,
-            keys=set(flatten([keys])),
             workers=workers,
             allow_other_workers=allow_other_workers,
             resources=resources,
@@ -3447,32 +3446,32 @@ class Client(SyncMethodMixin):
             )
 
         variables = [a for a in collections if dask.is_dask_collection(a)]
+        if newstyle_collections(variables):
+            variables = [var.finalize_compute() for var in variables]
+            dsk = collections_to_dsk(variables, optimize_graph, **kwargs)
+        else:
+            dsk = collections_to_dsk(variables, optimize_graph, **kwargs)
+            names = ["finalize-%s" % tokenize(v) for v in variables]
+            dsk = dsk._hlg
+            dsk2 = {}
+            for i, (name, v) in enumerate(zip(names, variables)):
+                func, extra_args = v.__dask_postcompute__()
+                keys = v.__dask_keys__()
+                if func is single_key and len(keys) == 1 and not extra_args:
+                    names[i] = keys[0]
+                else:
+                    dsk2[name] = (func, keys) + extra_args
 
-        dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
-        names = ["finalize-%s" % tokenize(v) for v in variables]
-        dsk2 = {}
-        for i, (name, v) in enumerate(zip(names, variables)):
-            func, extra_args = v.__dask_postcompute__()
-            keys = v.__dask_keys__()
-            if func is single_key and len(keys) == 1 and not extra_args:
-                names[i] = keys[0]
-            else:
-                dsk2[name] = (func, keys) + extra_args
-
-        if not isinstance(dsk, HighLevelGraph):
-            dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
-
-        # Let's append the finalize graph to dsk
-        finalize_name = tokenize(names)
-        layers = {finalize_name: dsk2}
-        layers.update(dsk.layers)
-        dependencies = {finalize_name: set(dsk.layers.keys())}
-        dependencies.update(dsk.dependencies)
-        dsk = HighLevelGraph(layers, dependencies)
+            # Let's append the finalize graph to dsk
+            finalize_name = tokenize(names)
+            layers = {finalize_name: dsk2}
+            layers.update(dsk.layers)
+            dependencies = {finalize_name: set(dsk.layers.keys())}
+            dependencies.update(dsk.dependencies)
+            dsk = TaskFactoryHLGWrapper(HighLevelGraph(layers, dependencies), out_keys=names)
 
         futures_dict = self._graph_to_futures(
             dsk,
-            names,
             workers=workers,
             allow_other_workers=allow_other_workers,
             resources=resources,
@@ -3482,14 +3481,7 @@ class Client(SyncMethodMixin):
             actors=actors,
         )
 
-        i = 0
-        futures = []
-        for arg in collections:
-            if dask.is_dask_collection(arg):
-                futures.append(futures_dict[names[i]])
-                i += 1
-            else:
-                futures.append(arg)
+        futures = list(futures_dict.values())
 
         if sync:
             result = self.gather(futures)
@@ -3497,8 +3489,10 @@ class Client(SyncMethodMixin):
             result = futures
 
         if singleton:
+            assert len(result) == 1
             return first(result)
         else:
+            assert len(result) > 1
             return result
 
     def persist(
@@ -3572,13 +3566,10 @@ class Client(SyncMethodMixin):
 
         assert all(map(dask.is_dask_collection, collections))
 
-        dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
-
-        names = {k for c in collections for k in flatten(c.__dask_keys__())}
+        dsk = collections_to_dsk(collections, optimize_graph, **kwargs)
 
         futures = self._graph_to_futures(
             dsk,
-            names,
             workers=workers,
             allow_other_workers=allow_other_workers,
             resources=resources,
@@ -3587,12 +3578,14 @@ class Client(SyncMethodMixin):
             fifo_timeout=fifo_timeout,
             actors=actors,
         )
-
-        postpersists = [c.__dask_postpersist__() for c in collections]
-        result = [
-            func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
-            for (func, args), c in zip(postpersists, collections)
-        ]
+        if newstyle_collections(collections):
+            result = [var.postpersist(futures) for var in collections]
+        else:
+            postpersists = [c.__dask_postpersist__() for c in collections]
+            result = [
+                func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
+                for (func, args), c in zip(postpersists, collections)
+            ]
 
         if singleton:
             return first(result)
@@ -4700,6 +4693,7 @@ class Client(SyncMethodMixin):
     @staticmethod
     def collections_to_dsk(collections, *args, **kwargs):
         """Convert many collections into a single dask graph, after optimization"""
+        warnings.warn(DeprecationWarning, "Why are you using this??")
         return collections_to_dsk(collections, *args, **kwargs)
 
     async def _story(self, *keys_or_stimuli: str, on_error="raise"):
@@ -5865,6 +5859,8 @@ def futures_of(o, client=None):
             if x not in seen:
                 seen.add(x)
                 futures.append(x)
+        elif isinstance(x, DaskCollection2):
+            stack.extend(x.__dask_graph_factory__().materialize().values())
         elif dask.is_dask_collection(x):
             stack.extend(x.__dask_graph__().values())
 
