@@ -149,7 +149,9 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self._raise_if_task_not_processing(key)
             worker_for = self._calculate_worker_for(spec)
             self._ensure_output_tasks_are_non_rootish(spec)
-            state = spec.create_new_run(worker_for)
+            state = spec.create_new_run(
+                worker_for=worker_for, span_id=self.scheduler.tasks[key].group.span_id
+            )
             self.active_shuffles[spec.id] = state
             self._shuffles[spec.id].add(state)
             state.participating_workers.add(worker)

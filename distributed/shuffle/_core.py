@@ -7,7 +7,7 @@ import itertools
 import pickle
 import time
 from collections import defaultdict
-from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Hashable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
@@ -24,13 +24,14 @@ from dask.utils import parse_timedelta
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
+from distributed.metrics import context_meter, thread_time
 from distributed.protocol import to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
-from distributed.utils import sync
+from distributed.utils import run_in_executor_with_context, sync
 from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
@@ -54,9 +55,11 @@ _T = TypeVar("_T")
 class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     id: ShuffleId
     run_id: int
+    span_id: str | None
     local_address: str
     executor: ThreadPoolExecutor
     rpc: Callable[[str], PooledRPCCall]
+    digest_metric: Callable[[Hashable, float], None]
     scheduler: PooledRPCCall
     closed: bool
     _disk_buffer: DiskShardsBuffer | MemoryShardsBuffer
@@ -77,10 +80,12 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self,
         id: ShuffleId,
         run_id: int,
+        span_id: str | None,
         local_address: str,
         directory: str,
         executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
+        digest_metric: Callable[[Hashable, float], None],
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
@@ -89,23 +94,33 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     ):
         self.id = id
         self.run_id = run_id
+        self.span_id = span_id
         self.local_address = local_address
         self.executor = executor
         self.rpc = rpc
+        self.digest_metric = digest_metric
         self.scheduler = scheduler
         self.closed = False
-        if disk:
-            self._disk_buffer = DiskShardsBuffer(
-                directory=directory,
-                read=self.read,
-                memory_limiter=memory_limiter_disk,
-            )
-        else:
-            self._disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
 
-        self._comm_buffer = CommShardsBuffer(
-            send=self.send, memory_limiter=memory_limiter_comms
-        )
+        # Initialize buffers and start background tasks
+        # Don't log metrics issued by the background tasks onto the dask task that
+        # spawned this object
+        with context_meter.clear_callbacks():
+            with self._capture_metrics("background-disk"):
+                if disk:
+                    self._disk_buffer = DiskShardsBuffer(
+                        directory=directory,
+                        read=self.read,
+                        memory_limiter=memory_limiter_disk,
+                    )
+                else:
+                    self._disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
+
+            with self._capture_metrics("background-comms"):
+                self._comm_buffer = CommShardsBuffer(
+                    send=self.send, memory_limiter=memory_limiter_comms
+                )
+
         # TODO: reduce number of connections to number of workers
         # MultiComm.max_connections = min(10, n_workers)
 
@@ -134,6 +149,38 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
     def __hash__(self) -> int:
         return self.run_id
+
+    @contextlib.contextmanager
+    def _capture_metrics(self, where: str) -> Iterator[None]:
+        """Capture context_meter metrics as
+
+            {('p2p', <span id>, 'foreground|background...', label, unit): value}
+
+        **Note 1:** When the metric is not logged by a background task
+        (where='foreground'), this produces a duplicated metric under
+
+            {('execute', <span id>, <task prefix>, label, unit): value}
+
+        This is by design so that one can have a holistic view of the whole shuffle
+        process.
+
+        **Note 2:** We're immediately writing to Worker.digests.
+        We don't temporarily store metrics under ShuffleRun as we would lose those
+        recorded between the heartbeat and when the ShuffleRun object is deleted at the
+        end of a run.
+        """
+
+        def callback(label: Hashable, value: float, unit: str) -> None:
+            if not isinstance(label, tuple):
+                label = (label,)
+            if isinstance(label[0], str) and label[0].startswith("p2p-"):
+                label = (label[0][len("p2p-") :], *label[1:])
+            name = ("p2p", self.span_id, where, *label, unit)
+
+            self.digest_metric(name, value)
+
+        with context_meter.add_callback(callback, allow_offload="background" in where):
+            yield
 
     @contextlib.contextmanager
     def time(self, name: str) -> Iterator[None]:
@@ -186,9 +233,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self, func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
         self.raise_if_closed()
-        with self.time("cpu"):
-            return await asyncio.get_running_loop().run_in_executor(
-                self.executor, partial(func, *args, **kwargs)
+        with self.time("cpu"), context_meter.meter("offload"):
+            return await run_in_executor_with_context(
+                self.executor, func, *args, **kwargs
             )
 
     def heartbeat(self) -> dict[str, Any]:
@@ -287,8 +334,14 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
-        shards = self._shard_partition(data, partition_id)
-        sync(self._loop, self._write_to_comm, shards)
+        # Log metrics both in the "execute" and in the "p2p" contexts
+        with self._capture_metrics("foreground"):
+            with (
+                context_meter.meter("p2p-shard-partition-noncpu"),
+                context_meter.meter("p2p-shard-partition-cpu", func=thread_time),
+            ):
+                shards = self._shard_partition(data, partition_id)
+            sync(self._loop, self._write_to_comm, shards)
         return self.run_id
 
     @abc.abstractmethod
@@ -305,7 +358,13 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if not self.transferred:
             raise RuntimeError("`get_output_partition` called before barrier task")
         sync(self._loop, self.flush_receive)
-        return self._get_output_partition(partition_id, key, **kwargs)
+        with (
+            # Log metrics both in the "execute" and in the "p2p" contexts
+            self._capture_metrics("foreground"),
+            context_meter.meter("p2p-get-output-noncpu"),
+            context_meter.meter("p2p-get-output-cpu", func=thread_time),
+        ):
+            return self._get_output_partition(partition_id, key, **kwargs)
 
     @abc.abstractmethod
     def _get_output_partition(
@@ -363,6 +422,7 @@ class ShuffleRunSpec(Generic[_T_partition_id]):
     run_id: int = field(init=False, default_factory=partial(next, itertools.count(1)))
     spec: ShuffleSpec
     worker_for: dict[_T_partition_id, str]
+    span_id: str | None
 
     @property
     def id(self) -> ShuffleId:
@@ -386,9 +446,10 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
     def create_new_run(
         self,
         worker_for: dict[_T_partition_id, str],
+        span_id: str | None,
     ) -> SchedulerShuffleState:
         return SchedulerShuffleState(
-            run_spec=ShuffleRunSpec(spec=self, worker_for=worker_for),
+            run_spec=ShuffleRunSpec(spec=self, worker_for=worker_for, span_id=span_id),
             participating_workers=set(worker_for.values()),
         )
 
@@ -396,6 +457,7 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
     def create_run_on_worker(
         self,
         run_id: int,
+        span_id: str | None,
         worker_for: dict[_T_partition_id, str],
         plugin: ShuffleWorkerPlugin,
     ) -> ShuffleRun:

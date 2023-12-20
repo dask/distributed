@@ -5,6 +5,7 @@ from typing import Any
 
 from dask.utils import parse_bytes
 
+from distributed.metrics import context_meter
 from distributed.shuffle._disk import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
@@ -67,5 +68,5 @@ class CommShardsBuffer(ShardsBuffer):
     async def _process(self, address: str, shards: list[tuple[Any, Any]]) -> None:
         """Send one message off to a neighboring worker"""
         # Consider boosting total_size a bit here to account for duplication
-        with self.time("send"):
+        with self.time("send"), context_meter.meter("send"):
             await self.send(address, shards)
