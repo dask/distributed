@@ -243,6 +243,8 @@ exclude_lines = [
     "TYPE_CHECKING",
     "except ImportError",
     "@overload",
+    "@abstractmethod",
+    "@abc.abstractmethod"
 ]
 
 [tool.coverage.html]

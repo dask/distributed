@@ -51,7 +51,7 @@ class ManualEvictProto(Protocol):
         of the manual eviction API it is just tested for emptiness to know if there is
         anything to evict.
         """
-        ...  # pragma: nocover
+        ...
 
     def evict(self) -> int:
         """Manually evict a key/value pair from fast to slow memory.
@@ -63,7 +63,7 @@ class ManualEvictProto(Protocol):
 
         This method never raises.
         """
-        ...  # pragma: nocover
+        ...
 
 
 class SpillBuffer(zict.Buffer[Key, object]):

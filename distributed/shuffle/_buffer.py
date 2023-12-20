@@ -132,7 +132,7 @@ class ShardsBuffer(Generic[ShardType]):
         ...
 
     def read(self, id: str) -> ShardType:
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: nocover
 
     @property
     def empty(self) -> bool:
