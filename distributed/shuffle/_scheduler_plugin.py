@@ -206,6 +206,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         else:
             workers = list(self.scheduler.workers)
 
+        # Ensure homogeneous cluster utilization when there are multiple small,
+        # independent shuffles going on at the same time, e.g. due to partial rechunking
         shift_by = next(self._shift_counter) % len(workers)
         workers = workers[shift_by:] + workers[:shift_by]
 
