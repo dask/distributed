@@ -60,6 +60,7 @@ async def test_memory_limit(big_payloads):
         with captured_context_meter() as metrics:
             # It's OK to write nothing
             await buf.write({})
+            assert buf.avg_size == 0
 
             many_small = [
                 asyncio.create_task(buf.write(small_payload)) for _ in range(9)
@@ -107,6 +108,7 @@ async def test_memory_limit(big_payloads):
             await buf.write(small_payload)
             assert metrics["my_label", "count"] == before_count + 1
             assert metrics["my_label", "seconds"] == before_seconds
+            assert buf.avg_size > 0
 
 
 class BufferShardsBroken(ShardsBuffer):

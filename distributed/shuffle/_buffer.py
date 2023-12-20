@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Sized
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from distributed.metrics import context_meter
+from distributed.metrics import context_meter, time
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.sizeof import sizeof
 
@@ -54,6 +54,8 @@ class ShardsBuffer(Generic[ShardType]):
     bytes_memory: int
     bytes_written: int
     bytes_read: int
+    avg_size: float
+    avg_duration: float
 
     _accepts_input: bool
     _inputs_done: bool
@@ -88,6 +90,8 @@ class ShardsBuffer(Generic[ShardType]):
         self.bytes_memory = 0
         self.bytes_written = 0
         self.bytes_read = 0
+        self.avg_size = 0.0
+        self.avg_duration = 0.0
 
     def heartbeat(self) -> dict[str, Any]:
         return {
@@ -96,17 +100,23 @@ class ShardsBuffer(Generic[ShardType]):
             "buckets": len(self.shards),
             "written": self.bytes_written,
             "read": self.bytes_read,
+            "avg_size": self.avg_size,
+            "avg_duration": self.avg_duration,
             "memory_limit": self.memory_limiter.limit,
         }
 
     async def process(self, id: str, shards: list[ShardType], size: int) -> None:
         try:
+            start = time()
             with context_meter.meter("process"):
                 await self._process(id, shards)
             context_meter.digest_metric("process", size, "bytes")
             context_meter.digest_metric("process", 1, "count")
             self.bytes_written += size
 
+            stop = time()
+            self.avg_size = 0.98 * self.avg_size + 0.02 * size
+            self.avg_duration = 0.98 * self.avg_duration + 0.02 * (stop - start)
         except Exception as e:
             self._exception = e
             self._inputs_done = True
