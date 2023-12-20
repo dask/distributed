@@ -7,6 +7,7 @@ from collections.abc import (
     Callable,
     Collection,
     Generator,
+    Hashable,
     Iterable,
     Iterator,
     Sequence,
@@ -397,6 +398,8 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         A unique `ShuffleID` this belongs to.
     run_id:
         A unique identifier of the specific execution of the shuffle this belongs to.
+    span_id:
+        Span identifier; see :doc:`spans`
     local_address:
         The local address this Shuffle can be contacted by using `rpc`.
     directory:
@@ -406,8 +409,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     rpc:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.
+    digest_metric:
+        A callable to ingest a performance metric.
+        Typically Server.digest_metric.
     scheduler:
-        A PooledRPCCall to to contact the scheduler.
+        A PooledRPCCall to contact the scheduler.
     memory_limiter_disk:
     memory_limiter_comm:
         A ``ResourceLimiter`` limiting the total amount of memory used in either
@@ -426,10 +432,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         meta: pd.DataFrame,
         id: ShuffleId,
         run_id: int,
+        span_id: str | None,
         local_address: str,
         directory: str,
         executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
+        digest_metric: Callable[[Hashable, float], None],
         scheduler: PooledRPCCall,
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
@@ -441,10 +449,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         super().__init__(
             id=id,
             run_id=run_id,
+            span_id=span_id,
             local_address=local_address,
             directory=directory,
             executor=executor,
             rpc=rpc,
+            digest_metric=digest_metric,
             scheduler=scheduler,
             memory_limiter_comms=memory_limiter_comms,
             memory_limiter_disk=memory_limiter_disk,
@@ -543,7 +553,11 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
 
     def create_run_on_worker(
-        self, run_id: int, worker_for: dict[int, str], plugin: ShuffleWorkerPlugin
+        self,
+        run_id: int,
+        span_id: str | None,
+        worker_for: dict[int, str],
+        plugin: ShuffleWorkerPlugin,
     ) -> ShuffleRun:
         return DataFrameShuffleRun(
             column=self.column,
@@ -551,6 +565,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
             worker_for=worker_for,
             id=self.id,
             run_id=run_id,
+            span_id=span_id,
             directory=os.path.join(
                 plugin.worker.local_directory,
                 f"shuffle-{self.id}-{run_id}",
@@ -558,6 +573,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
             executor=plugin._executor,
             local_address=plugin.worker.address,
             rpc=plugin.worker.rpc,
+            digest_metric=plugin.worker.digest_metric,
             scheduler=plugin.worker.scheduler,
             memory_limiter_disk=plugin.memory_limiter_disk
             if self.disk

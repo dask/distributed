@@ -11,13 +11,21 @@ da = pytest.importorskip("dask.array")
 
 
 def assert_metrics(s: Scheduler, *keys: tuple[str, ...]) -> None:
+    metrics = dict(s.cumulative_worker_metrics)
+    span = s.extensions["spans"].spans_search_by_name["default",][0]
+    span_metrics = dict(span.cumulative_worker_metrics)
+
     for key in keys:
-        assert key in s.cumulative_worker_metrics
-        value = s.cumulative_worker_metrics[key]
-        if key[-1] == "seconds":
-            assert value >= 0
-        else:  # count or bytes
-            assert value > 0
+        value = metrics.pop(key)
+        assert span_metrics.pop(key) == pytest.approx(value)
+        if key[0] == "execute":
+            key2 = ("p2p", "foreground", key[2].replace("p2p-", ""), key[3])
+            assert metrics.pop(key2) == pytest.approx(value)
+            assert span_metrics.pop(key2) == pytest.approx(value)
+
+    # Check that the test doesn't omit any metrics
+    assert [key for key in metrics if key[0] == "p2p"] == []
+    assert [key for key in span_metrics if key[0] == "p2p"] == []
 
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
@@ -39,6 +47,21 @@ async def test_rechunk(c, s, a, b):
         ("execute", "rechunk", "p2p-disk-read", "count"),
         ("execute", "rechunk", "p2p-get-output-cpu", "seconds"),
         ("execute", "rechunk", "p2p-get-output-noncpu", "seconds"),
+        ("p2p", "background-comms", "compress", "seconds"),
+        ("p2p", "background-comms", "idle", "seconds"),
+        ("p2p", "background-comms", "process", "bytes"),
+        ("p2p", "background-comms", "process", "count"),
+        ("p2p", "background-comms", "process", "seconds"),
+        ("p2p", "background-comms", "send", "seconds"),
+        ("p2p", "background-comms", "serialize", "seconds"),
+        ("p2p", "background-disk", "disk-write", "bytes"),
+        ("p2p", "background-disk", "disk-write", "count"),
+        ("p2p", "background-disk", "disk-write", "seconds"),
+        ("p2p", "background-disk", "idle", "seconds"),
+        ("p2p", "background-disk", "process", "bytes"),
+        ("p2p", "background-disk", "process", "count"),
+        ("p2p", "background-disk", "process", "seconds"),
+        ("p2p", "background-disk", "serialize", "seconds"),
     )
 
 
@@ -71,4 +94,18 @@ async def test_dataframe(c, s, a, b):
         ("execute", "shuffle_p2p", "p2p-disk-read", "count"),
         ("execute", "shuffle_p2p", "p2p-get-output-cpu", "seconds"),
         ("execute", "shuffle_p2p", "p2p-get-output-noncpu", "seconds"),
+        ("p2p", "background-comms", "compress", "seconds"),
+        ("p2p", "background-comms", "idle", "seconds"),
+        ("p2p", "background-comms", "process", "bytes"),
+        ("p2p", "background-comms", "process", "count"),
+        ("p2p", "background-comms", "process", "seconds"),
+        ("p2p", "background-comms", "send", "seconds"),
+        ("p2p", "background-comms", "serialize", "seconds"),
+        ("p2p", "background-disk", "disk-write", "bytes"),
+        ("p2p", "background-disk", "disk-write", "count"),
+        ("p2p", "background-disk", "disk-write", "seconds"),
+        ("p2p", "background-disk", "idle", "seconds"),
+        ("p2p", "background-disk", "process", "bytes"),
+        ("p2p", "background-disk", "process", "count"),
+        ("p2p", "background-disk", "process", "seconds"),
     )

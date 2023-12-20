@@ -241,7 +241,10 @@ class _ShuffleRunManager:
                 f" expected run_id > {stale_run_id}"
             )
         shuffle_run = result.spec.create_run_on_worker(
-            result.run_id, result.worker_for, self._plugin
+            run_id=result.run_id,
+            worker_for=result.worker_for,
+            plugin=self._plugin,
+            span_id=result.span_id,
         )
         self._active_runs[shuffle_id] = shuffle_run
         self._runs.add(shuffle_run)
