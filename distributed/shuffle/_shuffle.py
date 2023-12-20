@@ -27,6 +27,7 @@ from dask.typing import Key
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
+from distributed.metrics import context_meter
 from distributed.shuffle._arrow import (
     check_dtype_support,
     check_minimal_arrow_version,
@@ -498,6 +499,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self.worker_for,
         )
         out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
+
+        nbytes = sum(len(b) for _, b in out.values())
+        context_meter.digest_metric("p2p-shards", nbytes, "bytes")
+        context_meter.digest_metric("p2p-shards", len(out), "count")
+
         return out
 
     def _get_output_partition(

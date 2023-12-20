@@ -10,6 +10,7 @@ from typing import Any
 
 from toolz import concat
 
+from distributed.metrics import context_meter
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import pickle_bytelist
@@ -179,11 +180,18 @@ class DiskShardsBuffer(ShardsBuffer):
             raise RuntimeError("Tried to read from file before done.")
 
         try:
-            with self.time("read"):
-                with self._directory_lock.read():
-                    if self._closed:
-                        raise RuntimeError("Already closed")
-                    data, size = self._read((self.directory / str(id)).resolve())
+            with self._directory_lock.read():
+                if self._closed:
+                    raise RuntimeError("Already closed")
+                fname = (self.directory / str(id)).resolve()
+                # Note: don't add `with context_meter.meter("p2p-disk-read"):` to
+                # measure seconds here, as it would shadow "p2p-get-output-cpu" and
+                # "p2p-get-output-noncpu". Also, for rechunk it would not measure
+                # the whole disk access, as _read returns memory-mapped buffers.
+                with self.time("read"):
+                    data, size = self._read(fname)
+                context_meter.digest_metric("p2p-disk-read", 1, "count")
+                context_meter.digest_metric("p2p-disk-read", size, "bytes")
         except FileNotFoundError:
             raise KeyError(id)
 

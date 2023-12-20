@@ -114,6 +114,7 @@ from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.typing import Key
 
 from distributed.core import PooledRPCCall
+from distributed.metrics import context_meter
 from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
@@ -395,10 +396,13 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
 
     def _shard_partition(
         self, data: np.ndarray, partition_id: NDIndex
-    ) -> dict[str, tuple[NDIndex, Any]]:
+    ) -> dict[str, tuple[NDIndex, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]]]:
         out: dict[str, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]] = defaultdict(
             list
         )
+        shards_size = 0
+        shards_count = 0
+
         ndsplits = product(*(axis[i] for axis, i in zip(self.split_axes, partition_id)))
 
         for ndsplit in ndsplits:
@@ -410,9 +414,15 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             if shard.base is not None:
                 shard = shard.copy()
 
+            shards_size += shard.nbytes
+            shards_count += 1
+
             out[self.worker_for[chunk_index]].append(
                 (chunk_index, (shard_index, shard))
             )
+
+        context_meter.digest_metric("p2p-shards", shards_size, "bytes")
+        context_meter.digest_metric("p2p-shards", shards_count, "count")
         return {k: (partition_id, v) for k, v in out.items()}
 
     def _get_output_partition(

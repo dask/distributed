@@ -24,6 +24,7 @@ from dask.utils import parse_timedelta
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
+from distributed.metrics import context_meter, thread_time
 from distributed.protocol import to_serialize
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
@@ -287,7 +288,11 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.raise_if_closed()
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
-        shards = self._shard_partition(data, partition_id)
+        with (
+            context_meter.meter("p2p-shard-partition-noncpu"),
+            context_meter.meter("p2p-shard-partition-cpu", func=thread_time),
+        ):
+            shards = self._shard_partition(data, partition_id)
         sync(self._loop, self._write_to_comm, shards)
         return self.run_id
 
@@ -305,7 +310,11 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if not self.transferred:
             raise RuntimeError("`get_output_partition` called before barrier task")
         sync(self._loop, self.flush_receive)
-        return self._get_output_partition(partition_id, key, **kwargs)
+        with (
+            context_meter.meter("p2p-get-output-noncpu"),
+            context_meter.meter("p2p-get-output-cpu", func=thread_time),
+        ):
+            return self._get_output_partition(partition_id, key, **kwargs)
 
     @abc.abstractmethod
     def _get_output_partition(
