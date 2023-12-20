@@ -31,7 +31,7 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
-from distributed.utils import sync
+from distributed.utils import run_in_executor_with_context, sync
 from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
@@ -187,9 +187,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self, func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
         self.raise_if_closed()
-        with self.time("cpu"):
-            return await asyncio.get_running_loop().run_in_executor(
-                self.executor, partial(func, *args, **kwargs)
+        with self.time("cpu"), context_meter.meter("offload"):
+            return await run_in_executor_with_context(
+                self.executor, func, *args, **kwargs
             )
 
     def heartbeat(self) -> dict[str, Any]:
