@@ -92,7 +92,7 @@ from distributed.protocol.serialize import _is_dumpable
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.spans import SpansWorkerExtension
+from distributed.spans import CONTEXTS_WITH_SPAN_ID, SpansWorkerExtension
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
@@ -1041,7 +1041,7 @@ class Worker(BaseWorker, ServerNode):
         # Don't cast int metrics to float
         digests: defaultdict[Hashable, float] = defaultdict(int)
         for k, v in self.digests_total_since_heartbeat.items():
-            if isinstance(k, tuple) and k[0] == "execute":
+            if isinstance(k, tuple) and k[0] in CONTEXTS_WITH_SPAN_ID:
                 k = k[:1] + k[2:]
             digests[k] += v
 
