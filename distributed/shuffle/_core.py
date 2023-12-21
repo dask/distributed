@@ -434,10 +434,10 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
     id: ShuffleId
     disk: bool
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def output_partitions(self) -> Generator[_T_partition_id, None, None]:
         """Output partitions"""
-        raise NotImplementedError
 
     @abc.abstractmethod
     def pick_worker(self, partition: _T_partition_id, workers: Sequence[str]) -> str:

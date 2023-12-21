@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import asyncio
 import contextlib
 import logging
@@ -126,11 +127,12 @@ class ShardsBuffer(Generic[ShardType]):
             await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
 
+    @abc.abstractmethod
     async def _process(self, id: str, shards: list[ShardType]) -> None:
-        raise NotImplementedError()
+        ...
 
     def read(self, id: str) -> ShardType:
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: nocover
 
     @property
     def empty(self) -> bool:
