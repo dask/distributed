@@ -241,7 +241,10 @@ class _ShuffleRunManager:
                 f" expected run_id > {stale_run_id}"
             )
         shuffle_run = result.spec.create_run_on_worker(
-            result.run_id, result.worker_for, self._plugin
+            run_id=result.run_id,
+            worker_for=result.worker_for,
+            plugin=self._plugin,
+            span_id=result.span_id,
         )
         self._active_runs[shuffle_id] = shuffle_run
         self._runs.add(shuffle_run)
@@ -276,8 +279,12 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         # Initialize
         self.worker = worker
         self.shuffle_runs = _ShuffleRunManager(self)
-        self.memory_limiter_comms = ResourceLimiter(parse_bytes("100 MiB"))
-        self.memory_limiter_disk = ResourceLimiter(parse_bytes("1 GiB"))
+        self.memory_limiter_comms = ResourceLimiter(
+            parse_bytes("100 MiB"), metrics_label="p2p-comms-limiter"
+        )
+        self.memory_limiter_disk = ResourceLimiter(
+            parse_bytes("1 GiB"), metrics_label="p2p-disk-limiter"
+        )
         self.closed = False
         self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
 

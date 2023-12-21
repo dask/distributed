@@ -451,6 +451,27 @@ async def test_FinePerformanceMetrics_no_spans(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_FinePerformanceMetrics_shuffle(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    x = da.random.random((4, 4), chunks=(1, -1))
+    x = x.rechunk((-1, 1), method="p2p")
+    x = x.sum()
+    await c.compute(x)
+    await a.heartbeat()
+    await b.heartbeat()
+
+    cl = FinePerformanceMetrics(s)
+    cl.update()
+    # execute metrics from shuffle
+    assert "shuffle-barrier" in cl.visible_functions
+    assert "p2p-shard-partition-cpu" in cl.visible_activities
+    # shuffle metrics have been filtered out
+    assert "background-comms" not in cl.visible_functions
+    assert "p2p-partition-cpu" not in cl.visible_activities
+
+
+@gen_cluster(client=True)
 async def test_ClusterMemory(c, s, a, b):
     cl = ClusterMemory(s)
 

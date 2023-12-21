@@ -2823,7 +2823,7 @@ class SchedulerState:
                 # It's ok to forget a task that nobody needs
                 pass
             else:
-                raise AssertionError("Unreachable", ts)  # pragma: nocover
+                raise AssertionError("Unreachable", str(ts))  # pragma: nocover
 
         if ts.actor:
             for ws in ts.who_has or ():
