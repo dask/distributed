@@ -30,8 +30,10 @@ from tornado.ioloop import IOLoop
 from distributed import preloading
 from distributed.core import ConnectionPool
 from distributed.security import Security
-from distributed.utils import LoopRunner, SyncMethodMixin, no_default, sync
+from distributed.utils import LoopRunner, SyncMethodMixin,  sync
 from distributed.utils_comm import gather_from_workers, scatter_to_workers
+
+from dask.typing import no_default
 
 logger = logging.getLogger(__name__)
 
