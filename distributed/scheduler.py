@@ -4998,7 +4998,10 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = self.workers[worker]
         ts: TaskState = self.tasks.get(key)
         if ts.state == "external":
-            ts.metadata.update(kwargs["metadata"])
+            if kwargs["metadata"]:
+                if ts.metadata is None:
+                    ts.metadata = dict()
+                ts.metadata.update(kwargs["metadata"])
             r: tuple = self._transition(
                 key, "memory", stimulus_id, worker=worker, **kwargs
             )
