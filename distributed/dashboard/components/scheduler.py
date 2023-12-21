@@ -4471,12 +4471,8 @@ class Shuffling(DashboardComponent):
                 data[f"{prefix}_memory"].append(d[prefix]["memory"])
                 data[f"{prefix}_memory_limit"].append(memory_limit)
                 data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
-                data[f"{prefix}_avg_duration"].append(
-                    d[prefix]["diagnostics"].get("avg_duration", 0)
-                )
-                data[f"{prefix}_avg_size"].append(
-                    d[prefix]["diagnostics"].get("avg_size", 0)
-                )
+                data[f"{prefix}_avg_duration"].append(d[prefix]["avg_duration"])
+                data[f"{prefix}_avg_size"].append(d[prefix]["avg_size"])
                 data[f"{prefix}_read"].append(d[prefix]["read"])
                 data[f"{prefix}_written"].append(d[prefix]["written"])
                 if self.scheduler.workers[worker].last_seen < now - 5:
