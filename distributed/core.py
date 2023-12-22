@@ -1176,15 +1176,25 @@ class Server:
 
                         server._ongoing_background_tasks.call_soon(_)
 
+                    async def watch_comm():
+                        while True:
+                            if self._bcomm.comm.closed():
+                                fut.set_exception(CommClosedError)
+                                break
+                            await asyncio.sleep(0.1)
+
+                    t = asyncio.create_task(watch_comm())
+
                     def is_next():
                         return server._waiting_for[0] == sig
 
-                    async with server._ensure_order:
-                        await server._ensure_order.wait_for(is_next)
-                        try:
+                    try:
+                        async with server._ensure_order:
+                            await server._ensure_order.wait_for(is_next)
                             return await fut
-                        finally:
-                            server._waiting_for.popleft()
+                    finally:
+                        t.cancel()
+                        server._waiting_for.popleft()
 
                 return send_recv_from_rpc
 

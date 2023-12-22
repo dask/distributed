@@ -1544,3 +1544,40 @@ async def test_ordered_rpc(use_side_channel):
         async with rpc(s2.address) as r:
             assert not await r.do_work(other_addr=s1.address)
             assert await r.do_work(other_addr=s1.address, ordered=True)
+
+
+@pytest.mark.parametrize(
+    "use_side_channel",
+    [False, True],
+)
+@gen_test()
+async def test_ordered_rpc_comm_closed(use_side_channel):
+    async def sleep(duration):
+        await asyncio.sleep(duration)
+
+    class MyServer(Server):
+        def __init__(self, *args, **kwargs):
+            handlers = {
+                "sleep": sleep,
+                "do_work": self.do_work,
+                "kill": self.kill,
+            }
+            super().__init__(handlers, *args, **kwargs)
+
+        async def kill(self):
+            await self.close()
+
+        async def do_work(self, other_addr):
+            r = await self.ordered_rpc(other_addr, use_side_channel=use_side_channel)
+            t1 = asyncio.create_task(r.sleep(duration=100000))
+            with contextlib.suppress(OSError):
+                await self.rpc(other_addr).kill()
+            with pytest.raises(CommClosedError):
+                await t1
+            return True
+
+    async with MyServer() as s1, MyServer() as s2:
+        await s1.listen()
+        await s2.listen()
+        async with rpc(s2.address) as r:
+            assert await r.do_work(other_addr=s1.address)
