@@ -1483,8 +1483,12 @@ async def test_messages_are_ordered_raw():
             await comm.close()
 
 
+@pytest.mark.parametrize(
+    "use_side_channel",
+    [False, True],
+)
 @gen_test()
-async def test_ordered_rpc():
+async def test_ordered_rpc(use_side_channel):
     entered_sleep = asyncio.Event()
     i = 0
 
@@ -1507,11 +1511,13 @@ async def test_ordered_rpc():
 
         async def do_work(self, other_addr, ordered=False):
             if ordered:
-                r = await self.ordered_rpc(other_addr)
+                r = await self.ordered_rpc(
+                    other_addr, use_side_channel=use_side_channel
+                )
             else:
                 r = self.rpc(other_addr)
 
-            t1 = asyncio.create_task(r.sleep(duration=1))
+            t1 = asyncio.create_task(r.sleep(duration=0.1))
 
             async def wait_to_unblock(error=False):
                 await entered_sleep.wait()
