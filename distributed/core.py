@@ -434,7 +434,10 @@ class Server:
                 "distributed.%s.blocked-handlers" % type(self).__name__.lower(), []
             )
         self.blocked_handlers = blocked_handlers
-        self.stream_handlers = {}
+        self.stream_handlers = {
+            "__ordered_send": self._handle_ordered_send,
+            "__ordered_rcv": self._handle_ordered_rcv,
+        }
         self.stream_handlers.update(stream_handlers or {})
 
         self.id = type(self).__name__ + "-" + str(uuid.uuid4())
@@ -532,7 +535,15 @@ class Server:
             timeout=timeout,
             server=self,
         )
+        import itertools
 
+        self._counter = itertools.count()
+        self._responses = {}
+        self._waiting_for = deque()
+        self._ensure_order = asyncio.Condition()
+
+        self._batched_comms = {}
+        self._batched_comms_locks = defaultdict(asyncio.Lock)
         self.__stopped = False
 
     async def upload_file(
@@ -1062,6 +1073,89 @@ class Server:
         finally:
             await comm.close()
             assert comm.closed()
+
+    async def _handle_ordered_send(self, sig, user_op, origin, user_kwargs, **extra):
+        # Note: The backchannel is currently unique. It's currently unclear if
+        # we need more control here
+        bcomm = await self._get_bcomm(origin)
+        try:
+            result = self.handlers[user_op](**merge(extra, user_kwargs))
+            if inspect.isawaitable(result):
+                result = await result
+            bcomm.send({"op": "__ordered_rcv", "sig": sig, "result": result})
+        except Exception as e:
+            exc_info = error_message(e)
+            bcomm.send({"op": "__ordered_rcv", "sig": sig, "exc_info": exc_info})
+
+    async def _handle_ordered_rcv(self, sig, result=None, exc_info=None):
+        fut = self._responses[sig]
+        if result is not None:
+            assert not exc_info
+            fut.set_result(result)
+        elif exc_info is not None:
+            assert not result
+            _, exc, tb = clean_exception(**exc_info)
+            fut.set_exception(exc.with_traceback(tb))
+        else:
+            raise RuntimeError("Unreachable")
+
+    async def ordered_rpc(self, addr=None, bcomm=None):
+        # TODO: Allow reuse of existing bcomm
+        # TODO: Allow different channels
+        if addr is not None:
+            assert bcomm is None
+            bcomm = await self._get_bcomm(addr)
+        else:
+            assert bcomm is not None
+
+        server = self
+
+        class OrderedRPC:
+            def __init__(self, bcomm):
+                self._bcomm = bcomm
+
+            def __getattr__(self, key):
+                async def send_recv_from_rpc(**kwargs):
+                    sig = (server.address, next(server._counter))
+                    msg = {
+                        "op": "__ordered_send",
+                        "sig": sig,
+                        "user_op": key,
+                        "user_kwargs": kwargs,
+                        "origin": server.address,
+                    }
+                    self._bcomm.send(msg)
+                    fut = asyncio.Future()
+                    server._responses[sig] = fut
+                    server._waiting_for.append(sig)
+
+                    def is_next():
+                        return server._waiting_for[0] == sig
+
+                    async with server._ensure_order:
+                        await server._ensure_order.wait_for(is_next)
+                        try:
+                            return await fut
+                        finally:
+                            server._waiting_for.popleft()
+
+                return send_recv_from_rpc
+
+        return OrderedRPC(bcomm)
+
+    async def _get_bcomm(self, addr):
+        async with self._batched_comms_locks[addr]:
+            if addr in self._batched_comms:
+                bcomm = self._batched_comms[addr]
+                if not bcomm.comm.closed():
+                    return bcomm
+            from distributed.batched import BatchedSend
+
+            self._batched_comms[addr] = bcomm = BatchedSend(interval=0.01)
+            comm = await self.rpc.connect(addr)
+            await comm.write({"op": "connection_stream"})
+            bcomm.start(comm)
+            return bcomm
 
     async def close(self, timeout: float | None = None, reason: str = "") -> None:
         try:

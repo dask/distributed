@@ -786,6 +786,7 @@ class Worker(BaseWorker, ServerNode):
         BaseWorker.__init__(self, state)
 
         self.scheduler = self.rpc(scheduler_addr)
+        self.scheduler_orderd = None
         self.execution_state = {
             "scheduler": self.scheduler.address,
             "ioloop": self.loop,
@@ -1225,6 +1226,7 @@ class Worker(BaseWorker, ServerNode):
             raise ValueError(f"Unexpected response from register: {response!r}")
 
         self.batched_stream.start(comm)
+        self.scheduler_ordered = await self.ordered_rpc(bcomm=self.batched_stream)
         self.status = Status.running
 
         await asyncio.gather(
@@ -1249,9 +1251,7 @@ class Worker(BaseWorker, ServerNode):
         logger.debug("Heartbeat: %s", self.address)
         try:
             start = time()
-            response = await retry_operation(
-                self.scheduler.heartbeat_worker,
-                address=self.contact_address,
+            response = await self.scheduler_ordered.heartbeat_worker(
                 now=start,
                 metrics=await self.get_metrics(),
                 executing={
@@ -1286,8 +1286,6 @@ class Worker(BaseWorker, ServerNode):
             )
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
-        except OSError:
-            logger.exception("Failed to communicate with scheduler during heartbeat.")
         except Exception:
             logger.exception("Unexpected exception during heartbeat. Closing worker.")
             await self.close()
