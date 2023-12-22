@@ -1100,8 +1100,7 @@ class Server:
             raise RuntimeError("Unreachable")
 
     async def ordered_rpc(self, addr=None, bcomm=None):
-        # TODO: Allow reuse of existing bcomm
-        # TODO: Allow different channels
+        # TODO: Allow different channels?
         if addr is not None:
             assert bcomm is None
             bcomm = await self._get_bcomm(addr)
@@ -1116,7 +1115,7 @@ class Server:
 
             def __getattr__(self, key):
                 async def send_recv_from_rpc(**kwargs):
-                    sig = (server.address, next(server._counter))
+                    sig = next(server._counter)
                     msg = {
                         "op": "__ordered_send",
                         "sig": sig,
