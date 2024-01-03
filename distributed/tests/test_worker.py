@@ -3311,7 +3311,8 @@ async def test_broken_comm(c, s, a, b):
         start="2000-01-01",
         end="2000-01-10",
     )
-    s = df.shuffle("id", shuffle="tasks")
+    with dask.config.set({"dataframe.shuffle.method": "tasks"}):
+        s = df.shuffle("id")
     await c.compute(s.size)
 
 
