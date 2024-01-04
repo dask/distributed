@@ -40,7 +40,7 @@ async def test_combo_of_layer_types(c, s, a, b):
     )
 
     df = dd.from_pandas(pd.DataFrame({"a": np.arange(3)}), npartitions=3)
-    df = df.shuffle("a", shuffle="tasks")
+    df = df.shuffle("a")
     df = df["a"].to_dask_array()
 
     res = x.sum() + df.sum()
@@ -84,7 +84,7 @@ async def test_shuffle(c, s, a, b):
         ),
         npartitions=5,
     )
-    df = df.shuffle("a", shuffle="tasks", max_branch=2)
+    df = df.shuffle("a", max_branch=2)
     df = df["a"] + df["b"]
     res = await c.compute(df, optimize_graph=False)
     assert res.dtypes == np.float64
@@ -169,7 +169,7 @@ async def test_dataframe_annotations(c, s, a, b):
         ),
         npartitions=5,
     )
-    df = df.shuffle("a", shuffle="tasks", max_branch=2)
+    df = df.shuffle("a", max_branch=2)
     acol = df["a"]
     bcol = df["b"]
 

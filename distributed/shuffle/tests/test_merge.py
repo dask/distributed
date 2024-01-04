@@ -66,8 +66,10 @@ async def test_minimal_version(c, s, a, b):
         B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
         b = dd.repartition(B, [0, 2, 5])
 
-        with pytest.raises(ModuleNotFoundError, match="requires pyarrow"):
-            await c.compute(dd.merge(a, b, left_on="x", right_on="z", shuffle="p2p"))
+        with pytest.raises(
+            ModuleNotFoundError, match="requires pyarrow"
+        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+            await c.compute(dd.merge(a, b, left_on="x", right_on="z"))
 
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
@@ -113,13 +115,12 @@ async def test_merge_p2p_shuffle_reused_dataframe_with_different_parameters(c, s
     ddf1 = dd.from_pandas(pdf1, npartitions=5)
     ddf2 = dd.from_pandas(pdf2, npartitions=10)
 
-    out = (
-        ddf1.merge(ddf2, left_on="a", right_on="x", shuffle="p2p")
-        # Vary the number of output partitions for the shuffles of dd2
-        .repartition(npartitions=20).merge(
-            ddf2, left_on="b", right_on="x", shuffle="p2p"
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = (
+            ddf1.merge(ddf2, left_on="a", right_on="x")
+            # Vary the number of output partitions for the shuffles of dd2
+            .repartition(npartitions=20).merge(ddf2, left_on="b", right_on="x")
         )
-    )
     # Generate unique shuffle IDs if the input frame is the same but
     # parameters differ. Reusing shuffles in merges is dangerous because of the
     # required coordination and complexity introduced through dynamic clusters.
@@ -141,22 +142,22 @@ async def test_merge_p2p_shuffle_reused_dataframe_with_same_parameters(c, s, a, 
     # This performs two shuffles:
     #   * ddf1 is shuffled on `a`
     #   * ddf2 is shuffled on `x`
-    ddf3 = ddf1.merge(
-        ddf2,
-        left_on="a",
-        right_on="x",
-        shuffle="p2p",
-    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        ddf3 = ddf1.merge(
+            ddf2,
+            left_on="a",
+            right_on="x",
+        )
 
     # This performs one shuffle:
     #   * ddf3 is shuffled on `b`
     # We can reuse the shuffle of dd2 on `x` from the previous merge.
-    out = ddf2.merge(
-        ddf3,
-        left_on="x",
-        right_on="b",
-        shuffle="p2p",
-    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = ddf2.merge(
+            ddf3,
+            left_on="x",
+            right_on="b",
+        )
     # Generate unique shuffle IDs if the input frame is the same and all its
     # parameters match. Reusing shuffles in merges is dangerous because of the
     # required coordination and complexity introduced through dynamic clusters.
@@ -178,101 +179,93 @@ async def test_merge(c, s, a, b, how, disk):
     B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
     b = dd.repartition(B, [0, 2, 5])
 
-    with dask.config.set({"distributed.p2p.disk": disk}):
-        joined = dd.merge(
-            a, b, left_index=True, right_index=True, how=how, shuffle="p2p"
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        with dask.config.set({"distributed.p2p.disk": disk}):
+            joined = dd.merge(a, b, left_index=True, right_index=True, how=how)
+        res = await c.compute(joined)
+        assert_eq(
+            res,
+            pd.merge(A, B, left_index=True, right_index=True, how=how),
         )
-    res = await c.compute(joined)
-    assert_eq(
-        res,
-        pd.merge(A, B, left_index=True, right_index=True, how=how),
-    )
-    joined = dd.merge(a, b, on="y", how=how)
-    result = await c.compute(joined)
-    list_eq(result, pd.merge(A, B, on="y", how=how))
-    assert all(d is None for d in joined.divisions)
+        joined = dd.merge(a, b, on="y", how=how)
+        result = await c.compute(joined)
+        list_eq(result, pd.merge(A, B, on="y", how=how))
+        assert all(d is None for d in joined.divisions)
 
-    list_eq(
-        await c.compute(
-            dd.merge(a, b, left_on="x", right_on="z", how=how, shuffle="p2p")
-        ),
-        pd.merge(A, B, left_on="x", right_on="z", how=how),
-    )
-    list_eq(
-        await c.compute(
-            dd.merge(
-                a,
-                b,
-                left_on="x",
-                right_on="z",
-                how=how,
-                suffixes=("1", "2"),
-                shuffle="p2p",
-            )
-        ),
-        pd.merge(A, B, left_on="x", right_on="z", how=how, suffixes=("1", "2")),
-    )
+        list_eq(
+            await c.compute(dd.merge(a, b, left_on="x", right_on="z", how=how)),
+            pd.merge(A, B, left_on="x", right_on="z", how=how),
+        )
+        list_eq(
+            await c.compute(
+                dd.merge(
+                    a,
+                    b,
+                    left_on="x",
+                    right_on="z",
+                    how=how,
+                    suffixes=("1", "2"),
+                )
+            ),
+            pd.merge(A, B, left_on="x", right_on="z", how=how, suffixes=("1", "2")),
+        )
 
-    list_eq(
-        await c.compute(dd.merge(a, b, how=how, shuffle="p2p")),
-        pd.merge(A, B, how=how),
-    )
-    list_eq(
-        await c.compute(dd.merge(a, B, how=how, shuffle="p2p")),
-        pd.merge(A, B, how=how),
-    )
-    list_eq(
-        await c.compute(dd.merge(A, b, how=how, shuffle="p2p")),
-        pd.merge(A, B, how=how),
-    )
-    # Note: No await since A and B are both pandas dataframes and this doesn't
-    # actually submit anything
-    list_eq(
-        c.compute(dd.merge(A, B, how=how, shuffle="p2p")),
-        pd.merge(A, B, how=how),
-    )
+        list_eq(
+            await c.compute(dd.merge(a, b, how=how)),
+            pd.merge(A, B, how=how),
+        )
+        list_eq(
+            await c.compute(dd.merge(a, B, how=how)),
+            pd.merge(A, B, how=how),
+        )
+        list_eq(
+            await c.compute(dd.merge(A, b, how=how)),
+            pd.merge(A, B, how=how),
+        )
+        # Note: No await since A and B are both pandas dataframes and this doesn't
+        # actually submit anything
+        list_eq(
+            c.compute(dd.merge(A, B, how=how)),
+            pd.merge(A, B, how=how),
+        )
 
-    list_eq(
-        await c.compute(
-            dd.merge(a, b, left_index=True, right_index=True, how=how, shuffle="p2p")
-        ),
-        pd.merge(A, B, left_index=True, right_index=True, how=how),
-    )
-    list_eq(
-        await c.compute(
-            dd.merge(
-                a,
-                b,
-                left_index=True,
-                right_index=True,
-                how=how,
-                suffixes=("1", "2"),
-                shuffle="p2p",
-            )
-        ),
-        pd.merge(A, B, left_index=True, right_index=True, how=how, suffixes=("1", "2")),
-    )
+        list_eq(
+            await c.compute(dd.merge(a, b, left_index=True, right_index=True, how=how)),
+            pd.merge(A, B, left_index=True, right_index=True, how=how),
+        )
+        list_eq(
+            await c.compute(
+                dd.merge(
+                    a,
+                    b,
+                    left_index=True,
+                    right_index=True,
+                    how=how,
+                    suffixes=("1", "2"),
+                )
+            ),
+            pd.merge(
+                A, B, left_index=True, right_index=True, how=how, suffixes=("1", "2")
+            ),
+        )
 
-    list_eq(
-        await c.compute(
-            dd.merge(a, b, left_on="x", right_index=True, how=how, shuffle="p2p")
-        ),
-        pd.merge(A, B, left_on="x", right_index=True, how=how),
-    )
-    list_eq(
-        await c.compute(
-            dd.merge(
-                a,
-                b,
-                left_on="x",
-                right_index=True,
-                how=how,
-                suffixes=("1", "2"),
-                shuffle="p2p",
-            )
-        ),
-        pd.merge(A, B, left_on="x", right_index=True, how=how, suffixes=("1", "2")),
-    )
+        list_eq(
+            await c.compute(dd.merge(a, b, left_on="x", right_index=True, how=how)),
+            pd.merge(A, B, left_on="x", right_index=True, how=how),
+        )
+        list_eq(
+            await c.compute(
+                dd.merge(
+                    a,
+                    b,
+                    left_on="x",
+                    right_index=True,
+                    how=how,
+                    suffixes=("1", "2"),
+                )
+            ),
+            pd.merge(A, B, left_on="x", right_index=True, how=how, suffixes=("1", "2")),
+        )
 
 
 @pytest.mark.slow
@@ -336,132 +329,132 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
             ddl = dd.from_pandas(pdl, lpart)
             ddr = dd.from_pandas(pdr, rpart)
 
-            expected = pdl.join(pdr, how=how)
-            assert_eq(
-                await c.compute(ddl.join(ddr, how=how, shuffle="p2p")),
-                expected,
-                # FIXME: There's an discrepancy with an empty index for
-                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
-                # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not (PANDAS_GE_200 and expected.index.empty),
-            )
+            with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+                expected = pdl.join(pdr, how=how)
+                assert_eq(
+                    await c.compute(ddl.join(ddr, how=how)),
+                    expected,
+                    # FIXME: There's an discrepancy with an empty index for
+                    # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
+                    # Temporarily avoid index check until the discrepancy is fixed.
+                    check_index=not (PANDAS_GE_200 and expected.index.empty),
+                )
 
-            expected = pdr.join(pdl, how=how)
-            assert_eq(
-                await c.compute(ddr.join(ddl, how=how, shuffle="p2p")),
-                expected,
-                # FIXME: There's an discrepancy with an empty index for
-                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
-                # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not (PANDAS_GE_200 and expected.index.empty),
-            )
+                expected = pdr.join(pdl, how=how)
+                assert_eq(
+                    await c.compute(ddr.join(ddl, how=how)),
+                    expected,
+                    # FIXME: There's an discrepancy with an empty index for
+                    # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
+                    # Temporarily avoid index check until the discrepancy is fixed.
+                    check_index=not (PANDAS_GE_200 and expected.index.empty),
+                )
 
-            expected = pd.merge(pdl, pdr, how=how, left_index=True, right_index=True)
-            assert_eq(
-                await c.compute(
-                    dd.merge(
-                        ddl,
-                        ddr,
-                        how=how,
-                        left_index=True,
-                        right_index=True,
-                        shuffle="p2p",
-                    )
-                ),
-                expected,
-                # FIXME: There's an discrepancy with an empty index for
-                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
-                # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not (PANDAS_GE_200 and expected.index.empty),
-            )
+                expected = pd.merge(
+                    pdl, pdr, how=how, left_index=True, right_index=True
+                )
+                assert_eq(
+                    await c.compute(
+                        dd.merge(
+                            ddl,
+                            ddr,
+                            how=how,
+                            left_index=True,
+                            right_index=True,
+                        )
+                    ),
+                    expected,
+                    # FIXME: There's an discrepancy with an empty index for
+                    # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
+                    # Temporarily avoid index check until the discrepancy is fixed.
+                    check_index=not (PANDAS_GE_200 and expected.index.empty),
+                )
 
-            expected = pd.merge(pdr, pdl, how=how, left_index=True, right_index=True)
-            assert_eq(
-                await c.compute(
-                    dd.merge(
-                        ddr,
-                        ddl,
-                        how=how,
-                        left_index=True,
-                        right_index=True,
-                        shuffle="p2p",
-                    )
-                ),
-                expected,
-                # FIXME: There's an discrepancy with an empty index for
-                # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
-                # Temporarily avoid index check until the discrepancy is fixed.
-                check_index=not (PANDAS_GE_200 and expected.index.empty),
-            )
+                expected = pd.merge(
+                    pdr, pdl, how=how, left_index=True, right_index=True
+                )
+                assert_eq(
+                    await c.compute(
+                        dd.merge(
+                            ddr,
+                            ddl,
+                            how=how,
+                            left_index=True,
+                            right_index=True,
+                        )
+                    ),
+                    expected,
+                    # FIXME: There's an discrepancy with an empty index for
+                    # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
+                    # Temporarily avoid index check until the discrepancy is fixed.
+                    check_index=not (PANDAS_GE_200 and expected.index.empty),
+                )
 
-            # hash join
-            list_eq(
-                await c.compute(
-                    dd.merge(
-                        ddl,
-                        ddr,
-                        how=how,
-                        left_on="a",
-                        right_on="d",
-                        shuffle="p2p",
-                    )
-                ),
-                pd.merge(pdl, pdr, how=how, left_on="a", right_on="d"),
-            )
-            list_eq(
-                await c.compute(
-                    dd.merge(
-                        ddl,
-                        ddr,
-                        how=how,
-                        left_on="b",
-                        right_on="e",
-                        shuffle="p2p",
-                    )
-                ),
-                pd.merge(pdl, pdr, how=how, left_on="b", right_on="e"),
-            )
+                # hash join
+                list_eq(
+                    await c.compute(
+                        dd.merge(
+                            ddl,
+                            ddr,
+                            how=how,
+                            left_on="a",
+                            right_on="d",
+                        )
+                    ),
+                    pd.merge(pdl, pdr, how=how, left_on="a", right_on="d"),
+                )
+                list_eq(
+                    await c.compute(
+                        dd.merge(
+                            ddl,
+                            ddr,
+                            how=how,
+                            left_on="b",
+                            right_on="e",
+                        )
+                    ),
+                    pd.merge(pdl, pdr, how=how, left_on="b", right_on="e"),
+                )
 
-            list_eq(
-                await c.compute(
-                    dd.merge(
-                        ddr,
-                        ddl,
-                        how=how,
-                        left_on="d",
-                        right_on="a",
-                        shuffle="p2p",
-                    )
-                ),
-                pd.merge(pdr, pdl, how=how, left_on="d", right_on="a"),
-            )
-            list_eq(
-                await c.compute(
-                    dd.merge(
-                        ddr,
-                        ddl,
-                        how=how,
-                        left_on="e",
-                        right_on="b",
-                        shuffle="p2p",
-                    )
-                ),
-                pd.merge(pdr, pdl, how=how, left_on="e", right_on="b"),
-            )
+                list_eq(
+                    await c.compute(
+                        dd.merge(
+                            ddr,
+                            ddl,
+                            how=how,
+                            left_on="d",
+                            right_on="a",
+                        )
+                    ),
+                    pd.merge(pdr, pdl, how=how, left_on="d", right_on="a"),
+                )
+                list_eq(
+                    await c.compute(
+                        dd.merge(
+                            ddr,
+                            ddl,
+                            how=how,
+                            left_on="e",
+                            right_on="b",
+                        )
+                    ),
+                    pd.merge(pdr, pdl, how=how, left_on="e", right_on="b"),
+                )
 
-            list_eq(
-                await c.compute(
-                    dd.merge(
-                        ddl,
-                        ddr,
-                        how=how,
-                        left_on=["a", "b"],
-                        right_on=["d", "e"],
-                        shuffle="p2p",
-                    )
-                ),
-                pd.merge(pdl, pdr, how=how, left_on=["a", "b"], right_on=["d", "e"]),
-            )
+                list_eq(
+                    await c.compute(
+                        dd.merge(
+                            ddl,
+                            ddr,
+                            how=how,
+                            left_on=["a", "b"],
+                            right_on=["d", "e"],
+                        )
+                    ),
+                    pd.merge(
+                        pdl, pdr, how=how, left_on=["a", "b"], right_on=["d", "e"]
+                    ),
+                )
 
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
@@ -473,19 +466,16 @@ async def test_index_merge_p2p(c, s, a, b, how):
     left = dd.from_pandas(pdf_left, npartitions=5, sort=False)
     right = dd.from_pandas(pdf_right, npartitions=6)
 
-    assert_eq(
-        await c.compute(
-            left.merge(right, how=how, left_index=True, right_on="a", shuffle="p2p")
-        ),
-        pdf_left.merge(pdf_right, how=how, left_index=True, right_on="a"),
-    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        assert_eq(
+            await c.compute(left.merge(right, how=how, left_index=True, right_on="a")),
+            pdf_left.merge(pdf_right, how=how, left_index=True, right_on="a"),
+        )
 
-    assert_eq(
-        await c.compute(
-            right.merge(left, how=how, right_index=True, left_on="a", shuffle="p2p")
-        ),
-        pdf_right.merge(pdf_left, how=how, right_index=True, left_on="a"),
-    )
+        assert_eq(
+            await c.compute(right.merge(left, how=how, right_index=True, left_on="a")),
+            pdf_right.merge(pdf_left, how=how, right_index=True, left_on="a"),
+        )
 
 
 class LimitedGetOrCreateShuffleRunManager(_ShuffleRunManager):
@@ -522,7 +512,8 @@ async def test_merge_does_not_deadlock_if_worker_joins(c, s, a):
 
     run_manager_A = a.plugins["shuffle"].shuffle_runs
 
-    joined = dd.merge(df1, df2, left_on="a", right_on="x", shuffle="p2p")
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        joined = dd.merge(df1, df2, left_on="a", right_on="x")
     result = c.compute(joined)
 
     await run_manager_A.blocking_get_or_create.wait()

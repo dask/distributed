@@ -78,7 +78,8 @@ async def test_dataframe(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    shuffled = dd.shuffle.shuffle(df, "x", shuffle="p2p", npartitions=20)
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        shuffled = dd.shuffle.shuffle(df, "x", npartitions=20)
     await c.compute(shuffled)
     await a.heartbeat()
     await b.heartbeat()
