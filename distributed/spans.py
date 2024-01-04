@@ -25,6 +25,9 @@ if TYPE_CHECKING:
     from distributed.scheduler import TaskGroup, TaskStateState
 
 
+CONTEXTS_WITH_SPAN_ID = ("execute", "p2p")
+
+
 @contextmanager
 def span(*tags: str) -> Iterator[str]:
     """Tag group of tasks to be part of a certain group, called a span.
@@ -316,8 +319,10 @@ class Span:
 
         At the moment of writing, all keys are
         ``("execute", <task prefix>, <activity>, <unit>)``
-        but more may be added in the future with a different format; please test for
-        ``k[0] == "execute"``.
+        or
+        ``("p2p", <where>, <activity>, <unit>)``
+        but more may be added in the future with a different format; please test e.g.
+        for ``k[0] == "execute"``.
         """
         out = sum_mappings(
             child._cumulative_worker_metrics for child in self.traverse_spans()
@@ -634,7 +639,7 @@ class SpansWorkerExtension:
         self.digests_total_since_heartbeat = {
             k: v
             for k, v in self.worker.digests_total_since_heartbeat.items()
-            if isinstance(k, tuple) and k[0] == "execute"
+            if isinstance(k, tuple) and k[0] in CONTEXTS_WITH_SPAN_ID
         }
 
     def heartbeat(self) -> dict[tuple[Hashable, ...], float]:

@@ -98,7 +98,13 @@ async def test_prefix(c, s, a, b):
             assert is_valid_xml(body)
 
 
-@gen_cluster(client=True, clean_kwargs={"threads": False})
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.admin.system-monitor.gil.enabled": True,
+    },
+)
 async def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")
 

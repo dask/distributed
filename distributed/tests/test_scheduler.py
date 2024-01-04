@@ -155,8 +155,6 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
-# FIXME: Temporarily xfail-ing to unblock CI
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/8255")
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
 @pytest.mark.parametrize(
     "nthreads",
@@ -277,6 +275,30 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test_decide_worker_coschedule_order_neighbors_()
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+)
+async def test_override_is_rootish(c, s):
+    x = c.submit(lambda x: x + 1, 1, key="x")
+    await async_poll_for(lambda: "x" in s.tasks, timeout=5)
+    ts_x = s.tasks["x"]
+    assert ts_x._rootish is None
+    assert s.is_rootish(ts_x)
+
+    ts_x._rootish = False
+    assert not s.is_rootish(ts_x)
+
+    y = c.submit(lambda y: y + 1, 1, key="y", workers=["not-existing"])
+    await async_poll_for(lambda: "y" in s.tasks, timeout=5)
+    ts_y = s.tasks["y"]
+    assert ts_y._rootish is None
+    assert not s.is_rootish(ts_y)
+
+    ts_y._rootish = True
+    assert s.is_rootish(ts_y)
 
 
 @pytest.mark.skipif(
@@ -1580,6 +1602,38 @@ async def test_workers_to_close_grouped(c, s, *workers):
     assert set(s.workers_to_close(key=key)) == {workers[0].address, workers[1].address}
 
 
+@pytest.mark.parametrize("reverse", [True, False])
+@gen_cluster(client=True)
+async def test_workers_to_close_never_close_long_running(c, s, a, b, reverse):
+    if reverse:
+        a, b = b, a
+    wait_evt = Event()
+
+    def executing(evt):
+        evt.wait()
+
+    def long_running_secede(evt):
+        secede()
+        evt.wait()
+
+    assert a.address in s.workers_to_close()
+    assert b.address in s.workers_to_close()
+    long_fut = c.submit(long_running_secede, wait_evt, workers=[a.address])
+    wsA = s.workers[a.address]
+    while not wsA.long_running:
+        await asyncio.sleep(0.01)
+    assert s.workers_to_close() == [b.address]
+    futs = [c.submit(executing, wait_evt, workers=[b.address]) for _ in range(10)]
+    assert a.address not in s.workers_to_close(n=2)
+    while not b.state.tasks:
+        await asyncio.sleep(0.01)
+    assert s.workers_to_close() == []
+    assert s.workers_to_close(n=1) == [b.address]
+    assert s.workers_to_close(n=2) == [b.address]
+
+    await wait_evt.set()
+
+
 @gen_cluster(client=True)
 async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     future = c.submit(
@@ -1799,13 +1853,11 @@ async def test_run_on_scheduler(c, s, a, b):
     assert response == s.address
 
 
-@gen_cluster(client=True, config={"distributed.scheduler.pickle": False})
-async def test_run_on_scheduler_disabled(c, s, a, b):
-    def f(dask_scheduler=None):
-        return dask_scheduler.address
-
-    with pytest.raises(ValueError, match="disallowed from deserializing"):
-        await c._run_on_scheduler(f)
+@gen_test()
+async def test_allow_pickle_false():
+    with dask.config.set({"distributed.scheduler.pickle": False}):
+        with pytest.raises(RuntimeError, match="Pickling can no longer be disabled"):
+            await Scheduler()
 
 
 @gen_cluster()

@@ -13,6 +13,7 @@ import dask.bag as db
 import dask.dataframe as dd
 
 from distributed.client import wait
+from distributed.nanny import Nanny
 from distributed.utils_test import gen_cluster
 
 dfs = [
@@ -122,6 +123,18 @@ async def test_bag_groupby_tasks_default(c, s, a, b):
     b = db.range(100, npartitions=10)
     b2 = b.groupby(lambda x: x % 13)
     assert not any("partd" in k[0] for k in b2.dask)
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_bag_groupby_key_hashing(c, s, a, b):
+    # https://github.com/dask/distributed/issues/4141
+    dsk = {("x", 0): (range, 5), ("x", 1): (range, 5), ("x", 2): (range, 5)}
+    grouped = db.Bag(dsk, "x", 3).groupby(lambda x: "even" if x % 2 == 0 else "odd")
+    remote = c.compute(grouped)
+    result = await remote
+    assert len(result) == 2
+    assert ("odd", [1, 3] * 3) in result
+    assert ("even", [0, 2, 4] * 3) in result
 
 
 @pytest.mark.parametrize("wait", [wait, lambda x: None])

@@ -114,7 +114,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v3.0.0
+        uses: conda-incubator/setup-miniconda@v3.0.1
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
@@ -281,7 +281,7 @@ jobs:
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.TEST_ID }}
           path: reports
@@ -291,7 +291,7 @@ jobs:
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.TEST_ID }}_cluster_dumps
           path: test_cluster_dump
@@ -305,7 +305,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Upload
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Event File
           path: ${{ github.event_path }}

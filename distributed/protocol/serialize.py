@@ -573,10 +573,6 @@ class ToPickle(Generic[T]):
 
     Both the scheduler and workers with automatically unpickle this
     object on arrival.
-
-    Notice, this requires that the scheduler is allowed to use pickle.
-    If the configuration option "distributed.scheduler.pickle" is set
-    to False, the scheduler will raise an exception instead.
     """
 
     data: T

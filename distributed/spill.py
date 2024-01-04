@@ -136,25 +136,24 @@ class SpillBuffer(zict.Buffer[Key, object]):
             logger.error("Spill to disk failed; keeping data in memory", exc_info=True)
             raise HandledError()
         except PickleError as e:
-            key_e, orig_e = e.args
-            assert key_e in self.fast
-            assert key_e not in self.slow
-            if key_e == key:
+            assert e.key in self.fast
+            assert e.key not in self.slow
+            if e.key == key:
                 assert key is not None
                 # The key we just inserted failed to serialize.
                 # This happens only when the key is individually larger than target.
                 # The exception will be caught by Worker and logged; the status of
                 # the task will be set to error.
                 del self[key]
-                raise orig_e
+                raise
             else:
                 # The key we just inserted is smaller than target, but it caused
                 # another, unrelated key to be spilled out of the LRU, and that key
                 # failed to serialize. There's nothing wrong with the new key. The older
                 # key is still in memory.
-                if key_e not in self.logged_pickle_errors:
-                    logger.error("Failed to pickle %r", key_e, exc_info=True)
-                    self.logged_pickle_errors.add(key_e)
+                if e.key not in self.logged_pickle_errors:
+                    logger.error("Failed to pickle %r", e.key, exc_info=True)
+                    self.logged_pickle_errors.add(e.key)
                 raise HandledError()
 
     def __setitem__(self, key: Key, value: object) -> None:
@@ -267,8 +266,13 @@ class MaxSpillExceeded(Exception):
     pass
 
 
-class PickleError(Exception):
-    pass
+class PickleError(TypeError):
+    def __str__(self) -> str:
+        return f"Failed to pickle {self.key!r}"
+
+    @property
+    def key(self) -> Key:
+        return self.args[0]
 
 
 class HandledError(Exception):
@@ -324,7 +328,7 @@ class Slow(zict.Func[Key, object, bytes]):
             # zict.LRU ensures that the key remains in fast if we raise.
             # Wrap the exception so that it's recognizable by SpillBuffer,
             # which will then unwrap it.
-            raise PickleError(key, e)
+            raise PickleError(key) from e
 
         # Thanks to Buffer.__setitem__, we never update existing
         # keys in slow, but always delete them and reinsert them.

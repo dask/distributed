@@ -92,7 +92,7 @@ from distributed.protocol.serialize import _is_dumpable
 from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.sizeof import safe_sizeof as sizeof
-from distributed.spans import SpansWorkerExtension
+from distributed.spans import CONTEXTS_WITH_SPAN_ID, SpansWorkerExtension
 from distributed.threadpoolexecutor import ThreadPoolExecutor
 from distributed.threadpoolexecutor import secede as tpe_secede
 from distributed.utils import (
@@ -636,10 +636,6 @@ class Worker(BaseWorker, ServerNode):
             "offload": utils._offload_executor,
             "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
         }
-        if nvml.device_get_count() > 0:
-            self.executors["gpu"] = ThreadPoolExecutor(
-                1, thread_name_prefix="Dask-GPU-Threads"
-            )
 
         # Find the default executor
         if executor == "offload":
@@ -1045,7 +1041,7 @@ class Worker(BaseWorker, ServerNode):
         # Don't cast int metrics to float
         digests: defaultdict[Hashable, float] = defaultdict(int)
         for k, v in self.digests_total_since_heartbeat.items():
-            if isinstance(k, tuple) and k[0] == "execute":
+            if isinstance(k, tuple) and k[0] in CONTEXTS_WITH_SPAN_ID:
                 k = k[:1] + k[2:]
             digests[k] += v
 
@@ -3258,6 +3254,22 @@ else:
 
     DEFAULT_METRICS["rmm"] = rmm_metric
     del _rmm
+
+# avoid importing cuDF unless explicitly enabled
+if dask.config.get("distributed.diagnostics.cudf"):
+    try:
+        import cudf as _cudf  # noqa: F401
+    except Exception:
+        pass
+    else:
+        from distributed.diagnostics import cudf
+
+        async def cudf_metric(worker):
+            result = await offload(cudf.real_time)
+            return result
+
+        DEFAULT_METRICS["cudf"] = cudf_metric
+        del _cudf
 
 
 def print(

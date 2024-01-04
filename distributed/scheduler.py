@@ -1373,6 +1373,15 @@ class TaskState:
     #: be rejected.
     run_id: int | None
 
+    #: Whether to consider this task rootish in the context of task queueing
+    #: True
+    #:     Always consider this task rootish
+    #: False
+    #:     Never consider this task rootish
+    #: None
+    #:     Use a heuristic to determine whether this task should be considered rootish
+    _rootish: bool | None
+
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
 
@@ -1430,6 +1439,7 @@ class TaskState:
         self.metadata = None
         self.annotations = None
         self.erred_on = None
+        self._rootish = None
         self.run_id = None
         TaskState._instances.add(self)
 
@@ -2813,7 +2823,7 @@ class SchedulerState:
                 # It's ok to forget a task that nobody needs
                 pass
             else:
-                raise AssertionError("Unreachable", ts)  # pragma: nocover
+                raise AssertionError("Unreachable", str(ts))  # pragma: nocover
 
         if ts.actor:
             for ws in ts.who_has or ():
@@ -2909,8 +2919,11 @@ class SchedulerState:
         Whether ``ts`` is a root or root-like task.
 
         Root-ish tasks are part of a group that's much larger than the cluster,
-        and have few or no dependencies.
+        and have few or no dependencies. Tasks may also be explicitly marked as rootish
+        to override this heuristic.
         """
+        if ts._rootish is not None:
+            return ts._rootish
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
         tg = ts.group
@@ -3533,6 +3546,10 @@ class Scheduler(SchedulerState, ServerNode):
         jupyter=False,
         **kwargs,
     ):
+        if dask.config.get("distributed.scheduler.pickle", default=True) is False:
+            raise RuntimeError(
+                "Pickling can no longer be disabled with the `distributed.scheduler.pickle` option. Please remove this configuration to start the scheduler."
+            )
         if loop is not None:
             warnings.warn(
                 "the loop kwarg to Scheduler is deprecated",
@@ -5868,13 +5885,6 @@ class Scheduler(SchedulerState, ServerNode):
         idempotent: bool | None = None,
     ) -> None:
         """Register a plugin on the scheduler."""
-        if not dask.config.get("distributed.scheduler.pickle"):
-            raise ValueError(
-                "Cannot register a scheduler plugin as the scheduler "
-                "has been explicitly disallowed from deserializing "
-                "arbitrary bytestrings using pickle via the "
-                "'distributed.scheduler.pickle' configuration setting."
-            )
         if idempotent is None:
             warnings.warn(
                 "The signature of `Scheduler.register_scheduler_plugin` now requires "
@@ -6922,10 +6932,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         if key is None:
             key = operator.attrgetter("address")
-        if isinstance(key, bytes) and dask.config.get("distributed.scheduler.pickle"):
+        if isinstance(key, bytes):
             key = pickle.loads(key)
 
-        groups = groupby(key, self.workers.values())
+        # Long running tasks typically use a worker_client to schedule
+        # other tasks. We should never shut down the worker they're
+        # running on, as it would cause them to restart from scratch
+        # somewhere else.
+        valid_workers = [ws for ws in self.workers.values() if not ws.long_running]
+        groups = groupby(key, valid_workers)
 
         limit_bytes = {k: sum(ws.memory_limit for ws in v) for k, v in groups.items()}
         group_bytes = {k: sum(ws.nbytes for ws in v) for k, v in groups.items()}
@@ -7262,14 +7277,6 @@ class Scheduler(SchedulerState, ServerNode):
         Caution: this runs arbitrary Python code on the scheduler.  This should
         eventually be phased out.  It is mostly used by diagnostics.
         """
-        if not dask.config.get("distributed.scheduler.pickle"):
-            logger.warning(
-                "Tried to call 'feed' route with custom functions, but "
-                "pickle is disallowed.  Set the 'distributed.scheduler.pickle'"
-                "config value to True to use the 'feed' route (this is mostly "
-                "commonly used with progress bars)"
-            )
-            return
 
         interval = parse_timedelta(interval)
         if function:
@@ -7484,12 +7491,6 @@ class Scheduler(SchedulerState, ServerNode):
         """
         from distributed.worker import run
 
-        if not dask.config.get("distributed.scheduler.pickle"):
-            raise ValueError(
-                "Cannot run function as the scheduler has been explicitly disallowed from "
-                "deserializing arbitrary bytestrings using pickle via the "
-                "'distributed.scheduler.pickle' configuration setting."
-            )
         kwargs = kwargs or {}
         self.log_event("all", {"action": "run-function", "function": function})
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
