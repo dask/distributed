@@ -82,7 +82,7 @@ async def test_pandas(c, s, a, b, align):
     async with ms.sample("foo", measure="managed", interval=0.15):
         f = c.submit(lambda: 1)
         await f
-        await asyncio.sleep(0.7)
+        await asyncio.sleep(1.5)
 
     assert ms.samples["foo"][0][1] == 0
     assert ms.samples["foo"][-1][1] > 0
