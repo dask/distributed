@@ -150,7 +150,8 @@ def test_dataframe_set_index_sync(wait, client):
     df = df.persist()
     wait(df)
 
-    df2 = df.set_index("name", shuffle="tasks")
+    with dask.config.set({"dataframe.shuffle.method": "tasks"}):
+        df2 = df.set_index("name")
     df2 = df2.persist()
 
     assert len(df2)
