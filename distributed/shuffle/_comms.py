@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from dask.utils import parse_bytes
-
 from distributed.metrics import context_meter
 from distributed.shuffle._disk import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
@@ -49,18 +47,17 @@ class CommShardsBuffer(ShardsBuffer):
         Number of background tasks to run.
     """
 
-    max_message_size = parse_bytes("2 MiB")
-
     def __init__(
         self,
         send: Callable[[str, list[tuple[Any, Any]]], Awaitable[None]],
         memory_limiter: ResourceLimiter,
-        concurrency_limit: int = 10,
+        max_message_size: int,
+        concurrency_limit: int,
     ):
         super().__init__(
             memory_limiter=memory_limiter,
             concurrency_limit=concurrency_limit,
-            max_message_size=CommShardsBuffer.max_message_size,
+            max_message_size=max_message_size,
         )
         self.send = send
 

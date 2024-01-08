@@ -180,7 +180,7 @@ async def test_merge(c, s, a, b, how, disk):
     b = dd.repartition(B, [0, 2, 5])
 
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        with dask.config.set({"distributed.p2p.disk": disk}):
+        with dask.config.set({"distributed.p2p.storage.disk": disk}):
             joined = dd.merge(a, b, left_index=True, right_index=True, how=how)
         res = await c.compute(joined)
         assert_eq(

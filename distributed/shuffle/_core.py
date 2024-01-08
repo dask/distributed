@@ -19,7 +19,7 @@ from tornado.ioloop import IOLoop
 import dask.config
 from dask.core import flatten
 from dask.typing import Key
-from dask.utils import parse_timedelta
+from dask.utils import parse_bytes, parse_timedelta
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -115,8 +115,15 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
                     self._disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
 
             with self._capture_metrics("background-comms"):
+                max_message_size = parse_bytes(
+                    dask.config.get("distributed.p2p.comm.message-bytes-limit")
+                )
+                concurrency_limit = dask.config.get("distributed.p2p.comm.concurrency")
                 self._comm_buffer = CommShardsBuffer(
-                    send=self.send, memory_limiter=memory_limiter_comms
+                    send=self.send,
+                    max_message_size=max_message_size,
+                    memory_limiter=memory_limiter_comms,
+                    concurrency_limit=concurrency_limit,
                 )
 
         # TODO: reduce number of connections to number of workers

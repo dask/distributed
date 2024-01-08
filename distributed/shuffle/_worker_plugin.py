@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, overload
 
+import dask
 from dask.context import thread_state
 from dask.typing import Key
 from dask.utils import parse_bytes
@@ -279,14 +280,19 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         # Initialize
         self.worker = worker
         self.shuffle_runs = _ShuffleRunManager(self)
+        comm_limit = parse_bytes(dask.config.get("distributed.p2p.comm.buffer"))
         self.memory_limiter_comms = ResourceLimiter(
-            parse_bytes("100 MiB"), metrics_label="p2p-comms-limiter"
+            comm_limit, metrics_label="p2p-comms-limiter"
         )
+        storage_limit = parse_bytes(dask.config.get("distributed.p2p.storage.buffer"))
         self.memory_limiter_disk = ResourceLimiter(
-            parse_bytes("1 GiB"), metrics_label="p2p-disk-limiter"
+            storage_limit, metrics_label="p2p-disk-limiter"
         )
         self.closed = False
-        self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
+        nthreads = (
+            dask.config.get("distributed.p2p.threads") or self.worker.state.nthreads
+        )
+        self._executor = ThreadPoolExecutor(nthreads)
 
     def __str__(self) -> str:
         return f"ShuffleWorkerPlugin on {self.worker.address}"

@@ -195,7 +195,7 @@ async def test_basic_integration(c, s, a, b, npartitions, disk):
         freq="10 s",
     )
     with dask.config.set(
-        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.storage.disk": disk}
     ):
         shuffled = dd.shuffle.shuffle(df, "x", npartitions=npartitions)
     if npartitions is None:

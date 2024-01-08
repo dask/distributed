@@ -131,7 +131,7 @@ def rearrange_by_column_p2p(
         )
 
     name = f"shuffle_p2p-{token}"
-    disk: bool = dask.config.get("distributed.p2p.disk")
+    disk: bool = dask.config.get("distributed.p2p.storage.disk")
 
     layer = P2PShuffleLayer(
         name,
