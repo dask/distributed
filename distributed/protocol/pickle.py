@@ -72,7 +72,7 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
             and getattr(inspect.getmodule(x), "__name__", None)
             in cloudpickle.list_registry_pickle_by_value()
         ) or (
-            (len(result) < 1000 or not _always_use_pickle_for(x))
+            (len(result) < 1000 and not _always_use_pickle_for(x))
             # this is pretty expensive so check very last
             and b"__main__" in result
         ):
