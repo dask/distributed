@@ -11,6 +11,7 @@ from distributed.protocol.serialize import (
     Serialize,
     Serialized,
     ToPickle,
+    _is_msgpack_serializable,
     merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
@@ -104,7 +105,32 @@ def dumps(  # type: ignore[no-untyped-def]
             else:
                 return msgpack_encode_default(obj)
 
-        frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        try:
+            frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        except TypeError as e:
+            logger.warning(e)
+
+            def _encode_default_safe(obj):
+                if isinstance(obj, (Serialize, Serialized)):
+                    offset = len(frames)
+                    frames.extend(create_serialized_sub_frames(obj))
+                    return {"__Serialized__": offset}
+                elif isinstance(obj, (ToPickle, Pickled)):
+                    offset = len(frames)
+                    frames.extend(create_pickled_sub_frames(obj))
+                    return {"__Pickled__": offset}
+                else:
+                    encoded = msgpack_encode_default(obj)
+                    if encoded is not obj or _is_msgpack_serializable(obj):
+                        return encoded
+                    obj = ToPickle(obj)
+                    offset = len(frames)
+                    frames.extend(create_pickled_sub_frames(obj))
+                    return {"__Pickled__": offset}
+
+            frames[0] = msgpack.dumps(
+                msg, default=_encode_default_safe, use_bin_type=True
+            )
         return frames
 
     except Exception:
