@@ -2071,7 +2071,7 @@ class SchedulerState:
             for key in keys:
                 scheduler.validate_key(key)
 
-    def transition_released_waiting(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_released_waiting(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2110,7 +2110,7 @@ class SchedulerState:
 
         return recommendations, {}, {}
 
-    def transition_no_worker_processing(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_no_worker_processing(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2302,7 +2302,7 @@ class SchedulerState:
 
         return ws
 
-    def transition_waiting_processing(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_waiting_processing(self, key: Key, stimulus_id: str) -> RecsMsgs:
         """Possibly schedule a ready task. This is the primary dispatch for ready tasks.
 
         If there's no appropriate worker for the task (but the task is otherwise
@@ -2327,7 +2327,7 @@ class SchedulerState:
 
         return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
 
-    def transition_waiting_memory(
+    def _transition_waiting_memory(
         self,
         key: Key,
         stimulus_id: str,
@@ -2355,7 +2355,7 @@ class SchedulerState:
 
         return {}, {}, {}
 
-    def transition_processing_memory(
+    def _transition_processing_memory(
         self,
         key: Key,
         stimulus_id: str,
@@ -2433,7 +2433,7 @@ class SchedulerState:
 
         return recommendations, client_msgs, {}
 
-    def transition_memory_released(
+    def _transition_memory_released(
         self, key: Key, stimulus_id: str, *, safe: bool = False
     ) -> RecsMsgs:
         ts = self.tasks[key]
@@ -2494,7 +2494,7 @@ class SchedulerState:
 
         return recommendations, client_msgs, worker_msgs
 
-    def transition_released_erred(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_released_erred(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
         recommendations: Recs = {}
         client_msgs: Msgs = {}
@@ -2527,7 +2527,7 @@ class SchedulerState:
         # TODO: waiting data?
         return recommendations, client_msgs, {}
 
-    def transition_erred_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_erred_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
         recommendations: Recs = {}
         client_msgs: Msgs = {}
@@ -2564,7 +2564,7 @@ class SchedulerState:
 
         return recommendations, client_msgs, worker_msgs
 
-    def transition_waiting_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_waiting_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
         recommendations: Recs = {}
 
@@ -2591,7 +2591,7 @@ class SchedulerState:
 
         return recommendations, {}, {}
 
-    def transition_processing_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_processing_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
         recommendations: Recs = {}
         worker_msgs: Msgs = {}
@@ -2615,7 +2615,7 @@ class SchedulerState:
         self._propagate_released(ts, recommendations)
         return recommendations, {}, worker_msgs
 
-    def transition_processing_erred(
+    def _transition_processing_erred(
         self,
         key: Key,
         stimulus_id: str,
@@ -2732,7 +2732,7 @@ class SchedulerState:
 
         return recommendations, client_msgs, {}
 
-    def transition_no_worker_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_no_worker_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2746,7 +2746,7 @@ class SchedulerState:
         self._propagate_released(ts, recommendations)
         return recommendations, {}, {}
 
-    def transition_waiting_queued(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_waiting_queued(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2758,7 +2758,7 @@ class SchedulerState:
 
         return {}, {}, {}
 
-    def transition_waiting_no_worker(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_waiting_no_worker(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2769,7 +2769,7 @@ class SchedulerState:
 
         return {}, {}, {}
 
-    def transition_queued_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_queued_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2782,7 +2782,7 @@ class SchedulerState:
         self._propagate_released(ts, recommendations)
         return recommendations, {}, {}
 
-    def transition_queued_processing(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_queued_processing(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2806,7 +2806,7 @@ class SchedulerState:
         ts.exception_blame = ts.exception = ts.traceback = None
         self.task_metadata.pop(key, None)
 
-    def transition_memory_forgotten(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_memory_forgotten(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2838,7 +2838,7 @@ class SchedulerState:
 
         return recommendations, client_msgs, worker_msgs
 
-    def transition_released_forgotten(self, key: Key, stimulus_id: str) -> RecsMsgs:
+    def _transition_released_forgotten(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
@@ -2880,24 +2880,24 @@ class SchedulerState:
             Callable[..., RecsMsgs],
         ]
     ] = {
-        ("released", "waiting"): transition_released_waiting,
-        ("waiting", "released"): transition_waiting_released,
-        ("waiting", "processing"): transition_waiting_processing,
-        ("waiting", "no-worker"): transition_waiting_no_worker,
-        ("waiting", "queued"): transition_waiting_queued,
-        ("waiting", "memory"): transition_waiting_memory,
-        ("queued", "released"): transition_queued_released,
-        ("queued", "processing"): transition_queued_processing,
-        ("processing", "released"): transition_processing_released,
-        ("processing", "memory"): transition_processing_memory,
-        ("processing", "erred"): transition_processing_erred,
-        ("no-worker", "released"): transition_no_worker_released,
-        ("no-worker", "processing"): transition_no_worker_processing,
-        ("released", "forgotten"): transition_released_forgotten,
-        ("memory", "forgotten"): transition_memory_forgotten,
-        ("erred", "released"): transition_erred_released,
-        ("memory", "released"): transition_memory_released,
-        ("released", "erred"): transition_released_erred,
+        ("released", "waiting"): _transition_released_waiting,
+        ("waiting", "released"): _transition_waiting_released,
+        ("waiting", "processing"): _transition_waiting_processing,
+        ("waiting", "no-worker"): _transition_waiting_no_worker,
+        ("waiting", "queued"): _transition_waiting_queued,
+        ("waiting", "memory"): _transition_waiting_memory,
+        ("queued", "released"): _transition_queued_released,
+        ("queued", "processing"): _transition_queued_processing,
+        ("processing", "released"): _transition_processing_released,
+        ("processing", "memory"): _transition_processing_memory,
+        ("processing", "erred"): _transition_processing_erred,
+        ("no-worker", "released"): _transition_no_worker_released,
+        ("no-worker", "processing"): _transition_no_worker_processing,
+        ("released", "forgotten"): _transition_released_forgotten,
+        ("memory", "forgotten"): _transition_memory_forgotten,
+        ("erred", "released"): _transition_erred_released,
+        ("memory", "released"): _transition_memory_released,
+        ("released", "erred"): _transition_released_erred,
     }
 
     def story(
