@@ -128,6 +128,10 @@ def dumps(  # type: ignore[no-untyped-def]
                     frames.extend(create_pickled_sub_frames(obj))
                     return {"__Pickled__": offset}
 
+            # If possible, we want to avoid the performance penalty from the checks
+            # implemented in _encode_default_safe to fall back to pickle, so we
+            # try to serialize the data without the fallback first assuming that
+            # this succeeds in the overwhelming majority of cases.
             frames[0] = msgpack.dumps(
                 msg, default=_encode_default_safe, use_bin_type=True
             )
