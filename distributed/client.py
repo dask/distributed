@@ -2188,7 +2188,7 @@ class Client(SyncMethodMixin):
                 "Cannot gather Futures created by another client. "
                 f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
                 f"mismatched Futures and their client IDs (this client is {self.id}): "
-                f"{ {f: f.client.id for f in mismatched_futures} }"
+                f"{ {f: f.client.id for f in mismatched_futures} }"  # noqa: E201, E202
             )
         keys = [future.key for future in future_set]
         bad_data = dict()

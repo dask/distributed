@@ -2867,16 +2867,16 @@ class TaskGroupGraph(DashboardComponent):
                 f"{comp_tasks} ({comp_tasks / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_processing"].append(
-                f"{tasks_processing} ({tasks_processing/ tot_tasks * 100:.0f} %)"
+                f"{tasks_processing} ({tasks_processing / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_memory"].append(
-                f"{tasks_memory} ({tasks_memory/ tot_tasks * 100:.0f} %)"
+                f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased/ tot_tasks * 100:.0f} %)"
+                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
-                f"{ tasks_erred} ({tasks_erred/ tot_tasks * 100:.0f} %)"
+                f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
             )
 
         self.nodes_source.data.update(nodes_data)
