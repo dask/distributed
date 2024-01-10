@@ -108,7 +108,10 @@ def dumps(  # type: ignore[no-untyped-def]
         try:
             frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
         except TypeError as e:
-            logger.info(e)
+            logger.info(
+                f"Failed to serialize ({e}); falling back to pickle. "
+                "Be aware that this may degrade performance."
+            )
 
             def _encode_default_safe(obj):
                 encoded = _encode_default(obj)
