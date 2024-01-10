@@ -11,6 +11,7 @@ from distributed.protocol.serialize import (
     Serialize,
     Serialized,
     ToPickle,
+    _is_msgpack_serializable,
     merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
@@ -104,7 +105,31 @@ def dumps(  # type: ignore[no-untyped-def]
             else:
                 return msgpack_encode_default(obj)
 
-        frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        try:
+            frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        except TypeError as e:
+            logger.info(
+                f"Failed to serialize ({e}); falling back to pickle. "
+                "Be aware that this may degrade performance."
+            )
+
+            def _encode_default_safe(obj):
+                encoded = _encode_default(obj)
+                if encoded is not obj or _is_msgpack_serializable(obj):
+                    return encoded
+
+                obj = ToPickle(obj)
+                offset = len(frames)
+                frames.extend(create_pickled_sub_frames(obj))
+                return {"__Pickled__": offset}
+
+            # If possible, we want to avoid the performance penalty from the checks
+            # implemented in _encode_default_safe to fall back to pickle, so we
+            # try to serialize the data without the fallback first assuming that
+            # this succeeds in the overwhelming majority of cases.
+            frames[0] = msgpack.dumps(
+                msg, default=_encode_default_safe, use_bin_type=True
+            )
         return frames
 
     except Exception:
