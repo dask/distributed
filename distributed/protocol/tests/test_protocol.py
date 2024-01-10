@@ -199,3 +199,12 @@ def test_fallback_to_pickle():
     # Make sure that we pickle the individual ints, not the entire dict
     assert L[0].count(b"__Pickled__") == 2
     assert loads(L) == d
+
+    d = {np.int64(1): {Serialize(2): "a"}, 3: ("b", "c"), 4: "d"}
+    with captured_logger("distributed.protocol.core") as logger:
+        L = dumps(d)
+    assert "can not serialize 'numpy.int64'" in logger.getvalue()
+    # Make sure that we still serialize and don't pickle indiscriminately
+    assert L[0].count(b"__Pickled__") == 1
+    assert L[0].count(b"__Serialized__") == 1
+    assert loads(L) == {np.int64(1): {2: "a"}, 3: ("b", "c"), 4: "d"}
