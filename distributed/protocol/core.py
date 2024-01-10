@@ -108,25 +108,17 @@ def dumps(  # type: ignore[no-untyped-def]
         try:
             frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
         except TypeError as e:
-            logger.warning(e)
+            logger.info(e)
 
             def _encode_default_safe(obj):
-                if isinstance(obj, (Serialize, Serialized)):
-                    offset = len(frames)
-                    frames.extend(create_serialized_sub_frames(obj))
-                    return {"__Serialized__": offset}
-                elif isinstance(obj, (ToPickle, Pickled)):
-                    offset = len(frames)
-                    frames.extend(create_pickled_sub_frames(obj))
-                    return {"__Pickled__": offset}
-                else:
-                    encoded = msgpack_encode_default(obj)
-                    if encoded is not obj or _is_msgpack_serializable(obj):
-                        return encoded
-                    obj = ToPickle(obj)
-                    offset = len(frames)
-                    frames.extend(create_pickled_sub_frames(obj))
-                    return {"__Pickled__": offset}
+                encoded = _encode_default(obj)
+                if encoded is not obj or _is_msgpack_serializable(obj):
+                    return encoded
+
+                obj = ToPickle(obj)
+                offset = len(frames)
+                frames.extend(create_pickled_sub_frames(obj))
+                return {"__Pickled__": offset}
 
             # If possible, we want to avoid the performance penalty from the checks
             # implemented in _encode_default_safe to fall back to pickle, so we
