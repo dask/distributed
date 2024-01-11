@@ -370,8 +370,6 @@ def download_and_parse_artifacts(
             jobs_df = get_jobs(r, session=session, repo=repo)
             r["dfs"] = []
             for a in r["artifacts"]:
-                if repo.endswith("/dask") and not a["name"].startswith("test-results-"):
-                    continue
                 url = a["archive_download_url"]
                 df: pandas.DataFrame | None
                 xml = download_and_parse_artifact(url, session=session)
