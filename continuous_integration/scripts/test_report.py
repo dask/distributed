@@ -162,9 +162,7 @@ def get_jobs(run, session, repo):
         df_jobs["suite_name"] = name_components.iloc[:, 0].str.cat(
             name_components.iloc[:, 1:], sep="-"
         )
-        df_jobs["suite_name"] = ("test-results-" + df_jobs.suite_name).str.replace(
-            "--", "-"
-        )
+        df_jobs["suite_name"] = df_jobs.suite_name.str.replace("--", "-")
     else:
         name_components = df_jobs.name.str.split("-", expand=True).dropna()
         if len(name_components.columns) != 5:
