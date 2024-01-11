@@ -340,10 +340,13 @@ async def test_environment_variable_config(c, s, monkeypatch):
     },
 )
 async def test_environment_variable_pre_post_spawn(c, s, n):
-    assert n.env == {"PRE-SPAWN": "1", "POST-SPAWN": "2"}
+    assert n.env == {"PRE-SPAWN": "1", "POST-SPAWN": "2", "PYTHONHASHSEED": "6640"}
     results = await c.run(lambda: os.environ)
     assert results[n.worker_address]["PRE-SPAWN"] == "1"
     assert results[n.worker_address]["POST-SPAWN"] == "2"
+    # if unset in pre-spawn-environ config, PYTHONHASHSEED defaults to "6640" to ensure
+    # consistent hashing across workers; https://github.com/dask/distributed/issues/4141
+    assert results[n.worker_address]["PYTHONHASHSEED"] == "6640"
 
     del os.environ["PRE-SPAWN"]
     assert "POST-SPAWN" not in os.environ

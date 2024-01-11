@@ -361,18 +361,22 @@ class HashJoinP2PLayer(Layer):
 
     def _construct_graph(self) -> dict[tuple | str, tuple]:
         token_left = tokenize(
-            "hash-join",
+            # Include self.name to ensure that shuffle IDs are unique for individual
+            # merge operations. Reusing shuffles between merges is dangerous because of
+            # required coordination and complexity introduced through dynamic clusters.
+            self.name,
             self.name_input_left,
             self.left_on,
-            self.npartitions,
-            self.parts_out,
+            self.left_index,
         )
         token_right = tokenize(
-            "hash-join",
+            # Include self.name to ensure that shuffle IDs are unique for individual
+            # merge operations. Reusing shuffles between merges is dangerous because of
+            # required coordination and complexity introduced through dynamic clusters.
+            self.name,
             self.name_input_right,
             self.right_on,
-            self.npartitions,
-            self.parts_out,
+            self.right_index,
         )
         dsk: dict[tuple | str, tuple] = {}
         name_left = "hash-join-transfer-" + token_left

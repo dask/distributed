@@ -1454,10 +1454,10 @@ class Client(SyncMethodMixin):
                 f"`n_workers` must be a positive integer. Instead got {n_workers}."
             )
 
-        if self.cluster is None:
-            return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+        if self.cluster and hasattr(self.cluster, "wait_for_workers"):
+            return self.cluster.wait_for_workers(n_workers, timeout)
 
-        return self.cluster.wait_for_workers(n_workers, timeout)
+        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
         # Don't send heartbeat if scheduler comm or cluster are already closed
@@ -2188,7 +2188,7 @@ class Client(SyncMethodMixin):
                 "Cannot gather Futures created by another client. "
                 f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
                 f"mismatched Futures and their client IDs (this client is {self.id}): "
-                f"{ {f: f.client.id for f in mismatched_futures} }"
+                f"{ {f: f.client.id for f in mismatched_futures} }"  # noqa: E201, E202
             )
         keys = [future.key for future in future_set]
         bad_data = dict()
@@ -3790,6 +3790,14 @@ class Client(SyncMethodMixin):
         >>> client.upload_file('mylibrary.egg')  # doctest: +SKIP
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
+        >>>
+        >>> # Where did that file go? Use `dask_worker.local_directory`.
+        >>> def where_is_mylibrary(dask_worker):
+        >>>     path = pathlib.Path(dask_worker.local_directory) / 'mylibrary.egg'
+        >>>     assert path.exists()
+        >>>     return str(path)
+        >>>
+        >>> client.run(where_is_mylibrary)  # doctest: +SKIP
         """
         name = filename + str(uuid.uuid4())
 
@@ -4857,7 +4865,7 @@ class Client(SyncMethodMixin):
             warnings.warn(
                 "The `idempotent` argument is deprecated and will be removed in a "
                 "future version. Please mark your plugin as idempotent by setting its "
-                "`.idempotent` atrribute to `True`.",
+                "`.idempotent` attribute to `True`.",
                 FutureWarning,
             )
         else:

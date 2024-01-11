@@ -1041,12 +1041,12 @@ async def test_blocklist_shuffle_split(c, s, a, b):
     dd = pytest.importorskip("dask.dataframe")
     npart = 10
     df = dd.from_pandas(pd.DataFrame({"A": range(100), "B": 1}), npartitions=npart)
-    graph = df.shuffle(
-        "A",
-        shuffle="tasks",
-        # If we don't have enough partitions, we'll fall back to a simple shuffle
-        max_branch=npart - 1,
-    ).sum()
+    with dask.config.set({"dataframe.shuffle.method": "tasks"}):
+        graph = df.shuffle(
+            "A",
+            # If we don't have enough partitions, we'll fall back to a simple shuffle
+            max_branch=npart - 1,
+        ).sum()
     res = c.compute(graph)
 
     while not s.tasks:

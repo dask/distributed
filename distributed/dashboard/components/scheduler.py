@@ -276,10 +276,17 @@ class MemoryColor:
     orange: float
     red: float
 
-    def __init__(self):
+    def __init__(
+        self, neutral_color="blue", target_color="orange", terminated_color="red"
+    ):
+        self.neutral_color = neutral_color
+        self.target_color = target_color
+        self.terminated_color = terminated_color
+
         target = dask.config.get("distributed.worker.memory.target")
         spill = dask.config.get("distributed.worker.memory.spill")
         terminate = dask.config.get("distributed.worker.memory.terminate")
+
         # These values can be False. It's also common to configure them to impossibly
         # high values to achieve the same effect.
         self.orange = min(target or math.inf, spill or math.inf)
@@ -287,14 +294,14 @@ class MemoryColor:
 
     def _memory_color(self, current: int, limit: int, status: Status) -> str:
         if status != Status.running:
-            return "red"
+            return self.terminated_color
         if not limit:
-            return "blue"
+            return self.neutral_color
         if current >= limit * self.red:
-            return "red"
+            return self.terminated_color
         if current >= limit * self.orange:
-            return "orange"
-        return "blue"
+            return self.target_color
+        return self.neutral_color
 
 
 class ClusterMemory(DashboardComponent, MemoryColor):
@@ -2860,16 +2867,16 @@ class TaskGroupGraph(DashboardComponent):
                 f"{comp_tasks} ({comp_tasks / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_processing"].append(
-                f"{tasks_processing} ({tasks_processing/ tot_tasks * 100:.0f} %)"
+                f"{tasks_processing} ({tasks_processing / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_memory"].append(
-                f"{tasks_memory} ({tasks_memory/ tot_tasks * 100:.0f} %)"
+                f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased/ tot_tasks * 100:.0f} %)"
+                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
-                f"{ tasks_erred} ({tasks_erred/ tot_tasks * 100:.0f} %)"
+                f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
             )
 
         self.nodes_source.data.update(nodes_data)
@@ -3607,21 +3614,23 @@ class FinePerformanceMetrics(DashboardComponent):
         )
         if spans_ext and self.span_tag_selector.value:
             span = spans_ext.merge_by_tags(*self.span_tag_selector.value)
-            execute_metrics = span.cumulative_worker_metrics
+            metrics = span.cumulative_worker_metrics
         elif spans_ext and spans_ext.spans:
             # Calculate idle time
             span = spans_ext.merge_all()
-            execute_metrics = span.cumulative_worker_metrics
+            metrics = span.cumulative_worker_metrics
         else:
             # Spans extension is not loaded
-            execute_metrics = {
+            metrics = {
                 k: v
                 for k, v in self.scheduler.cumulative_worker_metrics.items()
-                if isinstance(k, tuple) and k[0] == "execute"
+                if isinstance(k, tuple)
+                and len(k) == 4  # Skip get-data, gather-deps, and memory-monitor
             }
 
-        for (context, function, activity, unit), v in execute_metrics.items():
-            assert context == "execute"
+        for (context, function, activity, unit), v in metrics.items():
+            if context != "execute":
+                continue  # TODO visualize 'shuffle' metrics
             assert isinstance(function, str)
             assert isinstance(unit, str)
             assert self.unit_selector.value
@@ -4462,12 +4471,8 @@ class Shuffling(DashboardComponent):
                 data[f"{prefix}_memory"].append(d[prefix]["memory"])
                 data[f"{prefix}_memory_limit"].append(memory_limit)
                 data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
-                data[f"{prefix}_avg_duration"].append(
-                    d[prefix]["diagnostics"].get("avg_duration", 0)
-                )
-                data[f"{prefix}_avg_size"].append(
-                    d[prefix]["diagnostics"].get("avg_size", 0)
-                )
+                data[f"{prefix}_avg_duration"].append(d[prefix]["avg_duration"])
+                data[f"{prefix}_avg_size"].append(d[prefix]["avg_size"])
                 data[f"{prefix}_read"].append(d[prefix]["read"])
                 data[f"{prefix}_written"].append(d[prefix]["written"])
                 if self.scheduler.workers[worker].last_seen < now - 5:

@@ -13,6 +13,7 @@ import dask.bag as db
 import dask.dataframe as dd
 
 from distributed.client import wait
+from distributed.nanny import Nanny
 from distributed.utils_test import gen_cluster
 
 dfs = [
@@ -124,6 +125,18 @@ async def test_bag_groupby_tasks_default(c, s, a, b):
     assert not any("partd" in k[0] for k in b2.dask)
 
 
+@gen_cluster(client=True, Worker=Nanny)
+async def test_bag_groupby_key_hashing(c, s, a, b):
+    # https://github.com/dask/distributed/issues/4141
+    dsk = {("x", 0): (range, 5), ("x", 1): (range, 5), ("x", 2): (range, 5)}
+    grouped = db.Bag(dsk, "x", 3).groupby(lambda x: "even" if x % 2 == 0 else "odd")
+    remote = c.compute(grouped)
+    result = await remote
+    assert len(result) == 2
+    assert ("odd", [1, 3] * 3) in result
+    assert ("even", [0, 2, 4] * 3) in result
+
+
 @pytest.mark.parametrize("wait", [wait, lambda x: None])
 def test_dataframe_set_index_sync(wait, client):
     df = dask.datasets.timeseries(
@@ -137,7 +150,8 @@ def test_dataframe_set_index_sync(wait, client):
     df = df.persist()
     wait(df)
 
-    df2 = df.set_index("name", shuffle="tasks")
+    with dask.config.set({"dataframe.shuffle.method": "tasks"}):
+        df2 = df.set_index("name")
     df2 = df2.persist()
 
     assert len(df2)

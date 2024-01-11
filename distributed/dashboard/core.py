@@ -6,8 +6,8 @@ import warnings
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.resources import Resources
-from bokeh.server.server import BokehTornado
 from bokeh.server.util import create_hosts_allowlist
+from packaging.version import parse as parse_version
 
 import dask
 
@@ -32,9 +32,14 @@ else:
     from bokeh.models import TabPanel  # noqa: F401
 
 
-class DaskBokehTornado(BokehTornado):
-    def resources(self, absolute_url: str | bool | None = True) -> Resources:
-        return super().resources(absolute_url)
+if BOKEH_VERSION < parse_version("3.3.0"):
+    from bokeh.server.server import BokehTornado as DaskBokehTornado
+else:
+    from bokeh.server.server import BokehTornado
+
+    class DaskBokehTornado(BokehTornado):  # type: ignore[no-redef]
+        def resources(self, absolute_url: str | bool | None = True) -> Resources:
+            return super().resources(absolute_url)
 
 
 def BokehApplication(applications, server, prefix="/", template_variables=None):

@@ -17,6 +17,7 @@ np = pytest.importorskip("numpy")
 dd = pytest.importorskip("dask.dataframe")
 import pandas as pd
 
+import dask
 from dask.dataframe.utils import assert_eq
 
 from distributed.shuffle import HashJoinP2PLayer, P2PShuffleLayer
@@ -124,7 +125,8 @@ async def test_merge_known_to_unknown(
     expected = df_left.merge(df_right, on=on, how=how)
 
     # Perform merge
-    result_graph = ddf_left.merge(ddf_right_unknown, on=on, how=how, shuffle="p2p")
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        result_graph = ddf_left.merge(ddf_right_unknown, on=on, how=how)
     result = await c.compute(result_graph)
     # Assertions
     assert_eq(result, expected)
@@ -148,7 +150,8 @@ async def test_merge_unknown_to_known(
     expected = df_left.merge(df_right, on=on, how=how)
 
     # Perform merge
-    result_graph = ddf_left_unknown.merge(ddf_right, on=on, how=how, shuffle="p2p")
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        result_graph = ddf_left_unknown.merge(ddf_right, on=on, how=how)
     result = await c.compute(result_graph)
 
     # Assertions
@@ -173,9 +176,8 @@ async def test_merge_unknown_to_unknown(
     expected = df_left.merge(df_right, on=on, how=how)
 
     # Merge unknown to unknown
-    result_graph = ddf_left_unknown.merge(
-        ddf_right_unknown, on=on, how=how, shuffle="p2p"
-    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        result_graph = ddf_left_unknown.merge(ddf_right_unknown, on=on, how=how)
     if not any(
         isinstance(layer, (HashJoinP2PLayer, P2PShuffleLayer))
         for layer in result_graph.dask.layers.values()

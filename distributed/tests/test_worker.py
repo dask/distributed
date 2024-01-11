@@ -30,7 +30,6 @@ from dask import delayed
 from dask.system import CPU_COUNT
 from dask.utils import tmpfile
 
-import distributed
 from distributed import (
     Client,
     Event,
@@ -46,7 +45,6 @@ from distributed.comm.registry import backends
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
-from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import ForwardOutput
 from distributed.metrics import time
 from distributed.protocol import pickle
@@ -2267,17 +2265,6 @@ async def test_process_executor_raise_exception(c, s, a, b):
             await future
 
 
-@pytest.mark.gpu
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_gpu_executor(c, s, w):
-    if nvml.device_get_count() > 0:
-        e = w.executors["gpu"]
-        assert isinstance(e, distributed.threadpoolexecutor.ThreadPoolExecutor)
-        assert e._max_workers == 1
-    else:
-        assert "gpu" not in w.executors
-
-
 async def assert_task_states_on_worker(
     expected: dict[str, str], worker: Worker
 ) -> None:
@@ -3324,7 +3311,8 @@ async def test_broken_comm(c, s, a, b):
         start="2000-01-01",
         end="2000-01-10",
     )
-    s = df.shuffle("id", shuffle="tasks")
+    with dask.config.set({"dataframe.shuffle.method": "tasks"}):
+        s = df.shuffle("id")
     await c.compute(s.size)
 
 
