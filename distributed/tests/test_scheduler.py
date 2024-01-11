@@ -2493,7 +2493,11 @@ async def test_no_workers_timeout_bad_restrictions(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
 async def test_no_workers_timeout_queued(c, s, a):
     """Don't trip no-workers-timeout when there are queued tasks AND processing tasks"""
     ev = Event()
