@@ -5,6 +5,7 @@ on:
   pull_request:
   schedule:
     - cron: "0 6,18 * * *"
+  workflow_dispatch:
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
