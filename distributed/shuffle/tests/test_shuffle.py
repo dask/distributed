@@ -44,8 +44,8 @@ from distributed import (
 from distributed.core import ConnectionPool
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
+    buffers_to_table,
     convert_shards,
-    list_of_buffers_to_table,
     read_from_disk,
     serialize_table,
 )
@@ -1151,7 +1151,7 @@ def test_processing_chain(tmp_path):
     # We then receive them back and reconstute them
 
     by_worker = {
-        worker: list_of_buffers_to_table(list_of_batches)
+        worker: buffers_to_table(list_of_batches)
         for worker, list_of_batches in batches.items()
     }
     assert sum(map(len, by_worker.values())) == len(df)
