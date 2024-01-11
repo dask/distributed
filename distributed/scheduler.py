@@ -3520,7 +3520,7 @@ class Scheduler(SchedulerState, ServerNode):
     worker_ttl: float | None
     idle_since: float | None
     idle_timeout: float | None
-    no_workers_since: float | None  # Note: not None iff there are pending tasks
+    _no_workers_since: float | None  # Note: not None iff there are pending tasks
     no_workers_timeout: float | None
 
     def __init__(
@@ -3595,7 +3595,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.no_workers_timeout = parse_timedelta(
             dask.config.get("distributed.scheduler.no-workers-timeout")
         )
-        self.no_workers_since = None
+        self._no_workers_since = None
 
         self.time_started = self.idle_since  # compatibility for dask-gateway
         self._replica_lock = RLock()
@@ -3872,7 +3872,7 @@ class Scheduler(SchedulerState, ServerNode):
         pc = PeriodicCallback(self.check_idle, 250)
         self.periodic_callbacks["idle-timeout"] = pc
 
-        pc = PeriodicCallback(self.check_no_workers, 250)
+        pc = PeriodicCallback(self._check_no_workers, 250)
         self.periodic_callbacks["no-workers-timeout"] = pc
 
         if extensions is None:
@@ -8190,25 +8190,25 @@ class Scheduler(SchedulerState, ServerNode):
                 self._ongoing_background_tasks.call_soon(self.close)
         return self.idle_since
 
-    def check_no_workers(self) -> None:
+    def _check_no_workers(self) -> None:
         if self.status in (Status.closing, Status.closed):
             return  # pragma: nocover
 
         if (not self.queued and not self.unrunnable) or (self.queued and self.workers):
-            self.no_workers_since = None
+            self._no_workers_since = None
             return
 
         # 1. There are queued or unrunnable tasks and no workers at all
         # 2. There are unrunnable tasks and no workers satisfy their restrictions
         # (Only rootish tasks can be queued, and rootish tasks can't have restrictions)
 
-        if not self.no_workers_since:
-            self.no_workers_since = time()
+        if not self._no_workers_since:
+            self._no_workers_since = time()
             return
 
         if (
             self.no_workers_timeout
-            and time() > self.no_workers_since + self.no_workers_timeout
+            and time() > self._no_workers_since + self.no_workers_timeout
         ):
             logger.info(
                 "Tasks have been without any workers to run them for %s; "

@@ -2449,7 +2449,7 @@ async def test_no_workers_timeout_disabled(c, s, a, b):
     """no-workers-timeout has been disabled"""
     future = c.submit(inc, 1, key="x")
     await wait_for_state("x", ("queued", "no-worker"), s)
-    s.check_no_workers()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
     assert s.status == Status.running
 
@@ -2462,7 +2462,7 @@ async def test_no_workers_timeout_disabled(c, s, a, b):
 async def test_no_workers_timeout_without_workers(c, s):
     """Trip no-workers-timeout when there are no workers available"""
     # Don't trip scheduler shutdown when there are no tasks
-    s.check_no_workers()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
     assert s.status == Status.running
 
@@ -2493,7 +2493,7 @@ async def test_no_workers_timeout_queued(c, s, a):
         await asyncio.sleep(0.01)
     assert s.queued or math.isinf(s.WORKER_SATURATION)
 
-    s.check_no_workers()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
     assert s.status == Status.running
     await ev.set()
