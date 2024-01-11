@@ -39,7 +39,14 @@ from distributed.comm.utils import (
 )
 from distributed.protocol.utils import host_array, pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nbytes
+from distributed.utils import (
+    ensure_ip,
+    ensure_memoryview,
+    get_ip,
+    get_ipv6,
+    is_python_shutting_down,
+    nbytes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +240,7 @@ class TCP(Comm):
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not sys.is_finalizing():
+            if not is_python_shutting_down():
                 convert_stream_closed_error(self, e)
         except BaseException:
             # Some OSError, CancelledError or another "low-level" exception.
@@ -305,7 +312,7 @@ class TCP(Comm):
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not sys.is_finalizing():
+            if not is_python_shutting_down():
                 convert_stream_closed_error(self, e)
         except BaseException:
             # Some OSError or a another "low-level" exception. We do not really know
