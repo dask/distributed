@@ -8191,10 +8191,18 @@ class Scheduler(SchedulerState, ServerNode):
         return self.idle_since
 
     def _check_no_workers(self) -> None:
+        """Shut down the scheduler if there have been tasks ready to run which have
+        nowhere to run for `distributed.scheduler.no-workers-timeout`, and there
+        aren't other tasks running.
+        """
         if self.status in (Status.closing, Status.closed):
             return  # pragma: nocover
 
-        if (not self.queued and not self.unrunnable) or (self.queued and self.workers):
+        if (
+            (not self.queued and not self.unrunnable)
+            or (self.queued and self.workers)
+            or any(ws.processing for ws in self.workers.values())
+        ):
             self._no_workers_since = None
             return
 
