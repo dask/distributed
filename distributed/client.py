@@ -507,7 +507,7 @@ class Future(WrappedKey):
         except AttributeError:
             # Occasionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
-            if not sys.is_finalizing():
+            if not is_python_shutting_down():
                 raise
         except RuntimeError:  # closed event loop
             pass
