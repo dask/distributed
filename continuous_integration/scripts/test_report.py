@@ -229,14 +229,16 @@ def get_artifacts_for_workflow_run(
     return artifacts
 
 
-def suite_from_name(name: str, n: int) -> str:
+def suite_from_name(name: str, n: int | None = None) -> str:
     """
     Get a test suite name from an artifact name. The artifact
     can have matrix partitions, pytest marks, etc. Basically,
     just lop off the front of the name to get the suite.
     """
-    parts = name.split("-")
-    return "-".join(parts[:n])
+    if n is not None:
+        parts = name.split("-")
+        return "-".join(parts[:n])
+    return name
 
 
 def download_and_parse_artifact(
@@ -393,7 +395,7 @@ def download_and_parse_artifacts(
                 df2 = df.assign(
                     name=a["name"],
                     suite=suite_from_name(
-                        a["name"], -1 if repo.endswith("/dask") else 4
+                        a["name"], None if repo.endswith("/dask") else 4
                     ),
                     date=r["created_at"],
                     html_url=html_url,
