@@ -2443,7 +2443,7 @@ async def test_idle_timeout_no_workers(c, s):
 @gen_cluster(
     client=True,
     nthreads=[],
-    config={"distributed.scheduler.idle-timeout-no-worker": None},
+    config={"distributed.scheduler.no-workers-timeout": None},
 )
 async def test_no_workers_timeout_disabled(c, s, a, b):
     """no-workers-timeout has been disabled"""
