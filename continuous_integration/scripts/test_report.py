@@ -10,7 +10,7 @@ import shelve
 import sys
 import zipfile
 from collections.abc import Iterable, Iterator
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any, cast
 
 import altair
@@ -374,9 +374,6 @@ def download_and_parse_artifacts(
             for a in r["artifacts"]:
                 if repo.endswith("/dask") and not a["name"].startswith("test-results-"):
                     continue
-                # TODO: only applies to milesgranger/dask from bad prior test
-                if a["name"] == "test-results-":
-                    continue
                 url = a["archive_download_url"]
                 df: pandas.DataFrame | None
                 xml = download_and_parse_artifact(url, session=session)
@@ -508,7 +505,7 @@ def main(argv: list[str] | None = None) -> None:
             if not len(df):
                 continue
             jobs.append(executor.submit(make_chart, name, df, times))
-        charts = [job.result() for job in as_completed(jobs)]
+        charts = [job.result() for job in jobs]
 
     # Concat the sub-charts and output to file
     chart = (
