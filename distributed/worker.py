@@ -131,6 +131,7 @@ from distributed.worker_state_machine import (
     DeprecatedWorkerStateAttribute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
+    ExternalTaskEvent,
     FindMissingEvent,
     FreeKeysEvent,
     GatherDepBusyEvent,
@@ -1818,10 +1819,14 @@ class Worker(BaseWorker, ServerNode):
         self,
         data: dict[Key, object],
         stimulus_id: str | None = None,
+        external: bool = False,
     ) -> dict[str, Any]:
+        if external:
+            stimulus_id = f"external-task-{time()}"
+            self.handle_stimulus(ExternalTaskEvent(data=data, stimulus_id=stimulus_id))
         if stimulus_id is None:
             stimulus_id = f"update-data-{time()}"
-        self.handle_stimulus(UpdateDataEvent(data=data, stimulus_id=stimulus_id))
+            self.handle_stimulus(UpdateDataEvent(data=data, stimulus_id=stimulus_id))
         return {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
 
     async def set_resources(self, **resources: float) -> None:
