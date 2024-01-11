@@ -2405,11 +2405,11 @@ async def test_idle_timeout(c, s, a, b):
     pc.stop()
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[],
-)
+@gen_cluster(client=True, nthreads=[])
 async def test_idle_timeout_no_workers(c, s):
+    """Test that idle-timeout is not triggered if there are no workers available
+    but there are tasks queued
+    """
     # Cancel the idle check periodic timeout so we can step through manually
     s.periodic_callbacks["idle-timeout"].stop()
 
@@ -2442,32 +2442,61 @@ async def test_idle_timeout_no_workers(c, s):
 
 @gen_cluster(
     client=True,
-    nthreads=[("127.0.0.1", 1)],
-    config={"distributed.scheduler.idle-timeout-no-worker": "1s"},
+    nthreads=[],
+    config={"distributed.scheduler.idle-timeout-no-worker": None},
 )
-async def test_idle_timeout_unrunnable(c, s, a):
-    future = c.submit(inc, 1, workers="127.0.0.5:9999")
+async def test_no_workers_timeout_disabled(c, s, a, b):
+    """no-workers-timeout has been disabled"""
+    future = c.submit(inc, 1, key="x")
+    await wait_for_state("x", ("queued", "no-worker"), s)
+    s.check_no_workers()
+    await asyncio.sleep(0.2)
+    assert s.status == Status.running
 
-    while not s.tasks:
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
+async def test_no_workers_timeout_without_workers(c, s):
+    """Trip no-workers-timeout when there are no workers available"""
+    # Don't trip scheduler shutdown when there are no tasks
+    s.check_no_workers()
+    await asyncio.sleep(0.2)
+    assert s.status == Status.running
+
+    future = c.submit(inc, 1)
+    while s.status != Status.closed:
         await asyncio.sleep(0.01)
 
-    assert s.tasks[future.key] in s.unrunnable
-    assert not s.check_idle()
 
-    while not s.no_worker_since:
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
+async def test_no_workers_timeout_bad_restrictions(c, s, a, b):
+    """Trip no-workers-timeout when there are workers available but none satisfies
+    task restrictions
+    """
+    future = c.submit(inc, 1, key="x", workers=["127.0.0.2:1234"])
+    while s.status != Status.closed:
         await asyncio.sleep(0.01)
 
-    # still not idle
-    assert not s.check_idle()
 
-    for _ in range(10):
-        # wait for idle-timeout-no-worker
-        await asyncio.sleep(0.1)
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_no_workers_timeout_queued(c, s, a):
+    """Don't trip no-workers-timeout when there are queued tasks AND processing tasks"""
+    ev = Event()
+    futures = [c.submit(lambda ev: ev.wait(), ev, pure=False) for _ in range(3)]
+    while not a.state.tasks:
+        await asyncio.sleep(0.01)
+    assert s.queued or math.isinf(s.WORKER_SATURATION)
 
-    assert s.check_idle()
-
-    # task still waiting to be processed
-    assert s.tasks[future.key] in s.unrunnable
+    s.check_no_workers()
+    await asyncio.sleep(0.2)
+    assert s.status == Status.running
+    await ev.set()
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})

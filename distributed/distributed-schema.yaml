@@ -76,17 +76,20 @@ properties:
             description: |
               Shut down the scheduler after this duration if no activity has occurred
 
-              This can be helpful to reduce costs and stop zombie processes from roaming the earth.
-
-          idle-timeout-no-worker:
+          no-workers-timeout:
             type:
-            - string:
+            - string
+            - "null"
             description: |
-              Consider the scheduler idle after this duration if all remaining tasks have no workers.
+              Shut down the scheduler after this duration if there are pending tasks,
+              but no workers that can process them. This can either mean that there are
+              no workers running at all, or that there are idle workers but they've been
+              excluded through worker or resource restrictions.
 
-              This works in conjuction with idle-timeout. This prevents the scheduler from running
-              indefinitely if there exists tasks that still need to be process but no workers are 
-              processing them.
+              In adaptive clusters, this timeout must be set to be safely higher than
+              the time it takes for workers to spin up.
+
+              Works in conjunction with idle-timeout.
 
           work-stealing:
             type: boolean

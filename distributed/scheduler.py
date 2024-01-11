@@ -3512,13 +3512,16 @@ class Scheduler(SchedulerState, ServerNode):
         report results
     * **task_duration:** ``{key-prefix: time}``
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
-
-    * **no_worker_since** ``float``
-        Time since tasks were in no worker state and no worker is processing
     """
 
     default_port = 8786
     _instances: ClassVar[weakref.WeakSet[Scheduler]] = weakref.WeakSet()
+
+    worker_ttl: float | None
+    idle_since: float | None
+    idle_timeout: float | None
+    no_workers_since: float | None  # Note: not None iff there are pending tasks
+    no_workers_timeout: float | None
 
     def __init__(
         self,
@@ -3581,20 +3584,19 @@ class Scheduler(SchedulerState, ServerNode):
         self.service_kwargs = service_kwargs or {}
         self.services = {}
         self.scheduler_file = scheduler_file
-        worker_ttl = worker_ttl or dask.config.get("distributed.scheduler.worker-ttl")
-        self.worker_ttl = parse_timedelta(worker_ttl) if worker_ttl else None
-        idle_timeout = idle_timeout or dask.config.get(
-            "distributed.scheduler.idle-timeout"
+
+        self.worker_ttl = parse_timedelta(
+            worker_ttl or dask.config.get("distributed.scheduler.worker-ttl")
         )
-        if idle_timeout:
-            self.idle_timeout = parse_timedelta(idle_timeout)
-        else:
-            self.idle_timeout = None
+        self.idle_timeout = parse_timedelta(
+            idle_timeout or dask.config.get("distributed.scheduler.idle-timeout")
+        )
         self.idle_since = time()
-        self.idle_timeout_no_worker = parse_timedelta(
-            dask.config.get("distributed.scheduler.idle-timeout-no-worker")
+        self.no_workers_timeout = parse_timedelta(
+            dask.config.get("distributed.scheduler.no-workers-timeout")
         )
-        self.no_worker_since = None
+        self.no_workers_since = None
+
         self.time_started = self.idle_since  # compatibility for dask-gateway
         self._replica_lock = RLock()
         self.bandwidth_workers = defaultdict(float)
@@ -3867,8 +3869,11 @@ class Scheduler(SchedulerState, ServerNode):
             pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl * 1000)
             self.periodic_callbacks["worker-ttl"] = pc
 
-        pc = PeriodicCallback(self.check_idle, (self.idle_timeout or 1) * 1000 / 4)
+        pc = PeriodicCallback(self.check_idle, 250)
         self.periodic_callbacks["idle-timeout"] = pc
+
+        pc = PeriodicCallback(self.check_no_workers, 250)
+        self.periodic_callbacks["no-workers-timeout"] = pc
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS.copy()
@@ -8148,27 +8153,20 @@ class Scheduler(SchedulerState, ServerNode):
 
     def check_idle(self) -> float | None:
         if self.status in (Status.closing, Status.closed):
-            return None
+            return None  # pragma: nocover
 
         if self.transition_counter != self._idle_transition_counter:
             self._idle_transition_counter = self.transition_counter
             self.idle_since = None
             return None
 
-        if self.queued or any(ws.processing for ws in self.workers.values()):
+        if (
+            self.queued
+            or self.unrunnable
+            or any(ws.processing for ws in self.workers.values())
+        ):
             self.idle_since = None
-            self.no_worker_since = None
             return None
-
-        if self.unrunnable and not self.no_worker_since:
-            self.idle_since = None
-            self.no_worker_since = time()
-            return None
-
-        if self.no_worker_since:
-            # if no worker process task after given time, consider it idle
-            if time() < self.no_worker_since + self.idle_timeout_no_worker:
-                return None
 
         if not self.idle_since:
             self.idle_since = time()
@@ -8191,6 +8189,33 @@ class Scheduler(SchedulerState, ServerNode):
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
         return self.idle_since
+
+    def check_no_workers(self) -> None:
+        if self.status in (Status.closing, Status.closed):
+            return  # pragma: nocover
+
+        if (not self.queued and not self.unrunnable) or (self.queued and self.workers):
+            self.no_workers_since = None
+            return
+
+        # 1. There are queued or unrunnable tasks and no workers at all
+        # 2. There are unrunnable tasks and no workers satisfy their restrictions
+        # (Only rootish tasks can be queued, and rootish tasks can't have restrictions)
+
+        if not self.no_workers_since:
+            self.no_workers_since = time()
+            return
+
+        if (
+            self.no_workers_timeout
+            and time() > self.no_workers_since + self.no_workers_timeout
+        ):
+            logger.info(
+                "Tasks have been without any workers to run them for %s; "
+                "shutting scheduler down",
+                format_time(self.no_workers_timeout),
+            )
+            self._ongoing_background_tasks.call_soon(self.close)
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
