@@ -210,6 +210,32 @@ async def test_basic_integration(c, s, a, b, npartitions, disk):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.parametrize("disk", [True, False])
+@gen_cluster(client=True)
+async def test_stable_ordering(c, s, a, b, disk):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": int, "y": int},
+        freq="10 s",
+    )
+    df["x"] = df["x"] % 19
+    df["y"] = df["y"] % 23
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+    ):
+        shuffled = dd.shuffle.shuffle(df, "x")
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(
+        result.drop_duplicates("x", keep="first"),
+        expected.drop_duplicates("x", keep="first"),
+    )
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
 @pytest.mark.parametrize("processes", [True, False])
 @gen_test()
 async def test_basic_integration_local_cluster(processes):
