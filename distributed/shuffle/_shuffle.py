@@ -30,11 +30,11 @@ from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.metrics import context_meter
 from distributed.shuffle._arrow import (
+    buffers_to_table,
     check_dtype_support,
     check_minimal_arrow_version,
     convert_shards,
     deserialize_table,
-    list_of_buffers_to_table,
     read_from_disk,
     serialize_table,
 )
@@ -475,7 +475,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         filtered = []
         for d in data:
             if d[0] not in self.received:
-                filtered.append(d[1])
+                filtered.append(d)
                 self.received.add(d[0])
                 self.total_recvd += sizeof(d)
         del data
@@ -489,8 +489,10 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, bytes]:
-        table = list_of_buffers_to_table(data)
+    def _repartition_buffers(
+        self, data: list[tuple[int, bytes]]
+    ) -> dict[NDIndex, bytes]:
+        table = buffers_to_table(data)
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data

@@ -44,8 +44,8 @@ from distributed import (
 from distributed.core import ConnectionPool
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
+    buffers_to_table,
     convert_shards,
-    list_of_buffers_to_table,
     read_from_disk,
     serialize_table,
 )
@@ -204,6 +204,32 @@ async def test_basic_integration(c, s, a, b, npartitions, disk):
         assert shuffled.npartitions == npartitions
     result, expected = await c.compute([shuffled, df], sync=True)
     dd.assert_eq(result, expected)
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@pytest.mark.parametrize("disk", [True, False])
+@gen_cluster(client=True)
+async def test_stable_ordering(c, s, a, b, disk):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": int, "y": int},
+        freq="10 s",
+    )
+    df["x"] = df["x"] % 19
+    df["y"] = df["y"] % 23
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+    ):
+        shuffled = dd.shuffle.shuffle(df, "x")
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(
+        result.drop_duplicates("x", keep="first"),
+        expected.drop_duplicates("x", keep="first"),
+    )
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -1145,13 +1171,13 @@ def test_processing_chain(tmp_path):
     assert set(data) == set(worker_for.cat.categories)
     assert sum(map(len, data.values())) == len(df)
 
-    batches = {worker: [serialize_table(t)] for worker, t in data.items()}
+    batches = {worker: [(0, serialize_table(t))] for worker, t in data.items()}
 
     # Typically we communicate to different workers at this stage
     # We then receive them back and reconstute them
 
     by_worker = {
-        worker: list_of_buffers_to_table(list_of_batches)
+        worker: buffers_to_table(list_of_batches)
         for worker, list_of_batches in batches.items()
     }
     assert sum(map(len, by_worker.values())) == len(df)

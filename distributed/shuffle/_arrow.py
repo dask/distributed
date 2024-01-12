@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
+_INPUT_PARTITION_ID_COLUMN = "__input_partition_id__"
+
+
 def check_dtype_support(meta_input: pd.DataFrame) -> None:
     import pandas as pd
 
@@ -66,6 +69,8 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
     table = concat_tables(shards)
+    table = table.sort_by(_INPUT_PARTITION_ID_COLUMN)
+    table = table.drop([_INPUT_PARTITION_ID_COLUMN])
 
     df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     reconciled_dtypes = {}
@@ -87,10 +92,33 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     return df.astype(reconciled_dtypes, copy=False)
 
 
-def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
+def buffers_to_table(data: list[tuple[int, bytes]]) -> pa.Table:
+    import numpy as np
+    import pyarrow as pa
+
     """Convert a list of arrow buffers and a schema to an Arrow Table"""
 
-    tables = (deserialize_table(buffer) for buffer in data)
+    def _create_input_partition_id_array(
+        table: pa.Table, input_partition_id: int
+    ) -> pa.ChunkedArray:
+        arrays = (
+            np.full((batch.num_rows,), input_partition_id)
+            for batch in table.to_batches()
+        )
+        return pa.chunked_array(arrays)
+
+    tables = (
+        (input_partition_id, deserialize_table(buffer))
+        for input_partition_id, buffer in data
+    )
+    tables = (
+        table.append_column(
+            _INPUT_PARTITION_ID_COLUMN,
+            _create_input_partition_id_array(table, input_partition_id),
+        )
+        for input_partition_id, table in tables
+    )
+
     return concat_tables(tables)
 
 
