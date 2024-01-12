@@ -70,7 +70,7 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
 
     table = concat_tables(shards)
     table = table.sort_by(_INPUT_PARTITION_ID_COLUMN)
-    table = table.drop(_INPUT_PARTITION_ID_COLUMN)
+    table = table.drop([_INPUT_PARTITION_ID_COLUMN])
 
     df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     reconciled_dtypes = {}
