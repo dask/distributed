@@ -2209,7 +2209,7 @@ class SchedulerState:
 
         """
         if self.validate:
-            # We don't `assert self.is_rootish(ts)` here, because that check is
+            # We don't `assert self._is_rootish(ts)` here, because that check is
             # dependent on cluster size. It's possible a task looked root-ish when it
             # was queued, but the cluster has since scaled up and it no longer does when
             # coming out of the queue. If `is_rootish` changes to a static definition,
