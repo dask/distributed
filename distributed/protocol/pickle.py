@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import io
 import logging
 import pickle
@@ -23,6 +22,13 @@ class _DaskPickler(pickle.Pickler):
         # https://github.com/dask/distributed/pull/7564#issuecomment-1438727339
         if _always_use_pickle_for(obj):
             return NotImplemented
+
+        module_name = pickle.whichmodule(obj, None)
+        if (
+            module_name == "__main__"
+            or module_name in cloudpickle.list_registry_pickle_by_value()
+        ):
+            return cloudpickle.loads, cloudpickle.dumps(obj)
         try:
             serialize = dask_serialize.dispatch(type(obj))
             deserialize = dask_deserialize.dispatch(type(obj))
@@ -56,30 +62,16 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
     """
     buffers = []
     dump_kwargs = {"protocol": protocol or HIGHEST_PROTOCOL}
+
     if dump_kwargs["protocol"] >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
-    try:
-        try:
-            result = pickle.dumps(x, **dump_kwargs)
-        except Exception:
-            f = io.BytesIO()
-            pickler = _DaskPickler(f, **dump_kwargs)
-            buffers.clear()
-            pickler.dump(x)
-            result = f.getvalue()
 
-        if not _always_use_pickle_for(x) and (
-            CLOUDPICKLE_GE_20
-            and getattr(inspect.getmodule(x), "__name__", None)
-            in cloudpickle.list_registry_pickle_by_value()
-            or (
-                len(result) < 1000
-                # Do this very last since it's expensive
-                and b"__main__" in result
-            )
-        ):
-            buffers.clear()
-            result = cloudpickle.dumps(x, **dump_kwargs)
+    try:
+        f = io.BytesIO()
+        pickler = _DaskPickler(f, **dump_kwargs)
+        buffers.clear()
+        pickler.dump(x)
+        result = f.getvalue()
     except Exception:
         try:
             buffers.clear()
