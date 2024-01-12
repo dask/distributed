@@ -14,7 +14,7 @@ from tornado.ioloop import IOLoop
 from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend, backends
 from distributed.protocol import nested_deserialize
-from distributed.utils import get_ip
+from distributed.utils import get_ip, is_python_shutting_down
 
 logger = logging.getLogger(__name__)
 
@@ -186,10 +186,13 @@ class InProc(Comm):
     def _get_finalizer(self):
         r = repr(self)
 
-        def finalize(write_q=self._write_q, write_loop=self._write_loop, r=r):
-            if write_q.peek(None) is not _EOF:
-                logger.warning(f"Closing dangling queue in {r}")
-                write_loop.add_callback(write_q.put_nowait, _EOF)
+        def finalize(
+            read_q=self._read_q, write_q=self._write_q, write_loop=self._write_loop, r=r
+        ):
+            if read_q.peek(None) is _EOF or is_python_shutting_down():
+                return
+            logger.warning(f"Closing dangling queue in {r}")
+            write_loop.add_callback(write_q.put_nowait, _EOF)
 
         return finalize
 
