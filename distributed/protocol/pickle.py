@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import io
 import logging
 import pickle
@@ -20,16 +21,13 @@ logger = logging.getLogger(__name__)
 
 class _DaskPickler(pickle.Pickler):
     def reducer_override(self, obj):
-        import inspect
-
         mod = inspect.getmodule(type(obj))
 
-        if (
-            mod.__name__ != "builtins"
-            and getattr(mod, type(obj).__name__, None) is not None
-        ):
-            # print(f"local object {obj} {mod}")
-            return cloudpickle.loads, (cloudpickle.dumps(obj),)
+        # If a thing is local scoped, use cloudpickle
+        # This check is not guaranteed and evaluates false positively for
+        # dynamically created types, e.g. numpy scalars
+        if getattr(mod, type(obj).__name__, None) is not None:
+            return pickle.loads, (cloudpickle.dumps(obj),)
         if isinstance(obj, FunctionType):
             module_name = pickle.whichmodule(obj, None)
             if (
@@ -37,20 +35,16 @@ class _DaskPickler(pickle.Pickler):
                 or CLOUDPICKLE_GE_20
                 and module_name in cloudpickle.list_registry_pickle_by_value()
             ):
-                print(f"cloudpickle for {type(obj)} {obj}")
-                return cloudpickle.loads, (cloudpickle.dumps(obj),)
+                return pickle.loads, (cloudpickle.dumps(obj),)
         elif type(obj) is memoryview:
             return memoryview, (pickle.PickleBuffer(obj),)
         elif type(obj) not in dispatch_table:
             try:
-                # print(f"Attempt to serialize {type(obj)}")
                 serialize = dask_serialize.dispatch(type(obj))
                 deserialize = dask_deserialize.dispatch(type(obj))
                 rv = deserialize, serialize(obj)
-                # print(f"Using dask for {type(obj)}")
                 return rv
             except Exception:
-                # print(f"Exception during dask serialization of {type(obj)}")
                 return NotImplemented
         return NotImplemented
 
@@ -73,12 +67,10 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
         pickler = _DaskPickler(f, **dump_kwargs)
         pickler.dump(x)
         result = f.getvalue()
-        print("success!")
     except Exception as exc:
         import traceback
 
         traceback.print_tb(exc.__traceback__)
-        print(f"Caught exception {exc}, falling back to cloudpickle")
         try:
             buffers.clear()
             result = cloudpickle.dumps(x, **dump_kwargs)
