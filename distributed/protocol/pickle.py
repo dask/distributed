@@ -20,13 +20,16 @@ class _DaskPickler(pickle.Pickler):
     def reducer_override(self, obj):
         # For some objects this causes segfaults otherwise, see
         # https://github.com/dask/distributed/pull/7564#issuecomment-1438727339
+
         if _always_use_pickle_for(obj):
             return NotImplemented
 
         module_name = pickle.whichmodule(obj, None)
+
         if (
             module_name == "__main__"
-            or module_name in cloudpickle.list_registry_pickle_by_value()
+            or CLOUDPICKLE_GE_20
+            and module_name in cloudpickle.list_registry_pickle_by_value()
         ):
             return cloudpickle.loads, cloudpickle.dumps(obj)
         try:
