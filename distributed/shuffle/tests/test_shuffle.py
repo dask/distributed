@@ -210,32 +210,6 @@ async def test_basic_integration(c, s, a, b, npartitions, disk):
     await check_scheduler_cleanup(s)
 
 
-@pytest.mark.parametrize("disk", [True, False])
-@gen_cluster(client=True)
-async def test_stable_ordering(c, s, a, b, disk):
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-02-01",
-        dtypes={"x": int, "y": int},
-        freq="10 s",
-    )
-    df["x"] = df["x"] % 19
-    df["y"] = df["y"] % 23
-    with dask.config.set(
-        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
-    ):
-        shuffled = dd.shuffle.shuffle(df, "x")
-    result, expected = await c.compute([shuffled, df], sync=True)
-    dd.assert_eq(
-        result.drop_duplicates("x", keep="first"),
-        expected.drop_duplicates("x", keep="first"),
-    )
-
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
-
-
 @pytest.mark.parametrize("processes", [True, False])
 @gen_test()
 async def test_basic_integration_local_cluster(processes):
@@ -2724,3 +2698,56 @@ async def test_barrier_handles_stale_resumed_transfer(c, s, *workers):
     await wait_for_tasks_in_state("shuffle-transfer", "resumed", 1, barrier_worker)
     barrier_worker.block_gather_dep.set()
     await out
+
+
+@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("keep", ["first", "last"])
+@gen_cluster(client=True)
+async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
+    """Ensures that shuffling guarantees ordering for individual entries
+    belonging to the same shuffle key"""
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": int, "y": int, "z": int},
+        freq="1 s",
+    )
+    df["x"] = df["x"] % 23
+    df["y"] = df["y"] % 19
+    df["z"] = df["z"] % 17
+
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+    ):
+        shuffled = dd.shuffle.shuffle(df, "x")
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(
+        result.drop_duplicates("x", keep=keep),
+        expected.drop_duplicates("x", keep=keep),
+    )
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("keep", ["first", "last"])
+@gen_cluster(client=True)
+async def test_drop_duplicates_stable_ordering(c, s, a, b, keep, disk):
+    df = dask.datasets.timeseries()
+
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+    ):
+        result, expected = await c.compute(
+            [
+                df.drop_duplicates(
+                    subset=["name"], keep=keep, split_out=df.npartitions
+                ),
+                df,
+            ],
+            sync=True,
+        )
+    expected = expected.drop_duplicates(subset=["name"], keep=keep)
+    dd.assert_eq(result, expected)
