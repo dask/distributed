@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
+_INPUT_PARTITION_ID_COLUMN = "__input_partition_id__"
+
+
 def check_dtype_support(meta_input: pd.DataFrame) -> None:
     import pandas as pd
 
@@ -66,8 +69,8 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
     table = concat_tables(shards)
-    table = table.sort_by("__input_partition_id__")
-    table = table.drop("__input_partition_id__")
+    table = table.sort_by(_INPUT_PARTITION_ID_COLUMN)
+    table = table.drop(_INPUT_PARTITION_ID_COLUMN)
 
     df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     reconciled_dtypes = {}
@@ -110,7 +113,7 @@ def buffers_to_table(data: list[tuple[int, bytes]]) -> pa.Table:
     )
     tables = (
         table.append_column(
-            "__input_partition_id__",
+            _INPUT_PARTITION_ID_COLUMN,
             _create_input_partition_id_array(table, input_partition_id),
         )
         for input_partition_id, table in tables
