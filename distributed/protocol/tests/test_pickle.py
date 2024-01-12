@@ -289,13 +289,11 @@ if __name__ == "__main__":
         def func(df):
             return (df + 5)
         client.submit(func, 5).result()
-        print("success")
+        print("script successful", flush=True)
 """
     with open(tmp_path / "script.py", mode="w") as f:
         f.write(script)
     with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
         out, _ = proc.communicate(timeout=60)
 
-    lines = out.decode("utf-8").split("\n")
-
-    assert "success" in lines
+    assert "script successful" in out.decode("utf-8")
