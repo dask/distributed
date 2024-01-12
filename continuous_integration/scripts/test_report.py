@@ -144,16 +144,16 @@ def get_jobs(run, session, repo):
     if repo.endswith("/dask"):
         # example name: "test (windows-latest, 3.9)" or "test (ubuntu-latest, 3.12, dask-expr)"
         df_jobs = df_jobs[~df_jobs.name.str.contains("Event File")]
+
+        def format(row):
+            return ",".join((row[1].strip(), row[2].strip(), (row[3] or "").strip()))
+
         name_components = (
-            df_jobs.name.str.replace("(", ",")
+            df_jobs[df_jobs.name.str.startswith("test")]
+            .name.str.replace("(", ",")
             .str.replace(")", ",")
             .str.split(",", expand=True)
-            .apply(
-                lambda row: ",".join(
-                    (row[1].strip(), row[2].strip(), row[3].strip() or "-")
-                ),
-                axis=1,
-            )
+            .apply(format, axis=1)
             .str.split(",", expand=True)
         )
 
