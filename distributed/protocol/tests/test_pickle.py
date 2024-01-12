@@ -283,15 +283,13 @@ def test_nopickle_nested():
 @pytest.mark.slow()
 def test_pickle_functions_in_main(tmp_path):
     script = """
-import dask.dataframe as dd
 from dask.distributed import Client
 
 if __name__ == "__main__":
     with Client(n_workers=1) as client:
-        ddf = dd.from_dict({"a": range(10)}, 1)
         def func(df):
             return (df + 5)
-        ddf.map_partitions(func).compute()
+        client.submit(func, 5).result()
         print("success")
 """
     with open(tmp_path / "script.py", mode="w") as f:
