@@ -72,7 +72,6 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
     try:
         f = io.BytesIO()
         pickler = _DaskPickler(f, **dump_kwargs)
-        buffers.clear()
         pickler.dump(x)
         result = f.getvalue()
     except Exception:
