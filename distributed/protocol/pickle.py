@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import logging
 import pickle
+from types import FunctionType
 
 import cloudpickle
 from packaging.version import parse as parse_version
@@ -18,42 +19,19 @@ logger = logging.getLogger(__name__)
 
 class _DaskPickler(pickle.Pickler):
     def reducer_override(self, obj):
-        # For some objects this causes segfaults otherwise, see
-        # https://github.com/dask/distributed/pull/7564#issuecomment-1438727339
-
-        if _always_use_pickle_for(obj):
-            return NotImplemented
-
-        module_name = pickle.whichmodule(obj, None)
-
-        if (
-            module_name == "__main__"
-            or CLOUDPICKLE_GE_20
-            and module_name in cloudpickle.list_registry_pickle_by_value()
-        ):
-            return cloudpickle.loads, cloudpickle.dumps(obj)
-        try:
+        if isinstance(obj, FunctionType):
+            module_name = pickle.whichmodule(obj, None)
+            if (
+                module_name == "__main__"
+                or CLOUDPICKLE_GE_20
+                and module_name in cloudpickle.list_registry_pickle_by_value()
+            ):
+                return cloudpickle.loads, cloudpickle.dumps(obj)
+        elif type(obj) not in self.dispatch:
             serialize = dask_serialize.dispatch(type(obj))
             deserialize = dask_deserialize.dispatch(type(obj))
             return deserialize, serialize(obj)
-        except TypeError:
-            return NotImplemented
-
-
-def _always_use_pickle_for(x):
-    mod, _, _ = x.__class__.__module__.partition(".")
-    if mod == "numpy":
-        import numpy as np
-
-        return isinstance(x, np.ndarray)
-    elif mod == "pandas":
-        import pandas as pd
-
-        return isinstance(x, pd.core.generic.NDFrame)
-    elif mod == "builtins":
-        return isinstance(x, (str, bytes))
-    else:
-        return False
+        return NotImplemented
 
 
 def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
