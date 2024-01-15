@@ -2706,25 +2706,25 @@ async def test_barrier_handles_stale_resumed_transfer(c, s, *workers):
 async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
     """Ensures that shuffling guarantees ordering for individual entries
     belonging to the same shuffle key"""
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-02-01",
-        dtypes={"x": int, "y": int, "z": int},
-        freq="1 s",
-    )
-    df["x"] = df["x"] % 23
-    df["y"] = df["y"] % 19
-    df["z"] = df["z"] % 17
+
+    def make_partition(partition_id, size):
+        """Return null column for every other partition"""
+        offset = partition_id * size
+        df = pd.DataFrame({"a": np.arange(start=offset, stop=offset + size)})
+        df["b"] = df["a"] % 23
+        return df
+
+    df = dd.from_map(make_partition, np.arange(19), args=(250,))
 
     with dask.config.set(
         {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
     ):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("b")
     result, expected = await c.compute([shuffled, df], sync=True)
-    dd.assert_eq(
-        result.drop_duplicates("x", keep=keep),
-        expected.drop_duplicates("x", keep=keep),
-    )
+    dd.assert_eq(result, expected)
+
+    for _, group in result.groupby("b"):
+        assert group["a"].is_monotonic_increasing
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
