@@ -13,7 +13,6 @@ import operator
 import os
 import pickle
 import random
-import sys
 import textwrap
 import uuid
 import warnings
@@ -119,6 +118,7 @@ from distributed.utils import (
     TimeoutError,
     format_dashboard_link,
     get_fileno_limit,
+    is_python_shutting_down,
     key_split_group,
     log_errors,
     offload,
@@ -5607,7 +5607,7 @@ class Scheduler(SchedulerState, ServerNode):
             if not comm.closed():
                 self.client_comms[client].send({"op": "stream-closed"})
             try:
-                if not sys.is_finalizing():
+                if not is_python_shutting_down():
                     await self.client_comms[client].close()
                     del self.client_comms[client]
                     if self.status == Status.running:

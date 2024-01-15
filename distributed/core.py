@@ -54,6 +54,7 @@ from distributed.utils import (
     get_traceback,
     has_keyword,
     import_file,
+    is_python_shutting_down,
     iscoroutinefunction,
     offload,
     recursive_to_dict,
@@ -899,7 +900,7 @@ class Server:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
                 except OSError as e:
-                    if not sys.is_finalizing():
+                    if not is_python_shutting_down():
                         logger.debug(
                             "Lost connection to %r while reading message: %s."
                             " Last operation: %s",
@@ -1003,7 +1004,7 @@ class Server:
 
         finally:
             del self._comms[comm]
-            if not sys.is_finalizing() and not comm.closed():
+            if not is_python_shutting_down() and not comm.closed():
                 try:
                     comm.abort()
                 except Exception as e:
