@@ -383,9 +383,9 @@ def download_and_parse_artifacts(
                 a["name"] = a["name"].replace("--", "-numpy-")
 
                 # TODO: Some artifacts created w/ wrong name in dask
-                # can removed this after ~90 days of this commit. 15JAN2023
+                # This can be removed after ~90 days.
                 # Between time https://github.com/dask/dask/pull/10769 was merged and
-                # then https://github.com/dask/dask/pull/10781 which changed the same
+                # then https://github.com/dask/dask/pull/10781 which changed the name
                 if a["name"].startswith("test-results") and repo.endswith("/dask"):
                     continue
 
