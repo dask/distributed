@@ -382,6 +382,13 @@ def download_and_parse_artifacts(
                 # Needed until *-*-mindeps-numpy shows up in TEST_ID
                 a["name"] = a["name"].replace("--", "-numpy-")
 
+                # TODO: Some artifacts created w/ wrong name in dask
+                # can removed this after ~90 days of this commit. 15JAN2023
+                # Between time https://github.com/dask/dask/pull/10769 was merged and
+                # then https://github.com/dask/dask/pull/10781 which changed the same
+                if a["name"].startswith("test-results") and repo.endswith("/dask"):
+                    continue
+
                 # Note: we assign a column with the workflow run timestamp rather
                 # than the artifact timestamp so that artifacts triggered under
                 # the same workflow run can be aligned according to the same trigger
