@@ -55,7 +55,6 @@ import dask
 from dask.core import get_deps, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
-    ensure_dict,
     format_bytes,
     format_time,
     key_split,
@@ -140,7 +139,6 @@ if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
     from dask.typing import TaskGraphFactory
-    from dask.highlevelgraph import HighLevelGraph
 
 # Not to be confused with distributed.worker_state_machine.TaskStateState
 TaskStateState: TypeAlias = Literal[
@@ -4670,6 +4668,15 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             try:
                 graph_factory = deserialize(graph_header, graph_frames).data
+                if list(graph_factory.__dask_output_keys__()) != list(keys):
+                    # Note: If we no longer want to rely on tokenization to be
+                    # consistent beyond an interpreter session, we could
+                    # implement this in a way that the scheduler sends a signal
+                    # back to the client with the final key names
+                    # This would be easiest with a version of https://github.com/dask/distributed/issues/7480
+                    raise RuntimeError(
+                        "Catastrophic failure. Tokenization of keys unstable!"
+                    )
                 del graph_header, graph_frames
             except Exception as e:
                 msg = """\

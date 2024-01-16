@@ -33,14 +33,14 @@ from tlz import first, groupby, merge, partition_all, valmap
 import dask
 from dask.base import (
     collections_to_dsk,
+    newstyle_collections,
     normalize_token,
     tokenize,
-    newstyle_collections,
 )
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph, TaskFactoryHLGWrapper
 from dask.optimization import SubgraphCallable
-from dask.typing import no_default, DaskCollection2
+from dask.typing import DaskCollection2, no_default
 from dask.utils import (
     apply,
     ensure_dict,
@@ -1966,6 +1966,7 @@ class Client(SyncMethodMixin):
 
         futures = self._graph_to_futures(
             dsk,
+            [key],
             workers=workers,
             allow_other_workers=allow_other_workers,
             internal_priority={key: 0},
@@ -2171,6 +2172,7 @@ class Client(SyncMethodMixin):
 
         futures = self._graph_to_futures(
             dsk,
+            keys,
             workers=workers,
             allow_other_workers=allow_other_workers,
             internal_priority=internal_priority,
@@ -3109,6 +3111,7 @@ class Client(SyncMethodMixin):
     def _graph_to_futures(
         self,
         dsk,
+        keys,
         workers=None,
         allow_other_workers=None,
         internal_priority=None,
@@ -3140,9 +3143,6 @@ class Client(SyncMethodMixin):
 
             # Merge global and local annotations
             annotations = merge(dask.get_annotations(), annotations)
-
-            # Pack the high level graph before sending it to the scheduler
-            keys = dsk.__dask_output_keys__()
 
             # Validate keys
             for key in keys:
@@ -3259,6 +3259,7 @@ class Client(SyncMethodMixin):
         dsk = TaskFactoryHLGWrapper.from_low_level(dsk, list(flatten(keys)))
         futures = self._graph_to_futures(
             dsk,
+            keys,
             workers=workers,
             allow_other_workers=allow_other_workers,
             resources=resources,
@@ -3449,6 +3450,7 @@ class Client(SyncMethodMixin):
         if newstyle_collections(variables):
             variables = [var.finalize_compute() for var in variables]
             dsk = collections_to_dsk(variables, optimize_graph, **kwargs)
+            names = dsk.__dask_output_keys__()
         else:
             dsk = collections_to_dsk(variables, optimize_graph, **kwargs)
             names = ["finalize-%s" % tokenize(v) for v in variables]
@@ -3468,10 +3470,13 @@ class Client(SyncMethodMixin):
             layers.update(dsk.layers)
             dependencies = {finalize_name: set(dsk.layers.keys())}
             dependencies.update(dsk.dependencies)
-            dsk = TaskFactoryHLGWrapper(HighLevelGraph(layers, dependencies), out_keys=names)
+            dsk = TaskFactoryHLGWrapper(
+                HighLevelGraph(layers, dependencies), out_keys=names
+            )
 
         futures_dict = self._graph_to_futures(
             dsk,
+            keys=names,
             workers=workers,
             allow_other_workers=allow_other_workers,
             resources=resources,
@@ -3481,7 +3486,7 @@ class Client(SyncMethodMixin):
             actors=actors,
         )
 
-        futures = list(futures_dict.values())
+        futures = [futures_dict[name] for name in names]
 
         if sync:
             result = self.gather(futures)
@@ -3570,6 +3575,7 @@ class Client(SyncMethodMixin):
 
         futures = self._graph_to_futures(
             dsk,
+            dsk.__dask_output_keys__(),
             workers=workers,
             allow_other_workers=allow_other_workers,
             resources=resources,
