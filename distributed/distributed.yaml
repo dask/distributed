@@ -188,10 +188,6 @@ distributed:
     pre-spawn-environ:
       # See https://distributed.dask.org/en/stable/worker-memory.html#automatically-trim-memory
       MALLOC_TRIM_THRESHOLD_: 65536
-      # Numpy configuration
-      OMP_NUM_THREADS: 1
-      MKL_NUM_THREADS: 1
-      OPENBLAS_NUM_THREADS: 1
 
   client:
     heartbeat: 5s  # Interval between client heartbeats
