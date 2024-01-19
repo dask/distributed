@@ -175,7 +175,7 @@ class PubSubClientExtension:
 
     def __init__(self, client):
         self.client = client
-        self.client._stream_handlers.update({"pubsub-msg": self.handle_message})
+        self.client.server.stream_handlers.update({"pubsub-msg": self.handle_message})
 
         self.subscribers = defaultdict(weakref.WeakSet)
 
