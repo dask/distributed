@@ -478,6 +478,20 @@ async def test_index_merge_p2p(c, s, a, b, how):
         )
 
 
+@pytest.mark.parametrize("npartitions", [4, 5, 10, 20])
+@gen_cluster(client=True)
+async def test_merge_with_npartitions(c, s, a, b, npartitions):
+    pdf = pd.DataFrame({"a": [1, 2, 3, 4] * 10, "b": 1})
+
+    left = dd.from_pandas(pdf, npartitions=10)
+    right = dd.from_pandas(pdf, npartitions=5)
+
+    expected = pdf.merge(pdf)
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        result = await c.compute(left.merge(right, npartitions=npartitions))
+    assert_eq(result, expected, check_index=False)
+
+
 class LimitedGetOrCreateShuffleRunManager(_ShuffleRunManager):
     seen: set[ShuffleId]
     block_get_or_create: asyncio.Event
