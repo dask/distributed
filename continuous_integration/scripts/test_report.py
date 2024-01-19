@@ -389,10 +389,6 @@ def download_and_parse_artifacts(
                 if a["name"].startswith("test-results") and repo.endswith("/dask"):
                     continue
 
-                # NOTE: Temporarily ignore reporting dask-expr related test cases
-                if "dask-expr" in a["name"]:
-                    continue
-
                 # Note: we assign a column with the workflow run timestamp rather
                 # than the artifact timestamp so that artifacts triggered under
                 # the same workflow run can be aligned according to the same trigger
