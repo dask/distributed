@@ -27,7 +27,7 @@ class PubSubSchedulerExtension:
 
         self.scheduler.handlers.update({"pubsub_add_publisher": self.add_publisher})
 
-        self.scheduler.stream_handlers.update(
+        self.scheduler.server.stream_handlers.update(
             {
                 "pubsub-add-subscriber": self.add_subscriber,
                 "pubsub-remove-publisher": self.remove_publisher,
@@ -122,7 +122,7 @@ class PubSubWorkerExtension:
 
     def __init__(self, worker):
         self.worker = worker
-        self.worker.stream_handlers.update(
+        self.worker.server.stream_handlers.update(
             {
                 "pubsub-add-subscriber": self.add_subscriber,
                 "pubsub-remove-subscriber": self.remove_subscriber,
