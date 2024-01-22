@@ -271,8 +271,8 @@ class HashJoinP2PLayer(Layer):
         """
         deps = {}
         parts_out = parts_out or self._keys_to_parts(keys)
-        keys = {(self.name_input_left, i) for i in range(self.npartitions)}
-        keys |= {(self.name_input_right, i) for i in range(self.npartitions)}
+        keys = {(self.name_input_left, i) for i in range(self.n_partitions_left)}
+        keys |= {(self.name_input_right, i) for i in range(self.n_partitions_right)}
         # Protect against mutations later on with frozenset
         keys = frozenset(keys)
         for part in parts_out:
@@ -352,6 +352,7 @@ class HashJoinP2PLayer(Layer):
         parameter.
         """
         parts_out = self._keys_to_parts(keys)
+
         culled_deps = self._cull_dependencies(keys, parts_out=parts_out)
         if parts_out != set(self.parts_out):
             culled_layer = self._cull(parts_out)
