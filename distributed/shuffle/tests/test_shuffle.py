@@ -1038,6 +1038,7 @@ async def test_heartbeat(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.filterwarnings("ignore:DatetimeTZBlock")  # pandas >=2.2 vs. pyarrow <15
 def test_processing_chain(tmp_path):
     """
     This is a serial version of the entire compute chain
