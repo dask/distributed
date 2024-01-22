@@ -11,6 +11,7 @@ from pandas.testing import assert_frame_equal, assert_index_equal, assert_series
 import dask
 import dask.bag as db
 import dask.dataframe as dd
+from dask.dataframe._compat import PANDAS_GE_220
 
 from distributed.client import wait
 from distributed.nanny import Nanny
@@ -139,12 +140,13 @@ async def test_bag_groupby_key_hashing(c, s, a, b):
 
 @pytest.mark.parametrize("wait", [wait, lambda x: None])
 def test_dataframe_set_index_sync(wait, client):
+    partition_freq_unit = "ME" if PANDAS_GE_220 else "M"
     df = dask.datasets.timeseries(
         start="2000",
         end="2001",
         dtypes={"value": float, "name": str, "id": int},
-        freq="2H",
-        partition_freq="1M",
+        freq="2h",
+        partition_freq=f"1{partition_freq_unit}",
         seed=1,
     )
     df = df.persist()
