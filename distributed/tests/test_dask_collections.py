@@ -145,7 +145,7 @@ def test_dataframe_set_index_sync(wait, client):
         start="2000",
         end="2001",
         dtypes={"value": float, "name": str, "id": int},
-        freq="2H",
+        freq="2h",
         partition_freq=f"1{partition_freq_unit}",
         seed=1,
     )
