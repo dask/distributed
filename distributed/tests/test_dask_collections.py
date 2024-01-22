@@ -144,7 +144,7 @@ def test_dataframe_set_index_sync(wait, client):
         end="2001",
         dtypes={"value": float, "name": str, "id": int},
         freq="2H",
-        partition_freq="1M",
+        partition_freq="1ME",
         seed=1,
     )
     df = df.persist()
