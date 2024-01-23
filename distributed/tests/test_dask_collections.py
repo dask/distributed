@@ -189,6 +189,7 @@ async def test_loc(c, s, a, b):
 
 @ignore_single_machine_warning
 def test_dataframe_groupby_tasks(client):
+    INCLUDE_GROUPS = {"include_groups": False} if PANDAS_GE_220 else {}
     df = make_time_dataframe()
 
     df["A"] = df.A // 0.1
@@ -196,21 +197,21 @@ def test_dataframe_groupby_tasks(client):
     ddf = dd.from_pandas(df, npartitions=10)
 
     for ind in [lambda x: "A", lambda x: x.A]:
-        a = df.groupby(ind(df)).apply(len)
-        b = ddf.groupby(ind(ddf)).apply(len, meta=(None, int))
+        a = df.groupby(ind(df)).apply(len, **INCLUDE_GROUPS)
+        b = ddf.groupby(ind(ddf)).apply(len, meta=(None, int), **INCLUDE_GROUPS)
         assert_equal(a, b.compute().sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
-        a = df.groupby(ind(df)).B.apply(len)
-        b = ddf.groupby(ind(ddf)).B.apply(len, meta=("B", int))
+        a = df.groupby(ind(df)).B.apply(len, **INCLUDE_GROUPS)
+        b = ddf.groupby(ind(ddf)).B.apply(len, meta=("B", int), **INCLUDE_GROUPS)
         assert_equal(a, b.compute().sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
     with pytest.raises((NotImplementedError, ValueError)):
-        ddf.groupby(ddf[["A", "B"]]).apply(len, meta=int)
+        ddf.groupby(ddf[["A", "B"]]).apply(len, meta=int, **INCLUDE_GROUPS)
 
-    a = df.groupby(["A", "B"]).apply(len)
-    b = ddf.groupby(["A", "B"]).apply(len, meta=(None, int))
+    a = df.groupby(["A", "B"]).apply(len, **INCLUDE_GROUPS)
+    b = ddf.groupby(["A", "B"]).apply(len, meta=(None, int), **INCLUDE_GROUPS)
 
     assert_equal(a, b.compute().sort_index())
 
