@@ -489,14 +489,10 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self._exception = e
             raise
 
-    @property
-    def npartitions(self) -> int:
-        return sum(map(len, self.partitions_of.values()))
-
     def _repartition_buffers(
         self, data: list[tuple[int, bytes]]
     ) -> dict[NDIndex, bytes]:
-        table = buffers_to_table(data, self.npartitions)
+        table = buffers_to_table(data, max(self.worker_for))
         groups = split_by_partition(table, self.column)
         assert len(table) == sum(map(len, groups.values()))
         del data

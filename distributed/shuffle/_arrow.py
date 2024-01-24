@@ -92,7 +92,7 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     return df.astype(reconciled_dtypes, copy=False)
 
 
-def buffers_to_table(data: list[tuple[int, bytes]], npartitions: int) -> pa.Table:
+def buffers_to_table(data: list[tuple[int, bytes]], max_partition_id: int) -> pa.Table:
     import numpy as np
     import pyarrow as pa
 
@@ -105,7 +105,7 @@ def buffers_to_table(data: list[tuple[int, bytes]], npartitions: int) -> pa.Tabl
             np.full(
                 (batch.num_rows,),
                 input_partition_id,
-                dtype=np.min_scalar_type(npartitions - 1),
+                dtype=np.min_scalar_type(max_partition_id),
             )
             for batch in table.to_batches()
         )
