@@ -1178,7 +1178,7 @@ def test_processing_chain(tmp_path):
     # We then receive them back and reconstute them
 
     by_worker = {
-        worker: buffers_to_table(list_of_batches)
+        worker: buffers_to_table(list_of_batches, len(df))
         for worker, list_of_batches in batches.items()
     }
     assert sum(map(len, by_worker.values())) == len(df)
