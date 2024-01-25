@@ -26,6 +26,13 @@ def itemsize(dt):
     return result
 
 
+@dask_serialize.register(np.matrix)
+def serialize_numpy_matrix(x, context=None):
+    header, frames = serialize_numpy_ndarray(x)
+    header["matrix"] = True
+    return header, frames
+
+
 @dask_serialize.register(np.ndarray)
 def serialize_numpy_ndarray(x, context=None):
     if x.dtype.hasobject or (x.dtype.flags & np_core.multiarray.LIST_PICKLE):
@@ -151,7 +158,8 @@ def deserialize_numpy_ndarray(header, frames):
         #    buffers the decompressed output is deep-copied beforehand into a
         #    bytearray in order to merge it.
         x = np.require(x, requirements=["W"])
-
+    if header.get("matrix"):
+        x = np.asmatrix(x)
     return x
 
 
