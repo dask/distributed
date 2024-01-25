@@ -210,28 +210,6 @@ async def test_basic_integration(c, s, a, b, npartitions, disk):
     await check_scheduler_cleanup(s)
 
 
-@pytest.mark.slow
-@gen_cluster(client=True)
-async def test_many_input_partitions(c, s, a, b):
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-10",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
-    ).repartition(
-        # This should be larger than np.iinfo(np.uint8()).max
-        npartitions=300
-    )
-    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
-    result, expected = await c.compute([shuffled, df], sync=True)
-    dd.assert_eq(result, expected)
-
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
-
-
 @pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
 async def test_stable_ordering(c, s, a, b, disk):

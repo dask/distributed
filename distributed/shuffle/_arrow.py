@@ -105,7 +105,7 @@ def buffers_to_table(data: list[tuple[int, bytes]]) -> pa.Table:
             np.full(
                 (batch.num_rows,),
                 input_partition_id,
-                dtype=np.min_scalar_type(input_partition_id),
+                dtype=np.uint32(),
             )
             for batch in table.to_batches()
         )
