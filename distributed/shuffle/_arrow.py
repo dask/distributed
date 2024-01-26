@@ -102,7 +102,11 @@ def buffers_to_table(data: list[tuple[int, bytes]]) -> pa.Table:
         table: pa.Table, input_partition_id: int
     ) -> pa.ChunkedArray:
         arrays = (
-            np.full((batch.num_rows,), input_partition_id)
+            np.full(
+                (batch.num_rows,),
+                input_partition_id,
+                dtype=np.uint32(),
+            )
             for batch in table.to_batches()
         )
         return pa.chunked_array(arrays)
