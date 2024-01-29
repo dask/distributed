@@ -373,7 +373,7 @@ class Future(WrappedKey):
         return self.client.sync(self._exception, callback_timeout=timeout, **kwargs)
 
     def add_done_callback(self, fn):
-        """Call callback on future when callback has finished
+        """Call callback on future when future has finished
 
         The callback ``fn`` should take the future as its only argument.  This
         will be called regardless of if the future completes successfully,
