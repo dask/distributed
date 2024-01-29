@@ -33,13 +33,6 @@ async def test_repr():
 
 
 @gen_test()
-async def test_logs_deprecated():
-    async with Cluster(asynchronous=True) as cluster:
-        with pytest.warns(FutureWarning, match="get_logs"):
-            cluster.logs()
-
-
-@gen_test()
 async def test_cluster_wait_for_worker():
     async with LocalCluster(n_workers=2, asynchronous=True) as cluster:
         assert len(cluster.scheduler.workers) == 2
