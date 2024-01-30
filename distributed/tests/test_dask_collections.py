@@ -254,7 +254,6 @@ def test_tuple_futures_arg(client, typ):
     dd.assert_eq(df2.result().iloc[:0], make_time_dataframe().iloc[:0])
 
 
-@ignore_single_machine_warning
 def test_dataframe_checkpoint(client, tmp_path):
     from distributed.checkpoint import DataFrameCheckpoint
 
