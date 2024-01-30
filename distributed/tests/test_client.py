@@ -1008,17 +1008,23 @@ async def test_map_quotes(c, s, a, b):
     assert all(result)
 
 
-@gen_cluster()
-async def test_two_consecutive_clients_share_results(s, a, b):
-    async with Client(s.address, asynchronous=True) as c:
-        x = c.submit(random.randint, 0, 1000, pure=True)
-        xx = await x
+@gen_cluster(client=True)
+async def test_two_consecutive_clients_share_results(c, s, a, b):
+    # Calling c.submit(random.randint) directly would cause the client to tokenize and
+    # deep-copy the global random state. Also, Client and/or Scheduler draw from the
+    # global random state, so its state (and thus, token) would be different between the
+    # two calls to submit().
+    def f():
+        return random.randint(0, 1000)
 
-        async with Client(s.address, asynchronous=True) as f:
-            y = f.submit(random.randint, 0, 1000, pure=True)
-            yy = await y
+    x = c.submit(f)
+    xx = await x
 
-            assert xx == yy
+    async with Client(s.address, asynchronous=True) as c2:
+        y = c2.submit(f)
+        yy = await y
+
+    assert xx == yy
 
 
 @gen_cluster(client=True)
