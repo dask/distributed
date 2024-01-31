@@ -233,8 +233,7 @@ class TCP(Comm):
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not sys.is_finalizing():
-                convert_stream_closed_error(self, e)
+            convert_stream_closed_error(self, e)
         except BaseException:
             # Some OSError, CancelledError or another "low-level" exception.
             # We do not really know what was already read from the underlying
@@ -305,8 +304,7 @@ class TCP(Comm):
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not sys.is_finalizing():
-                convert_stream_closed_error(self, e)
+            convert_stream_closed_error(self, e)
         except BaseException:
             # Some OSError or a another "low-level" exception. We do not really know
             # what was already written to the underlying socket, so it is not even safe

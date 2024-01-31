@@ -373,7 +373,7 @@ class Future(WrappedKey):
         return self.client.sync(self._exception, callback_timeout=timeout, **kwargs)
 
     def add_done_callback(self, fn):
-        """Call callback on future when callback has finished
+        """Call callback on future when future has finished
 
         The callback ``fn`` should take the future as its only argument.  This
         will be called regardless of if the future completes successfully,
@@ -507,7 +507,7 @@ class Future(WrappedKey):
         except AttributeError:
             # Occasionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
-            if not sys.is_finalizing():
+            if not is_python_shutting_down():
                 raise
         except RuntimeError:  # closed event loop
             pass
@@ -1786,7 +1786,7 @@ class Client(SyncMethodMixin):
 
         assert self.status == "closed"
 
-        if not sys.is_finalizing():
+        if not is_python_shutting_down():
             self._loop_runner.stop()
 
     async def _shutdown(self):

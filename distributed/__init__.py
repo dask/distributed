@@ -107,7 +107,7 @@ def _():
     Note
     ----
     This function must be registered with atexit *after* any class that invokes
-    ``dstributed.utils.is_python_shutting_down`` has been defined. This way it
+    ``distributed.utils.is_python_shutting_down`` has been defined. This way it
     will be called before the ``__del__`` method of those classes.
 
     See Also

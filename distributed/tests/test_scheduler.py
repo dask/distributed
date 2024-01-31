@@ -2405,11 +2405,11 @@ async def test_idle_timeout(c, s, a, b):
     pc.stop()
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[],
-)
+@gen_cluster(client=True, nthreads=[])
 async def test_idle_timeout_no_workers(c, s):
+    """Test that idle-timeout is not triggered if there are no workers available
+    but there are tasks queued
+    """
     # Cancel the idle check periodic timeout so we can step through manually
     s.periodic_callbacks["idle-timeout"].stop()
 
@@ -2438,6 +2438,108 @@ async def test_idle_timeout_no_workers(c, s):
     assert not s.check_idle()
 
     assert s.check_idle()
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.scheduler.no-workers-timeout": None},
+)
+async def test_no_workers_timeout_disabled(c, s, a, b):
+    """no-workers-timeout has been disabled"""
+    future = c.submit(inc, 1, key="x")
+    await wait_for_state("x", ("queued", "no-worker"), s)
+
+    s._check_no_workers()
+    await asyncio.sleep(0.2)
+    s._check_no_workers()
+    await asyncio.sleep(0.2)
+
+    assert s.status == Status.running
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
+async def test_no_workers_timeout_without_workers(c, s):
+    """Trip no-workers-timeout when there are no workers available"""
+    # Don't trip scheduler shutdown when there are no tasks
+    s._check_no_workers()
+    await asyncio.sleep(0.2)
+    s._check_no_workers()
+    await asyncio.sleep(0.2)
+
+    assert s.status == Status.running
+
+    future = c.submit(inc, 1)
+    while s.status != Status.closed:
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
+async def test_no_workers_timeout_bad_restrictions(c, s, a, b):
+    """Trip no-workers-timeout when there are workers available but none satisfies
+    task restrictions
+    """
+    future = c.submit(inc, 1, key="x", workers=["127.0.0.2:1234"])
+    while s.status != Status.closed:
+        await asyncio.sleep(0.01)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
+async def test_no_workers_timeout_queued(c, s, a):
+    """Don't trip no-workers-timeout when there are queued tasks AND processing tasks"""
+    ev = Event()
+    futures = [c.submit(lambda ev: ev.wait(), ev, pure=False) for _ in range(3)]
+    while not a.state.tasks:
+        await asyncio.sleep(0.01)
+    assert s.queued or math.isinf(s.WORKER_SATURATION)
+
+    s._check_no_workers()
+    await asyncio.sleep(0.2)
+    s._check_no_workers()
+    await asyncio.sleep(0.2)
+
+    assert s.status == Status.running
+    await ev.set()
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
+async def test_no_workers_timeout_processing(c, s, a, b):
+    """Don't trip no-workers-timeout when there are tasks processing"""
+    ev = Event()
+    x = c.submit(lambda ev: ev.wait(), ev, key="x")
+    y = c.submit(inc, 1, key="y", workers=["127.0.0.2:1234"])
+    await wait_for_state("x", "processing", s)
+    await wait_for_state("y", "no-worker", s)
+
+    # Scheduler won't shut down for as long as f1 is running
+    s._check_no_workers()
+    await asyncio.sleep(0.2)
+    s._check_no_workers()
+    await asyncio.sleep(0.2)
+    assert s.status == Status.running
+
+    await ev.set()
+    await x
+
+    while s.status != Status.closed:
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
