@@ -4924,7 +4924,10 @@ class Client(SyncMethodMixin):
         )
 
     def register_scheduler_plugin(
-        self, plugin: SchedulerPlugin, name: str | None = None, idempotent: bool = False
+        self,
+        plugin: SchedulerPlugin,
+        name: str | None = None,
+        idempotent: bool | None = None,
     ):
         """
         Register a scheduler plugin.
