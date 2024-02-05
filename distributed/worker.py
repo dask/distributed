@@ -101,7 +101,6 @@ from distributed.utils import (
     get_ip,
     has_arg,
     in_async_call,
-    is_python_shutting_down,
     iscoroutinefunction,
     json_load_robust,
     log_errors,
@@ -1632,7 +1631,7 @@ class Worker(BaseWorker, ServerNode):
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            if is_python_shutting_down():
+            if self._is_finalizing():
                 # If we're shutting down there is no need to wait for daemon
                 # threads to finish
                 _close(executor=executor, wait=False)
