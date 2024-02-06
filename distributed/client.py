@@ -1576,7 +1576,7 @@ class Client(SyncMethodMixin):
 
                 breakout = False
                 for msg in msgs:
-                    logger.debug("Client receives message %s", msg)
+                    logger.debug("Client %s receives message %s", self.id, msg)
 
                     if "status" in msg and "error" in msg["status"]:
                         typ, exc, tb = clean_exception(**msg)
