@@ -15,7 +15,7 @@ import warnings
 import xml
 from array import array
 from collections import deque
-from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor
 from contextvars import ContextVar
 from time import sleep
 from unittest import mock
@@ -677,7 +677,7 @@ async def test_run_in_executor_with_context():
 
         def submit(self, __fn, *args, **kwargs):
             self.call_count += 1
-            f = Future()
+            f = ConcurrentFuture()
             f.set_result(__fn(*args, **kwargs))
             return f
 

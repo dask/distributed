@@ -4,7 +4,7 @@ import random
 from concurrent.futures import (
     FIRST_COMPLETED,
     FIRST_EXCEPTION,
-    Future,
+    Future as ConcurrentFuture,
     TimeoutError,
     as_completed,
     wait,
@@ -27,7 +27,7 @@ def number_of_processing_tasks(client):
 def test_submit(client):
     with client.get_executor() as e:
         f1 = e.submit(slowadd, 1, 2)
-        assert isinstance(f1, Future)
+        assert isinstance(f1, ConcurrentFuture)
         f2 = e.submit(slowadd, 3, y=4)
         f3 = e.submit(throws, "foo")
         f4 = e.submit(slowadd, x=5, y=6)
