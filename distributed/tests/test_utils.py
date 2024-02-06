@@ -15,7 +15,9 @@ import warnings
 import xml
 from array import array
 from collections import deque
-from concurrent.futures import Executor, Future as ConcurrentFuture, ThreadPoolExecutor
+from concurrent.futures import Executor
+from concurrent.futures import Future as ConcurrentFuture
+from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from time import sleep
 from unittest import mock

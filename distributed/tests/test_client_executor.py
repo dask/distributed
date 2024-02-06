@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import random
-from concurrent.futures import (
-    FIRST_COMPLETED,
-    FIRST_EXCEPTION,
-    Future as ConcurrentFuture,
-    TimeoutError,
-    as_completed,
-    wait,
-)
+from concurrent.futures import FIRST_COMPLETED, FIRST_EXCEPTION
+from concurrent.futures import Future as ConcurrentFuture
+from concurrent.futures import TimeoutError, as_completed, wait
 from time import sleep
 
 import pytest
