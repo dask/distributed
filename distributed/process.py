@@ -12,7 +12,7 @@ from collections.abc import Callable
 from queue import Queue as PyQueue
 from typing import TYPE_CHECKING
 
-from tornado.concurrent import Future
+from tornado.concurrent import Future as TornadoFuture
 from tornado.ioloop import IOLoop
 
 import dask
@@ -111,7 +111,7 @@ class AsyncProcess:
             self, _asyncprocess_finalizer, self._process
         )
         self._watch_q = PyQueue()
-        self._exit_future = Future()
+        self._exit_future = TornadoFuture()
         self._exit_callback = None
         self._closed = False
 
@@ -282,7 +282,7 @@ class AsyncProcess:
         This method returns a future.
         """
         self._check_closed()
-        fut = Future()
+        fut = TornadoFuture()
         self._watch_q.put_nowait({"op": "start", "future": fut})
         return fut
 
@@ -296,7 +296,7 @@ class AsyncProcess:
         multiprocessing.Process.terminate
         """
         self._check_closed()
-        fut: Future[None] = Future()
+        fut: TornadoFuture[None] = TornadoFuture()
         self._watch_q.put_nowait({"op": "terminate", "future": fut})
         return fut
 
@@ -311,7 +311,7 @@ class AsyncProcess:
         multiprocessing.Process.kill
         """
         self._check_closed()
-        fut: Future[None] = Future()
+        fut: TornadoFuture[None] = TornadoFuture()
         self._watch_q.put_nowait({"op": "kill", "future": fut})
         return fut
 
