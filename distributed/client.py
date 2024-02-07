@@ -627,19 +627,19 @@ class FutureState:
         return f"<{self.__class__.__name__}: {self.status}>"
 
 
-async def done_callback(future, callback):
-    """Coroutine that waits on the future, then calls the callback
+async def done_callback(future_, callback):
+    """Coroutine that waits on the future_, then calls the callback
 
     Parameters
     ----------
-    future : asyncio.Future
-        The future
+    future_ : asyncio.Future
+        The future_
     callback : callable
         The callback
     """
-    while future.status == "pending":
-        await future._state.wait()
-    callback(future)
+    while future_.status == "pending":
+        await future_._state.wait()
+    callback(future_)
 
 
 @partial(normalize_token.register, Future)
