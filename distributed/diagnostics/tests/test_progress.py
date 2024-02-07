@@ -203,12 +203,12 @@ async def test_AllProgress(c, s, a, b):
         return x
 
     for i in range(4):
-        future = c.submit(f, i)
+        task = c.submit(f, i)
 
     await asyncio.sleep(1)
 
-    await wait([future])
-    assert p.state["memory"] == {"f": {future.key}}
+    await wait([task])
+    assert p.state["memory"] == {"f": {task.key}}
 
     await c._restart()
 
@@ -225,8 +225,8 @@ async def test_AllProgress(c, s, a, b):
 @gen_cluster(client=True, Worker=Nanny)
 async def test_AllProgress_lost_key(c, s, a, b):
     p = AllProgress(s)
-    futures = c.map(inc, range(5))
-    await wait(futures)
+    tasks = c.map(inc, range(5))
+    await wait(tasks)
     assert len(p.state["memory"]["inc"]) == 5
 
     await a.close()
@@ -244,9 +244,9 @@ async def test_group_timing(c, s, a, b):
     assert len(p.time) == 2
     assert len(p.nthreads) == 2
 
-    futures1 = c.map(slowinc, range(10), delay=0.3)
-    futures2 = c.map(slowdec, range(10), delay=0.3)
-    await wait(futures1 + futures2)
+    tasks1 = c.map(slowinc, range(10), delay=0.3)
+    tasks2 = c.map(slowdec, range(10), delay=0.3)
+    await wait(tasks1 + tasks2)
 
     assert len(p.time) > 2
     assert len(p.nthreads) == len(p.time)

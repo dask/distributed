@@ -98,7 +98,7 @@ using the ``@gen_cluster`` style of test, e.g.
     # tests/test_submit.py
 
     from distributed.utils_test import gen_cluster, inc
-    from distributed import Client, Future, Scheduler, Worker
+    from distributed import Client, Task, Scheduler, Worker
 
     @gen_cluster(client=True)
     async def test_submit(c, s, a, b):
@@ -107,16 +107,16 @@ using the ``@gen_cluster`` style of test, e.g.
         assert isinstance(a, Worker)
         assert isinstance(b, Worker)
 
-        future = c.submit(inc, 1)
-        assert isinstance(future, Future)
-        assert future.key in c.futures
+        task = c.submit(inc, 1)
+        assert isinstance(task, Task)
+        assert task.key in c.tasks
 
-        # result = future.result()  # This synchronous API call would block
-        result = await future
+        # result = task.result()  # This synchronous API call would block
+        result = await task
         assert result == 2
 
-        assert future.key in s.tasks
-        assert future.key in a.data or future.key in b.data
+        assert task.key in s.tasks
+        assert task.key in a.data or task.key in b.data
 
 
 The ``@gen_cluster`` decorator sets up a scheduler, client, and workers for
@@ -136,8 +136,8 @@ different forked processes:
    from distributed.utils_test import client
 
    def test_submit(client):
-       future = client.submit(inc, 10)
-       assert future.result() == 11
+       task = client.submit(inc, 10)
+       assert task.result() == 11
 
 Additionally, if you want access to the scheduler and worker processes you can
 also add the ``s, a, b`` fixtures as well.
@@ -148,12 +148,12 @@ also add the ``s, a, b`` fixtures as well.
    from distributed.utils_test import client
 
    def test_submit(client, s, a, b):
-       future = client.submit(inc, 10)
-       assert future.result() == 11  # use the synchronous/blocking API here
+       task = client.submit(inc, 10)
+       assert task.result() == 11  # use the synchronous/blocking API here
 
        a['proc'].terminate()  # kill one of the workers
 
-       result = future.result()  # test that future remains valid
+       result = task.result()  # test that task remains valid
        assert result == 2
 
 In this style of test you do not have access to the scheduler or workers.  The

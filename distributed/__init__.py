@@ -20,11 +20,11 @@ import dask
 from dask.config import config  # type: ignore
 
 from distributed._version import get_versions
-from distributed.actor import Actor, ActorFuture, BaseActorFuture
+from distributed.actor import Actor, ActorTask, BaseActorTask
 from distributed.client import (
     Client,
     CompatibleExecutor,
-    Future,
+    Task,
     as_completed,
     default_client,
     fire_and_forget,
@@ -120,16 +120,16 @@ def _():
 
 __all__ = [
     "Actor",
-    "ActorFuture",
+    "ActorTask",
     "Adaptive",
-    "BaseActorFuture",
+    "BaseActorTask",
     "CancelledError",
     "Client",
     "CompatibleExecutor",
     "CondaInstall",
     "Environ",
     "Event",
-    "Future",
+    "Task",
     "KilledWorker",
     "LocalCluster",
     "Lock",

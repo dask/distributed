@@ -1,7 +1,7 @@
 // TODO Animate workers when performing tasks or swapping to show activity
 // TODO Add memory usage dial around outside of workers
 // TODO Add clients
-// TODO Show future retrieval
+// TODO Show task retrieval
 // TODO Show graph submission
 
 const workerColor = "#ECB172";

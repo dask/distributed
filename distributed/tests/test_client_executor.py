@@ -209,23 +209,23 @@ def test_retries(client):
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 42]
 
     with client.get_executor(retries=5, pure=False) as e:
-        future = e.submit(varying(args))
-        assert future.result() == 42
+        task = e.submit(varying(args))
+        assert task.result() == 42
 
     with client.get_executor(retries=4) as e:
-        future = e.submit(varying(args))
-        result = future.result()
+        task = e.submit(varying(args))
+        result = task.result()
         assert result == 42
 
     with client.get_executor(retries=2) as e:
-        future = e.submit(varying(args))
+        task = e.submit(varying(args))
         with pytest.raises(ZeroDivisionError, match="two"):
-            res = future.result()
+            res = task.result()
 
     with client.get_executor(retries=0) as e:
-        future = e.submit(varying(args))
+        task = e.submit(varying(args))
         with pytest.raises(ZeroDivisionError, match="one"):
-            res = future.result()
+            res = task.result()
 
 
 def test_shutdown_wait(client):
@@ -235,7 +235,7 @@ def test_shutdown_wait(client):
     fut = e.submit(sleep, 1.0)
     e.shutdown()
     assert time() >= start + 1.0
-    sleep(0.1)  # wait for future outcome to propagate
+    sleep(0.1)  # wait for task outcome to propagate
     assert fut.done()
     fut.result()  # doesn't raise
 
@@ -250,7 +250,7 @@ def test_shutdown_nowait(client):
     fut = e.submit(sleep, 5.0)
     e.shutdown(wait=False)
     assert time() < start + 2.0
-    sleep(0.1)  # wait for future outcome to propagate
+    sleep(0.1)  # wait for task outcome to propagate
     assert fut.cancelled()
 
     with pytest.raises(RuntimeError):

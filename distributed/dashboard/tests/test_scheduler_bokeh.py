@@ -82,7 +82,7 @@ blocklist_apps = {
 async def test_simple(c, s, a, b):
     port = s.http_server.port
     ev = Event()
-    future = c.submit(block_on_event, ev)
+    task = c.submit(block_on_event, ev)
     await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
@@ -101,7 +101,7 @@ async def test_simple(c, s, a, b):
     assert response
 
     await ev.set()
-    await future
+    await task
 
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
@@ -141,11 +141,11 @@ async def test_counters(c, s, a, b):
 async def test_stealing_events(c, s, a, b):
     se = StealingEvents(s)
 
-    futures = c.map(
+    tasks = c.map(
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    await wait(futures)
+    await wait(tasks)
     se.update()
     assert len(first(se.source.data.values()))
     assert b.state.tasks
@@ -156,7 +156,7 @@ async def test_stealing_events(c, s, a, b):
 async def test_events(c, s, a, b):
     e = Events(s, "all")
 
-    futures = c.map(
+    tasks = c.map(
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
@@ -172,9 +172,9 @@ async def test_events(c, s, a, b):
 async def test_task_stream(c, s, a, b):
     ts = TaskStream(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
+    tasks = c.map(slowinc, range(10), delay=0.001)
 
-    await wait(futures)
+    await wait(tasks)
 
     ts.update()
     d = dict(ts.source.data)
@@ -186,7 +186,7 @@ async def test_task_stream(c, s, a, b):
     d = dict(ts.source.data)
     assert all(len(L) == 10 for L in d.values())
 
-    total = c.submit(sum, futures)
+    total = c.submit(sum, tasks)
     await wait(total)
 
     ts.update()
@@ -197,8 +197,8 @@ async def test_task_stream(c, s, a, b):
 @gen_cluster(client=True)
 async def test_task_stream_n_rectangles(c, s, a, b):
     ts = TaskStream(s, n_rectangles=10)
-    futures = c.map(slowinc, range(10), delay=0.001)
-    await wait(futures)
+    tasks = c.map(slowinc, range(10), delay=0.001)
+    await wait(tasks)
     ts.update()
 
     assert len(ts.source.data["start"]) == 10
@@ -208,8 +208,8 @@ async def test_task_stream_n_rectangles(c, s, a, b):
 async def test_task_stream_second_plugin(c, s, a, b):
     ts = TaskStream(s, n_rectangles=10, clear_interval=10)
     ts.update()
-    futures = c.map(inc, range(10))
-    await wait(futures)
+    tasks = c.map(inc, range(10))
+    await wait(tasks)
     ts.update()
 
     ts2 = TaskStream(s, n_rectangles=5, clear_interval=10)
@@ -243,23 +243,23 @@ async def test_task_stream_clear_interval(c, s, a, b):
 async def test_TaskProgress(c, s, a, b):
     tp = TaskProgress(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
-    await wait(futures)
+    tasks = c.map(slowinc, range(10), delay=0.001)
+    await wait(tasks)
 
     tp.update()
     d = dict(tp.source.data)
     assert all(len(L) == 1 for L in d.values())
     assert d["name"] == ["slowinc"]
 
-    futures2 = c.map(dec, range(5))
-    await wait(futures2)
+    tasks2 = c.map(dec, range(5))
+    await wait(tasks2)
 
     tp.update()
     d = dict(tp.source.data)
     assert all(len(L) == 2 for L in d.values())
     assert d["name"] == ["slowinc", "dec"]
 
-    del futures, futures2
+    del tasks, tasks2
 
     while s.tasks:
         await asyncio.sleep(0.01)
@@ -273,11 +273,11 @@ async def test_TaskProgress_empty(c, s, a, b):
     tp = TaskProgress(s)
     tp.update()
 
-    futures = [c.submit(inc, i, key="f-" + "a" * i) for i in range(20)]
-    await wait(futures)
+    tasks = [c.submit(inc, i, key="f-" + "a" * i) for i in range(20)]
+    await wait(tasks)
     tp.update()
 
-    del futures
+    del tasks
     while s.tasks:
         await asyncio.sleep(0.01)
     tp.update()
@@ -289,8 +289,8 @@ async def test_TaskProgress_empty(c, s, a, b):
 async def test_CurrentLoad(c, s, a, b):
     cl = CurrentLoad(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
-    await wait(futures)
+    tasks = c.map(slowinc, range(10), delay=0.001)
+    await wait(tasks)
 
     cl.update()
     d = dict(cl.source.data)
@@ -306,7 +306,7 @@ async def test_ProcessingHistogram(c, s, a, b):
     assert (ph.source.data["top"] != 0).sum() == 1
     assert ph.source.data["right"][-1] < 2
 
-    futures = c.map(slowinc, range(10), delay=0.050)
+    tasks = c.map(slowinc, range(10), delay=0.050)
     while not s.tasks:
         await asyncio.sleep(0.01)
 
@@ -318,8 +318,8 @@ async def test_ProcessingHistogram(c, s, a, b):
 async def test_WorkersMemory(c, s, a, b):
     cl = WorkersMemory(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
-    await wait(futures)
+    tasks = c.map(slowinc, range(10), delay=0.001)
+    await wait(tasks)
 
     cl.update()
     d = dict(cl.source.data)
@@ -475,8 +475,8 @@ async def test_FinePerformanceMetrics_shuffle(c, s, a, b):
 async def test_ClusterMemory(c, s, a, b):
     cl = ClusterMemory(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
-    await wait(futures)
+    tasks = c.map(slowinc, range(10), delay=0.001)
+    await wait(tasks)
 
     cl.update()
     d = dict(cl.source.data)
@@ -537,8 +537,8 @@ async def test_WorkersMemoryHistogram(c, s, a, b):
     nh.update()
     assert any(nh.source.data["top"] != 0)
 
-    futures = c.map(inc, range(10))
-    await wait(futures)
+    tasks = c.map(inc, range(10))
+    await wait(tasks)
 
     nh.update()
     assert nh.source.data["right"][-1] > 5 * 20
@@ -820,8 +820,8 @@ async def test_SystemTimeseries(c, s, a, b):
 @gen_cluster(client=True)
 async def test_TaskGraph(c, s, a, b):
     gp = TaskGraph(s)
-    futures = c.map(inc, range(5))
-    total = c.submit(sum, futures)
+    tasks = c.map(inc, range(5))
+    total = c.submit(sum, tasks)
     await total
 
     gp.update()
@@ -843,11 +843,11 @@ async def test_TaskGraph(c, s, a, b):
 
     gp.update()
 
-    future = c.submit(inc, 10)
-    future2 = c.submit(inc, future)
-    await wait(future2)
-    key = future.key
-    del future, future2
+    task = c.submit(inc, 10)
+    task2 = c.submit(inc, task)
+    await wait(task2)
+    key = task.key
+    del task, task2
     while key in s.tasks:
         await asyncio.sleep(0.01)
 
@@ -862,13 +862,13 @@ async def test_TaskGraph(c, s, a, b):
 @gen_cluster(client=True)
 async def test_TaskGraph_clear(c, s, a, b):
     gp = TaskGraph(s)
-    futures = c.map(inc, range(5))
-    total = c.submit(sum, futures)
+    tasks = c.map(inc, range(5))
+    total = c.submit(sum, tasks)
     await total
 
     gp.update()
 
-    del total, futures
+    del total, tasks
 
     while s.tasks:
         await asyncio.sleep(0.01)
@@ -951,8 +951,8 @@ async def test_TaskGraph_order(c, s, a, b):
 @gen_cluster(client=True)
 async def test_TaskGroupGraph(c, s, a, b):
     tgg = TaskGroupGraph(s)
-    futures = c.map(inc, range(10))
-    await wait(futures)
+    tasks = c.map(inc, range(10))
+    await wait(tasks)
 
     tgg.update()
     assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
@@ -961,15 +961,15 @@ async def test_TaskGroupGraph(c, s, a, b):
 
     assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
 
-    futures2 = c.map(dec, range(5))
-    await wait(futures2)
+    tasks2 = c.map(dec, range(5))
+    await wait(tasks2)
 
     tgg.update()
     assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
     assert tgg.nodes_source.data["name"] == ["inc", "dec"]
     assert tgg.nodes_source.data["tot_tasks"] == [10, 5]
 
-    del futures, futures2
+    del tasks, tasks2
     while s.task_groups:
         await asyncio.sleep(0.01)
 
@@ -981,8 +981,8 @@ async def test_TaskGroupGraph(c, s, a, b):
 async def test_TaskGroupGraph_arrows(c, s, a, b):
     tgg = TaskGroupGraph(s)
 
-    futures = c.map(inc, range(10))
-    await wait(futures)
+    tasks = c.map(inc, range(10))
+    await wait(tasks)
 
     tgg.update()
     assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
@@ -991,8 +991,8 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
 
     assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
 
-    futures2 = c.map(dec, futures)
-    await wait(futures2)
+    tasks2 = c.map(dec, tasks)
+    await wait(tasks2)
 
     tgg.update()
     assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
@@ -1001,11 +1001,11 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
 
     assert all(len(L) == 1 for L in tgg.arrows_source.data.values())
 
-    del futures, futures2
+    del tasks, tasks2
     while s.task_groups:
         await asyncio.sleep(0.01)
 
-    tgg.update()  # for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    tgg.update()  # for some reason after deleting the tasks the tgg.node_source.data.values are not clear.
     assert not any(tgg.nodes_source.data.values())
     assert not any(tgg.arrows_source.data.values())
 
@@ -1110,8 +1110,8 @@ async def test_lots_of_tasks(c, s, a, b):
 
     ts = TaskStream(s)
     ts.update()
-    futures = c.map(toolz.identity, range(100))
-    await wait(futures)
+    tasks = c.map(toolz.identity, range(100))
+    await wait(tasks)
 
     tsp = s.plugins[TaskStreamPlugin.name]
     assert len(tsp.buffer) == 10
@@ -1119,8 +1119,8 @@ async def test_lots_of_tasks(c, s, a, b):
     assert len(ts.source.data["start"]) == 10
     assert "identity" in str(ts.source.data)
 
-    futures = c.map(lambda x: x, range(100), pure=False)
-    await wait(futures)
+    tasks = c.map(lambda x: x, range(100), pure=False)
+    await wait(tasks)
     ts.update()
     assert "lambda" in str(ts.source.data)
 

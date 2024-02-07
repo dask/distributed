@@ -229,7 +229,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 if not (shuffle := self.active_shuffles.get(other_barrier_key)):
                     continue
                 current_worker_for = shuffle.run_spec.worker_for
-                # This is a fail-safe for future three-ways merges. At the moment there
+                # This is a fail-safe for task three-ways merges. At the moment there
                 # should only ever be at most one other shuffle that shares output
                 # tasks, so existing will always be empty.
                 if existing:  # pragma: nocover

@@ -169,42 +169,42 @@ def _del_global_client(c: Client) -> None:
             pass
 
 
-class Future(WrappedKey):
+class Task(WrappedKey):
     """A remotely running computation
 
-    A Future is a local proxy to a result running on a remote worker.  A user
-    manages future objects in the local Python process to determine what
+    A Task is a local proxy to a result running on a remote worker.  A user
+    manages task objects in the local Python process to determine what
     happens in the larger cluster.
 
     Parameters
     ----------
     key: str, or tuple
-        Key of remote data to which this future refers
+        Key of remote data to which this task refers
     client: Client
-        Client that should own this future.  Defaults to _get_global_client()
+        Client that should own this task.  Defaults to _get_global_client()
     inform: bool
-        Do we inform the scheduler that we need an update on this future
-    state: FutureState
-        The state of the future
+        Do we inform the scheduler that we need an update on this task
+    state: TaskState
+        The state of the task
 
     Examples
     --------
-    Futures typically emerge from Client computations
+    Tasks typically emerge from Client computations
 
-    >>> my_future = client.submit(add, 1, 2)  # doctest: +SKIP
+    >>> my_task = client.submit(add, 1, 2)  # doctest: +SKIP
 
-    We can track the progress and results of a future
+    We can track the progress and results of a task
 
-    >>> my_future  # doctest: +SKIP
-    <Future: status: finished, key: add-8f6e709446674bad78ea8aeecfee188e>
+    >>> my_task  # doctest: +SKIP
+    <Task: status: finished, key: add-8f6e709446674bad78ea8aeecfee188e>
 
-    We can get the result or the exception and traceback from the future
+    We can get the result or the exception and traceback from the task
 
-    >>> my_future.result()  # doctest: +SKIP
+    >>> my_task.result()  # doctest: +SKIP
 
     See Also
     --------
-    Client:  Creates futures
+    Client:  Creates tasks
     """
 
     _cb_executor = None
@@ -235,10 +235,10 @@ class Future(WrappedKey):
             self._client._inc_ref(self.key)
             self._generation = self._client.generation
 
-            if self.key in self._client.futures:
-                self._state = self._client.futures[self.key]
+            if self.key in self._client.tasks:
+                self._state = self._client.tasks[self.key]
             else:
-                self._state = self._client.futures[self.key] = FutureState()
+                self._state = self._client.tasks[self.key] = TaskState()
 
             if self._inform:
                 self._client._send_to_scheduler(
@@ -367,16 +367,16 @@ class Future(WrappedKey):
 
         See Also
         --------
-        Future.traceback
+        Task.traceback
         """
         self._verify_initialized()
         return self.client.sync(self._exception, callback_timeout=timeout, **kwargs)
 
     def add_done_callback(self, fn):
-        """Call callback on future when future has finished
+        """Call callback on task when task has finished
 
-        The callback ``fn`` should take the future as its only argument.  This
-        will be called regardless of if the future completes successfully,
+        The callback ``fn`` should take the task as its only argument.  This
+        will be called regardless of if the task completes successfully,
         errs, or is cancelled
 
         The callback is executed in a separate thread.
@@ -387,7 +387,7 @@ class Future(WrappedKey):
             The method or function to be called
         """
         self._verify_initialized()
-        cls = Future
+        cls = Task
         if cls._cb_executor is None or cls._cb_executor_pid != os.getpid():
             try:
                 cls._cb_executor = ThreadPoolExecutor(
@@ -408,7 +408,7 @@ class Future(WrappedKey):
         )
 
     def cancel(self, **kwargs):
-        """Cancel the request to run this future
+        """Cancel the request to run this task
 
         See Also
         --------
@@ -418,7 +418,7 @@ class Future(WrappedKey):
         return self.client.cancel([self], **kwargs)
 
     def retry(self, **kwargs):
-        """Retry this future if it has failed
+        """Retry this task if it has failed
 
         See Also
         --------
@@ -428,12 +428,12 @@ class Future(WrappedKey):
         return self.client.retry([self], **kwargs)
 
     def cancelled(self):
-        """Returns True if the future has been cancelled
+        """Returns True if the task has been cancelled
 
         Returns
         -------
         bool
-            True if the future was 'cancelled', otherwise False
+            True if the task was 'cancelled', otherwise False
         """
         return self._state.status == "cancelled"
 
@@ -448,7 +448,7 @@ class Future(WrappedKey):
         """Return the traceback of a failed task
 
         This returns a traceback object.  You can inspect this object using the
-        ``traceback`` module.  Alternatively if you call ``future.result()``
+        ``traceback`` module.  Alternatively if you call ``task.result()``
         this traceback will accompany the raised exception.
 
         Parameters
@@ -462,7 +462,7 @@ class Future(WrappedKey):
         Examples
         --------
         >>> import traceback  # doctest: +SKIP
-        >>> tb = future.traceback()  # doctest: +SKIP
+        >>> tb = task.traceback()  # doctest: +SKIP
         >>> traceback.format_tb(tb)  # doctest: +SKIP
         [...]
 
@@ -473,7 +473,7 @@ class Future(WrappedKey):
 
         See Also
         --------
-        Future.exception
+        Task.exception
         """
         self._verify_initialized()
         return self.client.sync(self._traceback, callback_timeout=timeout, **kwargs)
@@ -488,7 +488,7 @@ class Future(WrappedKey):
         Notes
         -----
         This method can be called from different threads
-        (see e.g. Client.get() or Future.__del__())
+        (see e.g. Client.get() or Task.__del__())
         """
         self._verify_initialized()
         if not self._cleared and self.client.generation == self._generation:
@@ -499,7 +499,7 @@ class Future(WrappedKey):
                 pass  # Shutting down, add_callback may be None
 
     def __reduce__(self) -> str | tuple[Any, ...]:
-        return Future, (self.key,)
+        return Task, (self.key,)
 
     def __del__(self):
         try:
@@ -515,10 +515,10 @@ class Future(WrappedKey):
     def __repr__(self):
         if self.type:
             return (
-                f"<Future: {self.status}, type: {typename(self.type)}, key: {self.key}>"
+                f"<Task: {self.status}, type: {typename(self.type)}, key: {self.key}>"
             )
         else:
-            return f"<Future: {self.status}, key: {self.key}>"
+            return f"<Task: {self.status}, key: {self.key}>"
 
     def _repr_html_(self):
         return get_template("future.html.j2").render(
@@ -531,10 +531,10 @@ class Future(WrappedKey):
         return self.result().__await__()
 
 
-class FutureState:
-    """A Future's internal state.
+class TaskState:
+    """A Task's internal state.
 
-    This is shared between all Futures with the same key and client.
+    This is shared between all Tasks with the same key and client.
     """
 
     __slots__ = ("_event", "status", "type", "exception", "traceback")
@@ -627,23 +627,23 @@ class FutureState:
         return f"<{self.__class__.__name__}: {self.status}>"
 
 
-async def done_callback(future_, callback):
-    """Coroutine that waits on the future_, then calls the callback
+async def done_callback(future, callback):
+    """Coroutine that waits on the future, then calls the callback
 
     Parameters
     ----------
-    future_ : asyncio.Future
-        The future_
+    future : asyncio.Future
+        The future
     callback : callable
         The callback
     """
-    while future_.status == "pending":
-        await future_._state.wait()
-    callback(future_)
+    while future.status == "pending":
+        await future._state.wait()
+    callback(future)
 
 
-@partial(normalize_token.register, Future)
-def normalize_future(f):
+@partial(normalize_token.register, Task)
+def normalize_task(f):
     """Returns the key and the type as a list
 
     Parameters
@@ -740,8 +740,8 @@ class Client(SyncMethodMixin):
     """Connect to and submit computation to a Dask cluster
 
     The Client connects users to a Dask cluster.  It provides an asynchronous
-    user interface around functions and futures.  This class resembles
-    executors in ``concurrent.futures`` but also allows ``Future`` objects
+    user interface around functions and tasks.  This class resembles
+    executors in ``concurrent.futures`` but also allows ``Task`` objects
     within ``submit/map`` calls.  When a Client is instantiated it takes over
     all ``dask.compute`` and ``dask.persist`` calls by default.
 
@@ -861,7 +861,7 @@ class Client(SyncMethodMixin):
             timeout = parse_timedelta(timeout, "s")
         self._timeout = timeout
 
-        self.futures = dict()
+        self.tasks = dict()
         self.refcount = defaultdict(int)
         self._handle_report_task = None
         if name is None:
@@ -880,9 +880,9 @@ class Client(SyncMethodMixin):
         self.cluster = None
         self.scheduler = None
         self._scheduler_identity = {}
-        # A reentrant-lock on the refcounts for futures associated with this
+        # A reentrant-lock on the refcounts for tasks associated with this
         # client. Should be held by individual operations modifying refcounts,
-        # or any bulk operation that needs to ensure the set of futures doesn't
+        # or any bulk operation that needs to ensure the set of tasks doesn't
         # change during operation.
         self._refcount_lock = threading.RLock()
         self.datasets = Datasets(self)
@@ -952,7 +952,7 @@ class Client(SyncMethodMixin):
         self._connecting_to_scheduler = False
 
         self._gather_keys = None
-        self._gather_future = None
+        self._gather_task = None
 
         if heartbeat_interval is None:
             heartbeat_interval = dask.config.get("distributed.client.heartbeat")
@@ -1053,7 +1053,7 @@ class Client(SyncMethodMixin):
     @contextmanager
     def as_current(self):
         """Thread-local, Task-local context manager that causes the Client.current
-        class method to return self. Any Future objects deserialized inside this
+        class method to return self. Any Task objects deserialized inside this
         context manager will be automatically attached to this Client.
         """
         tok = _current_client.set(self)
@@ -1317,9 +1317,9 @@ class Client(SyncMethodMixin):
         self.status = "connecting"
         self.scheduler_comm = None
 
-        for st in self.futures.values():
+        for st in self.tasks.values():
             st.cancel()
-        self.futures.clear()
+        self.tasks.clear()
 
         timeout = self._timeout
         deadline = time() + timeout
@@ -1535,7 +1535,7 @@ class Client(SyncMethodMixin):
     def _release_key(self, key):
         """Release key from distributed memory"""
         logger.debug("Release key %s", key)
-        st = self.futures.pop(key, None)
+        st = self.tasks.pop(key, None)
         if st is not None:
             st.cancel()
         if self.status != "closed":
@@ -1601,7 +1601,7 @@ class Client(SyncMethodMixin):
             pass
 
     def _handle_key_in_memory(self, key=None, type=None, workers=None):
-        state = self.futures.get(key)
+        state = self.tasks.get(key)
         if state is not None:
             if type and not state.type:  # Type exists and not yet set
                 try:
@@ -1615,31 +1615,31 @@ class Client(SyncMethodMixin):
             state.finish(type)
 
     def _handle_lost_data(self, key=None):
-        state = self.futures.get(key)
+        state = self.tasks.get(key)
         if state is not None:
             state.lose()
 
     def _handle_cancelled_keys(self, keys):
         for key in keys:
-            state = self.futures.get(key)
+            state = self.tasks.get(key)
             if state is not None:
                 state.cancel()
 
     def _handle_retried_key(self, key=None):
-        state = self.futures.get(key)
+        state = self.tasks.get(key)
         if state is not None:
             state.retry()
 
     def _handle_task_erred(self, key=None, exception=None, traceback=None):
-        state = self.futures.get(key)
+        state = self.tasks.get(key)
         if state is not None:
             state.set_error(exception, traceback)
 
     def _handle_restart(self):
         logger.info("Receive restart signal from scheduler")
-        for state in self.futures.values():
+        for state in self.tasks.values():
             state.cancel()
-        self.futures.clear()
+        self.tasks.clear()
         self.generation += 1
         with self._refcount_lock:
             self.refcount.clear()
@@ -1714,7 +1714,7 @@ class Client(SyncMethodMixin):
             ):
                 await self.scheduler_comm.close()
 
-            for key in list(self.futures):
+            for key in list(self.tasks):
                 self._release_key(key=key)
 
             if self._start_arg is None:
@@ -1903,7 +1903,7 @@ class Client(SyncMethodMixin):
         Notes
         -----
         The current implementation of a task graph resolution searches for occurrences of ``key``
-        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        and replaces it with a corresponding ``Task`` result. That can lead to unwanted
         substitution of strings passed as arguments to a task if these strings match some ``key``
         that already exists on a cluster. To avoid these situations it is required to use unique
         values if a ``key`` is set manually.
@@ -1911,8 +1911,8 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        Future
-            If running in asynchronous mode, returns the future. Otherwise
+        Task
+            If running in asynchronous mode, returns the task. Otherwise
             returns the concrete value
 
         Raises
@@ -1944,8 +1944,8 @@ class Client(SyncMethodMixin):
                 key = funcname(func) + "-" + str(uuid.uuid4())
 
         with self._refcount_lock:
-            if key in self.futures:
-                return Future(key, self, inform=False)
+            if key in self.tasks:
+                return Task(key, self, inform=False)
 
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
@@ -1958,7 +1958,7 @@ class Client(SyncMethodMixin):
         else:
             dsk = {key: (func,) + tuple(args)}
 
-        futures = self._graph_to_futures(
+        tasks = self._graph_to_tasks(
             dsk,
             [key],
             workers=workers,
@@ -1973,7 +1973,7 @@ class Client(SyncMethodMixin):
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
-        return futures[key]
+        return tasks[key]
 
     def map(
         self,
@@ -1994,7 +1994,7 @@ class Client(SyncMethodMixin):
     ):
         """Map a function on a sequence of arguments
 
-        Arguments can be normal objects or Futures
+        Arguments can be normal objects or Tasks
 
         Parameters
         ----------
@@ -2053,7 +2053,7 @@ class Client(SyncMethodMixin):
         Notes
         -----
         The current implementation of a task graph resolution searches for occurrences of ``key``
-        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        and replaces it with a corresponding ``Task`` result. That can lead to unwanted
         substitution of strings passed as arguments to a task if these strings match some ``key``
         that already exists on a cluster. To avoid these situations it is required to use unique
         values if a ``key`` is set manually.
@@ -2061,7 +2061,7 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        List, iterator, or Queue of futures, depending on the type of the
+        List, iterator, or Queue of tasks, depending on the type of the
         inputs.
 
         See Also
@@ -2164,7 +2164,7 @@ class Client(SyncMethodMixin):
 
         internal_priority = dict(zip(keys, range(len(keys))))
 
-        futures = self._graph_to_futures(
+        tasks = self._graph_to_tasks(
             dsk,
             keys,
             workers=workers,
@@ -2178,19 +2178,19 @@ class Client(SyncMethodMixin):
         )
         logger.debug("map(%s, ...)", funcname(func))
 
-        return [futures[k] for k in keys]
+        return [tasks[k] for k in keys]
 
-    async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
-        unpacked, future_set = unpack_remotedata(futures, byte_keys=True)
-        mismatched_futures = [f for f in future_set if f.client is not self]
-        if mismatched_futures:
+    async def _gather(self, tasks, errors="raise", direct=None, local_worker=None):
+        unpacked, future_set = unpack_remotedata(tasks, byte_keys=True)
+        mismatched_tasks = [f for f in future_set if f.client is not self]
+        if mismatched_tasks:
             raise ValueError(
-                "Cannot gather Futures created by another client. "
-                f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
-                f"mismatched Futures and their client IDs (this client is {self.id}): "
-                f"{ {f: f.client.id for f in mismatched_futures} }"  # noqa: E201, E202
+                "Cannot gather Tasks created by another client. "
+                f"These are the {len(mismatched_tasks)} (out of {len(tasks)}) "
+                f"mismatched Tasks and their client IDs (this client is {self.id}): "
+                f"{ {f: f.client.id for f in mismatched_tasks} }"  # noqa: E201, E202
             )
-        keys = [future.key for future in future_set]
+        keys = [task.key for task in future_set]
         bad_data = dict()
         data = {}
 
@@ -2208,7 +2208,7 @@ class Client(SyncMethodMixin):
         async def wait(k):
             """Want to stop the All(...) early if we find an error"""
             try:
-                st = self.futures[k]
+                st = self.tasks[k]
             except KeyError:
                 raise AllExit()
             else:
@@ -2217,11 +2217,11 @@ class Client(SyncMethodMixin):
                 raise AllExit()
 
         while True:
-            logger.debug("Waiting on futures to clear before gather")
+            logger.debug("Waiting on tasks to clear before gather")
 
             with suppress(AllExit):
                 await distributed.utils.All(
-                    [wait(key) for key in keys if key in self.futures],
+                    [wait(key) for key in keys if key in self.tasks],
                     quiet_exceptions=AllExit,
                 )
 
@@ -2230,11 +2230,11 @@ class Client(SyncMethodMixin):
             exceptions = set()
             bad_keys = set()
             for key in keys:
-                if key not in self.futures or self.futures[key].status in failed:
+                if key not in self.tasks or self.tasks[key].status in failed:
                     exceptions.add(key)
                     if errors == "raise":
                         try:
-                            st = self.futures[key]
+                            st = self.tasks[key]
                             exception = st.exception
                             traceback = st.traceback
                         except (KeyError, AttributeError):
@@ -2257,19 +2257,17 @@ class Client(SyncMethodMixin):
                 keys = [k for k in keys if k not in data]
 
             # We now do an actual remote communication with workers or scheduler
-            if self._gather_future:  # attach onto another pending gather request
+            if self._gather_task:  # attach onto another pending gather request
                 self._gather_keys |= set(keys)
-                response = await self._gather_future
+                response = await self._gather_task
             else:  # no one waiting, go ahead
                 self._gather_keys = set(keys)
-                future = asyncio.ensure_future(
-                    self._gather_remote(direct, local_worker)
-                )
+                task = asyncio.ensure_future(self._gather_remote(direct, local_worker))
                 if self._gather_keys is None:
-                    self._gather_future = None
+                    self._gather_task = None
                 else:
-                    self._gather_future = future
-                response = await future
+                    self._gather_task = task
+                response = await task
 
             if response["status"] == "error":
                 log = logger.warning if errors == "raise" else logger.debug
@@ -2282,7 +2280,7 @@ class Client(SyncMethodMixin):
                     self._send_to_scheduler({"op": "report-key", "key": key})
                 for key in response["keys"]:
                     try:
-                        self.futures[key].reset()
+                        self.tasks[key].reset()
                     except KeyError:  # TODO: verify that this is safe
                         pass
             else:  # pragma: no cover
@@ -2305,7 +2303,7 @@ class Client(SyncMethodMixin):
         async with self._gather_semaphore:
             keys = list(self._gather_keys)
             self._gather_keys = None  # clear state, these keys are being sent off
-            self._gather_future = None
+            self._gather_task = None
 
             if direct or local_worker:  # gather directly from workers
                 who_has = await retry_operation(self.scheduler.who_has, keys=keys)
@@ -2325,19 +2323,19 @@ class Client(SyncMethodMixin):
 
         return response
 
-    def gather(self, futures, errors="raise", direct=None, asynchronous=None):
-        """Gather futures from distributed memory
+    def gather(self, tasks, errors="raise", direct=None, asynchronous=None):
+        """Gather tasks from distributed memory
 
-        Accepts a future, nested container of futures, iterator, or queue.
+        Accepts a task, nested container of tasks, iterator, or queue.
         The return type will match the input type.
 
         Parameters
         ----------
-        futures : Collection of futures
-            This can be a possibly nested collection of Future objects.
+        tasks : Collection of tasks
+            This can be a possibly nested collection of Task objects.
             Collections can be lists, sets, or dictionaries
         errors : string
-            Either 'raise' or 'skip' if we should raise if a future has erred
+            Either 'raise' or 'skip' if we should raise if a task has erred
             or skip its inclusion in the output collection
         direct : boolean
             Whether or not to connect directly to the workers, or to ask
@@ -2349,7 +2347,7 @@ class Client(SyncMethodMixin):
         Returns
         -------
         results: a collection of the same type as the input, but now with
-        gathered results rather than futures
+        gathered results rather than tasks
 
         Examples
         --------
@@ -2365,14 +2363,14 @@ class Client(SyncMethodMixin):
         --------
         Client.scatter : Send data out to cluster
         """
-        if isinstance(futures, pyQueue):
+        if isinstance(tasks, pyQueue):
             raise TypeError(
                 "Dask no longer supports gathering over Iterators and Queues. "
                 "Consider using a normal for loop and Client.submit/gather"
             )
 
-        if isinstance(futures, Iterator):
-            return (self.gather(f, errors=errors, direct=direct) for f in futures)
+        if isinstance(tasks, Iterator):
+            return (self.gather(f, errors=errors, direct=direct) for f in tasks)
 
         try:
             local_worker = get_worker()
@@ -2382,7 +2380,7 @@ class Client(SyncMethodMixin):
         with shorten_traceback():
             return self.sync(
                 self._gather,
-                futures,
+                tasks,
                 errors=errors,
                 direct=direct,
                 local_worker=local_worker,
@@ -2478,9 +2476,9 @@ class Client(SyncMethodMixin):
                     timeout=timeout,
                 )
 
-        out = {k: Future(k, self, inform=False) for k in data}
+        out = {k: Task(k, self, inform=False) for k in data}
         for key, typ in types.items():
-            self.futures[key].finish(type=typ)
+            self.tasks[key].finish(type=typ)
 
         if direct and broadcast:
             n = None if broadcast is True else broadcast
@@ -2542,23 +2540,23 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        List, dict, iterator, or queue of futures matching the type of input.
+        List, dict, iterator, or queue of tasks matching the type of input.
 
         Examples
         --------
         >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
         >>> c.scatter(1) # doctest: +SKIP
-        <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>
+        <Task: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>
 
         >>> c.scatter([1, 2, 3])  # doctest: +SKIP
-        [<Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
-         <Future: status: finished, key: 58e78e1b34eb49a68c65b54815d1b158>,
-         <Future: status: finished, key: d3395e15f605bc35ab1bac6341a285e2>]
+        [<Task: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
+         <Task: status: finished, key: 58e78e1b34eb49a68c65b54815d1b158>,
+         <Task: status: finished, key: d3395e15f605bc35ab1bac6341a285e2>]
 
         >>> c.scatter({'x': 1, 'y': 2, 'z': 3})  # doctest: +SKIP
-        {'x': <Future: status: finished, key: x>,
-         'y': <Future: status: finished, key: y>,
-         'z': <Future: status: finished, key: z>}
+        {'x': <Task: status: finished, key: x>,
+         'y': <Task: status: finished, key: y>,
+         'z': <Task: status: finished, key: z>}
 
         Constrain location of data to subset of workers
 
@@ -2566,9 +2564,9 @@ class Client(SyncMethodMixin):
 
         Broadcast data to all workers
 
-        >>> [future] = c.scatter([element], broadcast=True)  # doctest: +SKIP
+        >>> [task] = c.scatter([element], broadcast=True)  # doctest: +SKIP
 
-        Send scattered data to parallelized function using client futures
+        Send scattered data to parallelized function using client tasks
         interface
 
         >>> data = c.scatter(data, broadcast=True)  # doctest: +SKIP
@@ -2576,9 +2574,9 @@ class Client(SyncMethodMixin):
 
         Notes
         -----
-        Scattering a dictionary uses ``dict`` keys to create ``Future`` keys.
+        Scattering a dictionary uses ``dict`` keys to create ``Task`` keys.
         The current implementation of a task graph resolution searches for occurrences of ``key``
-        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
+        and replaces it with a corresponding ``Task`` result. That can lead to unwanted
         substitution of strings passed as arguments to a task if these strings match some ``key``
         that already exists on a cluster. To avoid these situations it is required to use unique
         values if a ``key`` is set manually.
@@ -2612,52 +2610,52 @@ class Client(SyncMethodMixin):
             hash=hash,
         )
 
-    async def _cancel(self, futures, force=False):
-        # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
-        keys = list({f.key for f in futures_of(futures)})
+    async def _cancel(self, tasks, force=False):
+        # FIXME: This method is asynchronous since interacting with the TaskState below requires an event loop.
+        keys = list({f.key for f in futures_of(tasks)})
         self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
         for k in keys:
-            st = self.futures.pop(k, None)
+            st = self.tasks.pop(k, None)
             if st is not None:
                 st.cancel()
 
-    def cancel(self, futures, asynchronous=None, force=False):
+    def cancel(self, tasks, asynchronous=None, force=False):
         """
-        Cancel running futures
+        Cancel running tasks
         This stops future tasks from being scheduled if they have not yet run
         and deletes them if they have already run.  After calling, this result
         and all dependent results will no longer be accessible
 
         Parameters
         ----------
-        futures : List[Future]
-            The list of Futures
+        tasks : List[Task]
+            The list of Tasks
         asynchronous: bool
             If True the client is in asynchronous mode
         force : boolean (False)
-            Cancel this future even if other clients desire it
+            Cancel this task even if other clients desire it
         """
-        return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
+        return self.sync(self._cancel, tasks, asynchronous=asynchronous, force=force)
 
-    async def _retry(self, futures):
-        keys = list({f.key for f in futures_of(futures)})
+    async def _retry(self, tasks):
+        keys = list({f.key for f in futures_of(tasks)})
         response = await self.scheduler.retry(keys=keys, client=self.id)
         for key in response:
-            st = self.futures[key]
+            st = self.tasks[key]
             st.retry()
 
-    def retry(self, futures, asynchronous=None):
+    def retry(self, tasks, asynchronous=None):
         """
-        Retry failed futures
+        Retry failed tasks
 
         Parameters
         ----------
-        futures : list of Futures
-            The list of Futures
+        tasks : list of Tasks
+            The list of Tasks
         asynchronous: bool
             If True the client is in asynchronous mode
         """
-        return self.sync(self._retry, futures, asynchronous=asynchronous)
+        return self.sync(self._retry, tasks, asynchronous=asynchronous)
 
     @log_errors
     async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
@@ -2695,9 +2693,9 @@ class Client(SyncMethodMixin):
         """
         Publish named datasets to scheduler
 
-        This stores a named reference to a dask collection or list of futures
+        This stores a named reference to a dask collection or list of tasks
         on the scheduler.  These references are available to other Clients
-        which can download the collection or futures with ``get_dataset``.
+        which can download the collection or tasks with ``get_dataset``.
 
         Datasets are not immediately computed.  You may wish to call
         ``Client.persist`` prior to publishing a dataset.
@@ -3102,7 +3100,7 @@ class Client(SyncMethodMixin):
 
         return tuple(reversed(code))
 
-    def _graph_to_futures(
+    def _graph_to_tasks(
         self,
         dsk,
         keys,
@@ -3149,8 +3147,8 @@ class Client(SyncMethodMixin):
             for key in keyset:
                 validate_key(key)
 
-            # Create futures before sending graph (helps avoid contention)
-            futures = {key: Future(key, self, inform=False) for key in keyset}
+            # Create tasks before sending graph (helps avoid contention)
+            tasks = {key: Task(key, self, inform=False) for key in keyset}
             # Circular import
             from distributed.protocol import serialize
             from distributed.protocol.serialize import ToPickle
@@ -3162,7 +3160,7 @@ class Client(SyncMethodMixin):
                 warnings.warn(
                     f"Sending large graph of size {format_bytes(pickled_size)}.\n"
                     "This may cause some slowdown.\n"
-                    "Consider scattering data ahead of time and using futures."
+                    "Consider scattering data ahead of time and using tasks."
                 )
 
             computations = self._get_computation_code(
@@ -3182,7 +3180,7 @@ class Client(SyncMethodMixin):
                     "annotations": ToPickle(annotations),
                 }
             )
-            return futures
+            return tasks
 
     def get(
         self,
@@ -3218,7 +3216,7 @@ class Client(SyncMethodMixin):
             See :doc:`worker resources <resources>` for details on defining
             resources.
         sync : bool (optional)
-            Returns Futures if False or concrete values if True (default).
+            Returns Tasks if False or concrete values if True (default).
         asynchronous: bool
             If True the client is in asynchronous mode
         direct : bool
@@ -3257,7 +3255,7 @@ class Client(SyncMethodMixin):
         --------
         Client.compute : Compute asynchronous collections
         """
-        futures = self._graph_to_futures(
+        tasks = self._graph_to_tasks(
             dsk,
             keys=set(flatten([keys])),
             workers=workers,
@@ -3268,7 +3266,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             actors=actors,
         )
-        packed = pack_data(keys, futures)
+        packed = pack_data(keys, tasks)
         if sync:
             if getattr(thread_state, "key", False):
                 try:
@@ -3279,18 +3277,18 @@ class Client(SyncMethodMixin):
             try:
                 results = self.gather(packed, asynchronous=asynchronous, direct=direct)
             finally:
-                for f in futures.values():
+                for f in tasks.values():
                     f.release()
                 if getattr(thread_state, "key", False) and should_rejoin:
                     rejoin()
             return results
         return packed
 
-    def _optimize_insert_futures(self, dsk, keys):
-        """Replace known keys in dask graph with Futures
+    def _optimize_insert_tasks(self, dsk, keys):
+        """Replace known keys in dask graph with Tasks
 
         When given a Dask graph that might have overlapping keys with our known
-        results we replace the values of that graph with futures.  This can be
+        results we replace the values of that graph with tasks.  This can be
         used as an optimization to avoid recomputation.
 
         This returns the same graph if unchanged but a new graph if any changes
@@ -3299,11 +3297,11 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             changed = False
             for key in list(dsk):
-                if key in self.futures:
+                if key in self.tasks:
                     if not changed:
                         changed = True
                         dsk = ensure_dict(dsk)
-                    dsk[key] = Future(key, self, inform=False)
+                    dsk[key] = Task(key, self, inform=False)
 
         if changed:
             dsk, _ = dask.optimization.cull(dsk, keys)
@@ -3312,11 +3310,11 @@ class Client(SyncMethodMixin):
 
     def normalize_collection(self, collection):
         """
-        Replace collection's tasks by already existing futures if they exist
+        Replace collection's tasks by already existing tasks if they exist
 
         This normalizes the tasks within a collections task graph against the
-        known futures within the scheduler.  It returns a copy of the
-        collection with a task graph that includes the overlapping futures.
+        known tasks within the scheduler.  It returns a copy of the
+        collection with a task graph that includes the overlapping tasks.
 
         Parameters
         ----------
@@ -3326,13 +3324,13 @@ class Client(SyncMethodMixin):
         Returns
         -------
         collection : dask object
-            Collection with its tasks replaced with any existing futures.
+            Collection with its tasks replaced with any existing tasks.
 
         Examples
         --------
         >>> len(x.__dask_graph__())  # x is a dask collection with 100 tasks  # doctest: +SKIP
         100
-        >>> set(client.futures).intersection(x.__dask_graph__())  # some overlap exists  # doctest: +SKIP
+        >>> set(client.tasks).intersection(x.__dask_graph__())  # some overlap exists  # doctest: +SKIP
         10
 
         >>> x = client.normalize_collection(x)  # doctest: +SKIP
@@ -3344,7 +3342,7 @@ class Client(SyncMethodMixin):
         Client.persist : trigger computation of collection's tasks
         """
         dsk_orig = collection.__dask_graph__()
-        dsk = self._optimize_insert_futures(dsk_orig, collection.__dask_keys__())
+        dsk = self._optimize_insert_tasks(dsk_orig, collection.__dask_keys__())
 
         if dsk is dsk_orig:
             return collection
@@ -3373,7 +3371,7 @@ class Client(SyncMethodMixin):
         collections : iterable of dask objects or single dask object
             Collections like dask.array or dataframe or dask.value objects
         sync : bool (optional)
-            Returns Futures if False (default) or concrete values if True
+            Returns Tasks if False (default) or concrete values if True
         optimize_graph : bool
             Whether or not to optimize the underlying graphs
         workers : string or iterable of strings
@@ -3408,7 +3406,7 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        List of Futures if input is a sequence, or a single future otherwise
+        List of Tasks if input is a sequence, or a single task otherwise
 
         Examples
         --------
@@ -3418,7 +3416,7 @@ class Client(SyncMethodMixin):
         >>> y = delayed(add)(x, x)
         >>> xx, yy = client.compute([x, y])  # doctest: +SKIP
         >>> xx  # doctest: +SKIP
-        <Future: status: finished, key: add-8f6e709446674bad78ea8aeecfee188e>
+        <Task: status: finished, key: add-8f6e709446674bad78ea8aeecfee188e>
         >>> xx.result()  # doctest: +SKIP
         3
         >>> yy.result()  # doctest: +SKIP
@@ -3470,7 +3468,7 @@ class Client(SyncMethodMixin):
         dependencies.update(dsk.dependencies)
         dsk = HighLevelGraph(layers, dependencies)
 
-        futures_dict = self._graph_to_futures(
+        futures_dict = self._graph_to_tasks(
             dsk,
             names,
             workers=workers,
@@ -3483,18 +3481,18 @@ class Client(SyncMethodMixin):
         )
 
         i = 0
-        futures = []
+        tasks = []
         for arg in collections:
             if dask.is_dask_collection(arg):
-                futures.append(futures_dict[names[i]])
+                tasks.append(futures_dict[names[i]])
                 i += 1
             else:
-                futures.append(arg)
+                tasks.append(arg)
 
         if sync:
-            result = self.gather(futures)
+            result = self.gather(tasks)
         else:
-            result = futures
+            result = tasks
 
         if singleton:
             return first(result)
@@ -3518,7 +3516,7 @@ class Client(SyncMethodMixin):
 
         Starts computation of the collection on the cluster in the background.
         Provides a new dask collection that is semantically identical to the
-        previous one, but now based off of futures currently in execution.
+        previous one, but now based off of tasks currently in execution.
 
         Parameters
         ----------
@@ -3576,7 +3574,7 @@ class Client(SyncMethodMixin):
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
 
-        futures = self._graph_to_futures(
+        tasks = self._graph_to_tasks(
             dsk,
             names,
             workers=workers,
@@ -3590,7 +3588,7 @@ class Client(SyncMethodMixin):
 
         postpersists = [c.__dask_postpersist__() for c in collections]
         result = [
-            func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
+            func({k: tasks[k] for k in flatten(c.__dask_keys__())}, *args)
             for (func, args), c in zip(postpersists, collections)
         ]
 
@@ -3749,9 +3747,9 @@ class Client(SyncMethodMixin):
         with open(local_filename, "rb") as f:
             data = f.read()
 
-        [future] = await self._scatter([data])
-        key = future.key
-        await self._replicate(future)
+        [task] = await self._scatter([data])
+        key = task.key
+        await self._replicate(task)
 
         def dump_to_file(dask_worker=None):
             if not os.path.isabs(remote_filename):
@@ -3813,10 +3811,10 @@ class Client(SyncMethodMixin):
 
         return self.sync(_)
 
-    async def _rebalance(self, futures=None, workers=None):
-        if futures is not None:
-            await _wait(futures)
-            keys = list({f.key for f in self.futures_of(futures)})
+    async def _rebalance(self, tasks=None, workers=None):
+        if tasks is not None:
+            await _wait(tasks)
+            keys = list({f.key for f in self.futures_of(tasks)})
         else:
             keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
@@ -3824,7 +3822,7 @@ class Client(SyncMethodMixin):
             raise KeyError(f"Could not rebalance keys: {result['keys']}")
         assert result["status"] == "OK", result
 
-    def rebalance(self, futures=None, workers=None, **kwargs):
+    def rebalance(self, tasks=None, workers=None, **kwargs):
         """Rebalance data within network
 
         Move data between workers to roughly balance memory burden.  This
@@ -3840,32 +3838,32 @@ class Client(SyncMethodMixin):
 
         Parameters
         ----------
-        futures : list, optional
-            A list of futures to balance, defaults all data
+        tasks : list, optional
+            A list of tasks to balance, defaults all data
         workers : list, optional
             A list of workers on which to balance, defaults to all workers
         **kwargs : dict
             Optional keyword arguments for the function
         """
-        return self.sync(self._rebalance, futures, workers, **kwargs)
+        return self.sync(self._rebalance, tasks, workers, **kwargs)
 
-    async def _replicate(self, futures, n=None, workers=None, branching_factor=2):
-        futures = self.futures_of(futures)
-        await _wait(futures)
-        keys = {f.key for f in futures}
+    async def _replicate(self, tasks, n=None, workers=None, branching_factor=2):
+        tasks = self.futures_of(tasks)
+        await _wait(tasks)
+        keys = {f.key for f in tasks}
         await self.scheduler.replicate(
             keys=list(keys), n=n, workers=workers, branching_factor=branching_factor
         )
 
-    def replicate(self, futures, n=None, workers=None, branching_factor=2, **kwargs):
-        """Set replication of futures within network
+    def replicate(self, tasks, n=None, workers=None, branching_factor=2, **kwargs):
+        """Set replication of tasks within network
 
         Copy data onto many workers.  This helps to broadcast frequently
         accessed data and can improve resilience.
 
         This performs a tree copy of the data throughout the network
         individually on each piece of data.  This operation blocks until
-        complete.  It does not guarantee replication of data to future workers.
+        complete.  It does not guarantee replication of data to task workers.
 
         .. note::
            This method is incompatible with the Active Memory Manager's
@@ -3874,8 +3872,8 @@ class Client(SyncMethodMixin):
 
         Parameters
         ----------
-        futures : list of futures
-            Futures we wish to replicate
+        tasks : list of tasks
+            Tasks we wish to replicate
         n : int, optional
             Number of processes on the cluster on which to replicate the data.
             Defaults to all.
@@ -3902,7 +3900,7 @@ class Client(SyncMethodMixin):
         """
         return self.sync(
             self._replicate,
-            futures,
+            tasks,
             n=n,
             workers=workers,
             branching_factor=branching_factor,
@@ -3943,13 +3941,13 @@ class Client(SyncMethodMixin):
 
     ncores = nthreads
 
-    def who_has(self, futures=None, **kwargs):
-        """The workers storing each future's data
+    def who_has(self, tasks=None, **kwargs):
+        """The workers storing each task's data
 
         Parameters
         ----------
-        futures : list (optional)
-            A list of futures, defaults to all data
+        tasks : list (optional)
+            A list of tasks, defaults to all data
         **kwargs : dict
             Optional keyword arguments for the remote function
 
@@ -3971,9 +3969,9 @@ class Client(SyncMethodMixin):
         Client.has_what
         Client.nthreads
         """
-        if futures is not None:
-            futures = self.futures_of(futures)
-            keys = list({f.key for f in futures})
+        if tasks is not None:
+            tasks = self.futures_of(tasks)
+            keys = list({f.key for f in tasks})
         else:
             keys = None
 
@@ -4084,18 +4082,18 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.nbytes, keys=keys, summary=summary, **kwargs)
 
-    def call_stack(self, futures=None, keys=None):
+    def call_stack(self, tasks=None, keys=None):
         """The actively running call stack of all relevant keys
 
-        You can specify data of interest either by providing futures or
-        collections in the ``futures=`` keyword or a list of explicit keys in
+        You can specify data of interest either by providing tasks or
+        collections in the ``tasks=`` keyword or a list of explicit keys in
         the ``keys=`` keyword.  If neither are provided then all call stacks
         will be returned.
 
         Parameters
         ----------
-        futures : list (optional)
-            List of futures, defaults to all data
+        tasks : list (optional)
+            List of tasks, defaults to all data
         keys : list (optional)
             List of key names, defaults to all data
 
@@ -4107,9 +4105,9 @@ class Client(SyncMethodMixin):
         >>> client.call_stack()  # Or call with no arguments for all activity  # doctest: +SKIP
         """
         keys = keys or []
-        if futures is not None:
-            futures = self.futures_of(futures)
-            keys += list({f.key for f in futures})
+        if tasks is not None:
+            tasks = self.futures_of(tasks)
+            keys += list({f.key for f in tasks})
         return self.sync(self.scheduler.call_stack, keys=keys or None)
 
     def profile(
@@ -4673,15 +4671,15 @@ class Client(SyncMethodMixin):
 
         return result
 
-    def futures_of(self, futures):
+    def futures_of(self, tasks):
         """Wrapper method of futures_of
 
         Parameters
         ----------
-        futures : tuple
-            The futures
+        tasks : tuple
+            The tasks
         """
-        return futures_of(futures, client=self)
+        return futures_of(tasks, client=self)
 
     @classmethod
     def _expand_key(cls, k):
@@ -4995,12 +4993,12 @@ class Client(SyncMethodMixin):
 
     def register_worker_callbacks(self, setup=None):
         """
-        Registers a setup callback function for all current and future workers.
+        Registers a setup callback function for all current and task workers.
 
         This registers a new setup function for workers in this cluster. The
         function will run immediately on all currently connected workers. It
         will also be run upon connection by any workers that are added in the
-        future. Multiple setup functions can be registered - these will be
+        task. Multiple setup functions can be registered - these will be
         called in the order they were added.
 
         If the function takes an input argument named ``dask_worker`` then
@@ -5050,7 +5048,7 @@ class Client(SyncMethodMixin):
         nanny: bool | None = None,
     ):
         """
-        Registers a lifecycle worker plugin for all current and future workers.
+        Registers a lifecycle worker plugin for all current and task workers.
 
         .. deprecated:: 2023.9.2
             Use :meth:`Client.register_plugin` instead.
@@ -5110,7 +5108,7 @@ class Client(SyncMethodMixin):
         ...    plugin = worker.plugins['my-plugin']
         ...    return plugin.my_state
 
-        >>> future = client.run(f)
+        >>> task = client.run(f)
 
         See Also
         --------
@@ -5410,17 +5408,17 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         )
     fs = futures_of(fs)
     if return_when == ALL_COMPLETED:
-        future = distributed.utils.All({f._state.wait() for f in fs})
+        task = distributed.utils.All({f._state.wait() for f in fs})
     elif return_when == FIRST_COMPLETED:
-        future = distributed.utils.Any({f._state.wait() for f in fs})
+        task = distributed.utils.Any({f._state.wait() for f in fs})
     else:
         raise NotImplementedError(
             "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"
         )
 
     if timeout is not None:
-        future = wait_for(future, timeout)
-    await future
+        task = wait_for(task, timeout)
+    await task
 
     done, not_done = (
         {fu for fu in fs if fu.status != "pending"},
@@ -5434,11 +5432,11 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
 
 
 def wait(fs, timeout=None, return_when=ALL_COMPLETED):
-    """Wait until all/any futures are finished
+    """Wait until all/any tasks are finished
 
     Parameters
     ----------
-    fs : List[Future]
+    fs : List[Task]
     timeout : number, string, optional
         Time after which to raise a ``dask.distributed.TimeoutError``.
         Can be a string like ``"10 minutes"`` or a number of seconds to wait.
@@ -5466,45 +5464,45 @@ async def _as_completed(fs, queue):
 
     while not wait_iterator.done():
         await wait_iterator.next()
-        # TODO: handle case of restarted futures
-        future_ = firsts[wait_iterator.current_index]
-        for f in groups[future_.key]:
+        # TODO: handle case of restarted tasks
+        future = firsts[wait_iterator.current_index]
+        for f in groups[future.key]:
             queue.put_nowait(f)
 
 
-async def _first_completed(futures_):
-    """Return a single completed future_
+async def _first_completed(futures):
+    """Return a single completed future
 
     See Also:
         _as_completed
     """
     q = asyncio.Queue()
-    await _as_completed(futures_, q)
+    await _as_completed(futures, q)
     result = await q.get()
     return result
 
 
 class as_completed:
     """
-    Return futures in the order in which they complete
+    Return tasks in the order in which they complete
 
-    This returns an iterator that yields the input future objects in the order
+    This returns an iterator that yields the input task objects in the order
     in which they complete.  Calling ``next`` on the iterator will block until
-    the next future completes, irrespective of order.
+    the next task completes, irrespective of order.
 
-    Additionally, you can also add more futures to this object during
+    Additionally, you can also add more tasks to this object during
     computation with the ``.add`` method
 
     Parameters
     ----------
-    futures: Collection of futures
-        A list of Future objects to be iterated over in the order in which they
+    tasks: Collection of tasks
+        A list of Task objects to be iterated over in the order in which they
         complete
     with_results: bool (False)
-        Whether to wait and include results of futures as well;
-        in this case ``as_completed`` yields a tuple of (future, result)
+        Whether to wait and include results of tasks as well;
+        in this case ``as_completed`` yields a tuple of (task, result)
     raise_errors: bool (True)
-        Whether we should raise when the result of a future raises an
+        Whether we should raise when the result of a task raises an
         exception; only affects behavior when ``with_results=True``.
     timeout: int (optional)
         The returned iterator raises a ``dask.distributed.TimeoutError``
@@ -5516,20 +5514,20 @@ class as_completed:
     Examples
     --------
     >>> x, y, z = client.map(inc, [1, 2, 3])  # doctest: +SKIP
-    >>> for future in as_completed([x, y, z]):  # doctest: +SKIP
-    ...     print(future.result())  # doctest: +SKIP
+    >>> for task in as_completed([x, y, z]):  # doctest: +SKIP
+    ...     print(task.result())  # doctest: +SKIP
     3
     2
     4
 
-    Add more futures during computation
+    Add more tasks during computation
 
     >>> x, y, z = client.map(inc, [1, 2, 3])  # doctest: +SKIP
     >>> ac = as_completed([x, y, z])  # doctest: +SKIP
-    >>> for future in ac:  # doctest: +SKIP
-    ...     print(future.result())  # doctest: +SKIP
+    >>> for task in ac:  # doctest: +SKIP
+    ...     print(task.result())  # doctest: +SKIP
     ...     if random.random() < 0.5:  # doctest: +SKIP
-    ...         ac.add(c.submit(double, future))  # doctest: +SKIP
+    ...         ac.add(c.submit(double, task))  # doctest: +SKIP
     4
     2
     8
@@ -5541,7 +5539,7 @@ class as_completed:
     Optionally wait until the result has been gathered as well
 
     >>> ac = as_completed([x, y, z], with_results=True)  # doctest: +SKIP
-    >>> for future, result in ac:  # doctest: +SKIP
+    >>> for task, result in ac:  # doctest: +SKIP
     ...     print(result)  # doctest: +SKIP
     2
     4
@@ -5550,16 +5548,16 @@ class as_completed:
 
     def __init__(
         self,
-        futures=None,
+        tasks=None,
         loop=None,
         with_results=False,
         raise_errors=True,
         *,
         timeout=None,
     ):
-        if futures is None:
-            futures = []
-        self.futures = defaultdict(int)
+        if tasks is None:
+            tasks = []
+        self.tasks = defaultdict(int)
         self.queue = pyQueue()
         self.lock = threading.Lock()
         self.loop = loop or default_client().loop
@@ -5568,8 +5566,8 @@ class as_completed:
         self.raise_errors = raise_errors
         self._deadline = Deadline.after(parse_timedelta(timeout))
 
-        if futures:
-            self.update(futures)
+        if tasks:
+            self.update(tasks)
 
     @property
     def condition(self):
@@ -5579,71 +5577,71 @@ class as_completed:
             self._condition = asyncio.Condition()
             return self._condition
 
-    async def _track_future(self, future):
+    async def _track_task(self, task):
         try:
-            await _wait(future)
+            await _wait(task)
         except CancelledError:
             pass
         if self.with_results:
             try:
-                result = await future._result(raiseit=False)
+                result = await task._result(raiseit=False)
             except CancelledError as exc:
                 result = exc
         with self.lock:
-            if future in self.futures:
-                self.futures[future] -= 1
-                if not self.futures[future]:
-                    del self.futures[future]
+            if task in self.tasks:
+                self.tasks[task] -= 1
+                if not self.tasks[task]:
+                    del self.tasks[task]
                 if self.with_results:
-                    self.queue.put_nowait((future, result))
+                    self.queue.put_nowait((task, result))
                 else:
-                    self.queue.put_nowait(future)
+                    self.queue.put_nowait(task)
                 async with self.condition:
                     self.condition.notify()
                 with self.thread_condition:
                     self.thread_condition.notify()
 
-    def update(self, futures):
-        """Add multiple futures to the collection.
+    def update(self, tasks):
+        """Add multiple tasks to the collection.
 
-        The added futures will emit from the iterator once they finish"""
-        from distributed.actor import BaseActorFuture
+        The added tasks will emit from the iterator once they finish"""
+        from distributed.actor import BaseActorTask
 
         with self.lock:
-            for f in futures:
-                if not isinstance(f, (Future, BaseActorFuture)):
-                    raise TypeError("Input must be a future, got %s" % f)
-                self.futures[f] += 1
-                self.loop.add_callback(self._track_future, f)
+            for f in tasks:
+                if not isinstance(f, (Task, BaseActorTask)):
+                    raise TypeError("Input must be a task, got %s" % f)
+                self.tasks[f] += 1
+                self.loop.add_callback(self._track_task, f)
 
-    def add(self, future):
-        """Add a future to the collection
+    def add(self, task):
+        """Add a task to the collection
 
-        This future will emit from the iterator once it finishes
+        This task will emit from the iterator once it finishes
         """
-        self.update((future,))
+        self.update((task,))
 
     def is_empty(self):
-        """Returns True if there no completed or computing futures"""
+        """Returns True if there no completed or computing tasks"""
         return not self.count()
 
     def has_ready(self):
-        """Returns True if there are completed futures available."""
+        """Returns True if there are completed tasks available."""
         return not self.queue.empty()
 
     def count(self):
-        """Return the number of futures yet to be returned
+        """Return the number of tasks yet to be returned
 
-        This includes both the number of futures still computing, as well as
+        This includes both the number of tasks still computing, as well as
         those that are finished, but have not yet been returned from this
         iterator.
         """
         with self.lock:
-            return len(self.futures) + len(self.queue.queue)
+            return len(self.tasks) + len(self.queue.queue)
 
     def __repr__(self):
         return "<as_completed: waiting={} done={}>".format(
-            len(self.futures), len(self.queue.queue)
+            len(self.tasks), len(self.queue.queue)
         )
 
     def __iter__(self):
@@ -5655,12 +5653,12 @@ class as_completed:
     def _get_and_raise(self):
         res = self.queue.get()
         if self.with_results:
-            future, result = res
-            if self.raise_errors and future.status == "error":
+            task, result = res
+            if self.raise_errors and task.status == "error":
                 typ, exc, tb = result
                 raise exc.with_traceback(tb)
-            elif future.status == "cancelled":
-                res = (res[0], CancelledError(future.key))
+            elif task.status == "cancelled":
+                res = (res[0], CancelledError(task.key))
         return res
 
     def __next__(self):
@@ -5679,10 +5677,10 @@ class as_completed:
         return await wait_for(self._anext(), self._deadline.remaining)
 
     async def _anext(self):
-        if not self.futures and self.queue.empty():
+        if not self.tasks and self.queue.empty():
             raise StopAsyncIteration
         while self.queue.empty():
-            if not self.futures:
+            if not self.tasks:
                 raise StopAsyncIteration
             async with self.condition:
                 await self.condition.wait()
@@ -5692,7 +5690,7 @@ class as_completed:
     next = __next__
 
     def next_batch(self, block=True):
-        """Get the next batch of completed futures.
+        """Get the next batch of completed tasks.
 
         Parameters
         ----------
@@ -5702,7 +5700,7 @@ class as_completed:
 
         Examples
         --------
-        >>> ac = as_completed(futures)  # doctest: +SKIP
+        >>> ac = as_completed(tasks)  # doctest: +SKIP
         >>> client.gather(ac.next_batch())  # doctest: +SKIP
         [4, 1, 3]
 
@@ -5711,7 +5709,7 @@ class as_completed:
 
         Returns
         -------
-        List of futures or (future, result) tuples
+        List of tasks or (task, result) tuples
         """
         if block:
             batch = [next(self)]
@@ -5723,16 +5721,16 @@ class as_completed:
 
     def batches(self):
         """
-        Yield all finished futures at once rather than one-by-one
+        Yield all finished tasks at once rather than one-by-one
 
-        This returns an iterator of lists of futures or lists of
-        (future, result) tuples rather than individual futures or individual
-        (future, result) tuples.  It will yield these as soon as possible
+        This returns an iterator of lists of tasks or lists of
+        (task, result) tuples rather than individual tasks or individual
+        (task, result) tuples.  It will yield these as soon as possible
         without waiting.
 
         Examples
         --------
-        >>> for batch in as_completed(futures).batches():  # doctest: +SKIP
+        >>> for batch in as_completed(tasks).batches():  # doctest: +SKIP
         ...     results = client.gather(batch)
         ...     print(results)
         [4, 2]
@@ -5747,9 +5745,9 @@ class as_completed:
                 return
 
     def clear(self):
-        """Clear out all submitted futures"""
+        """Clear out all submitted tasks"""
         with self.lock:
-            self.futures.clear()
+            self.tasks.clear()
             while not self.queue.empty():
                 self.queue.get()
 
@@ -5828,7 +5826,7 @@ def redict_collection(c, dsk):
 
 
 def futures_of(o, client=None):
-    """Future objects in a collection
+    """Task objects in a collection
 
     Parameters
     ----------
@@ -5840,22 +5838,22 @@ def futures_of(o, client=None):
     Examples
     --------
     >>> futures_of(my_dask_dataframe)
-    [<Future: finished key: ...>,
-     <Future: pending  key: ...>]
+    [<Task: finished key: ...>,
+     <Task: pending  key: ...>]
 
     Raises
     ------
     CancelledError
-        If one of the futures is cancelled a CancelledError is raised
+        If one of the tasks is cancelled a CancelledError is raised
 
     Returns
     -------
-    futures : List[Future]
-        A list of futures held by those collections
+    tasks : List[Task]
+        A list of tasks held by those collections
     """
     stack = [o]
     seen = set()
-    futures = list()
+    tasks = list()
     while stack:
         x = stack.pop()
         if type(x) in (tuple, set, list):
@@ -5864,50 +5862,50 @@ def futures_of(o, client=None):
             stack.extend(x.values())
         elif type(x) is SubgraphCallable:
             stack.extend(x.dsk.values())
-        elif isinstance(x, Future):
+        elif isinstance(x, Task):
             if x not in seen:
                 seen.add(x)
-                futures.append(x)
+                tasks.append(x)
         elif dask.is_dask_collection(x):
             stack.extend(x.__dask_graph__().values())
 
     if client is not None:
-        bad = {f for f in futures if f.cancelled()}
+        bad = {f for f in tasks if f.cancelled()}
         if bad:
             raise CancelledError(bad)
 
-    return futures[::-1]
+    return tasks[::-1]
 
 
 def fire_and_forget(obj):
-    """Run tasks at least once, even if we release the futures
+    """Run tasks at least once, even if we release the tasks
 
     Under normal operation Dask will not run any tasks for which there is not
-    an active future (this avoids unnecessary work in many situations).
-    However sometimes you want to just fire off a task, not track its future,
-    and expect it to finish eventually.  You can use this function on a future
-    or collection of futures to ask Dask to complete the task even if no active
+    an active task (this avoids unnecessary work in many situations).
+    However sometimes you want to just fire off a task, not track its task,
+    and expect it to finish eventually.  You can use this function on a task
+    or collection of tasks to ask Dask to complete the task even if no active
     client is tracking it.
 
     The results will not be kept in memory after the task completes (unless
-    there is an active future) so this is only useful for tasks that depend on
+    there is an active task) so this is only useful for tasks that depend on
     side effects.
 
     Parameters
     ----------
-    obj : Future, list, dict, dask collection
-        The futures that you want to run at least once
+    obj : Task, list, dict, dask collection
+        The tasks that you want to run at least once
 
     Examples
     --------
     >>> fire_and_forget(client.submit(func, *args))  # doctest: +SKIP
     """
-    futures = futures_of(obj)
-    for future in futures:
-        future.client._send_to_scheduler(
+    tasks = futures_of(obj)
+    for task in tasks:
+        task.client._send_to_scheduler(
             {
                 "op": "client-desires-keys",
-                "keys": [future.key],
+                "keys": [task.key],
                 "client": "fire-and-forget",
             }
         )

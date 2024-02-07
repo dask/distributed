@@ -2,7 +2,7 @@ Publish Datasets
 ================
 
 A *published dataset* is a named reference to a Dask collection or list of
-futures that has been published to the cluster.  It is available for any client
+tasks that has been published to the cluster.  It is available for any client
 to see and persists beyond the scope of an individual session.
 
 Publishing datasets is useful in the following cases:

@@ -24,8 +24,8 @@ async def test_single_lock(c, s, a, b):
             assert client.get_metadata("locked") is True
             client.set_metadata("locked", False)
 
-    futures = c.map(f, range(20))
-    await c.gather(futures)
+    tasks = c.map(f, range(20))
+    await c.gather(tasks)
     ext = s.extensions["multi_locks"]
     assert not ext.events
     assert not ext.requests

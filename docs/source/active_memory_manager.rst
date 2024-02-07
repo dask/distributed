@@ -9,7 +9,7 @@ Memory imbalance and duplication
 --------------------------------
 Whenever a Dask task returns data, it is stored on the worker that executed the task for
 as long as it's a dependency of other tasks, is referenced by a
-:class:`~distributed.Client` through a :class:`~distributed.Future`, or is part of a
+:class:`~distributed.Client` through a :class:`~distributed.Task`, or is part of a
 :doc:`published dataset <publish>`.
 
 Dask assigns tasks to workers following criteria of CPU occupancy, :doc:`resources`, and

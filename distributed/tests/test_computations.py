@@ -31,9 +31,9 @@ async def test_computations(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_computations_futures(c, s, a, b):
-    futures = [c.submit(inc, i) for i in range(10)]
-    total = c.submit(sum, futures)
+async def test_computations_tasks(c, s, a, b):
+    tasks = [c.submit(inc, i) for i in range(10)]
+    total = c.submit(sum, tasks)
     await total
 
     [computation] = s.computations

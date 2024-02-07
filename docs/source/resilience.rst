@@ -36,7 +36,7 @@ appropriately raises an ``IOError`` then the scheduler will reroute all pending
 computations to other workers.
 
 If the lost worker was the only worker to hold vital results necessary for
-future computations then those results will be recomputed by surviving workers.
+task computations then those results will be recomputed by surviving workers.
 The scheduler maintains a full history of how each result was produced and so is
 able to reproduce those same computations on other workers.
 

@@ -102,7 +102,7 @@ async def test_task_lifecycle(c, s, a, b):
         ("execute", span_id(s), "z", "disk-write", "bytes"),
         # Delta to end-to-end runtime as seen from the worker state machine
         ("execute", span_id(s), "z", "other", "seconds"),
-        # a.get_data() (triggered by the client retrieving the Future for z)
+        # a.get_data() (triggered by the client retrieving the Task for z)
         # Unspill
         ("get-data", "disk-read", "seconds"),
         ("get-data", "disk-read", "count"),
@@ -475,10 +475,10 @@ async def test_reschedule(c, s, a, b):
         if get_worker().address == a_address:
             raise Reschedule()
 
-    futures = c.map(f, range(4), key=["x-1", "x-2", "x-3", "x-4"])
-    futures2 = c.map(slowinc, range(10), delay=0.1, key="clog", workers=[a.address])
-    await wait(futures)
-    assert all(f.key in b.data for f in futures)
+    tasks = c.map(f, range(4), key=["x-1", "x-2", "x-3", "x-4"])
+    tasks2 = c.map(slowinc, range(10), delay=0.1, key="clog", workers=[a.address])
+    await wait(tasks)
+    assert all(f.key in b.data for f in tasks)
 
     evs = get_digests(a, "x")
     k = ("execute", span_id(s), "x", "cancelled", "seconds")

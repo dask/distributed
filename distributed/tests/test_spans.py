@@ -8,7 +8,7 @@ import dask
 from dask import delayed
 
 import distributed
-from distributed import Client, Event, Future, Worker, span, wait
+from distributed import Client, Event, Task, Worker, span, wait
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.utils_test import (
     NoSchedulerDelayWorker,
@@ -396,7 +396,7 @@ async def test_client_desires_keys_creates_ts(c, s, a, b):
     test_spans.py::test_scatter_creates_ts
     test_spans.py::test_scatter_creates_tg
     """
-    x = Future(key="x")
+    x = Task(key="x")
     await wait_for_state("x", "released", s)
     assert s.tasks["x"].group.span_id is None
     async with Client(s.address, asynchronous=True) as c2:
@@ -416,7 +416,7 @@ async def test_client_desires_keys_creates_tg(c, s, a, b):
     test_spans.py::test_scatter_creates_ts
     test_spans.py::test_scatter_creates_tg
     """
-    x0 = Future(key="x-0")
+    x0 = Task(key="x-0")
     await wait_for_state("x-0", "released", s)
     assert s.tasks["x-0"].group.span_id is None
     x1 = c.submit(inc, 1, key="x-1")

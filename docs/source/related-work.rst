@@ -115,7 +115,7 @@ route computations to remote workers
    >>> view = Client(...)[:]
    >>> results = view.map(func, sequence)
    >>> result = view.apply(func, *args, **kwargs)
-   >>> future = view.apply_async(func, *args, **kwargs)
+   >>> task = view.apply_async(func, *args, **kwargs)
 
 It also provides direct execution of code in the remote process and collection
 of data from the remote namespace.
@@ -158,16 +158,16 @@ The distributed client includes a dynamic task scheduler capable of managing
 deep data dependencies between tasks.  The IPython parallel docs include `a
 recipe`_ for executing task graphs with data dependencies.  This same idea is
 core to all of ``distributed``, which uses a dynamic task scheduler for all
-operations.  Notably, ``distributed.Future`` objects can be used within
+operations.  Notably, ``distributed.Task`` objects can be used within
 ``submit/map/get`` calls before they have completed.
 
 .. code-block:: python
 
-   >>> x = client.submit(f, 1)  # returns a future
-   >>> y = client.submit(f, 2)  # returns a future
-   >>> z = client.submit(add, x, y)  # consumes futures
+   >>> x = client.submit(f, 1)  # returns a task
+   >>> y = client.submit(f, 2)  # returns a task
+   >>> z = client.submit(add, x, y)  # consumes tasks
 
-The ability to use futures cheaply within ``submit`` and ``map`` methods
+The ability to use tasks cheaply within ``submit`` and ``map`` methods
 enables the construction of very sophisticated data pipelines with simple code.
 Additionally, distributed can serve as a full dask task scheduler, enabling
 support for distributed arrays, dataframes, machine learning pipelines, and any
@@ -200,13 +200,13 @@ concurrent.futures
 The :class:`distributed.Client` API is modeled after :mod:`concurrent.futures`
 and :pep:`3148`.  It has a few notable differences:
 
-*  ``distributed`` accepts :class:`~distributed.client.Future` objects within
+*  ``distributed`` accepts :class:`~distributed.client.Task` objects within
    calls to ``submit/map``. When chaining computations, it is preferable to
-   submit Future objects directly rather than wait on them before submission.
+   submit Task objects directly rather than wait on them before submission.
 *  The :meth:`~distributed.client.Client.map` method returns
-   :class:`~distributed.client.Future` objects, not concrete results.
+   :class:`~distributed.client.Task` objects, not concrete results.
    The :meth:`~distributed.client.Client.map` method returns immediately.
-*  Despite sharing a similar API, ``distributed`` :class:`~distributed.client.Future`
+*  Despite sharing a similar API, ``distributed`` :class:`~distributed.client.Task`
    objects cannot always be substituted for :class:`concurrent.futures.Future`
    objects, especially when using ``wait()`` or ``as_completed()``.
 *  Distributed generally does not support callbacks.

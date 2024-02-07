@@ -203,7 +203,7 @@ class ClientState:
     #: A set of tasks this client wants to be kept in memory, so that it can download
     #: its result when desired. This is the reverse mapping of
     #: :class:`TaskState.who_wants`. Tasks are typically removed from this set when the
-    #: corresponding object in the client's space (for example a ``Future`` or a Dask
+    #: corresponding object in the client's space (for example a ``Task`` or a Dask
     #: collection) gets garbage-collected.
     wants_what: set[TaskState]
 
@@ -1917,7 +1917,7 @@ class SchedulerState:
         -------
         Tuple of:
 
-        - Dictionary of recommendations for future transitions {key: new state}
+        - Dictionary of recommendations for task transitions {key: new state}
         - Messages to clients {client address: [msg, msg, ...]}
         - Messages to workers {worker address: [msg, msg, ...]}
 
@@ -2129,7 +2129,7 @@ class SchedulerState:
     ) -> WorkerState | None:
         """Pick a worker for a runnable root-ish task, without queuing.
 
-        This attempts to schedule sibling tasks on the same worker, reducing future data
+        This attempts to schedule sibling tasks on the same worker, reducing task data
         transfer. It does not consider the location of dependencies, since they'll end
         up on every worker anyway.
 
@@ -3955,7 +3955,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> dict:
         "Produce the state dict used in a cluster state dump"
         # Kick off state-dumping on workers before we block the event loop in `self._to_dict`.
-        workers_future = asyncio.gather(
+        workers_task = asyncio.gather(
             self.broadcast(
                 msg={"op": "dump_state", "exclude": exclude},
                 on_error="return",
@@ -3968,11 +3968,11 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             scheduler_state = self._to_dict(exclude=exclude)
 
-            worker_states, worker_versions = await workers_future
+            worker_states, worker_versions = await workers_task
         finally:
             # Ensure the tasks aren't left running if anything fails.
             # Someday (py3.11), use a trio-style TaskGroup for this.
-            workers_future.cancel()
+            workers_task.cancel()
 
         # Convert any RPC errors to strings
         worker_states = {
@@ -4149,7 +4149,7 @@ class Scheduler(SchedulerState, ServerNode):
                 ext.teardown()
         logger.info("Scheduler closing all comms")
 
-        futures = []
+        tasks = []
         for _, comm in list(self.stream_comms.items()):
             # FIXME use `self.remove_worker()` instead after https://github.com/dask/distributed/issues/6390
             if not comm.closed():
@@ -4159,9 +4159,9 @@ class Scheduler(SchedulerState, ServerNode):
                 comm.send({"op": "close-stream"})
                 # ^ TODO remove? `Worker.close` will close the stream anyway.
             with suppress(AttributeError):
-                futures.append(comm.close())
+                tasks.append(comm.close())
 
-        await asyncio.gather(*futures)
+        await asyncio.gather(*tasks)
 
         if self.jupyter:
             await self._jupyter_server_application._cleanup()
@@ -5571,7 +5571,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         """Add client to network
 
-        We listen to all future messages from this Comm.
+        We listen to all task messages from this Comm.
         """
         assert client is not None
         comm.name = "Scheduler->Client"
@@ -7452,10 +7452,10 @@ class Scheduler(SchedulerState, ServerNode):
         # implementing logic based on IP addresses would not necessarily help.
         # Randomize the connections to even out the mean measures.
         random.shuffle(workers)
-        futures = [
+        tasks = [
             self.rpc(a).benchmark_network(address=b) for a, b in partition(2, workers)
         ]
-        responses = await asyncio.gather(*futures)
+        responses = await asyncio.gather(*tasks)
 
         for d in responses:
             for size, duration in d.items():
@@ -7601,7 +7601,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def register_worker_plugin(
         self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
     ) -> dict[str, OKMessage]:
-        """Registers a worker plugin on all running and future workers"""
+        """Registers a worker plugin on all running and task workers"""
         logger.info("Registering Worker plugin %s", name)
         if idempotent is None:
             warnings.warn(
@@ -7636,7 +7636,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def register_nanny_plugin(
         self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
     ) -> dict[str, OKMessage]:
-        """Registers a nanny plugin on all running and future nannies"""
+        """Registers a nanny plugin on all running and task nannies"""
         logger.info("Registering Nanny plugin %s", name)
 
         if idempotent is None:
@@ -7694,7 +7694,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         Returns
         -------
-        Dictionary of recommendations for future transitions
+        Dictionary of recommendations for task transitions
 
         See Also
         --------
@@ -7748,7 +7748,7 @@ class Scheduler(SchedulerState, ServerNode):
         if worker and ts.processing_on and ts.processing_on.address != worker:
             return
         # transition_processing_released will immediately suggest an additional
-        # transition to waiting if the task has any waiters or clients holding a future.
+        # transition to waiting if the task has any waiters or clients holding a task.
         self.transitions({key: "released"}, stimulus_id=stimulus_id)
 
     #####################
@@ -8720,7 +8720,7 @@ def _materialize_graph(
                 )
     dependencies, _ = get_deps(dsk)
 
-    # Remove `Future` objects from graph and note any future dependencies
+    # Remove `Task` objects from graph and note any task dependencies
     dsk2 = {}
     fut_deps = {}
     for k, v in dsk.items():
@@ -8729,9 +8729,9 @@ def _materialize_graph(
             fut_deps[k] = futs
     dsk = dsk2
 
-    # - Add in deps for any tasks that depend on futures
-    for k, futures in fut_deps.items():
-        dependencies[k].update(f.key for f in futures)
+    # - Add in deps for any tasks that depend on tasks
+    for k, tasks in fut_deps.items():
+        dependencies[k].update(f.key for f in tasks)
 
     # Remove any self-dependencies (happens on test_publish_bag() and others)
     for k, v in dependencies.items():

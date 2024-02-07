@@ -206,7 +206,7 @@ def test_restart_sync(loop):
 def test_worker_doesnt_await_task_completion(loop):
     with cluster(nanny=True, nworkers=1) as (s, [w]):
         with Client(s["address"], loop=loop) as c:
-            future = c.submit(sleep, 100)
+            task = c.submit(sleep, 100)
             sleep(0.1)
             start = time()
             c.restart(timeout="5s", wait_for_workers=False)
@@ -234,8 +234,8 @@ async def test_multiple_clients_restart(s, a, b):
             await asyncio.sleep(0.01)
             assert time() < start + 5
 
-        assert not c1.futures
-        assert not c2.futures
+        assert not c1.tasks
+        assert not c2.tasks
 
         # Ensure both clients still work after restart.
         # Reusing a previous key has no effect.
@@ -269,7 +269,7 @@ async def test_restart_scheduler(s, a, b):
 
 
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
-async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
+async def test_forgotten_futures_dont_clean_up_new_tasks(c, s, a, b):
     x = c.submit(inc, 1)
     await c.restart()
     y = c.submit(inc, 1)
@@ -364,7 +364,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
             await asyncio.sleep(0.01)
 
         n_worker_address = n.worker_address
-        futures = c.map(
+        tasks = c.map(
             inc,
             range(20),
             key=["f%d" % i for i in range(20)],
@@ -375,8 +375,8 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         def sink(*args):
             pass
 
-        await wait(futures)
-        result_fut = c.submit(sink, futures, workers=a.address)
+        await wait(tasks)
+        result_fut = c.submit(sink, tasks, workers=a.address)
 
         await n.kill(timeout=1)
         while len(s.workers) > 2:
@@ -406,7 +406,7 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
             return "B"
 
     with mock.patch("distributed.worker.get_address_host", mock_address_host):
-        futures = c.map(
+        tasks = c.map(
             slowinc,
             range(20),
             delay=0.1,
@@ -414,13 +414,13 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
             workers=[a.address],
             allow_other_workers=True,
         )
-        await wait(futures)
+        await wait(tasks)
 
         # replicate data to avoid the scheduler retriggering the computation
         # retriggering cleans up the state nicely but doesn't reflect real world
         # scenarios where there may be replicas on the cluster, e.g. they are
         # replicated as a dependency somewhere else
-        await c.replicate(futures, n=2, workers=[a.address, b.address])
+        await c.replicate(tasks, n=2, workers=[a.address, b.address])
 
         def sink(*args):
             pass
@@ -433,7 +433,7 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
         a.handle_stimulus(
             FreeKeysEvent(keys=["f1"], stimulus_id="Am I evil?")
         )  # Yes, I am!
-        result_fut = c.submit(sink, futures, workers=x.address)
+        result_fut = c.submit(sink, tasks, workers=x.address)
 
         await result_fut
 
@@ -442,7 +442,7 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
 @gen_cluster(client=True, timeout=60, Worker=Nanny, nthreads=[("127.0.0.1", 1)])
 async def test_restart_timeout_on_long_running_task(c, s, a):
     with captured_logger("distributed.scheduler") as sio:
-        future = c.submit(sleep, 3600)
+        task = c.submit(sleep, 3600)
         await asyncio.sleep(0.1)
         await c.restart()
 

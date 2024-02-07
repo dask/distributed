@@ -247,9 +247,9 @@ class Listener(ABC):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        future = self.stop()
-        if inspect.isawaitable(future):
-            await future
+        task = self.stop()
+        if inspect.isawaitable(task):
+            await task
 
     def __await__(self):
         async def _():

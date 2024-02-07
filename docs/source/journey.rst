@@ -30,9 +30,9 @@ message to the ``Scheduler``::
      'tasks': {'z': (add, x, y)},
      'keys': ['z']}
 
-The client then creates a ``Future`` object with the key ``'z'`` and returns
+The client then creates a ``Task`` object with the key ``'z'`` and returns
 that object back to the user.  This happens even before the message has been
-received by the scheduler.  The status of the future says ``'pending'``.
+received by the scheduler.  The status of the task says ``'pending'``.
 
 
 Step 2: Arrive in the Scheduler
@@ -140,7 +140,7 @@ The scheduler receives this message and does a few things:
 2.  If ``x`` or ``y`` are no longer needed then it sends a message out to
     relevant workers to delete them from local memory.
 3.  It sends a message to all of the clients that ``z`` is ready and so all
-    client ``Future`` objects that are currently waiting should, wake up.  In
+    client ``Task`` objects that are currently waiting should, wake up.  In
     particular, this wakes up the ``z.result()`` command executed by the user
     originally.
 
@@ -168,13 +168,13 @@ Step 8:  Garbage Collection
 The user leaves this part of their code and the local variable ``z`` goes out
 of scope.  The Python garbage collector cleans it up.  This triggers a
 decremented reference on the client (we didn't mention this, but when we
-created the ``Future`` we also started a reference count.)  If this is the only
-instance of a Future pointing to ``z`` then we send a message up to the
+created the ``Task`` we also started a reference count.)  If this is the only
+instance of a Task pointing to ``z`` then we send a message up to the
 scheduler that it is OK to release ``z``.  The user no longer requires it to
 persist.
 
 The scheduler receives this message and, if there are no computations that
-might depend on ``z`` in the immediate future, it removes elements of this key
+might depend on ``z`` in the immediate task, it removes elements of this key
 from local scheduler state and adds the key to a list of keys to be deleted
 periodically.  Every 500 ms a message goes out to relevant workers telling them
 which keys they can delete from their local memory.  The graph/recipe to create

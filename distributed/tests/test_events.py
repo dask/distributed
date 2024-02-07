@@ -35,20 +35,20 @@ async def test_event_on_workers(c, s, a, b):
         event = Event("x")
         event.clear()
 
-    wait_futures = c.map(wait_for_it_failing, range(10))
-    await c.gather(wait_futures)
+    wait_tasks = c.map(wait_for_it_failing, range(10))
+    await c.gather(wait_tasks)
 
-    set_future = c.submit(set_it)
-    await c.gather(set_future)
+    set_task = c.submit(set_it)
+    await c.gather(set_task)
 
-    wait_futures = c.map(wait_for_it_ok, range(10))
-    await c.gather(wait_futures)
+    wait_tasks = c.map(wait_for_it_ok, range(10))
+    await c.gather(wait_tasks)
 
-    clear_future = c.submit(clear_it)
-    await c.gather(clear_future)
+    clear_task = c.submit(clear_it)
+    await c.gather(clear_task)
 
-    wait_futures = c.map(wait_for_it_ok, range(10))
-    await c.gather(wait_futures)
+    wait_tasks = c.map(wait_for_it_ok, range(10))
+    await c.gather(wait_tasks)
 
     assert not s.extensions["events"]._events
     assert not s.extensions["events"]._waiter_count
@@ -149,14 +149,14 @@ def test_event_sync(client):
         event = Event("x")
         event.set()
 
-    wait_futures = client.map(wait_for_it_failing, range(10))
-    client.gather(wait_futures)
+    wait_tasks = client.map(wait_for_it_failing, range(10))
+    client.gather(wait_tasks)
 
-    set_future = client.submit(set_it)
-    client.gather(set_future)
+    set_task = client.submit(set_it)
+    client.gather(set_task)
 
-    wait_futures = client.map(wait_for_it_ok, range(10))
-    client.gather(wait_futures)
+    wait_tasks = client.map(wait_for_it_ok, range(10))
+    client.gather(wait_tasks)
 
 
 @gen_cluster(client=True)
@@ -183,8 +183,8 @@ async def test_serializable(c, s, a, b):
         return x + 1
 
     event = Event("x")
-    futures = c.map(f, range(10), event=event)
-    await c.gather(futures)
+    tasks = c.map(f, range(10), event=event)
+    await c.gather(tasks)
 
     event2 = pickle.loads(pickle.dumps(event))
     assert event2.name == event.name

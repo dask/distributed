@@ -170,8 +170,8 @@ async def test_gen_cluster_without_client(s, a, b):
     assert set(s.workers) == {w.address for w in [a, b]}
 
     async with Client(s.address, asynchronous=True) as c:
-        future = c.submit(lambda x: x + 1, 1)
-        result = await future
+        task = c.submit(lambda x: x + 1, 1)
+        result = await task
         assert result == 2
 
 

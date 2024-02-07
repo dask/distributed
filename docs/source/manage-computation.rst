@@ -7,7 +7,7 @@ Data and Computation in Dask.distributed are always in one of three states
     numpy array in the local process.
 2.  Lazy computations in a dask graph, perhaps stored in a ``dask.delayed`` or
     ``dask.dataframe`` object.
-3.  Running computations or remote data, represented by ``Future`` objects
+3.  Running computations or remote data, represented by ``Task`` objects
     pointing to computations currently in flight.
 
 All three of these forms are important and there are functions that convert
@@ -45,36 +45,36 @@ It also forces you to wait until the computation finishes before handing back
 control of the interpreter.
 
 
-Dask Collections to Futures
+Dask Collections to Tasks
 ---------------------------
 
 You can asynchronously submit lazy dask graphs to run on the cluster with the
-``client.compute`` and ``client.persist`` methods.  These functions return Future objects
-immediately.  These futures can then be queried to determine the state of the
+``client.compute`` and ``client.persist`` methods.  These functions return Task objects
+immediately.  These tasks can then be queried to determine the state of the
 computation.
 
 client.compute
 ~~~~~~~~~~~~~~
 
-The ``.compute`` method takes a collection and returns a single future.
+The ``.compute`` method takes a collection and returns a single task.
 
 .. code-block:: python
 
    >>> df = dd.read_csv('s3://...')
-   >>> total = client.compute(df.sum())  # Return a single future
+   >>> total = client.compute(df.sum())  # Return a single task
    >>> total
-   Future(..., status='pending')
+   Task(..., status='pending')
 
    >>> total.result()               # Block until finished
    100000000
 
-Because this is a single future the result must fit on a single worker machine.
+Because this is a single task the result must fit on a single worker machine.
 Like ``dask.compute`` above, the ``client.compute`` method is only appropriate when
 results are small and should fit in memory.  The following would likely fail:
 
 .. code-block:: python
 
-   >>> future = client.compute(df)       # Blows up memory
+   >>> task = client.compute(df)       # Blows up memory
 
 Instead, you should use ``client.persist``
 
@@ -82,12 +82,12 @@ client.persist
 ~~~~~~~~~~~~~~
 
 The ``.persist`` method submits the task graph behind the Dask collection to
-the scheduler, obtaining Futures for all of the top-most tasks (for example one
-Future for each Pandas DataFrame in a Dask DataFrame).  It then returns a copy
-of the collection pointing to these futures instead of the previous graph.
+the scheduler, obtaining Tasks for all of the top-most tasks (for example one
+Task for each Pandas DataFrame in a Dask DataFrame).  It then returns a copy
+of the collection pointing to these tasks instead of the previous graph.
 This new collection is semantically equivalent but now points to actively
 running data rather than a lazy graph.  If you look at the dask graph within
-the collection you will see the Future objects directly:
+the collection you will see the Task objects directly:
 
 .. code-block:: python
 
@@ -101,14 +101,14 @@ the collection you will see the Future objects directly:
    }
 
    >>> df = client.persist(df)               # Start computation
-   >>> df.dask                          # Now points to running futures
-   {('parse', 0): Future(..., status='finished'),
-    ('parse', 1): Future(..., status='pending'),
+   >>> df.dask                          # Now points to running tasks
+   {('parse', 0): Task(..., status='finished'),
+    ('parse', 1): Task(..., status='pending'),
     ...
    }
 
 The collection is returned immediately and the computation happens in the
-background on the cluster.  Eventually all of the futures of this collection
+background on the cluster.  Eventually all of the tasks of this collection
 will be completed at which point further queries on this collection will likely
 be very fast.
 
@@ -118,21 +118,21 @@ dataset to work from, then persist that collection to the cluster and then
 perform many fast queries off of the resulting collection.
 
 
-Concrete Values to Futures
+Concrete Values to Tasks
 --------------------------
 
-We obtain futures through a few different ways.  One is the mechanism above, by
-wrapping Futures within Dask collections.  Another is by submitting data or
+We obtain tasks through a few different ways.  One is the mechanism above, by
+wrapping Tasks within Dask collections.  Another is by submitting data or
 tasks directly to the cluster with ``client.scatter``, ``client.submit`` or ``client.map``.
 
 .. code-block:: python
 
-   futures = client.scatter(args)                        # Send data
-   future = client.submit(function, *args, **kwargs)     # Send single task
-   futures = client.map(function, sequence, **kwargs)    # Send many tasks
+   tasks = client.scatter(args)                        # Send data
+   task = client.submit(function, *args, **kwargs)     # Send single task
+   tasks = client.map(function, sequence, **kwargs)    # Send many tasks
 
 In this case ``*args`` or ``**kwargs`` can be normal Python objects, like ``1``
-or ``'hello'``, or they can be other ``Future`` objects if you want to link
+or ``'hello'``, or they can be other ``Task`` objects if you want to link
 tasks together with dependencies.
 
 Unlike Dask collections like dask.delayed these task submissions happen
@@ -140,35 +140,35 @@ immediately.  The concurrent.futures interface is very similar to dask.delayed
 except that execution is immediate rather than lazy.
 
 
-Futures to Concrete Values
+Tasks to Concrete Values
 --------------------------
 
-You can turn an individual ``Future`` into a concrete value in the local
-process by calling the ``Future.result()`` method.  You can convert a
-collection of futures into concrete values by calling the ``client.gather`` method.
+You can turn an individual ``Task`` into a concrete value in the local
+process by calling the ``Task.result()`` method.  You can convert a
+collection of tasks into concrete values by calling the ``client.gather`` method.
 
 .. code-block:: python
 
-   >>> future.result()
+   >>> task.result()
    1
 
-   >>> client.gather(futures)
+   >>> client.gather(tasks)
    [1, 2, 3, 4, ...]
 
 
-Futures to Dask Collections
+Tasks to Dask Collections
 ---------------------------
 
-As seen in the Collection to futures section it is common to have currently
-computing ``Future`` objects within Dask graphs.  This lets us build further
+As seen in the Collection to tasks section it is common to have currently
+computing ``Task`` objects within Dask graphs.  This lets us build further
 computations on top of currently running computations.  This is most often done
 with dask.delayed workflows on custom computations:
 
 .. code-block:: python
 
-   >>> x = delayed(sum)(futures)
-   >>> y = delayed(product)(futures)
-   >>> future = client.compute(x + y)
+   >>> x = delayed(sum)(tasks)
+   >>> y = delayed(product)(tasks)
+   >>> task = client.compute(x + y)
 
 Mixing the two forms allow you to build and submit a computation in stages like
 ``sum(...) + product(...)``.  This is often valuable if you want to wait to see

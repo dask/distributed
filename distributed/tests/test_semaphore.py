@@ -76,8 +76,8 @@ async def test_release_simple(c, s, a, b):
     sem = await Semaphore(max_leases=2, name="x")
 
     assert s.extensions["semaphores"]._semaphore_exists("x")
-    futures = c.map(f, list(range(10)), semaphore=sem)
-    await c.gather(futures)
+    tasks = c.map(f, list(range(10)), semaphore=sem)
+    await c.gather(tasks)
 
 
 @gen_cluster(client=True)
@@ -151,10 +151,10 @@ def test_worker_dies(loop):
                         os.kill(os.getpid(), signal.SIGTERM)
                     return x
 
-            futures = client.map(
+            tasks = client.map(
                 f, range(10), sem=sem, kill_address=workers[0]["address"]
             )
-            results = client.gather(futures)
+            results = client.gather(tasks)
 
             assert sorted(results) == list(range(10))
 
@@ -171,23 +171,23 @@ async def test_access_semaphore_by_name(c, s, a, b):
         return True
 
     sem = await Semaphore(name="x")
-    futures = c.map(f, list(range(10)))
-    assert all(await c.gather(futures))
+    tasks = c.map(f, list(range(10)))
+    assert all(await c.gather(tasks))
 
     # Clean-up the state, otherwise we would get the same result when calling `f` with the same arguments
-    del futures
+    del tasks
 
     assert len(s.extensions["semaphores"].leases["x"]) == 0
     assert await sem.acquire()
     assert len(s.extensions["semaphores"].leases["x"]) == 1
-    futures = c.map(f, list(range(10)))
-    assert not any(await c.gather(futures))
+    tasks = c.map(f, list(range(10)))
+    assert not any(await c.gather(tasks))
     assert await sem.release() is True
 
-    del futures
+    del tasks
 
-    futures = c.map(f, list(range(10)), release=False)
-    result = await c.gather(futures)
+    tasks = c.map(f, list(range(10)), release=False)
+    result = await c.gather(tasks)
     assert result.count(True) == 1
     assert result.count(False) == 9
 
@@ -264,8 +264,8 @@ async def test_release_once_too_many_resilience(c, s, a, b):
     sem = await Semaphore(max_leases=3, name="x")
 
     inpt = list(range(20))
-    futures = c.map(f, inpt, sem=sem)
-    assert sorted(await c.gather(futures)) == inpt
+    tasks = c.map(f, inpt, sem=sem)
+    assert sorted(await c.gather(tasks)) == inpt
 
     assert not s.extensions["semaphores"].leases["x"]
     await sem.acquire()
@@ -408,13 +408,13 @@ async def test_oversubscribing_leases(c, s, a, b):
         client.set_metadata("release", True)
 
     async with Worker(s.address) as observer:
-        futures = c.map(
+        tasks = c.map(
             guaranteed_lease_timeout, range(2), sem=sem, workers=[a.address, b.address]
         )
         fut_observe = c.submit(observe_state, sem=sem, workers=[observer.address])
 
         with captured_logger("distributed.semaphore", level=logging.DEBUG) as caplog:
-            payload, _ = await c.gather([futures, fut_observe])
+            payload, _ = await c.gather([tasks, fut_observe])
 
     logs = caplog.getvalue().split("\n")
     timeouts = [log for log in logs if "timed out" in log]

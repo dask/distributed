@@ -13,13 +13,13 @@ from distributed.utils import TimeoutError, sync
 
 
 @gen.coroutine
-def _cascade_future(future, cf_future):
+def _cascade_task(task, cf_future):
     """
-    Coroutine that waits on Dask future, then transmits its outcome to
+    Coroutine that waits on Dask task, then transmits its outcome to
     cf_future.
     """
-    result = yield future._result(raiseit=False)
-    status = future.status
+    result = yield task._result(raiseit=False)
+    status = task.status
     if status == "finished":
         cf_future.set_result(result)
     elif status == "cancelled":
@@ -35,8 +35,8 @@ def _cascade_future(future, cf_future):
 
 
 @gen.coroutine
-def _wait_on_futures(futures):
-    for fut in futures:
+def _wait_on_tasks(tasks):
+    for fut in tasks:
         try:
             yield fut
         except Exception:
@@ -60,41 +60,41 @@ class ClientExecutor(cf.Executor):
                 % sorted(sk - self._allowed_kwargs)
             )
         self._client = client
-        self._futures = weakref.WeakSet()
+        self._tasks = weakref.WeakSet()
         self._shutdown = False
         self._kwargs = kwargs
 
-    def _wrap_future(self, future):
+    def _wrap_task(self, task):
         """
-        Wrap a distributed Future in a concurrent.futures Future.
+        Wrap a distributed Task in a concurrent.futures Future.
         """
         cf_future = cf.Future()
 
         # Support cancelling task through .cancel() on c.f.Future
         def cf_callback(cf_future):
-            if cf_future.cancelled() and future.status != "cancelled":
-                future.cancel()
+            if cf_future.cancelled() and task.status != "cancelled":
+                task.cancel()
 
         cf_future.add_done_callback(cf_callback)
 
-        self._client.loop.add_callback(_cascade_future, future, cf_future)
+        self._client.loop.add_callback(_cascade_task, task, cf_future)
         return cf_future
 
     def submit(self, fn, *args, **kwargs):
         """Submits a callable to be executed with the given arguments.
 
         Schedules the callable to be executed as ``fn(*args, **kwargs)``
-        and returns a Future instance representing the execution of the callable.
+        and returns a Task instance representing the execution of the callable.
 
         Returns
         -------
-        A Future representing the given call.
+        A Task representing the given call.
         """
         if self._shutdown:
-            raise RuntimeError("cannot schedule new futures after shutdown")
-        future = self._client.submit(fn, *args, **merge(self._kwargs, kwargs))
-        self._futures.add(future)
-        return self._wrap_future(future)
+            raise RuntimeError("cannot schedule new tasks after shutdown")
+        task = self._client.submit(fn, *args, **merge(self._kwargs, kwargs))
+        self._tasks.add(task)
+        return self._wrap_task(task)
 
     def map(self, fn, *iterables, **kwargs):
         """Returns an iterator equivalent to ``map(fn, *iterables)``.
@@ -133,25 +133,25 @@ class ClientExecutor(cf.Executor):
         fs = self._client.map(fn, *iterables, **self._kwargs)
 
         # Below iterator relies on fs being an iterator itself, and not just an iterable
-        # (such as a list), in order to cancel remaining futures
+        # (such as a list), in order to cancel remaining tasks
         fs = iter(fs)
 
         # Yield must be hidden in closure so that the tasks are submitted
         # before the first iterator value is required.
         def result_iterator():
             try:
-                for future in fs:
-                    self._futures.add(future)
+                for task in fs:
+                    self._tasks.add(task)
                     if timeout is not None:
                         try:
-                            yield future.result(end_time - time())
+                            yield task.result(end_time - time())
                         except TimeoutError:
                             raise cf.TimeoutError
                     else:
-                        yield future.result()
+                        yield task.result()
             finally:
                 remaining = list(fs)
-                self._futures.update(remaining)
+                self._tasks.update(remaining)
                 self._client.cancel(remaining)
 
         return result_iterator()
@@ -165,13 +165,13 @@ class ClientExecutor(cf.Executor):
         Parameters
         ----------
         wait : If True then shutdown will not return until all running
-            futures have finished executing.  If False then all running
-            futures are cancelled immediately.
+            tasks have finished executing.  If False then all running
+            tasks are cancelled immediately.
         """
         if not self._shutdown:
             self._shutdown = True
-            fs = list(self._futures)
+            fs = list(self._tasks)
             if wait:
-                sync(self._client.loop, _wait_on_futures, fs)
+                sync(self._client.loop, _wait_on_tasks, fs)
             else:
                 self._client.cancel(fs)

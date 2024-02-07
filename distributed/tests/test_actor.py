@@ -10,10 +10,10 @@ import dask
 
 from distributed import (
     Actor,
-    BaseActorFuture,
+    BaseActorTask,
     Client,
-    Future,
     Nanny,
+    Task,
     as_completed,
     get_client,
     wait,
@@ -72,7 +72,7 @@ async def test_client_actions(s, a, b, direct_to_workers):
         s.address, asynchronous=True, direct_to_workers=direct_to_workers
     ) as c:
         counter = c.submit(Counter, workers=[a.address], actor=True)
-        assert isinstance(counter, Future)
+        assert isinstance(counter, Task)
         counter = await counter
         assert counter._address
         assert hasattr(counter, "increment")
@@ -106,14 +106,14 @@ async def test_worker_actions(c, s, a, b, separate_thread):
         assert type(counter) is Actor
         assert counter._address == a_address
 
-        future = counter.increment(separate_thread=separate_thread)
-        assert isinstance(future, BaseActorFuture)
-        assert "Future" in type(future).__name__
-        end = future.result(timeout=1)
+        task = counter.increment(separate_thread=separate_thread)
+        assert isinstance(task, BaseActorTask)
+        assert "Task" in type(task).__name__
+        end = task.result(timeout=1)
         assert end > start
 
-    futures = [c.submit(f, counter, pure=False) for _ in range(10)]
-    await c.gather(futures)
+    tasks = [c.submit(f, counter, pure=False) for _ in range(10)]
+    await c.gather(tasks)
 
     counter = await counter
     assert await counter.n == 10
@@ -139,8 +139,8 @@ async def test_Actor(c, s, a, b):
 @gen_cluster(client=True)
 async def test_linear_access(c, s, a, b):
     start = time()
-    future = c.submit(sleep, 0.2)
-    actor = c.submit(List, actor=True, dummy=future)
+    task = c.submit(sleep, 0.2)
+    actor = c.submit(List, actor=True, dummy=task)
     actor = await actor
 
     for i in range(100):
@@ -208,9 +208,9 @@ async def test_track_dependencies(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_future(c, s, a, b):
+async def test_task(c, s, a, b):
     counter = c.submit(Counter, actor=True, workers=[a.address])
-    assert isinstance(counter, Future)
+    assert isinstance(counter, Task)
     await wait(counter)
     assert isinstance(a.state.actors[counter.key], Counter)
 
@@ -219,7 +219,7 @@ async def test_future(c, s, a, b):
     assert counter._address
 
     await asyncio.sleep(0.1)
-    assert counter.key in c.futures  # don't lose future
+    assert counter.key in c.tasks  # don't lose task
 
 
 @gen_cluster(client=True)
@@ -249,15 +249,15 @@ def test_sync(client):
 
     assert counter.n == 0
 
-    future = counter.increment()
-    n = future.result()
+    task = counter.increment()
+    n = task.result()
     assert n == 1
     assert counter.n == 1
 
-    assert future.result() == future.result()
+    assert task.result() == task.result()
 
-    assert "ActorFuture" in repr(future)
-    assert "distributed.actor" not in repr(future)
+    assert "ActorTask" in repr(task)
+    assert "distributed.actor" not in repr(task)
 
 
 def test_timeout(client):
@@ -272,20 +272,20 @@ def test_timeout(client):
             return await self.event.wait()
 
     event = client.submit(Waiter, actor=True).result()
-    future = event.wait()
+    task = event.wait()
 
     with pytest.raises(asyncio.TimeoutError):
-        future.result(timeout="0.001s")
+        task.result(timeout="0.001s")
 
     event.set().result()
-    assert future.result() is True
+    assert task.result() is True
 
 
 @gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "1s"})
 async def test_failed_worker(c, s, a, b):
-    future = c.submit(Counter, actor=True, workers=[a.address])
-    await wait(future)
-    counter = await future
+    task = c.submit(Counter, actor=True, workers=[a.address])
+    await wait(task)
+    counter = await task
 
     await a.close()
 
@@ -359,8 +359,8 @@ async def test_many_computations(c, s, a, b):
         for _ in range(n):
             counter.increment().result()
 
-    futures = c.map(add, range(10), counter=counter)
-    done = c.submit(lambda x: None, futures)
+    tasks = c.map(add, range(10), counter=counter)
+    done = c.submit(lambda x: None, tasks)
 
     while not done.done():
         assert (
@@ -389,16 +389,16 @@ async def test_thread_safety(c, s, a, b):
 
     unsafe = await c.submit(Unsafe, actor=True)
 
-    futures = [unsafe.f() for i in range(10)]
-    await c.gather(futures)
+    tasks = [unsafe.f() for i in range(10)]
+    await c.gather(tasks)
 
 
 @gen_cluster(client=True)
 async def test_Actors_create_dependencies(c, s, a, b):
     counter = await c.submit(Counter, actor=True)
-    future = c.submit(lambda x: None, counter)
-    await wait(future)
-    assert s.tasks[future.key].dependencies == {s.tasks[counter.key]}
+    task = c.submit(lambda x: None, counter)
+    await wait(task)
+    assert s.tasks[task.key].dependencies == {s.tasks[counter.key]}
 
 
 @gen_cluster(client=True)
@@ -565,14 +565,14 @@ async def test_waiter(c, s, a, b):
 
     waiter = await c.submit(Waiter, actor=True)
 
-    futures = [waiter.wait() for _ in range(5)]  # way more than we have actor threads
+    tasks = [waiter.wait() for _ in range(5)]  # way more than we have actor threads
 
     await asyncio.sleep(0.1)
-    assert not any(future.done() for future in futures)
+    assert not any(task.done() for task in tasks)
 
     await waiter.set()
 
-    await c.gather(futures)
+    await c.gather(tasks)
 
 
 @gen_cluster(client=True, client_kwargs=dict(set_as_default=False))
@@ -649,7 +649,7 @@ def test_one_thread_deadlock_timeout(loop):
         # An actor whose method argument is another actor
 
         def do_inc(self, ac):
-            # ac.increment() returns an EagerActorFuture and so the timeout
+            # ac.increment() returns an EagerActorTask and so the timeout
             # cannot expire
             return ac.increment().result(timeout=0.001)
 
@@ -734,27 +734,27 @@ async def test_exception_async(client, s, a, b):
 
 def test_as_completed(client):
     ac = client.submit(Counter, actor=True).result()
-    futures = [ac.increment() for _ in range(10)]
+    tasks = [ac.increment() for _ in range(10)]
     max = 0
 
-    for future in as_completed(futures):
-        value = future.result()
+    for task in as_completed(tasks):
+        value = task.result()
         if value > max:
             max = value
 
-    assert all(future.done() for future in futures)
+    assert all(task.done() for task in tasks)
     assert max == 10
 
 
 @gen_cluster(client=True, timeout=3)
 async def test_actor_future_awaitable(client, s, a, b):
     ac = await client.submit(Counter, actor=True)
-    futures = [ac.increment() for _ in range(10)]
+    tasks = [ac.increment() for _ in range(10)]
 
-    assert all([isinstance(future, BaseActorFuture) for future in futures])
+    assert all([isinstance(task, BaseActorTask) for task in tasks])
 
-    out = await asyncio.gather(*futures)
-    assert all([future.done() for future in futures])
+    out = await asyncio.gather(*tasks)
+    assert all([task.done() for task in tasks])
     assert max(out) == 10
 
 
@@ -781,8 +781,8 @@ async def test_serialize_with_pickle(c, s, a, b):
         def __setstate__(self, state):
             self.actor = state
 
-    future = c.submit(Foo, workers=a.address)
-    foo = await future
+    task = c.submit(Foo, workers=a.address)
+    foo = await task
     assert isinstance(foo.actor, Actor)
 
 
