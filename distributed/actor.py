@@ -256,6 +256,9 @@ class BaseActorTask(abc.ABC, Awaitable[_T]):
         return "<ActorTask>"
 
 
+BaseActorFuture = BaseActorTask
+
+
 @dataclass(frozen=True, eq=False)
 class EagerActorTask(BaseActorTask[_T]):
     """Task to an actor's method call when an actor calls another actor on the same worker"""
@@ -313,3 +316,6 @@ class ActorTask(BaseActorTask[_T]):
 
     def result(self, timeout: str | timedelta | float | None = None) -> _T:
         return sync(self._io_loop, self._result, callback_timeout=timeout)
+
+
+ActorFuture = ActorTask

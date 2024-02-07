@@ -531,6 +531,9 @@ class Task(WrappedKey):
         return self.result().__await__()
 
 
+Future = Task
+
+
 class TaskState:
     """A Task's internal state.
 
@@ -4671,6 +4674,16 @@ class Client(SyncMethodMixin):
 
         return result
 
+    def tasks_of(self, tasks):
+        """Wrapper method of futures_of
+
+        Parameters
+        ----------
+        tasks : tuple
+            The tasks
+        """
+        return tasks_of(tasks, client=self)
+
     def futures_of(self, tasks):
         """Wrapper method of futures_of
 
@@ -4679,7 +4692,7 @@ class Client(SyncMethodMixin):
         tasks : tuple
             The tasks
         """
-        return futures_of(tasks, client=self)
+        return tasks_of(tasks, client=self)
 
     @classmethod
     def _expand_key(cls, k):
@@ -5825,7 +5838,7 @@ def redict_collection(c, dsk):
         return cc
 
 
-def futures_of(o, client=None):
+def tasks_of(o, client=None):
     """Task objects in a collection
 
     Parameters
@@ -5875,6 +5888,9 @@ def futures_of(o, client=None):
             raise CancelledError(bad)
 
     return tasks[::-1]
+
+
+futures_of = tasks_of
 
 
 def fire_and_forget(obj):
