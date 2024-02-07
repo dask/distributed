@@ -5467,19 +5467,19 @@ async def _as_completed(fs, queue):
     while not wait_iterator.done():
         await wait_iterator.next()
         # TODO: handle case of restarted futures
-        future = firsts[wait_iterator.current_index]
-        for f in groups[future.key]:
+        future_ = firsts[wait_iterator.current_index]
+        for f in groups[future_.key]:
             queue.put_nowait(f)
 
 
-async def _first_completed(futures):
-    """Return a single completed future
+async def _first_completed(futures_):
+    """Return a single completed future_
 
     See Also:
         _as_completed
     """
     q = asyncio.Queue()
-    await _as_completed(futures, q)
+    await _as_completed(futures_, q)
     result = await q.get()
     return result
 
