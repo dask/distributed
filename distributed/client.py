@@ -3095,8 +3095,12 @@ class Client(SyncMethodMixin):
                 module_name = fr.f_back.f_globals["__name__"]  # type: ignore
                 if module_name == "__channelexec__":
                     break  # execnet; pytest-xdist  # pragma: nocover
+                try:
+                    module_name = sys.modules[module_name].__name__
+                except KeyError:
+                    # Ignore pathological cases where the module name isn't in `sys.modules`
+                    break
                 # Ignore IPython related wrapping functions to user code
-                module_name = sys.modules[module_name].__name__
                 if module_name.endswith("interactiveshell"):
                     break
 
