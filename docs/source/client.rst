@@ -13,8 +13,8 @@ it to the address of a ``Scheduler``:
 
 There are a few different ways to interact with the cluster through the client:
 
-1.  The Client satisfies most of the standard concurrent.futures_ - PEP-3148_
-    interface with ``.submit``, ``.map`` functions and ``Future`` objects,
+1.  The Client satisfies most of the standard concurrent.futures - PEP-3148_
+    interface with ``.submit``, ``.map`` functions and ``Task`` objects,
     allowing the immediate and direct submission of tasks.
 2.  The Client registers itself as the default Dask_ scheduler, and so runs all
     dask collections like dask.array_, dask.bag_, dask.dataframe_ and dask.delayed_
@@ -35,19 +35,19 @@ many function calls with the ``client.map`` method
 
    >>> x = client.submit(inc, 10)
    >>> x
-   <Future - key: inc-e4853cffcc2f51909cdb69d16dacd1a5>
+   <Task - key: inc-e4853cffcc2f51909cdb69d16dacd1a5>
 
    >>> L = client.map(inc, range(1000))
    >>> L
-   [<Future - key: inc-e4853cffcc2f51909cdb69d16dacd1a5>,
-    <Future - key: inc-...>,
-    <Future - key: inc-...>,
-    <Future - key: inc-...>, ...]
+   [<Task - key: inc-e4853cffcc2f51909cdb69d16dacd1a5>,
+    <Task - key: inc-...>,
+    <Task - key: inc-...>,
+    <Task - key: inc-...>, ...]
 
 These results live on distributed workers.
 
-We gather back the results using either the ``Future.result`` method for single
-futures or ``client.gather`` method for many futures at once.
+We gather back the results using either the ``Task.result`` method for single
+tasks or ``client.gather`` method for many tasks at once.
 
 .. code-block:: python
 
@@ -63,13 +63,13 @@ remotely with functions like ``submit``, ``map``, ``get`` and ``compute``.
 See :doc:`efficiency <efficiency>` for more information on efficient use of
 distributed.
 
-We can submit tasks on futures and use futures as inputs. The function will go to 
-the machine where the futures are stored and run on the result once it has completed.
+We can submit tasks on tasks and use tasks as inputs. The function will go to 
+the machine where the tasks are stored and run on the result once it has completed.
 
 .. code-block:: python
 
-   >>> y = client.submit(inc, x)      # Submit on x, a Future
-   >>> total = client.submit(sum, L)  # Submit on L, a list of Futures
+   >>> y = client.submit(inc, x)      # Submit on x, a Task
+   >>> total = client.submit(sum, L)  # Submit on L, a list of Tasks
    >>> y.result()
    12
 
@@ -123,7 +123,7 @@ By default, ``distributed`` assumes that all functions are pure_. Pure functions
 If this is not the case, you should use the ``pure=False`` keyword argument in methods like ``Client.map()`` and ``Client.submit()``.
 
 The client associates a key to all computations.  This key is accessible on
-the Future object.
+the Task object.
 
 .. code-block:: python
 
@@ -168,8 +168,8 @@ functions.
 
    async def f():
        client = await Client(asynchronous=True)
-       future = client.submit(func, *args)
-       result = await future
+       task = client.submit(func, *args)
+       result = await task
        return result
 
 If you want to reuse the same client in asynchronous and synchronous
@@ -181,8 +181,8 @@ call.
    client = Client()  # normal blocking client
 
    async def f():
-       futures = client.map(func, L)
-       results = await client.gather(futures, asynchronous=True)
+       tasks = client.map(func, L)
+       results = await client.gather(tasks, asynchronous=True)
        return results
 
 See the :doc:`Asynchronous <asynchronous>` documentation for more information.

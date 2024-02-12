@@ -44,10 +44,10 @@ async def block_worker(
 
     ntasks_on_scheduler : int, optional
         Number of tasks that must appear on the scheduler. Defaults to the number of
-        futures held by the client.
+        tasks held by the client.
     ntasks_on_worker : int, optional
         Number of tasks that must appear on the worker before any task is actually
-        started. Defaults to the number of futures held by the client.
+        started. Defaults to the number of tasks held by the client.
     """
     if pause:
         w.status = Status.paused
@@ -62,9 +62,9 @@ async def block_worker(
     yield
 
     if ntasks_on_scheduler is None:
-        ntasks_on_scheduler = len(c.futures)
+        ntasks_on_scheduler = len(c.tasks)
     if ntasks_on_worker is None:
-        ntasks_on_worker = len(c.futures)
+        ntasks_on_worker = len(c.tasks)
     while len(s.tasks) < ntasks_on_scheduler:
         await asyncio.sleep(0.01)
 

@@ -43,10 +43,10 @@ async def test_prometheus_collect_count_total_by_cost_multipliers(c, s, a, b):
     expected_metrics = {str(multiplier): 0 for multiplier in stealing.cost_multipliers}
     assert active_metrics == expected_metrics
 
-    futures = c.map(
+    tasks = c.map(
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
-    await wait(futures)
+    await wait(tasks)
 
     active_metrics = await fetch_metrics_by_cost_multipliers()
     assert len(active_metrics) == len(stealing.cost_multipliers)
@@ -76,10 +76,10 @@ async def test_prometheus_collect_cost_total_by_cost_multipliers(c, s, a, b):
     expected_metrics = {str(multiplier): 0 for multiplier in stealing.cost_multipliers}
     assert active_metrics == expected_metrics
 
-    futures = c.map(
+    tasks = c.map(
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
-    await wait(futures)
+    await wait(tasks)
 
     active_metrics = await fetch_metrics_by_cost_multipliers()
     assert len(active_metrics) == len(stealing.cost_multipliers)

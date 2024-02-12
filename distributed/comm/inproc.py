@@ -8,7 +8,7 @@ import threading
 import weakref
 from collections import deque, namedtuple
 
-from tornado.concurrent import Future
+from tornado.concurrent import Future as TornadoFuture
 from tornado.ioloop import IOLoop
 
 from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
@@ -114,7 +114,7 @@ class Queue:
 
     def get(self):
         assert not self._read_future, "Only one reader allowed"
-        fut = Future()
+        fut = TornadoFuture()
         q = self._q
         if q:
             fut.set_result(q.popleft())

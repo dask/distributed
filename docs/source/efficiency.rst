@@ -25,7 +25,7 @@ shape we might choose one of the following options:
 
    >>> x = client.submit(np.random.random, (1000, 1000))
    >>> type(x)
-   Future
+   Task
 
 **Slow**
 
@@ -45,7 +45,7 @@ shape we might choose one of the following options:
 Use larger tasks
 ----------------
 
-The scheduler adds about *one millisecond* of overhead per task or Future
+The scheduler adds about *one millisecond* of overhead per task or Task
 object.  While this may sound fast it's quite slow if you run a billion tasks.
 If your functions run faster than 100ms or so then you might not see any
 speedup from using distributed computing.
@@ -56,8 +56,8 @@ A common solution is to batch your input into larger chunks.
 
 .. code-block:: python
 
-   >>> futures = client.map(f, seq)
-   >>> len(futures)  # avoid large numbers of futures
+   >>> tasks = client.map(f, seq)
+   >>> len(tasks)  # avoid large numbers of tasks
    1000000000
 
 **Fast**
@@ -70,8 +70,8 @@ A common solution is to batch your input into larger chunks.
    >>> from tlz import partition_all
    >>> chunks = partition_all(1000000, seq)  # Collect into groups of size 1000
 
-   >>> futures = client.map(f_many, chunks)
-   >>> len(futures)  # Compute on larger pieces of your data at once
+   >>> tasks = client.map(f_many, chunks)
+   >>> len(tasks)  # Compute on larger pieces of your data at once
    1000
 
 
@@ -95,7 +95,7 @@ for you.  Your code is likely optimal for use with multi-threading.
 Don't go distributed
 --------------------
 
-Consider the dask_ and concurrent.futures_ modules, which have similar APIs to
+Consider the dask_ and concurrent.futures modules, which have similar APIs to
 distributed but operate on a single machine.  It may be that your problem
 performs well enough on a laptop or large workstation.
 

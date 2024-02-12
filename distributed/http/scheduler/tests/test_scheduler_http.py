@@ -36,14 +36,14 @@ DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 async def test_connect(c, s, a, b):
     lock = Lock()
     async with lock:
-        future = c.submit(lambda x: x + 1, 1)
+        task = c.submit(lambda x: x + 1, 1)
         x = c.submit(lock_inc, 1, lock=lock, retries=5)
-        await future
+        await task
         http_client = AsyncHTTPClient()
         for suffix in [
             "info/main/workers.html",
             "info/worker/" + url_escape(a.address) + ".html",
-            "info/task/" + url_escape(future.key) + ".html",
+            "info/task/" + url_escape(task.key) + ".html",
             "info/main/logs.html",
             "info/logs/" + url_escape(a.address) + ".html",
             "info/call-stack/" + url_escape(x.key) + ".html",
@@ -194,8 +194,8 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     assert sum(forgotten_tasks) == 0.0
 
     # submit a task which should show up in the prometheus scraping
-    future = c.submit(slowinc, 1, delay=0.5)
-    while not any(future.key in w.state.tasks for w in [a, b]):
+    task = c.submit(slowinc, 1, delay=0.5)
+    while not any(task.key in w.state.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 
     active_metrics, forgotten_tasks = await fetch_state_metrics()
@@ -203,12 +203,12 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     assert sum(active_metrics.values()) == 1.0
     assert sum(forgotten_tasks) == 0.0
 
-    res = await c.gather(future)
+    res = await c.gather(task)
     assert res == 2
 
-    future.release()
+    task.release()
 
-    while any(future.key in w.state.tasks for w in [a, b]):
+    while any(task.key in w.state.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 
     active_metrics, forgotten_tasks = await fetch_state_metrics()
@@ -240,8 +240,8 @@ async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
         return prefix_state_counts
 
     # do some compute and check the counts for each prefix and state
-    futures = c.map(inc, range(10))
-    await c.gather(futures)
+    tasks = c.map(inc, range(10))
+    await c.gather(tasks)
 
     prefix_state_counts = await fetch_metrics()
     assert prefix_state_counts.get(("inc", "memory")) == 10
@@ -379,8 +379,8 @@ async def test_task_page(c, s, a, b, key):
     response = await http_client.fetch(url, raise_error=False)
     assert response.code == 404
 
-    future = c.submit(lambda: 1, key=key, workers=a.address)
-    await future
+    task = c.submit(lambda: 1, key=key, workers=a.address)
+    await task
     response = await http_client.fetch(url)
     assert response.code == 200
     body = response.body.decode()
@@ -408,7 +408,7 @@ async def test_call_stack_page(c, s, a, b, key):
         ev1.set()
         ev2.wait()
 
-    future = c.submit(f, ev1, ev2, key=key)
+    task = c.submit(f, ev1, ev2, key=key)
     await ev1.wait()
 
     response = await http_client.fetch(url)
@@ -417,7 +417,7 @@ async def test_call_stack_page(c, s, a, b, key):
     assert "test_scheduler_http.py" in body
 
     await ev2.set()
-    await future
+    await task
     response = await http_client.fetch(url)
     assert response.code == 200
     body = response.body.decode()

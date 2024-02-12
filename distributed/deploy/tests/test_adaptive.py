@@ -31,14 +31,14 @@ def test_adaptive_local_cluster(loop):
         alc = cluster.adapt(interval="100 ms")
         with Client(cluster, loop=loop) as c:
             assert not cluster.scheduler.workers
-            future = c.submit(lambda x: x + 1, 1)
-            assert future.result() == 2
+            task = c.submit(lambda x: x + 1, 1)
+            assert task.result() == 2
             assert cluster.scheduler.workers
 
             sleep(0.1)
             assert cluster.scheduler.workers
 
-            del future
+            del task
 
             start = time()
             while cluster.scheduler.workers:
@@ -60,13 +60,13 @@ async def test_adaptive_local_cluster_multi_workers():
         cluster.scheduler.allowed_failures = 1000
         adapt = cluster.adapt(interval="100 ms")
         async with Client(cluster, asynchronous=True) as c:
-            futures = c.map(slowinc, range(100), delay=0.01)
+            tasks = c.map(slowinc, range(100), delay=0.01)
 
             while not cluster.scheduler.workers:
                 await asyncio.sleep(0.01)
 
-            await c.gather(futures)
-            del futures
+            await c.gather(tasks)
+            del tasks
 
             while cluster.scheduler.workers:
                 await asyncio.sleep(0.01)
@@ -76,8 +76,8 @@ async def test_adaptive_local_cluster_multi_workers():
                 assert not cluster.scheduler.workers
                 await asyncio.sleep(0.05)
 
-            futures = c.map(slowinc, range(100), delay=0.01)
-            await c.gather(futures)
+            tasks = c.map(slowinc, range(100), delay=0.01)
+            await c.gather(tasks)
 
 
 @pytest.mark.xfail(reason="changed API")
@@ -134,7 +134,7 @@ async def test_min_max():
             assert len(cluster.scheduler.workers) == 1
             assert len(adapt.log) == 1 and adapt.log[-1][1] == {"status": "up", "n": 1}
 
-            futures = c.map(slowinc, range(100), delay=0.1)
+            tasks = c.map(slowinc, range(100), delay=0.1)
 
             start = time()
             while len(cluster.scheduler.workers) < 2:
@@ -149,7 +149,7 @@ async def test_min_max():
                 d["status"] == "up" for _, d in adapt.log
             )
 
-            del futures
+            del tasks
 
             start = time()
             while len(cluster.scheduler.workers) != 1:
@@ -198,12 +198,12 @@ async def test_adapt_quickly():
         threads_per_worker=1,
     ) as cluster, Client(cluster, asynchronous=True) as client:
         adapt = cluster.adapt(interval="20 ms", wait_count=5, maximum=10)
-        future = client.submit(slowinc, 1, delay=0.100)
-        await wait(future)
+        task = client.submit(slowinc, 1, delay=0.100)
+        await wait(task)
         assert len(adapt.log) == 1
 
         # Scale up when there is plenty of available work
-        futures = client.map(slowinc, range(1000), delay=0.100)
+        tasks = client.map(slowinc, range(1000), delay=0.100)
         while len(adapt.log) == 1:
             await asyncio.sleep(0.01)
         assert len(adapt.log) == 2
@@ -214,7 +214,7 @@ async def test_adapt_quickly():
         while len(cluster.workers) < adapt.maximum:
             await asyncio.sleep(0.01)
 
-        del futures
+        del tasks
 
         while len(cluster.scheduler.tasks) > 1:
             await asyncio.sleep(0.01)
@@ -249,7 +249,7 @@ async def test_adapt_down():
     ) as cluster, Client(cluster, asynchronous=True) as client:
         cluster.adapt(interval="20ms", maximum=5)
 
-        futures = client.map(slowinc, range(1000), delay=0.1)
+        tasks = client.map(slowinc, range(1000), delay=0.1)
         while len(cluster.scheduler.workers) < 5:
             await asyncio.sleep(0.1)
 
@@ -287,8 +287,8 @@ def test_basic_no_loop(cleanup):
         ) as cluster:
             with Client(cluster) as client:
                 cluster.adapt()
-                future = client.submit(lambda x: x + 1, 1)
-                assert future.result() == 2
+                task = client.submit(lambda x: x + 1, 1)
+                assert task.result() == 2
             loop = cluster.loop
     finally:
         assert loop is None or not loop.asyncio_loop.is_running()
@@ -323,8 +323,8 @@ def test_target_duration(target_duration):
 
                 async with Client(cluster, asynchronous=True) as client:
                     await client.wait_for_workers(2)
-                    futures = client.map(slowinc, range(n_tasks), delay=0.3)
-                    await wait(futures)
+                    tasks = client.map(slowinc, range(n_tasks), delay=0.3)
+                    await wait(tasks)
                 scaleup_recs = [
                     msg[1]["n"] for msg in adapt.log if msg[1].get("status") == "up"
                 ]
@@ -469,13 +469,13 @@ async def test_scale_needs_to_be_awaited():
         n_workers=0, asynchronous=True, dashboard_address=":0"
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
-            futures = client.map(slowinc, range(5), delay=0.05)
+            tasks = client.map(slowinc, range(5), delay=0.05)
             assert len(cluster.workers) == 0
             cluster.adapt()
 
-            await client.gather(futures)
+            await client.gather(tasks)
 
-            del futures
+            del tasks
             await async_poll_for(lambda: not cluster.workers, 10)
 
 
@@ -508,13 +508,13 @@ async def test_adaptive_stopped():
 )
 async def test_scale_up_large_tasks(c, s, saturation):
     s.WORKER_SATURATION = saturation
-    futures = c.map(slowinc, range(10))
+    tasks = c.map(slowinc, range(10))
     while not s.tasks:
         await asyncio.sleep(0.001)
 
     assert s.adaptive_target() == 10
 
-    more_futures = c.map(slowinc, range(200))
+    more_tasks = c.map(slowinc, range(200))
     while len(s.tasks) != 200:
         await asyncio.sleep(0.001)
 
@@ -527,13 +527,13 @@ async def test_scale_up_large_tasks(c, s, saturation):
     config={"distributed.scheduler.default-task-durations": {"slowinc": 1000}},
 )
 async def test_respect_average_nthreads(c, s, w):
-    futures = c.map(slowinc, range(10))
+    tasks = c.map(slowinc, range(10))
     while not s.tasks:
         await asyncio.sleep(0.001)
 
     assert s.adaptive_target() == 2
 
-    more_futures = c.map(slowinc, range(200))
+    more_tasks = c.map(slowinc, range(200))
     while len(s.tasks) != 200:
         await asyncio.sleep(0.001)
 

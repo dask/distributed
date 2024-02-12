@@ -37,7 +37,7 @@ class EventExtension:
     If an event is set, we need to keep track of this state so
     we can not remove it (the default flag is false).
     If it is unset but there are waiters, we can also not remove
-    it, as those waiters would then have dangling futures.
+    it, as those waiters would then have dangling tasks.
     Therefore the only time we can remove the event from our dict
     is when the number of waiters is 0 and the event flag is cleared.
     """
@@ -68,13 +68,13 @@ class EventExtension:
         name = self._normalize_name(name)
 
         event = self._events[name]
-        future = event.wait()
+        task = event.wait()
         if timeout is not None:
-            future = wait_for(future, timeout)
+            task = wait_for(task, timeout)
 
         self._waiter_count[name] += 1
         try:
-            await future
+            await task
         except TimeoutError:
             return False
         finally:

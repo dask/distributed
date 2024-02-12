@@ -34,18 +34,18 @@ and then call methods on that class remotely.
    from dask.distributed import Client          # Start a Dask Client
    client = Client()
 
-   future = client.submit(Counter, actor=True)  # Create a Counter on a worker
-   counter = future.result()                    # Get back a pointer to that object
+   task = client.submit(Counter, actor=True)  # Create a Counter on a worker
+   counter = task.result()                    # Get back a pointer to that object
 
    counter
    # <Actor: Counter, key=Counter-1234abcd>
 
-   future = counter.increment()                 # Call remote method
-   future.result()                              # Get back result
+   task = counter.increment()                 # Call remote method
+   task.result()                              # Get back result
    # 1
 
-   future = counter.add(10)                     # Call remote method
-   future.result()                              # Get back result
+   task = counter.add(10)                     # Call remote method
+   task.result()                              # Get back result
    # 11
 
 Motivation
@@ -85,17 +85,17 @@ and using the ``actors=`` keyword (or ``actor=`` on ``submit``).
 
 .. code-block:: python
 
-   future = client.submit(Counter, actors=True)
+   task = client.submit(Counter, actors=True)
 
 You can use all other keywords to these functions like ``workers=``,
 ``resources=``, and so on to control where this actor ends up.
 
-This creates a normal Dask future on which you can call ``.result()`` to get
+This creates a normal Dask task on which you can call ``.result()`` to get
 the Actor once it has successfully run on a worker.
 
 .. code-block:: python
 
-   >>> counter = future.result()
+   >>> counter = task.result()
    >>> counter
    <Actor: Counter, key=...>
 
@@ -115,21 +115,21 @@ However accessing an attribute or calling a method will trigger a communication
 to the remote worker, run the method on the remote worker in a separate thread
 pool, and then communicate the result back to the calling side.  For attribute
 access these operations block and return when finished, for method calls they
-return an ``BaseActorFuture`` immediately.
+return an ``BaseActorTask`` immediately.
 
 .. code-block:: python
 
-   >>> future = counter.increment()  # Immediately returns a BaseActorFuture
-   >>> future.result()               # Block until finished and result arrives
+   >>> task = counter.increment()  # Immediately returns a BaseActorTask
+   >>> task.result()               # Block until finished and result arrives
    1
 
-``BaseActorFuture`` are similar to normal Dask ``Future`` objects, but not as fully
+``BaseActorTask`` are similar to normal Dask ``Task`` objects, but not as fully
 featured.  They currently *only* support the ``result`` method and nothing else.
-They don't currently work with any other Dask functions that expect futures,
+They don't currently work with any other Dask functions that expect tasks,
 like ``as_completed``, ``wait``, or ``client.gather``.  They can't be placed
 into additional submit or map calls to form dependencies.  They communicate
 their results immediately (rather than waiting for result to be called) and
-cache the result on the future itself.
+cache the result on the task itself.
 
 Access Attributes
 -----------------
@@ -164,10 +164,10 @@ workers are not possible.
 The appropriate method of the Actor's object is then called in a separate
 thread, the result captured, and then sent back to the calling side.  Currently
 workers have only a single thread for actors, but this may change in the
-future.
+task.
 
 The result is sent back immediately to the calling side, and is not stored on
-the worker with the actor.  It is cached on the ``BaseActorFuture`` object.
+the worker with the actor.  It is cached on the ``BaseActorTask`` object.
 
 
 Calling from coroutines and async/await

@@ -118,7 +118,7 @@ they produce. For example, you may want to separate I/O time from `thread-noncpu
    def read_some_files():
        ...
 
-   future = client.submit(read_some_files)
+   task = client.submit(read_some_files)
 
 In the above example, the wall time spent by the custom function ``read_some_files``
 will be logged as "I/O", which is a completely arbitrary activity label.

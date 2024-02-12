@@ -8,25 +8,25 @@ from memory as quickly as possible in order to make room for more computation.
 The result of a task is kept in memory if either of the following conditions
 hold:
 
-1. A client holds a future pointing to this task. The data should stay in RAM so that
+1. A client holds a task pointing to this task. The data should stay in RAM so that
    the client can gather the data on demand.
 2. The task is necessary for ongoing computations that are working to produce
-   the final results pointed to by futures. These tasks will be removed once
+   the final results pointed to by tasks. These tasks will be removed once
    no ongoing tasks require them.
 
-When users hold Future objects or persisted collections (which contain many such Futures
+When users hold Task objects or persisted collections (which contain many such Tasks
 inside their dask graph, typically accessible through their ``.dask`` attribute) they
-pin those results to active memory. When the user deletes futures or collections from
+pin those results to active memory. When the user deletes tasks or collections from
 their local Python process, the scheduler removes the associated data from distributed
 RAM. Because of this relationship, distributed memory reflects the state of local
 memory. A user may free distributed memory on the cluster by deleting persisted
 collections in the local session.
 
 
-Creating Futures
+Creating Tasks
 ----------------
 
-The following functions produce Futures:
+The following functions produce Tasks:
 
 .. currentmodule:: distributed.client
 
@@ -46,12 +46,12 @@ Persisting Collections
 ----------------------
 
 Calls to ``Client.compute`` or ``Client.persist`` submit task graphs to the
-cluster and return ``Future`` objects that point to particular output tasks.
+cluster and return ``Task`` objects that point to particular output tasks.
 
-Compute returns a single future per input; persist returns a copy of the
-collection with each block or partition replaced by a single future. In short,
+Compute returns a single task per input; persist returns a copy of the
+collection with each block or partition replaced by a single task. In short,
 use ``persist`` to keep full collection on the cluster and use ``compute`` when
-you want a small result as a single future.
+you want a small result as a single task.
 
 Persist is more common and is often used as follows with collections:
 
@@ -76,8 +76,8 @@ then adding a new column. Up until this point all work is lazy; we've just
 built up a recipe to perform the work as a graph in the ``df`` object.
 
 When we call ``df = client.persist(df)``, we cut the graph off the ``df`` object,
-send it up to the scheduler, receive ``Future`` objects in return and create a
-new dataframe with a very shallow graph that points directly to these futures.
+send it up to the scheduler, receive ``Task`` objects in return and create a
+new dataframe with a very shallow graph that points directly to these tasks.
 This happens more or less immediately (as long as it takes to serialize and
 send the graph) and we can continue working on our new ``df`` object while the
 cluster works to evaluate the graph in the background.
@@ -108,14 +108,14 @@ collections and then use ``df.compute()`` for fast analyses.
    >>> # df.compute()  # This is bad and would likely flood local memory
    >>> df = client.persist(df)    # This is good and asynchronously pins df
    >>> df.x.sum().compute()  # This is good because the result is small
-   >>> future = client.compute(df.x.sum())  # This is also good but less intuitive
+   >>> task = client.compute(df.x.sum())  # This is also good but less intuitive
 
 
 Clearing data
 -------------
 
 We remove data from distributed RAM by removing the collection from our local
-process. Remote data is removed once all Futures pointing to that data are
+process. Remote data is removed once all Tasks pointing to that data are
 removed from all client machines.
 
 .. code-block:: python
@@ -131,14 +131,14 @@ we'll have to delete them all.
 .. code-block:: python
 
    >>> df2 = df[df.x < 10]
-   >>> del df  # would not delete data, because df2 still tracks the futures
+   >>> del df  # would not delete data, because df2 still tracks the tasks
 
 
 Aggressively Clearing Data
 --------------------------
 
 To definitely remove a computation and all computations that depend on it you
-can always ``cancel`` the futures/collection.
+can always ``cancel`` the tasks/collection.
 
 .. code-block:: python
 
@@ -155,7 +155,7 @@ completes in a few seconds.
 
 Client references
 -----------------
-Futures live on the cluster for as long as at least one Client holds a reference to
+Tasks live on the cluster for as long as at least one Client holds a reference to
 them. When the last Client holding a reference is shut down or crashes, then everything
 that was referenced exclusively by it is pruned from the cluster. This is generally
 desirable to prevent unclean client shutdowns from polluting the memory of long-running
@@ -175,8 +175,8 @@ Resilience
 Results are not intentionally copied unless necessary for computations on other
 worker nodes. Resilience is achieved through recomputation by maintaining the
 provenance of any result. If a worker node goes down, the scheduler is able to
-recompute all of its results. The complete graph for any desired Future is
-maintained until no references to that future exist.
+recompute all of its results. The complete graph for any desired Task is
+maintained until no references to that task exist.
 
 For more information see :doc:`Resilience <resilience>`.
 

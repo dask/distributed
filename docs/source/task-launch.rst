@@ -17,7 +17,7 @@ downloads the data and converts it to a list on one of our worker machines:
 
 .. code-block:: python
 
-   future = client.submit(download_and_convert_to_list, uri)
+   task = client.submit(download_and_convert_to_list, uri)
 
 But now we need to submit new tasks for individual parts of this data.  We have
 three options.
@@ -37,12 +37,12 @@ necessary logic on our local machine:
 
 .. code-block:: python
 
-   >>> data = future.result()                  # gather data to local process
+   >>> data = task.result()                  # gather data to local process
    >>> data                                    # data is a list
    [...]
 
-   >>> futures = e.map(process_element, data)  # submit new tasks on data
-   >>> analysis = e.submit(aggregate, futures) # submit final aggregation task
+   >>> tasks = e.map(process_element, data)  # submit new tasks on data
+   >>> analysis = e.submit(aggregate, tasks) # submit final aggregation task
 
 This is straightforward and, if ``data`` is small then it is probably the
 simplest, and therefore correct choice.  However, if ``data`` is large then we
@@ -64,8 +64,8 @@ on ``data`` remotely and then break up data into its various elements.
    >>> from operator import getitem
    >>> elements = [client.submit(getitem, data, i) for i in range(n)]  # split data
 
-   >>> futures = client.map(process_element, elements)
-   >>> analysis = client.submit(aggregate, futures)
+   >>> tasks = client.map(process_element, elements)
+   >>> analysis = client.submit(aggregate, tasks)
 
 We compute the length remotely, gather back this very small result, and then
 use it to submit more tasks to break up the data and process on the cluster.
@@ -159,15 +159,15 @@ to submit, scatter, and gather results.
         if n < 2:
             return n
         client = get_client()
-        a_future = client.submit(fib, n - 1)
-        b_future = client.submit(fib, n - 2)
-        a, b = client.gather([a_future, b_future])
+        a_task = client.submit(fib, n - 1)
+        b_task = client.submit(fib, n - 2)
+        a, b = client.gather([a_task, b_task])
         return a + b
 
     if __name__ == "__main__":
         client = Client()
-        future = client.submit(fib, 10)
-        result = future.result()
+        task = client.submit(fib, 10)
+        result = task.result()
         print(result)  # prints "55"
 
 However, this can deadlock the scheduler if too many tasks request jobs at
@@ -186,10 +186,10 @@ respectively.
         if n < 2:
             return n
         client = get_client()
-        a_future = client.submit(fib, n - 1)
-        b_future = client.submit(fib, n - 2)
+        a_task = client.submit(fib, n - 1)
+        b_task = client.submit(fib, n - 2)
         secede()
-        a, b = client.gather([a_future, b_future])
+        a, b = client.gather([a_task, b_task])
         rejoin()
         return a + b
 
@@ -211,15 +211,15 @@ worker.
         if n < 2:
             return n
          with worker_client() as client:
-             a_future = client.submit(fib, n - 1)
-             b_future = client.submit(fib, n - 2)
-             a, b = client.gather([a_future, b_future])
+             a_task = client.submit(fib, n - 1)
+             b_task = client.submit(fib, n - 2)
+             a, b = client.gather([a_task, b_task])
          return a + b
 
     if __name__ == "__main__":
         client = Client()
-        future = client.submit(fib, 10)
-        result = future.result()
+        task = client.submit(fib, 10)
+        result = task.result()
         print(result)  # prints "55"
 
 Tasks that invoke :py:func:`worker_client <distributed.worker_client>` are

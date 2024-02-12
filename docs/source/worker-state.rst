@@ -193,7 +193,7 @@ There are a few important exceptions to the flow diagrams above:
 - Scheduler intercession, in which the scheduler reassigns a task that was
   previously assigned to a separate worker to a new worker. This most commonly
   occurs when a :doc:`worker dies <killed>` during computation.
-- Client intercession, where a client either explicitly releases a Future or descopes
+- Client intercession, where a client either explicitly releases a Task or descopes
   it; alternatively the whole client may shut down or become unresponsive. When there
   are no more clients holding references to a key or one of its dependents, the
   Scheduler will release it.

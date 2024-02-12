@@ -12,21 +12,21 @@ from distributed.utils_test import gen_cluster, inc
 async def test_basic(c, s, a, b):
     gl = GraphLayout(s)
     s.add_plugin(gl)
-    futures = c.map(inc, range(5))
-    total = c.submit(sum, futures)
+    tasks = c.map(inc, range(5))
+    total = c.submit(sum, tasks)
 
     await total
 
     assert len(gl.x) == len(gl.y) == 6
-    assert all(gl.x[f.key] == 0 for f in futures)
+    assert all(gl.x[f.key] == 0 for f in tasks)
     assert gl.x[total.key] == 1
     assert min(gl.y.values()) < gl.y[total.key] < max(gl.y.values())
 
 
 @gen_cluster(client=True)
 async def test_construct_after_call(c, s, a, b):
-    futures = c.map(inc, range(5))
-    total = c.submit(sum, futures)
+    tasks = c.map(inc, range(5))
+    total = c.submit(sum, tasks)
 
     await total
 
@@ -34,7 +34,7 @@ async def test_construct_after_call(c, s, a, b):
     s.add_plugin(gl)
 
     assert len(gl.x) == len(gl.y) == 6
-    assert all(gl.x[f.key] == 0 for f in futures)
+    assert all(gl.x[f.key] == 0 for f in tasks)
     assert gl.x[total.key] == 1
     assert min(gl.y.values()) < gl.y[total.key] < max(gl.y.values())
 
@@ -56,8 +56,8 @@ async def test_states(c, s, a, b):
 async def test_release_tasks(c, s, a, b):
     gl = GraphLayout(s)
     s.add_plugin(gl)
-    futures = c.map(inc, range(5))
-    total = c.submit(sum, futures)
+    tasks = c.map(inc, range(5))
+    total = c.submit(sum, tasks)
 
     await total
     key = total.key
@@ -74,10 +74,10 @@ async def test_forget(c, s, a, b):
     gl = GraphLayout(s)
     s.add_plugin(gl)
 
-    futures = c.map(inc, range(10))
-    futures = c.map(inc, futures)
-    await wait(futures)
-    del futures
+    tasks = c.map(inc, range(10))
+    tasks = c.map(inc, tasks)
+    await wait(tasks)
+    del tasks
     while s.tasks:
         await asyncio.sleep(0.01)
 
@@ -107,6 +107,6 @@ async def test_layout_scatter(c, s, a, b):
     s.add_plugin(gl)
 
     data = await c.scatter([1, 2, 3], broadcast=True)
-    futures = [c.submit(sum, data) for _ in range(5)]
-    await wait(futures)
+    tasks = [c.submit(sum, data) for _ in range(5)]
+    await wait(tasks)
     assert len(gl.state_updates) > 0

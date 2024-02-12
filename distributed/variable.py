@@ -10,7 +10,7 @@ from tlz import merge
 
 from dask.utils import parse_timedelta
 
-from distributed.client import Future
+from distributed.client import Task
 from distributed.metrics import time
 from distributed.utils import TimeoutError, log_errors, wait_for
 from distributed.worker import get_client
@@ -39,12 +39,12 @@ class VariableExtension:
             {"variable_set": self.set, "variable_get": self.get}
         )
 
-        self.scheduler.stream_handlers["variable-future-release"] = self.future_release
+        self.scheduler.stream_handlers["variable-task-release"] = self.future_release
         self.scheduler.stream_handlers["variable_delete"] = self.delete
 
     async def set(self, name=None, key=None, data=None, client=None):
         if key is not None:
-            record = {"type": "Future", "value": key}
+            record = {"type": "Task", "value": key}
             self.scheduler.client_desires_keys(keys=[key], client="variable-%s" % name)
         else:
             record = {"type": "msgpack", "value": data}
@@ -53,7 +53,7 @@ class VariableExtension:
         except KeyError:
             pass
         else:
-            if old["type"] == "Future" and old["value"] != key:
+            if old["type"] == "Task" and old["value"] != key:
                 asyncio.ensure_future(self.release(old["value"], name))
         if name not in self.variables:
             async with self.started:
@@ -94,7 +94,7 @@ class VariableExtension:
                 self.started.release()
 
         record = self.variables[name]
-        if record["type"] == "Future":
+        if record["type"] == "Task":
             key = record["value"]
             token = uuid.uuid4().hex
             ts = self.scheduler.tasks.get(key)
@@ -114,7 +114,7 @@ class VariableExtension:
         except KeyError:
             pass
         else:
-            if old["type"] == "Future":
+            if old["type"] == "Task":
                 await self.release(old["value"], name)
         with suppress(KeyError):
             del self.waiting_conditions[name]
@@ -127,14 +127,14 @@ class VariableExtension:
 class Variable:
     """Distributed Global Variable
 
-    This allows multiple clients to share futures and data between each other
+    This allows multiple clients to share tasks and data between each other
     with a single mutable variable.  All metadata is sequentialized through the
     scheduler.  Race conditions can occur.
 
-    Values must be either Futures or msgpack-encodable data (ints, lists,
+    Values must be either Tasks or msgpack-encodable data (ints, lists,
     strings, etc..)  All data will be kept and sent through the scheduler, so
     it is wise not to send too much.  If you want to share a large amount of
-    data then ``scatter`` it and share the future instead.
+    data then ``scatter`` it and share the task instead.
 
     Parameters
     ----------
@@ -153,8 +153,8 @@ class Variable:
     >>> x.set(123)  # docttest: +SKIP
     >>> x.get()  # docttest: +SKIP
     123
-    >>> future = client.submit(f, x)  # doctest: +SKIP
-    >>> x.set(future)  # doctest: +SKIP
+    >>> task = client.submit(f, x)  # doctest: +SKIP
+    >>> x.set(task)  # doctest: +SKIP
 
     See Also
     --------
@@ -183,7 +183,7 @@ class Variable:
             )
 
     async def _set(self, value):
-        if isinstance(value, Future):
+        if isinstance(value, Task):
             await self.client.scheduler.variable_set(key=value.key, name=self.name)
         else:
             await self.client.scheduler.variable_set(data=value, name=self.name)
@@ -193,8 +193,8 @@ class Variable:
 
         Parameters
         ----------
-        value : Future or object
-            Must be either a Future or a msgpack-encodable value
+        value : Task or object
+            Must be either a Task or a msgpack-encodable value
         """
         self._verify_running()
         return self.client.sync(self._set, value, **kwargs)
@@ -203,13 +203,13 @@ class Variable:
         d = await self.client.scheduler.variable_get(
             timeout=timeout, name=self.name, client=self.client.id
         )
-        if d["type"] == "Future":
-            value = Future(d["value"], self.client, inform=True, state=d["state"])
+        if d["type"] == "Task":
+            value = Task(d["value"], self.client, inform=True, state=d["state"])
             if d["state"] == "erred":
                 value._state.set_error(d["exception"], d["traceback"])
             self.client._send_to_scheduler(
                 {
-                    "op": "variable-future-release",
+                    "op": "variable-task-release",
                     "name": self.name,
                     "key": d["value"],
                     "token": d["token"],
@@ -239,7 +239,7 @@ class Variable:
         Caution, this affects all clients currently pointing to this variable.
         """
         self._verify_running()
-        if self.client.status == "running":  # TODO: can leave zombie futures
+        if self.client.status == "running":  # TODO: can leave zombie tasks
             self.client._send_to_scheduler({"op": "variable_delete", "name": self.name})
 
     def __reduce__(self):

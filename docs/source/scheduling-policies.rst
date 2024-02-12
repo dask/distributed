@@ -48,7 +48,7 @@ good chance those neighbors will be combined in a downstream operation::
          X
 
 In the above case, we want ``a`` and ``b`` to run on the same worker,
-and ``c`` and ``d`` to run on the same worker, reducing future
+and ``c`` and ``d`` to run on the same worker, reducing task
 data transfer. We can also ignore the location of ``X``, because assuming
 we split the ``a b c d`` group across all workers to maximize parallelism,
 then ``X`` will eventually get transferred everywhere.
@@ -308,7 +308,7 @@ scheduler, and workers at various points in the computation.
     described above.  This per-graph counter encourages a first-in-first-out
     policy between computations.  All tasks from a previous call to compute
     have a higher priority than all tasks from a subsequent call to compute (or
-    submit, persist, map, or any operation that generates futures).
+    submit, persist, map, or any operation that generates tasks).
 3.  Whenever a task is ready to run (its dependencies, if any, are complete),
     the scheduler assigns it to a worker. When multiple tasks are ready at once,
     they are submitted to workers, in priority order. If scheduler-side queuing

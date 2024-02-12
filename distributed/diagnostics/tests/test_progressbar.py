@@ -11,9 +11,9 @@ from distributed.utils_test import div, gen_cluster, inc
 
 
 def test_text_progressbar(capsys, client):
-    futures = client.map(inc, range(10))
-    p = TextProgressBar(futures, interval=0.01, complete=True, loop=client.loop)
-    client.gather(futures)
+    tasks = client.map(inc, range(10))
+    p = TextProgressBar(tasks, interval=0.01, complete=True, loop=client.loop)
+    client.gather(tasks)
 
     start = time()
     while p.status != "finished":

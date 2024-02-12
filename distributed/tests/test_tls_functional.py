@@ -38,12 +38,12 @@ async def test_Queue(c, s, a, b):
     size = await x.qsize()
     assert size == 0
 
-    future = c.submit(inc, 1)
+    task = c.submit(inc, 1)
 
-    await x.put(future)
+    await x.put(task)
 
-    future2 = await x.get()
-    assert future.key == future2.key
+    task2 = await x.get()
+    assert task.key == task2.key
 
 
 @gen_tls_cluster(client=True)
@@ -119,7 +119,7 @@ async def test_rebalance(c, s, a, b):
     """
     assert a.address.startswith("tls://")
 
-    futures = await c.scatter(range(100), workers=[a.address])
+    tasks = await c.scatter(range(100), workers=[a.address])
     assert len(a.data) == 100
     assert len(b.data) == 0
     await c.rebalance()
@@ -130,9 +130,9 @@ async def test_rebalance(c, s, a, b):
 @gen_tls_cluster(client=True, nthreads=[("tls://127.0.0.1", 2)] * 2)
 async def test_work_stealing(c, s, a, b):
     [x] = await c._scatter([1], workers=a.address)
-    futures = c.map(slowadd, range(50), [x] * 50, delay=0.1)
+    tasks = c.map(slowadd, range(50), [x] * 50, delay=0.1)
     await asyncio.sleep(0.1)
-    await wait(futures)
+    await wait(tasks)
     assert len(a.data) > 10
     assert len(b.data) > 10
 
@@ -169,8 +169,8 @@ async def test_worker_client_gather(c, s, a, b):
             xx, yy = ee.gather([x, y])
         return xx, yy
 
-    future = c.submit(func)
-    result = await future
+    task = c.submit(func)
+    result = await task
 
     assert result == (2, 3)
 
@@ -182,8 +182,8 @@ async def test_worker_client_executor(c, s, a, b):
             with c.get_executor() as e:
                 return sum(e.map(double, range(30)))
 
-    future = c.submit(mysum)
-    result = await future
+    task = c.submit(mysum)
+    result = await task
     assert result == 30 * 29
 
 

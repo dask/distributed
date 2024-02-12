@@ -64,35 +64,35 @@ async def test_submit_from_worker_async(c, s, a, b):
 async def test_scatter_from_worker(c, s, a, b):
     def func():
         with worker_client() as c:
-            futures = c.scatter([1, 2, 3, 4, 5])
-            assert isinstance(futures, (list, tuple))
-            assert len(futures) == 5
+            tasks = c.scatter([1, 2, 3, 4, 5])
+            assert isinstance(tasks, (list, tuple))
+            assert len(tasks) == 5
 
             x = dict(get_worker().data)
-            y = {f.key: i for f, i in zip(futures, [1, 2, 3, 4, 5])}
+            y = {f.key: i for f, i in zip(tasks, [1, 2, 3, 4, 5])}
             assert x == y
 
-            total = c.submit(sum, futures)
+            total = c.submit(sum, tasks)
             return total.result()
 
-    future = c.submit(func)
-    result = await future
+    task = c.submit(func)
+    result = await task
     assert result == sum([1, 2, 3, 4, 5])
 
     def func():
         with worker_client() as c:
             correct = True
             for data in [[1, 2], (1, 2), {1, 2}]:
-                futures = c.scatter(data)
-                correct &= type(futures) == type(data)
+                tasks = c.scatter(data)
+                correct &= type(tasks) == type(data)
 
             o = object()
-            futures = c.scatter({"x": o})
+            tasks = c.scatter({"x": o})
             correct &= get_worker().data["x"] is o
             return correct
 
-    future = c.submit(func)
-    result = await future
+    task = c.submit(func)
+    result = await task
     assert result is True
 
     start = time()
@@ -108,8 +108,8 @@ async def test_scatter_singleton(c, s, a, b):
     def func():
         with worker_client() as c:
             x = np.ones(5)
-            future = c.scatter(x)
-            assert future.type == np.ndarray
+            task = c.scatter(x)
+            assert task.type == np.ndarray
 
     await c.submit(func)
 
@@ -128,8 +128,8 @@ async def test_gather_multi_machine(c, s, a, b):
             xx, yy = ee.gather([x, y])
         return xx, yy
 
-    future = c.submit(func)
-    result = await future
+    task = c.submit(func)
+    result = await task
 
     assert result == (2, 3)
 
@@ -140,8 +140,8 @@ async def test_same_loop(c, s, a, b):
         with worker_client() as lc:
             return lc.loop is get_worker().loop
 
-    future = c.submit(f)
-    result = await future
+    task = c.submit(f)
+    result = await task
     assert result
 
 
@@ -151,8 +151,8 @@ def test_sync(client):
         sub_tasks = [delayed(double)(i) for i in range(100)]
 
         with worker_client() as lc:
-            futures = lc.compute(sub_tasks)
-            for f in as_completed(futures):
+            tasks = lc.compute(sub_tasks)
+            for f in as_completed(tasks):
                 result += f.result()
         return result
 
@@ -166,13 +166,13 @@ async def test_async(c, s, a, b):
         sub_tasks = [delayed(double)(i) for i in range(100)]
 
         with worker_client() as lc:
-            futures = lc.compute(sub_tasks)
-            for f in as_completed(futures):
+            tasks = lc.compute(sub_tasks)
+            for f in as_completed(tasks):
                 result += f.result()
         return result
 
-    future = c.compute(delayed(mysum)())
-    await future
+    task = c.compute(delayed(mysum)())
+    await task
 
     start = time()
     while len(a.data) + len(b.data) > 1:
@@ -193,8 +193,8 @@ async def test_separate_thread_false(c, s, a):
             get_worker().count -= 1
         return i
 
-    futures = c.map(f, range(20))
-    results = await c._gather(futures)
+    tasks = c.map(f, range(20))
+    results = await c._gather(tasks)
     assert list(results) == list(range(20))
 
 
@@ -205,8 +205,8 @@ async def test_client_executor(c, s, a, b):
             with c.get_executor() as e:
                 return sum(e.map(double, range(30)))
 
-    future = c.submit(mysum)
-    result = await future
+    task = c.submit(mysum)
+    result = await task
     assert result == 30 * 29
 
 
@@ -243,8 +243,8 @@ async def test_local_client_warning(c, s, a, b):
         with cmgr as c:
             return c.submit(inc, x).result()
 
-    future = c.submit(func, 10)
-    result = await future
+    task = c.submit(func, 10)
+    result = await task
     assert result == 11
 
 
@@ -264,9 +264,9 @@ def test_timeout(client):
         with worker_client(timeout=0) as wc:
             print("hello")
 
-    future = client.submit(func)
+    task = client.submit(func)
     with pytest.raises(EnvironmentError):
-        result = future.result()
+        result = task.result()
 
 
 def test_secede_without_stealing_issue_1262():

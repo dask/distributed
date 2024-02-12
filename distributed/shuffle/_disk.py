@@ -150,7 +150,7 @@ class DiskShardsBuffer(ShardsBuffer):
 
         Most of the logic here is about possibly going back to a separate
         thread, or about diagnostics.  If things don't change much in the
-        future then we should consider simplifying this considerably and
+        task then we should consider simplifying this considerably and
         dropping the write into communicate above.
         """
         frames: Iterable[bytes | bytearray | memoryview]

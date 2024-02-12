@@ -26,13 +26,13 @@ This includes all functions that submit work to the cluster, like ``submit``,
 
 .. code-block:: python
 
-   future = client.submit(lambda x: x + 1, 10)
+   task = client.submit(lambda x: x + 1, 10)
 
-You can await futures directly
+You can await tasks directly
 
 .. code-block:: python
 
-   result = await future
+   result = await task
 
    >>> print(result)
    11
@@ -42,7 +42,7 @@ received information from the scheduler should now be ``await``'ed.
 
 .. code-block:: python
 
-   result = await client.gather(future)
+   result = await client.gather(task)
 
 
 If you want to use an asynchronous function with a synchronous ``Client``
@@ -57,8 +57,8 @@ function to run the asynchronous function:
    client = Client()  # normal blocking client
 
    async def f():
-       future = client.submit(lambda x: x + 1, 10)
-       result = await client.gather(future, asynchronous=True)
+       task = client.submit(lambda x: x + 1, 10)
+       result = await client.gather(task, asynchronous=True)
        return result
 
    client.sync(f)
@@ -92,8 +92,8 @@ Python 3 with Tornado or Asyncio
 
    async def f():
        client = await Client(asynchronous=True)
-       future = client.submit(lambda x: x + 1, 10)
-       result = await future
+       task = client.submit(lambda x: x + 1, 10)
+       result = await task
        await client.close()
        return result
 

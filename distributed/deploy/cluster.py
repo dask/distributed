@@ -290,7 +290,7 @@ class Cluster(SyncMethodMixin):
     def _log(self, log):
         """Log a message.
 
-        Output a message to the user and also store for future retrieval.
+        Output a message to the user and also store for task retrieval.
 
         For use in subclasses where initialisation may take a while and it would
         be beneficial to feed back to the user.

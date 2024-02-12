@@ -28,7 +28,7 @@ To retrieve the transition logs for a given task, pass the task's key to the :me
 
     >>> f = client.submit(inc, 123)
     >>> f
-    <Future: finished, type: builtins.int, key: inc-aad7bbea25dc61c8e53d929c7ec50bed>
+    <Task: finished, type: builtins.int, key: inc-aad7bbea25dc61c8e53d929c7ec50bed>
     >>> s.story(f.key)
     [('inc-aad7bbea25dc61c8e53d929c7ec50bed', 'released', 'waiting', {'inc-aad7bbea25dc61c8e53d929c7ec50bed': 'processing'}, 1605143345.7283862),
      ('inc-aad7bbea25dc61c8e53d929c7ec50bed', 'waiting', 'processing', {}, 1605143345.7284858),
@@ -53,7 +53,7 @@ For example, below we log start and stop times to the ``"runtimes"`` topic using
     ...     ...
     ...     stop = time()
     ...     dask.distributed.get_worker().log_event("runtimes", {"start": start, "stop": stop})
-    >>> futures = client.map(myfunc, range(10))
+    >>> tasks = client.map(myfunc, range(10))
     >>> client.get_events("runtimes")
     ((1605207481.77175, {'start': 1605207481.769397, 'stop': 1605207481.769397}),
      (1605207481.772021, {'start': 1605207481.770036, 'stop': 1605207481.770037}),

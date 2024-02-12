@@ -150,9 +150,9 @@ class FailToPickle:
         return self.reported_size
 
 
-async def assert_basic_futures(c: Client) -> None:
-    futures = c.map(inc, range(10))
-    results = await c.gather(futures)
+async def assert_basic_tasks(c: Client) -> None:
+    tasks = c.map(inc, range(10))
+    results = await c.gather(tasks)
     assert results == list(map(inc, range(10)))
 
 
@@ -178,7 +178,7 @@ async def test_fail_to_pickle_execute_1(c, s, a, b):
         await x
     assert isinstance(e.value.__cause__.__cause__, CustomError)
 
-    await assert_basic_futures(c)
+    await assert_basic_tasks(c)
 
 
 class FailStoreDict(UserDict):
@@ -280,7 +280,7 @@ async def test_fail_to_pickle_execute_2(c, s, a):
     await wait(y)
     assert set(a.data.memory) == {"x", "y"}
     assert not a.data.disk
-    await assert_basic_futures(c)
+    await assert_basic_tasks(c)
 
 
 @gen_cluster(
@@ -323,7 +323,7 @@ async def test_fail_to_pickle_spill(c, s, a):
     assert bad.status == "finished"
     assert bad.key in a.data.fast
 
-    await assert_basic_futures(c)
+    await assert_basic_tasks(c)
 
 
 @gen_cluster(
@@ -481,14 +481,14 @@ async def test_spill_hysteresis(c, s, target, managed, expect_spilled):
             a.monitor.get_process_memory = lambda: 50_000_000 * len(a.data.fast)
 
             # Add 500MB (reported) process memory. Spilling must not happen.
-            futures = [c.submit(C, pure=False) for _ in range(10)]
-            await wait(futures)
+            tasks = [c.submit(C, pure=False) for _ in range(10)]
+            await wait(tasks)
             await asyncio.sleep(0.1)
             assert not a.data.disk
 
             # Add another 250MB unmanaged memory. This must trigger the spilling.
-            futures += [c.submit(C, pure=False) for _ in range(5)]
-            await wait(futures)
+            tasks += [c.submit(C, pure=False) for _ in range(5)]
+            await wait(tasks)
 
             # Wait until spilling starts. Then, wait until it stops.
             prev_n = 0
@@ -709,8 +709,8 @@ async def test_avoid_memory_monitor_if_zero_limit_worker(c, s, a):
     assert type(a.data) is dict
     assert not memory_monitor_running(a)
 
-    future = c.submit(inc, 1)
-    assert await future == 2
+    task = c.submit(inc, 1)
+    assert await task == 2
     await asyncio.sleep(0.05)
     assert await c.submit(inc, 2) == 3  # worker doesn't pause
 
@@ -728,8 +728,8 @@ async def test_avoid_memory_monitor_if_zero_limit_nanny(c, s, nanny):
     assert not memory_monitor_running(nanny)
     assert not (await c.run(memory_monitor_running))[nanny.worker_address]
 
-    future = c.submit(inc, 1)
-    assert await future == 2
+    task = c.submit(inc, 1)
+    assert await task == 2
     await asyncio.sleep(0.02)
     assert await c.submit(inc, 2) == 3  # worker doesn't pause
 
@@ -825,7 +825,7 @@ async def test_manual_evict_proto(c, s, a):
     assert memory_monitor_running(a)
     assert isinstance(a.data, ManualEvictDict)
 
-    futures = await c.scatter({"x": None, "y": None, "z": None})
+    tasks = await c.scatter({"x": None, "y": None, "z": None})
     while a.data.evicted != {"x", "y", "z"}:
         await asyncio.sleep(0.01)
 
@@ -842,7 +842,7 @@ async def leak_until_restart(c: Client, s: Scheduler) -> None:
     (addr,) = s.workers
     pid = (await c.run(os.getpid))[addr]
 
-    future = c.submit(leak, key="leak")
+    task = c.submit(leak, key="leak")
 
     # Wait until the worker is restarted
     while len(s.workers) != 1 or set(s.workers) == {addr}:
@@ -853,12 +853,12 @@ async def leak_until_restart(c: Client, s: Scheduler) -> None:
         psutil.Process(pid)
 
     with pytest.raises(KilledWorker):
-        await future
+        await task
     assert s.tasks["leak"].suspicious == 1
     assert not any(
         (await c.run(lambda dask_worker: "leak" in dask_worker.state.tasks)).values()
     )
-    future.release()
+    task.release()
     while "leak" in s.tasks:
         await asyncio.sleep(0.01)
 

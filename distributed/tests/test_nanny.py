@@ -652,9 +652,9 @@ async def test_restart_memory(c, s, n):
 
     np = pytest.importorskip("numpy")
     s.allowed_failures = 1
-    future = c.submit(np.ones, 300_000_000, dtype="f8")
+    task = c.submit(np.ones, 300_000_000, dtype="f8")
     with pytest.raises(KilledWorker):
-        await future
+        await task
 
     while not s.workers:
         await asyncio.sleep(0.1)
@@ -736,7 +736,7 @@ async def test_malloc_trim_threshold(c, s, a):
 
     Note
     ----
-    This test may start failing in a future Python version if CPython switches to
+    This test may start failing in a task Python version if CPython switches to
     using mimalloc by default. If it does, a thorough benchmarking exercise is needed.
     """
     da = pytest.importorskip("dask.array")

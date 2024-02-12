@@ -117,8 +117,8 @@ worker:
 
 .. code-block:: python
 
-   >>> future = client.submit(count_words, filenames[0])
-   >>> counts = future.result()
+   >>> task = client.submit(count_words, filenames[0])
+   >>> counts = task.result()
    >>> print(sorted(counts.items(), key=lambda k_v: k_v[1], reverse=True)[:10])
 
    [(b'the', 144873),
@@ -139,30 +139,30 @@ are running.
 
 .. code-block:: python
 
-   >>> futures = client.map(count_words, filenames)
+   >>> tasks = client.map(count_words, filenames)
 
-We can check the status of some ``futures`` while all of the text files are
+We can check the status of some ``tasks`` while all of the text files are
 being processed:
 
 .. code-block:: python
 
-   >>> len(futures)
+   >>> len(tasks)
 
    161
 
-   >>> futures[:5]
+   >>> tasks[:5]
 
-   [<Future: status: finished, key: count_words-5114ab5911de1b071295999c9049e941>,
-    <Future: status: pending, key: count_words-d9e0d9daf6a1eab4ca1f26033d2714e7>,
-    <Future: status: pending, key: count_words-d2f365a2360a075519713e9380af45c5>,
-    <Future: status: pending, key: count_words-bae65a245042325b4c77fc8dde1acf1e>,
-    <Future: status: pending, key: count_words-03e82a9b707c7e36eab95f4feec1b173>]
+   [<Task: status: finished, key: count_words-5114ab5911de1b071295999c9049e941>,
+    <Task: status: pending, key: count_words-d9e0d9daf6a1eab4ca1f26033d2714e7>,
+    <Task: status: pending, key: count_words-d2f365a2360a075519713e9380af45c5>,
+    <Task: status: pending, key: count_words-bae65a245042325b4c77fc8dde1acf1e>,
+    <Task: status: pending, key: count_words-03e82a9b707c7e36eab95f4feec1b173>]
 
-   >>> progress(futures)
+   >>> progress(tasks)
 
    [########################################] | 100% Completed |  3min  0.2s
 
-When the ``futures`` finish reading in all of the text files and counting
+When the ``tasks`` finish reading in all of the text files and counting
 words, the results will exist on each worker. This operation required about
 3 minutes to run on a cluster with three worker machines, each with 4 cores
 and 16 GB RAM.
@@ -182,23 +182,23 @@ top 10,000 words from each text file.
    ...     items = sorted(d.items(), key=lambda kv: kv[1], reverse=True)[:10000]
    ...     return dict(items)
 
-We can then ``map`` the futures from the previous step to this culling
+We can then ``map`` the tasks from the previous step to this culling
 function. This is a convenient way to construct a pipeline of computations
-using futures:
+using tasks:
 
 .. code-block:: python
 
-   >>> futures2 = client.map(top_items, futures)
+   >>> tasks2 = client.map(top_items, tasks)
 
 We can ``gather`` the resulting culled word count data for each text file to
 the local process:
 
 .. code-block:: python
 
-   >>> results = client.gather(iter(futures2))
+   >>> results = client.gather(iter(tasks2))
 
 To sum the word counts for all of the text files, we can iterate over the
-results in ``futures2`` and update a local dictionary that contains all of the
+results in ``tasks2`` and update a local dictionary that contains all of the
 word counts.
 
 .. code-block:: python
@@ -259,22 +259,22 @@ The complete Python script for this example is shown below:
    counts = count_words(filenames[0])
    print(sorted(counts.items(), key=lambda k_v: k_v[1], reverse=True)[:10])
 
-   future = client.submit(count_words, filenames[0])
-   counts = future.result()
+   task = client.submit(count_words, filenames[0])
+   counts = task.result()
    print(sorted(counts.items(), key=lambda k_v: k_v[1], reverse=True)[:10])
 
-   futures = client.map(count_words, filenames)
-   len(futures)
-   futures[:5]
-   progress(futures)
+   tasks = client.map(count_words, filenames)
+   len(tasks)
+   tasks[:5]
+   progress(tasks)
 
 
    def top_items(d):
        items = sorted(d.items(), key=lambda kv: kv[1], reverse=True)[:10000]
        return dict(items)
 
-   futures2 = client.map(top_items, futures)
-   results = client.gather(iter(futures2))
+   tasks2 = client.map(top_items, tasks)
+   results = client.gather(iter(tasks2))
 
    all_counts = Counter()
    for result in results:

@@ -51,22 +51,22 @@ atexit.register(_python_exit)
 
 
 class _WorkItem:
-    def __init__(self, future, fn, args, kwargs):
-        self.future = future
+    def __init__(self, task, fn, args, kwargs):
+        self.task = task
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
 
     def run(self):
-        if not self.future.set_running_or_notify_cancel():  # pragma: no cover
+        if not self.task.set_running_or_notify_cancel():  # pragma: no cover
             return
 
         try:
             result = self.fn(*self.args, **self.kwargs)
         except BaseException as e:
-            self.future.set_exception(e)
+            self.task.set_exception(e)
         else:
-            self.future.set_result(result)
+            self.task.set_result(result)
 
 
 def _worker(executor_reference, work_queue):
@@ -123,7 +123,7 @@ class ThreadPoolExecutor(_base.Executor):
     def submit(self, fn, *args, **kwargs):
         with self._shutdown_lock:
             if self._shutdown:  # pragma: no cover
-                raise RuntimeError("cannot schedule new futures after shutdown")
+                raise RuntimeError("cannot schedule new tasks after shutdown")
 
             f = _base.Future()
             w = _WorkItem(f, fn, args, kwargs)

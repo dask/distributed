@@ -449,9 +449,9 @@ class MultiProgressWidget(MultiProgressBar):
 
 
 def progress(
-    *futures, notebook=None, multi=True, complete=True, group_by="prefix", **kwargs
+    *tasks, notebook=None, multi=True, complete=True, group_by="prefix", **kwargs
 ):
-    """Track progress of futures
+    """Track progress of tasks
 
     This operates differently in the notebook and the console
 
@@ -460,8 +460,8 @@ def progress(
 
     Parameters
     ----------
-    futures : Futures
-        A list of futures or keys to track
+    tasks : Tasks
+        A list of tasks or keys to track
     notebook : bool (optional)
         Running in the notebook or not (defaults to guess)
     multi : bool (optional)
@@ -481,12 +481,12 @@ def progress(
 
     Examples
     --------
-    >>> progress(futures)  # doctest: +SKIP
+    >>> progress(tasks)  # doctest: +SKIP
     [########################################] | 100% Completed |  1.7s
     """
-    futures = futures_of(futures)
-    if not isinstance(futures, (set, list)):
-        futures = [futures]
+    tasks = futures_of(tasks)
+    if not isinstance(tasks, (set, list)):
+        tasks = [tasks]
     if notebook is None:
         notebook = is_kernel()  # often but not always correct assumption
     if kwargs.get("func", None) is not None:
@@ -499,10 +499,10 @@ def progress(
     if notebook:
         if multi:
             bar = MultiProgressWidget(
-                futures, complete=complete, group_by=group_by, **kwargs
+                tasks, complete=complete, group_by=group_by, **kwargs
             )
         else:
-            bar = ProgressWidget(futures, complete=complete, **kwargs)
+            bar = ProgressWidget(tasks, complete=complete, **kwargs)
         return bar
     else:
-        TextProgressBar(futures, complete=complete, **kwargs)
+        TextProgressBar(tasks, complete=complete, **kwargs)

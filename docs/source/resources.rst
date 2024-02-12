@@ -124,7 +124,7 @@ each task will run in a separate process:
    from distributed import Client
    client = Client('scheduler:8786')
 
-   futures = [client.submit(non_thread_safe_function, arg,
+   tasks = [client.submit(non_thread_safe_function, arg,
                             resources={'process': 1}) for arg in args]
 
 

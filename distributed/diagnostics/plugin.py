@@ -127,7 +127,7 @@ class SchedulerPlugin:
                 A mapping that maps a key to its dependencies.
             **kwargs:
                 It is recommended to allow plugins to accept more parameters to
-                ensure future compatibility.
+                ensure task compatibility.
         """
 
     def restart(self, scheduler: Scheduler) -> None:

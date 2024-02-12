@@ -86,15 +86,15 @@ async def test_dask_array_collections(c, s, a, b):
 
     x_dsk = {("x", i, j): np.random.random((3, 3)) for i in range(3) for j in range(2)}
     y_dsk = {("y", i, j): np.random.random((3, 3)) for i in range(2) for j in range(3)}
-    x_futures = await c.scatter(x_dsk)
-    y_futures = await c.scatter(y_dsk)
+    x_tasks = await c.scatter(x_dsk)
+    y_tasks = await c.scatter(y_dsk)
 
     dt = np.random.random(0).dtype
     x_local = da.Array(x_dsk, "x", ((3, 3, 3), (3, 3)), dt)
     y_local = da.Array(y_dsk, "y", ((3, 3), (3, 3, 3)), dt)
 
-    x_remote = da.Array(x_futures, "x", ((3, 3, 3), (3, 3)), dt)
-    y_remote = da.Array(y_futures, "y", ((3, 3), (3, 3, 3)), dt)
+    x_remote = da.Array(x_tasks, "x", ((3, 3, 3), (3, 3)), dt)
+    y_remote = da.Array(y_tasks, "y", ((3, 3), (3, 3, 3)), dt)
 
     exprs = [
         lambda x, y: x.T + y,
@@ -183,8 +183,8 @@ def test_rolling_sync(client):
 async def test_loc(c, s, a, b):
     df = make_time_dataframe()
     ddf = dd.from_pandas(df, npartitions=10)
-    future = c.compute(ddf.loc["2000-01-17":"2000-01-24"])
-    await future
+    task = c.compute(ddf.loc["2000-01-17":"2000-01-24"])
+    await task
 
 
 @ignore_single_machine_warning
@@ -224,9 +224,9 @@ async def test_sparse_arrays(c, s, a, b):
     x = da.random.random((100, 10), chunks=(10, 10))
     x[x < 0.95] = 0
     s = x.map_blocks(sparse.COO)
-    future = c.compute(s.sum(axis=0)[:10])
+    task = c.compute(s.sum(axis=0)[:10])
 
-    await future
+    await task
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])

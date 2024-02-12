@@ -55,8 +55,8 @@ async def test_resource_submit(c, s, a, b):
     ],
 )
 async def test_submit_many_non_overlapping(c, s, a, b):
-    futures = [c.submit(inc, i, resources={"A": 1}) for i in range(5)]
-    await wait(futures)
+    tasks = [c.submit(inc, i, resources={"A": 1}) for i in range(5)]
+    await wait(tasks)
 
     assert len(a.data) == 5
     assert len(b.data) == 0
@@ -70,14 +70,14 @@ async def test_submit_many_non_overlapping(c, s, a, b):
     ],
 )
 async def test_submit_many_non_overlapping_2(c, s, a, b):
-    futures = c.map(slowinc, range(100), resources={"A": 1}, delay=0.02)
+    tasks = c.map(slowinc, range(100), resources={"A": 1}, delay=0.02)
 
     while len(a.data) + len(b.data) < 100:
         await asyncio.sleep(0.01)
         assert a.state.executing_count <= 2
         assert b.state.executing_count <= 1
 
-    await wait(futures)
+    await wait(tasks)
     assert a.state.total_resources == a.state.available_resources
     assert b.state.total_resources == b.state.available_resources
 
@@ -92,10 +92,10 @@ async def test_submit_many_non_overlapping_2(c, s, a, b):
 async def test_move(c, s, a, b):
     [x] = await c.scatter([1], workers=b.address)
 
-    future = c.submit(inc, x, resources={"A": 1})
+    task = c.submit(inc, x, resources={"A": 1})
 
-    await wait(future)
-    assert a.data[future.key] == 2
+    await wait(task)
+    assert a.data[task.key] == 2
 
 
 @gen_cluster(
@@ -108,12 +108,10 @@ async def test_move(c, s, a, b):
 async def test_dont_work_steal(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
-    futures = [
-        c.submit(slowadd, x, i, resources={"A": 1}, delay=0.05) for i in range(10)
-    ]
+    tasks = [c.submit(slowadd, x, i, resources={"A": 1}, delay=0.05) for i in range(10)]
 
-    await wait(futures)
-    assert all(f.key in a.data for f in futures)
+    await wait(tasks)
+    assert all(f.key in a.data for f in tasks)
 
 
 @gen_cluster(
@@ -124,9 +122,9 @@ async def test_dont_work_steal(c, s, a, b):
     ],
 )
 async def test_map(c, s, a, b):
-    futures = c.map(inc, range(10), resources={"B": 1})
-    await wait(futures)
-    assert set(b.data) == {f.key for f in futures}
+    tasks = c.map(inc, range(10), resources={"B": 1})
+    await wait(tasks)
+    assert set(b.data) == {f.key for f in tasks}
     assert not a.data
 
 
@@ -230,13 +228,13 @@ async def test_resources_str(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 4, {"resources": {"A": 2, "B": 1}})])
 async def test_minimum_resource(c, s, a):
-    futures = c.map(slowinc, range(30), resources={"A": 1, "B": 1}, delay=0.02)
+    tasks = c.map(slowinc, range(30), resources={"A": 1, "B": 1}, delay=0.02)
 
     while len(a.data) < 30:
         await asyncio.sleep(0.01)
         assert a.state.executing_count <= 1
 
-    await wait(futures)
+    await wait(tasks)
     assert a.state.total_resources == a.state.available_resources
 
 
@@ -369,7 +367,7 @@ def test_task_cancelled_and_readded_with_resources(ws):
     ],
 )
 async def test_balance_resources(c, s, a, b):
-    futures = c.map(slowinc, range(100), delay=0.1, workers=a.address)
+    tasks = c.map(slowinc, range(100), delay=0.1, workers=a.address)
     constrained = c.map(inc, range(2), resources={"A": 1})
 
     await wait(constrained)
@@ -385,7 +383,7 @@ async def test_set_resources(c, s, a):
     assert s.workers[a.address].resources == {"A": 2}
     lock = Lock()
     async with lock:
-        future = c.submit(lock_inc, 1, lock=lock, resources={"A": 1})
+        task = c.submit(lock_inc, 1, lock=lock, resources={"A": 1})
         while a.state.available_resources["A"] == 2:
             await asyncio.sleep(0.01)
 

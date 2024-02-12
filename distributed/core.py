@@ -700,15 +700,15 @@ class Server:
         listeners_to_stop: set[Awaitable] = set()
 
         for listener in self.listeners:
-            future = listener.stop()
-            if inspect.isawaitable(future):
+            task = listener.stop()
+            if inspect.isawaitable(task):
                 warnings.warn(
                     f"{type(listener)} is using an asynchronous `stop` method. "
                     "Support for asynchronous `Listener.stop` has been deprecated and "
                     "will be removed in a future version",
                     DeprecationWarning,
                 )
-                listeners_to_stop.add(future)
+                listeners_to_stop.add(task)
             elif hasattr(listener, "abort_handshaking_comms"):
                 listener.abort_handshaking_comms()
 
@@ -1486,7 +1486,7 @@ class ConnectionPool:
         self._created: weakref.WeakSet[Comm] = weakref.WeakSet()
         self._instances.add(self)
         # _n_connecting and _connecting have subtle different semantics. The set
-        # _connecting contains futures actively trying to establish a connection
+        # _connecting contains tasks actively trying to establish a connection
         # while the _n_connecting also accounts for connection attempts which
         # are waiting due to the connection limit
         self._connecting: defaultdict[str, set[Callable[[str], None]]] = defaultdict(

@@ -205,41 +205,41 @@ def _namedtuple_packing(o: Any, handler: Callable[..., Any]) -> Any:
 
 
 def _unpack_remotedata_inner(
-    o: Any, byte_keys: bool, found_futures: set[WrappedKey]
+    o: Any, byte_keys: bool, found_tasks: set[WrappedKey]
 ) -> Any:
-    """Inner implementation of `unpack_remotedata` that adds found wrapped keys to `found_futures`"""
+    """Inner implementation of `unpack_remotedata` that adds found wrapped keys to `found_tasks`"""
 
     typ = type(o)
     if typ is tuple:
         if not o:
             return o
         if type(o[0]) is SubgraphCallable:
-            # Unpack futures within the arguments of the subgraph callable
-            futures: set[WrappedKey] = set()
-            args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])
-            found_futures.update(futures)
+            # Unpack tasks within the arguments of the subgraph callable
+            tasks: set[WrappedKey] = set()
+            args = tuple(_unpack_remotedata_inner(i, byte_keys, tasks) for i in o[1:])
+            found_tasks.update(tasks)
 
-            # Unpack futures within the subgraph callable itself
+            # Unpack tasks within the subgraph callable itself
             sc: SubgraphCallable = o[0]
-            futures = set()
+            tasks = set()
             dsk = {
-                k: _unpack_remotedata_inner(v, byte_keys, futures)
+                k: _unpack_remotedata_inner(v, byte_keys, tasks)
                 for k, v in sc.dsk.items()
             }
             future_keys: tuple = ()
-            if futures:  # If no futures is in the subgraph, we just use `sc` as-is
-                found_futures.update(futures)
+            if tasks:  # If no tasks is in the subgraph, we just use `sc` as-is
+                found_tasks.update(tasks)
                 future_keys = (
-                    tuple(f.key for f in futures)
+                    tuple(f.key for f in tasks)
                     if byte_keys
-                    else tuple(f.key for f in futures)
+                    else tuple(f.key for f in tasks)
                 )
                 inkeys = tuple(sc.inkeys) + future_keys
                 sc = SubgraphCallable(dsk, sc.outkey, inkeys, sc.name)
             return (sc,) + args + future_keys
         else:
             return tuple(
-                _unpack_remotedata_inner(item, byte_keys, found_futures) for item in o
+                _unpack_remotedata_inner(item, byte_keys, found_tasks) for item in o
             )
     elif is_namedtuple_instance(o):
         return _namedtuple_packing(
@@ -247,26 +247,26 @@ def _unpack_remotedata_inner(
             partial(
                 _unpack_remotedata_inner,
                 byte_keys=byte_keys,
-                found_futures=found_futures,
+                found_tasks=found_tasks,
             ),
         )
 
     if typ in collection_types:
         if not o:
             return o
-        outs = [_unpack_remotedata_inner(item, byte_keys, found_futures) for item in o]
+        outs = [_unpack_remotedata_inner(item, byte_keys, found_tasks) for item in o]
         return typ(outs)
     elif typ is dict:
         if o:
             return {
-                k: _unpack_remotedata_inner(v, byte_keys, found_futures)
+                k: _unpack_remotedata_inner(v, byte_keys, found_tasks)
                 for k, v in o.items()
             }
         else:
             return o
-    elif issubclass(typ, WrappedKey):  # TODO use type is Future
+    elif issubclass(typ, WrappedKey):  # TODO use type is Task
         k = o.key
-        found_futures.add(o)
+        found_tasks.add(o)
         return k
     else:
         return o
@@ -299,8 +299,8 @@ def unpack_remotedata(o: Any, byte_keys: bool = False) -> tuple[Any, set]:
     >>> unpack_remotedata(rd, byte_keys=True)
     ("('x', 1)", {WrappedKey('('x', 1)')})
     """
-    found_futures: set[WrappedKey] = set()
-    return _unpack_remotedata_inner(o, byte_keys, found_futures), found_futures
+    found_tasks: set[WrappedKey] = set()
+    return _unpack_remotedata_inner(o, byte_keys, found_tasks), found_tasks
 
 
 def pack_data(o, d, key_types=object):

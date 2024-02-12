@@ -46,9 +46,9 @@ def dependent_keys(tasks, complete=False):
 
 
 class Progress(SchedulerPlugin):
-    """Tracks progress of a set of keys or futures
+    """Tracks progress of a set of keys or tasks
 
-    On creation we provide a set of keys or futures that interest us as well as
+    On creation we provide a set of keys or tasks that interest us as well as
     a scheduler.  We traverse through the scheduler's dependencies to find all
     relevant keys on which our keys depend.  We then plug into the scheduler to
     learn when our keys become available in memory at which point we record

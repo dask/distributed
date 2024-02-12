@@ -19,10 +19,10 @@ async def test_eventstream(c, s, *workers):
     s.add_plugin(es)
     assert es.buffer == []
 
-    futures = c.map(div, [1] * 10, range(10))
-    total = c.submit(sum, futures[1:])
+    tasks = c.map(div, [1] * 10, range(10))
+    total = c.submit(sum, tasks[1:])
     await wait(total)
-    await wait(futures)
+    await wait(tasks)
 
     assert len(es.buffer) == 11
 
@@ -53,7 +53,7 @@ async def test_eventstream_remote(c, s, a, b):
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    futures = c.map(div, [1] * 10, range(10))
+    tasks = c.map(div, [1] * 10, range(10))
 
     start = time()
     total = []

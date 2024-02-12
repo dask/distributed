@@ -34,7 +34,7 @@ cores and we scatter out the list ``range(10)`` as follows:
 
 .. code-block:: python
 
-   futures = client.scatter(range(10))
+   tasks = client.scatter(range(10))
 
 Then Alice and Bob receive the following data
 
@@ -56,7 +56,7 @@ as follows:
 
 .. code-block:: python
 
-   future = client.submit(func, *args, workers=['Alice'])
+   task = client.submit(func, *args, workers=['Alice'])
 
 *  Alice: ``[0, 1, 4, 5, 8, 9, new_result]``
 *  Bob: ``[2, 3, 6, 7]``
@@ -69,7 +69,7 @@ used.
 
 .. code-block:: python
 
-   future = client.submit(func, *args, workers=['Alice'],
+   task = client.submit(func, *args, workers=['Alice'],
                           allow_other_workers=True)
 
 Additionally the ``scatter`` function supports a ``broadcast=`` keyword
@@ -79,7 +79,7 @@ data.
 
 .. code-block:: python
 
-    futures = client.scatter([1, 2, 3], broadcast=True)  # send data to all workers
+    tasks = client.scatter([1, 2, 3], broadcast=True)  # send data to all workers
 
 *  Alice: ``[1, 2, 3]``
 *  Bob: ``[1, 2, 3]``
@@ -132,7 +132,7 @@ workers.
    y = delayed(f)(2)
    z = delayed(g)(x, y)
 
-   future = client.compute(z, workers={z: '127.0.0.1',
+   task = client.compute(z, workers={z: '127.0.0.1',
                                        x: '192.168.0.1'})
 
 Here the values of the dictionary are of the same form as before, a host, a
@@ -147,35 +147,35 @@ two computations for ``x`` and ``y`` can run anywhere.
 
 .. code-block:: python
 
-   future = client.compute(z, workers={z: '127.0.0.1'})
+   task = client.compute(z, workers={z: '127.0.0.1'})
 
 
 The computations for both ``z`` and ``x`` must run on ``127.0.0.1``
 
 .. code-block:: python
 
-   future = client.compute(z, workers={z: '127.0.0.1',
+   task = client.compute(z, workers={z: '127.0.0.1',
                                        x: '127.0.0.1'})
 
 Use a tuple to group collections.  This is shorthand for the above.
 
 .. code-block:: python
 
-   future = client.compute(z, workers={(x, y): '127.0.0.1'})
+   task = client.compute(z, workers={(x, y): '127.0.0.1'})
 
 Recall that all options for ``workers=`` in ``scatter/submit/map`` hold here as
 well.
 
 .. code-block:: python
 
-   future = client.compute(z, workers={(x, y): ['192.168.1.100', '192.168.1.101:9999']})
+   task = client.compute(z, workers={(x, y): ['192.168.1.100', '192.168.1.101:9999']})
 
 Set ``allow_other_workers=True`` to make these loose restrictions rather than
 hard requirements.
 
 .. code-block:: python
 
-   future = client.compute(z, workers={(x, y): '127.0.0.1'},
+   task = client.compute(z, workers={(x, y): '127.0.0.1'},
                            allow_other_workers=True)
 
 Provide a collection to ``allow_other_workers=[...]`` to say that
@@ -185,7 +185,7 @@ run elsewhere if necessary:
 
 .. code-block:: python
 
-   future = client.compute(z, workers={(x, y): '127.0.0.1'},
+   task = client.compute(z, workers={(x, y): '127.0.0.1'},
                            allow_other_workers=[x])
 
 This works fine with ``persist`` and with any dask collection (any object with

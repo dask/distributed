@@ -1202,9 +1202,9 @@ class Worker(BaseWorker, ServerNode):
                     ),
                     serializers=["msgpack"],
                 )
-                future = comm.read(deserializers=["msgpack"])
+                task = comm.read(deserializers=["msgpack"])
 
-                response = await future
+                response = await task
                 if response.get("warning"):
                     logger.warning(response["warning"])
 
@@ -1589,7 +1589,7 @@ class Worker(BaseWorker, ServerNode):
             ):
                 for c in Worker._initialized_clients:
                     # Regardless of what the client was initialized with
-                    # we'll require the result as a future. This is
+                    # we'll require the result as a task. This is
                     # necessary since the heuristics of asynchronous are not
                     # reliable and we might deadlock here
                     c._asynchronous = True
@@ -2616,8 +2616,8 @@ class Worker(BaseWorker, ServerNode):
         >>> def f():
         ...     return get_worker().get_current_task()
 
-        >>> future = client.submit(f)  # doctest: +SKIP
-        >>> future.result()  # doctest: +SKIP
+        >>> task = client.submit(f)  # doctest: +SKIP
+        >>> task.result()  # doctest: +SKIP
         'f-1234'
 
         See Also
@@ -2710,8 +2710,8 @@ def get_worker() -> Worker:
     ...     worker = get_worker()  # The worker on which this task is running
     ...     return worker.address
 
-    >>> future = client.submit(f)  # doctest: +SKIP
-    >>> future.result()  # doctest: +SKIP
+    >>> task = client.submit(f)  # doctest: +SKIP
+    >>> task.result()  # doctest: +SKIP
     'tcp://127.0.0.1:47373'
 
     See Also
@@ -2749,12 +2749,12 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
     --------
     >>> def f():
     ...     client = get_client(timeout="10s")
-    ...     futures = client.map(lambda x: x + 1, range(10))  # spawn many tasks
-    ...     results = client.gather(futures)
+    ...     tasks = client.map(lambda x: x + 1, range(10))  # spawn many tasks
+    ...     results = client.gather(tasks)
     ...     return sum(results)
 
-    >>> future = client.submit(f)  # doctest: +SKIP
-    >>> future.result()  # doctest: +SKIP
+    >>> task = client.submit(f)  # doctest: +SKIP
+    >>> task.result()  # doctest: +SKIP
     55
 
     See Also
@@ -2807,9 +2807,9 @@ def secede():
     >>> def mytask(x):
     ...     # do some work
     ...     client = get_client()
-    ...     futures = client.map(...)  # do some remote work
+    ...     tasks = client.map(...)  # do some remote work
     ...     secede()  # while that work happens, remove ourself from the pool
-    ...     return client.gather(futures)  # return gathered results
+    ...     return client.gather(tasks)  # return gathered results
 
     See Also
     --------
@@ -3293,7 +3293,7 @@ def print(
     >>> def worker_function():
     ...     print("Hello from worker!")
     >>> client.submit(worker_function)
-    <Future: finished, type: NoneType, key: worker_function-...>
+    <Task: finished, type: NoneType, key: worker_function-...>
     Hello from worker!
     """
     try:

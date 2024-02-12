@@ -37,7 +37,7 @@ def worker_client(timeout=None, separate_thread=True):
     ...         result = c.gather([a, b])  # and gather results
     ...     return result
 
-    >>> future = client.submit(func, 1)  # submit func(1) on cluster
+    >>> task = client.submit(func, 1)  # submit func(1) on cluster
 
     See Also
     --------

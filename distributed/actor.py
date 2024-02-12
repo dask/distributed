@@ -10,7 +10,7 @@ from typing import Generic, Literal, NoReturn, TypeVar
 
 from tornado.ioloop import IOLoop
 
-from distributed.client import Future
+from distributed.client import Task
 from distributed.protocol import to_serialize
 from distributed.utils import LateLoopEvent, iscoroutinefunction, sync, thread_state
 from distributed.utils_comm import WrappedKey
@@ -24,7 +24,7 @@ class Actor(WrappedKey):
 
     An actor allows remote control of a stateful object living on a remote
     worker.  Method calls on this object trigger operations on the remote
-    object and return BaseActorFutures on which we can block to get results.
+    object and return BaseActorTasks on which we can block to get results.
 
     Examples
     --------
@@ -41,20 +41,20 @@ class Actor(WrappedKey):
     You can create an actor by submitting a class with the keyword
     ``actor=True``.
 
-    >>> future = client.submit(Counter, actor=True)
-    >>> counter = future.result()
+    >>> task = client.submit(Counter, actor=True)
+    >>> counter = task.result()
     >>> counter
     <Actor: Counter, key=Counter-1234abcd>
 
-    Calling methods on this object immediately returns deferred ``BaseActorFuture``
+    Calling methods on this object immediately returns deferred ``BaseActorTask``
     objects.  You can call ``.result()`` on these objects to block and get the
     result of the function call.
 
-    >>> future = counter.increment()
-    >>> future.result()
+    >>> task = counter.increment()
+    >>> task.result()
     1
-    >>> future = counter.increment()
-    >>> future.result()
+    >>> task = counter.increment()
+    >>> task.result()
     2
     """
 
@@ -63,7 +63,7 @@ class Actor(WrappedKey):
         self._cls = cls
         self._address = address
         self._key = key
-        self._future = None
+        self._task = None
         self._worker = worker
         self._client = None
         self._try_bind_worker_client()
@@ -77,7 +77,7 @@ class Actor(WrappedKey):
         if not self._client:
             try:
                 self._client = get_client()
-                self._future = Future(self._key, inform=False)
+                self._task = Task(self._key, inform=False)
                 # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
@@ -139,9 +139,9 @@ class Actor(WrappedKey):
         return sorted(o)
 
     def __getattr__(self, key):
-        if self._future and self._future.status not in ("finished", "pending"):
+        if self._task and self._task.status not in ("finished", "pending"):
             raise ValueError(
-                "Worker holding Actor was lost.  Status: " + self._future.status
+                "Worker holding Actor was lost.  Status: " + self._task.status
             )
         self._try_bind_worker_client()
         if (
@@ -157,7 +157,7 @@ class Actor(WrappedKey):
                 return attr
 
             elif callable(attr):
-                return lambda *args, **kwargs: EagerActorFuture(attr(*args, **kwargs))
+                return lambda *args, **kwargs: EagerActorTask(attr(*args, **kwargs))
             else:
                 return attr
 
@@ -176,8 +176,8 @@ class Actor(WrappedKey):
                             kwargs={k: to_serialize(v) for k, v in kwargs.items()},
                         )
                     except OSError:
-                        if self._future and not self._future.done():
-                            await self._future
+                        if self._task and not self._task.done():
+                            await self._task
                             return await run_actor_function_on_worker()
                         else:
                             exc = OSError("Unable to contact Actor's worker")
@@ -186,13 +186,13 @@ class Actor(WrappedKey):
                         return _OK(result["result"])
                     return _Error(result["exception"])
 
-                actor_future = ActorFuture(io_loop=self._io_loop)
+                actor_task = ActorTask(io_loop=self._io_loop)
 
                 async def wait_then_set_result():
-                    actor_future._set_result(await run_actor_function_on_worker())
+                    actor_task._set_result(await run_actor_function_on_worker())
 
                 self._io_loop.add_callback(wait_then_set_result)
-                return actor_future
+                return actor_task
 
             return func
 
@@ -211,7 +211,7 @@ class Actor(WrappedKey):
 
     @property
     def client(self):
-        return self._future.client
+        return self._task.client
 
 
 class ProxyRPC:
@@ -232,10 +232,10 @@ class ProxyRPC:
         return func
 
 
-class BaseActorFuture(abc.ABC, Awaitable[_T]):
-    """Future to an actor's method call
+class BaseActorTask(abc.ABC, Awaitable[_T]):
+    """Task to an actor's method call
 
-    Whenever you call a method on an Actor you get a BaseActorFuture immediately
+    Whenever you call a method on an Actor you get a BaseActorTask immediately
     while the computation happens in the background.  You can call ``.result``
     to block and collect the full result
 
@@ -252,13 +252,16 @@ class BaseActorFuture(abc.ABC, Awaitable[_T]):
     def done(self) -> bool:
         ...
 
-    def __repr__(self) -> Literal["<ActorFuture>"]:
-        return "<ActorFuture>"
+    def __repr__(self) -> Literal["<ActorTask>"]:
+        return "<ActorTask>"
+
+
+BaseActorFuture = BaseActorTask
 
 
 @dataclass(frozen=True, eq=False)
-class EagerActorFuture(BaseActorFuture[_T]):
-    """Future to an actor's method call when an actor calls another actor on the same worker"""
+class EagerActorTask(BaseActorTask[_T]):
+    """Task to an actor's method call when an actor calls another actor on the same worker"""
 
     _result: _T
 
@@ -289,7 +292,7 @@ class _Error:
         raise self._e
 
 
-class ActorFuture(BaseActorFuture[_T]):
+class ActorTask(BaseActorTask[_T]):
     def __init__(self, io_loop: IOLoop):
         self._io_loop = io_loop
         self._event = LateLoopEvent()
@@ -313,3 +316,6 @@ class ActorFuture(BaseActorFuture[_T]):
 
     def result(self, timeout: str | timedelta | float | None = None) -> _T:
         return sync(self._io_loop, self._result, callback_timeout=timeout)
+
+
+ActorFuture = ActorTask

@@ -20,11 +20,18 @@ import dask
 from dask.config import config  # type: ignore
 
 from distributed._version import get_versions
-from distributed.actor import Actor, ActorFuture, BaseActorFuture
+from distributed.actor import (
+    Actor,
+    ActorFuture,
+    ActorTask,
+    BaseActorFuture,
+    BaseActorTask,
+)
 from distributed.client import (
     Client,
     CompatibleExecutor,
     Future,
+    Task,
     as_completed,
     default_client,
     fire_and_forget,
@@ -32,6 +39,7 @@ from distributed.client import (
     get_task_metadata,
     get_task_stream,
     performance_report,
+    tasks_of,
     wait,
 )
 from distributed.core import Status, connect, rpc
@@ -120,8 +128,10 @@ def _():
 
 __all__ = [
     "Actor",
+    "ActorTask",
     "ActorFuture",
     "Adaptive",
+    "BaseActorTask",
     "BaseActorFuture",
     "CancelledError",
     "Client",
@@ -130,6 +140,7 @@ __all__ = [
     "Environ",
     "Event",
     "Future",
+    "Task",
     "KilledWorker",
     "LocalCluster",
     "Lock",
@@ -163,6 +174,7 @@ __all__ = [
     "default_client",
     "fire_and_forget",
     "futures_of",
+    "tasks_of",
     "get_client",
     "get_task_metadata",
     "get_task_stream",

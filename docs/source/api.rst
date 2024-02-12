@@ -36,12 +36,12 @@ The client connects to and submits computation to a Dask cluster (such as a :cla
 .. currentmodule:: distributed
 
 
-**Future**
+**Task**
 
 .. autosummary::
-   Future
+   Task
 
-.. autoautosummary:: distributed.Future
+.. autoautosummary:: distributed.Task
    :methods:
 
 **Synchronization**
@@ -94,18 +94,18 @@ environment by passing the ``asynchronous=True`` keyword
 
    # blocking
    client = Client()
-   future = client.submit(func, *args)  # immediate, no blocking/async difference
-   result = client.gather(future)  # blocking
+   task = client.submit(func, *args)  # immediate, no blocking/async difference
+   result = client.gather(task)  # blocking
 
    # asynchronous Python 2/3
    client = yield Client(asynchronous=True)
-   future = client.submit(func, *args)  # immediate, no blocking/async difference
-   result = yield client.gather(future)  # non-blocking/asynchronous
+   task = client.submit(func, *args)  # immediate, no blocking/async difference
+   result = yield client.gather(task)  # non-blocking/asynchronous
 
    # asynchronous Python 3
    client = await Client(asynchronous=True)
-   future = client.submit(func, *args)  # immediate, no blocking/async difference
-   result = await client.gather(future)  # non-blocking/asynchronous
+   task = client.submit(func, *args)  # immediate, no blocking/async difference
+   result = await client.gather(task)  # non-blocking/asynchronous
 
 The asynchronous variants must be run within a Tornado coroutine.  See the
 :doc:`Asynchronous <asynchronous>` documentation for more information.
@@ -123,10 +123,10 @@ Client
    :members:
 
 
-Future
+Task
 ------
 
-.. autoclass:: Future
+.. autoclass:: Task
    :members:
 
 

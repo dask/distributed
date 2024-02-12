@@ -21,16 +21,16 @@ async def test_variable(c, s, a, b):
     xx = Variable("x")
     assert x.client is c
 
-    future = c.submit(inc, 1)
+    task = c.submit(inc, 1)
 
-    await x.set(future)
-    future2 = await xx.get()
-    assert future.key == future2.key
+    await x.set(task)
+    task2 = await xx.get()
+    assert task.key == task2.key
 
-    del future, future2
+    del task, task2
 
     await asyncio.sleep(0.1)
-    assert s.tasks  # future still present
+    assert s.tasks  # task still present
 
     x.delete()
 
@@ -84,29 +84,29 @@ async def test_queue_with_data(c, s, a, b):
 
 
 def test_sync(client):
-    future = client.submit(lambda x: x + 1, 10)
+    task = client.submit(lambda x: x + 1, 10)
     x = Variable("x")
     xx = Variable("x")
-    x.set(future)
-    future2 = xx.get()
+    x.set(task)
+    task2 = xx.get()
 
-    assert future2.result() == 11
+    assert task2.result() == 11
 
 
 @gen_cluster()
-async def test_hold_futures(s, a, b):
+async def test_hold_tasks(s, a, b):
     async with Client(s.address, asynchronous=True) as c1:
-        future = c1.submit(lambda x: x + 1, 10)
+        task = c1.submit(lambda x: x + 1, 10)
         x1 = Variable("x")
-        await x1.set(future)
+        await x1.set(task)
         del x1
 
     await asyncio.sleep(0.1)
 
     async with Client(s.address, asynchronous=True) as c2:
         x2 = Variable("x")
-        future2 = await x2.get()
-        result = await future2
+        task2 = await x2.get()
+        result = await task2
 
         assert result == 11
 
@@ -158,13 +158,13 @@ async def test_cleanup(c, s, a, b):
     del x
     await asyncio.sleep(0.1)
 
-    t_future = xx = asyncio.ensure_future(vv._get())
+    t_task = xx = asyncio.ensure_future(vv._get())
     await asyncio.sleep(0)
     asyncio.ensure_future(v.set(y))
 
-    future = await t_future
-    assert future.key == x_key
-    result = await future
+    task = await t_task
+    assert task.key == x_key
+    result = await task
     assert result == 11
 
 
@@ -182,12 +182,12 @@ def test_pickleable(client):
 async def test_timeout_get(c, s, a, b):
     v = Variable("v")
 
-    tornado_future = v.get()
+    tornado_task = v.get()
 
     vv = Variable("v")
     await vv.set(1)
 
-    result = await tornado_future
+    result = await tornado_task
     assert result == 1
 
 
@@ -200,8 +200,8 @@ async def test_race(c, s, *workers):
         with worker_client() as c:
             v = Variable("x", client=c)
             for _ in range(NITERS):
-                future = v.get()
-                x = future.result()
+                task = v.get()
+                x = task.result()
                 y = c.submit(inc, x)
                 v.set(y)
                 sleep(0.01 * random.random())
@@ -213,37 +213,37 @@ async def test_race(c, s, *workers):
     x = await c.scatter(1)
     await v.set(x)
 
-    futures = c.map(f, range(15))
-    results = await c.gather(futures)
+    tasks = c.map(f, range(15))
+    results = await c.gather(tasks)
 
     while "variable-x" in s.tasks:
         await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
-async def test_Future_knows_status_immediately(c, s, a, b):
+async def test_Task_knows_status_immediately(c, s, a, b):
     x = await c.scatter(123)
     v = Variable("x")
     await v.set(x)
 
     async with Client(s.address, asynchronous=True) as c2:
         v2 = Variable("x", client=c2)
-        future = await v2.get()
-        assert future.status == "finished"
+        task = await v2.get()
+        assert task.status == "finished"
 
         x = c.submit(div, 1, 0)
         await wait(x)
         await v.set(x)
 
-        future2 = await v2.get()
-        assert future2.status == "error"
+        task2 = await v2.get()
+        assert task2.status == "error"
         with pytest.raises(ZeroDivisionError):
-            await future2
+            await task2
 
         start = time()
         while True:  # we learn about the true error eventually
             try:
-                await future2
+                await task2
             except ZeroDivisionError:
                 break
             except Exception:
@@ -252,30 +252,30 @@ async def test_Future_knows_status_immediately(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_erred_future(c, s, a, b):
-    future = c.submit(div, 1, 0)
+async def test_erred_task(c, s, a, b):
+    task = c.submit(div, 1, 0)
     var = Variable()
-    await var.set(future)
+    await var.set(task)
     await asyncio.sleep(0.1)
-    future2 = await var.get()
+    task2 = await var.get()
     with pytest.raises(ZeroDivisionError):
-        await future2.result()
+        await task2.result()
 
-    exc = await future2.exception()
+    exc = await task2.exception()
     assert isinstance(exc, ZeroDivisionError)
 
 
 def test_future_erred_sync(client):
-    future = client.submit(div, 1, 0)
+    task = client.submit(div, 1, 0)
     var = Variable()
-    var.set(future)
+    var.set(task)
 
     sleep(0.1)
 
-    future2 = var.get()
+    task2 = var.get()
 
     with pytest.raises(ZeroDivisionError):
-        future2.result()
+        task2.result()
 
 
 @gen_cluster(client=True)
@@ -283,10 +283,10 @@ async def test_variables_do_not_leak_client(c, s, a, b):
     # https://github.com/dask/distributed/issues/3899
     clients_pre = set(s.clients)
 
-    # setup variable with future
+    # setup variable with task
     x = Variable("x")
-    future = c.submit(inc, 1)
-    await x.set(future)
+    task = c.submit(inc, 1)
+    await x.set(task)
 
     # complete teardown
     x.delete()

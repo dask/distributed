@@ -150,14 +150,14 @@ async def test_adaptive_killed_worker():
                 while not cluster.workers:
                     await asyncio.sleep(0.01)
 
-                future = client.submit(sleep, 0.1)
+                task = client.submit(sleep, 0.1)
 
                 # Kill the only worker.
                 [worker_id] = cluster.workers
                 await cluster.workers[worker_id].kill()
 
                 # Wait for the worker to re-spawn and finish sleeping.
-                await future
+                await task
 
 
 @gen_test()
@@ -469,8 +469,8 @@ async def test_MultiWorker():
             await cluster
             assert not s.workers
 
-            future = client.submit(lambda x: x + 1, 10)
-            await future
+            task = client.submit(lambda x: x + 1, 10)
+            await task
             assert len(cluster.workers) == 1
 
 

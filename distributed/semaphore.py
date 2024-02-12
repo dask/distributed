@@ -151,9 +151,9 @@ class SemaphoreExtension:
             # If acquiring fails, we wait for the event to be set, i.e. something has
             # been released and we can try to acquire again (continue loop)
             if not result:
-                future = wait_for(self.events[name].wait(), timeout=deadline.remaining)
+                task = wait_for(self.events[name].wait(), timeout=deadline.remaining)
                 try:
-                    await future
+                    await task
                     continue
                 except TimeoutError:
                     result = False
@@ -311,8 +311,8 @@ class Semaphore(SyncMethodMixin):
     ...     with sem:
     ...         pass
     ...
-    ... futures = client.map(access_resource, range(10), sem=sem)
-    ... client.gather(futures)
+    ... tasks = client.map(access_resource, range(10), sem=sem)
+    ... client.gather(tasks)
     ... # Once done, close the semaphore to clean up the state on scheduler side.
     ... sem.close()
 
