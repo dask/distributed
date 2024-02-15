@@ -1495,6 +1495,7 @@ async def test_large_payload(caplog):
         await server.listen(0)
         comm = await connect(server.address)
 
+        # FIXME https://github.com/dask/distributed/issues/8465
         # At debug level, messages are dumped into the log. By default, pytest captures
         # all logs, which would make this test extremely expensive to run.
         with caplog.at_level(logging.INFO, logger="distributed.core"):
