@@ -624,7 +624,7 @@ async def test_secede_opens_slot(c, s, a):
         secede()
         second.wait()
 
-    fs = c.map(func, [first] * 5, [second] * 5)
+    fs = c.map(func, [first] * 5, [second] * 5, key=[f"x{i}" for i in range(5)])
     await async_poll_for(lambda: a.state.executing, timeout=5)
 
     await first.set()
@@ -2641,7 +2641,7 @@ async def test_adaptive_target(c, s, a, b):
         assert s.adaptive_target() == 1
 
         # Long task
-        x = c.submit(slowinc, 1, delay=0.5)
+        x = c.submit(slowinc, 1, delay=0.4)
         while x.key not in s.tasks:
             await asyncio.sleep(0.01)
         assert s.adaptive_target(target_duration=".1s") == 1  # still one
