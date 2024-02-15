@@ -8757,7 +8757,7 @@ def _materialize_graph(
 
     # - Add in deps for any tasks that depend on futures
     for k, futures in fut_deps.items():
-        dependencies[k].update(f.key for f in futures if f.key != k)
+        dependencies[k].update(f.key for f in futures)
 
     # Remove any self-dependencies (happens on test_publish_bag() and others)
     for k, v in dependencies.items():
