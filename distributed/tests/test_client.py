@@ -5971,7 +5971,6 @@ async def test_config_scheduler_address(s, a, b):
     assert sio.getvalue() == f"Config value `scheduler-address` found: {s.address}\n"
 
 
-@pytest.mark.filterwarnings("error:Sending large graph of size")
 @gen_cluster(client=True, nthreads=[])
 async def test_warn_when_submitting_large_values(c, s):
     with pytest.warns(UserWarning, match="Sending large graph of size"):
