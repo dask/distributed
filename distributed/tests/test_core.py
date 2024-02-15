@@ -1485,7 +1485,7 @@ async def test_messages_are_ordered_raw():
 
 
 @pytest.mark.slow
-@gen_test()
+@gen_test(timeout=180)
 async def test_large_payload(caplog):
     """See also: protocol/tests/test_protocol.py::test_large_payload"""
     critical_size = 2**31 + 1  # >2 GiB
@@ -1499,7 +1499,9 @@ async def test_large_payload(caplog):
         # At debug level, messages are dumped into the log. By default, pytest captures
         # all logs, which would make this test extremely expensive to run.
         with caplog.at_level(logging.INFO, logger="distributed.core"):
-            await comm.write({"op": "echo", "x": to_serialize(data)})
+            # Note: if we wrap data in to_serialize, it will be sent as a buffer, which
+            # is not encoded by msgpack.
+            await comm.write({"op": "echo", "x": data})
             response = await comm.read()
 
         assert response["result"] == data
