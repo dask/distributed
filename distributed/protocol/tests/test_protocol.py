@@ -208,3 +208,29 @@ def test_fallback_to_pickle():
     assert L[0].count(b"__Pickled__") == 1
     assert L[0].count(b"__Serialized__") == 1
     assert loads(L) == {np.int64(1): {2: "a"}, 3: ("b", "c"), 4: "d"}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("typ", [bytes, str, "ext"])
+def test_large_payload(typ):
+    critical_size = 2 * 1024**3
+    if typ == bytes:
+        large_payload = critical_size * b"0"
+        expected = large_payload
+    elif typ == str:
+        large_payload = critical_size * "0"
+        expected = large_payload
+    # Testing array and map dtypes is practically not possible since we'd have
+    # to create an actual list or dict object of critical size (i.e. not the
+    # content but the container itself). These are so large that msgpack is
+    # running forever
+    # elif typ == "array":
+    #     large_payload = [b"0"] * critical_size
+    #     expected = tuple(large_payload)
+    # elif typ == "map":
+    #     large_payload = {x: b"0" for x in range(critical_size)}
+    #     expected = large_payload
+    elif typ == "ext":
+        large_payload = msgpack.ExtType(1, b"0" * critical_size)
+        expected = large_payload
+    assert loads(dumps(large_payload)) == expected
