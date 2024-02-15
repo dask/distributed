@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import random
 import socket
@@ -1485,13 +1486,20 @@ async def test_messages_are_ordered_raw():
 
 @pytest.mark.slow
 @gen_test()
-async def test_large_payload():
+async def test_large_payload(caplog):
+    """See also: protocol/tests/test_protocol.py::test_large_payload"""
+    critical_size = 2**31 + 1  # >2 GiB
+    data = b"0" * critical_size
+
     async with Server({"echo": echo_serialize}) as server:
         await server.listen(0)
-
         comm = await connect(server.address)
-        data = b"0" * 3 * 1024**3  # 3GB
-        await comm.write({"op": "echo", "x": to_serialize(data)})
-        response = await comm.read()
+
+        # At debug level, messages are dumped into the log. By default, pytest captures
+        # all logs, which would make this test extremely expensive to run.
+        with caplog.at_level(logging.INFO, logger="distributed.core"):
+            await comm.write({"op": "echo", "x": to_serialize(data)})
+            response = await comm.read()
+
         assert response["result"] == data
         await comm.close()

@@ -213,7 +213,8 @@ def test_fallback_to_pickle():
 @pytest.mark.slow
 @pytest.mark.parametrize("typ", [bytes, str, "ext"])
 def test_large_payload(typ):
-    critical_size = 2 * 1024**3
+    """See also: test_core.py::test_large_payload"""
+    critical_size = 2**31 + 1  # >2 GiB
     if typ == bytes:
         large_payload = critical_size * b"0"
         expected = large_payload
