@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # see
 # - https://github.com/dask/distributed/pull/5854
 # - https://bugs.python.org/issue42853
-# - XXX
+# - https://github.com/dask/distributed/pull/8507
 
 C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
