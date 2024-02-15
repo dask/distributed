@@ -323,6 +323,7 @@ distributed:
   ##################
 
   admin:
+    large-graph-warning-threshold: 10MB  # Threshold for warning on large graph
     tick:
       interval: 20ms  # time between event loop health checks
       limit: 3s       # time allowed before triggering a warning
