@@ -5971,9 +5971,12 @@ async def test_config_scheduler_address(s, a, b):
     assert sio.getvalue() == f"Config value `scheduler-address` found: {s.address}\n"
 
 
+@pytest.mark.filterwarnings("error:Sending large graph of size")
 @gen_cluster(client=True, nthreads=[])
 async def test_warn_when_submitting_large_values(c, s):
     with pytest.warns(UserWarning, match="Sending large graph of size"):
+        future = c.submit(lambda x: x + 1, b"0" * 10_000_000)
+    with dask.config.set({"distributed.admin.large-graph-warning-threshold": "1GB"}):
         future = c.submit(lambda x: x + 1, b"0" * 10_000_000)
 
 
