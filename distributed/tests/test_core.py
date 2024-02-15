@@ -1481,3 +1481,17 @@ async def test_messages_are_ordered_raw():
             assert ledger == list(range(n))
         finally:
             await comm.close()
+
+
+@pytest.mark.slow
+@gen_test()
+async def test_large_payload():
+    async with Server({"echo": echo_serialize}) as server:
+        await server.listen(0)
+
+        comm = await connect(server.address)
+        data = b"0" * 3 * 1024**3  # 3GB
+        await comm.write({"op": "echo", "x": to_serialize(data)})
+        response = await comm.read()
+        assert response["result"] == data
+        await comm.close()
