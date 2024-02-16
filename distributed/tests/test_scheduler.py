@@ -4757,21 +4757,35 @@ async def test_resubmit_different_task_same_key_many_clients(c, s):
             assert await x2 == 2  # kept old run_spec
 
 
+@pytest.mark.parametrize(
+    "before,after,expect_msg",
+    [
+        (object(), 123, True),
+        (123, object(), True),
+        (o := object(), o, False),
+    ],
+)
 @gen_cluster(client=True, nthreads=[])
-async def test_resubmit_nondeterministic_task_same_deps(c, s):
+async def test_resubmit_nondeterministic_task_same_deps(
+    c, s, before, after, expect_msg
+):
     """Some run_specs can't be tokenized deterministically. Silently skip comparison on
-    the run_spec in those cases. Dependencies must be the same.
+    the run_spec when both lhs and rhs are nondeterministic.
+    Dependencies must be the same.
     """
-    o = object()
-    # Round-tripping `o` through two separate cloudpickle.dumps() calls generates two
-    # different object instances, which yield different tokens.
-    x1 = c.submit(lambda x: x, o, key="x")
-    x2 = delayed(lambda x: x)(o, dask_key_name="x")
+    x1 = c.submit(lambda x: x, before, key="x")
+    x2 = delayed(lambda x: x)(after, dask_key_name="x")
     y = delayed(lambda x: x)(x2, dask_key_name="y")
-    fut = c.compute(y)
-    await async_poll_for(lambda: "y" in s.tasks, timeout=5)
+
+    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
+        fut = c.compute(y)
+        await async_poll_for(lambda: "y" in s.tasks, timeout=5)
+
+    has_msg = "Detected different `run_spec` for key 'x'" in log.getvalue()
+    assert has_msg == expect_msg
+
     async with Worker(s.address):
-        assert type(await fut) is object
+        assert type(await fut) is type(before)
 
 
 @pytest.mark.parametrize("add_deps", [False, True])

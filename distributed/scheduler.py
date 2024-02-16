@@ -4774,12 +4774,15 @@ class Scheduler(SchedulerState, ServerNode):
             # run_spec in the submitted graph may be None. This happens
             # when an already persisted future is part of the graph
             elif k in dsk:
+                # If both tokens are non-deterministic, skip comparison
                 try:
-                    tok_lhs: Any = tokenize(ts.run_spec, ensure_deterministic=True)
-                    tok_rhs: Any = tokenize(dsk[k], ensure_deterministic=True)
+                    tok_lhs = tokenize(ts.run_spec, ensure_deterministic=True)
                 except TokenizationError:
-                    # Non-deterministic tokens; skip comparison
-                    tok_lhs = tok_rhs = None
+                    tok_lhs = ""
+                try:
+                    tok_rhs = tokenize(dsk[k], ensure_deterministic=True)
+                except TokenizationError:
+                    tok_rhs = ""
 
                 # Additionally check dependency names. This should only be necessary
                 # if run_specs can't be tokenized deterministically.
