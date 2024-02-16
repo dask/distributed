@@ -4789,32 +4789,37 @@ class Scheduler(SchedulerState, ServerNode):
                 # FIXME It would be a really healthy idea to change this to a hard
                 # failure. However, this is not possible at the moment because of
                 # https://github.com/dask/dask/issues/9888
-                if (
-                    tok_lhs != tok_rhs or deps_lhs != deps_rhs
-                ) and ts.group not in tgs_with_bad_run_spec:
-                    tgs_with_bad_run_spec.add(ts.group)
-                    logger.warning(
-                        f"Detected different `run_spec` for key {ts.key!r} between two "
-                        "consecutive calls to `update_graph`. This can cause failures "
-                        "and deadlocks down the line. Please ensure unique key names. "
-                        "If you are using a standard dask collections, consider "
-                        "releasing all the data before resubmitting another "
-                        "computation. More details and help can be found at "
-                        "https://github.com/dask/dask/issues/9888. "
-                        + textwrap.dedent(
-                            f"""
-                            Debugging information
-                            ---------------------
-                            old task state: {ts.state}
-                            old run_spec: {ts.run_spec!r}
-                            new run_spec: {dsk[k]!r}
-                            old token: {normalize_token(ts.run_spec)!r}
-                            new token: {normalize_token(dsk[k])!r}
-                            old dependencies: {deps_lhs}
-                            new dependencies: {deps_rhs}
-                            """
+                if tok_lhs != tok_rhs or deps_lhs != deps_rhs:
+                    if ts.group not in tgs_with_bad_run_spec:
+                        tgs_with_bad_run_spec.add(ts.group)
+                        logger.warning(
+                            f"Detected different `run_spec` for key {ts.key!r} between "
+                            "two consecutive calls to `update_graph`. "
+                            "This can cause failures and deadlocks down the line. "
+                            "Please ensure unique key names. "
+                            "If you are using a standard dask collections, consider "
+                            "releasing all the data before resubmitting another "
+                            "computation. More details and help can be found at "
+                            "https://github.com/dask/dask/issues/9888. "
+                            + textwrap.dedent(
+                                f"""
+                                Debugging information
+                                ---------------------
+                                old task state: {ts.state}
+                                old run_spec: {ts.run_spec!r}
+                                new run_spec: {dsk[k]!r}
+                                old token: {normalize_token(ts.run_spec)!r}
+                                new token: {normalize_token(dsk[k])!r}
+                                old dependencies: {deps_lhs}
+                                new dependencies: {deps_rhs}
+                                """
+                            )
                         )
-                    )
+                    else:
+                        logger.debug(
+                            f"Detected different `run_spec` for key {ts.key!r} between "
+                            "two consecutive calls to `update_graph`."
+                        )
 
             if ts.run_spec:
                 runnable.append(ts)

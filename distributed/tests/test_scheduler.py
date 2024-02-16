@@ -4800,8 +4800,13 @@ async def test_resubmit_nondeterministic_task_different_deps(c, s, add_deps):
             assert await fut == 3
 
 
+@pytest.mark.parametrize(
+    "loglevel,expect_loglines", [(logging.DEBUG, 3), (logging.WARNING, 1)]
+)
 @gen_cluster(client=True, nthreads=[])
-async def test_resubmit_different_task_same_key_warns_only_once(c, s):
+async def test_resubmit_different_task_same_key_warns_only_once(
+    c, s, loglevel, expect_loglines
+):
     """If all tasks of a layer are affected by the same run_spec collision, warn
     only once.
     """
@@ -4814,13 +4819,14 @@ async def test_resubmit_different_task_same_key_warns_only_once(c, s):
         ("y", 1): (inc, ("x", 1)),
         ("y", 2): (inc, ("x", 2)),
     }
-    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
+    with captured_logger("distributed.scheduler", level=loglevel) as log:
         ys = c.get(dsk, [("y", 0), ("y", 1), ("y", 2)], sync=False)
         await wait_for_state(("y", 2), "waiting", s)
 
-    assert (
-        len(re.findall("Detected different `run_spec` for key ", log.getvalue())) == 1
+    actual_loglines = len(
+        re.findall("Detected different `run_spec` for key ", log.getvalue())
     )
+    assert actual_loglines == expect_loglines
 
     async with Worker(s.address):
         assert await c.gather(ys) == [2, 3, 4]
