@@ -4702,3 +4702,145 @@ async def test_html_repr(c, s, a, b):
         await asyncio.sleep(0.01)
 
     await f
+
+
+@pytest.mark.parametrize("add_deps", [False, True])
+@gen_cluster(client=True, nthreads=[])
+async def test_resubmit_different_task_same_key(c, s, add_deps):
+    """If an intermediate key has a different run_spec (either the callable function or
+    the dependencies / arguments) that will conflict with what was previously defined,
+    it should raise an error since this can otherwise break in many different places and
+    cause either spurious exceptions or even deadlocks.
+
+    For a real world example where this can trigger, see
+    https://github.com/dask/dask/issues/9888
+    """
+    y1 = c.submit(inc, 1, key="y")
+
+    x = delayed(inc)(1, dask_key_name="x") if add_deps else 2
+    y2 = delayed(inc)(x, dask_key_name="y")
+    z = delayed(inc)(y2, dask_key_name="z")
+
+    if add_deps:  # add_deps=True corrupts the state machine
+        s.validate = False
+
+    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
+        fut = c.compute(z)
+        await wait_for_state("z", "waiting", s)
+
+    assert "Detected different `run_spec` for key 'y'" in log.getvalue()
+
+    if not add_deps:  # add_deps=True hangs
+        async with Worker(s.address):
+            assert await y1 == 2
+            assert await fut == 3
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_resubmit_different_task_same_key_many_clients(c, s):
+    """Two different clients submit a task with the same key but different run_spec's."""
+    async with Client(s.address, asynchronous=True) as c2:
+        with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
+            x1 = c.submit(inc, 1, key="x")
+            x2 = c2.submit(inc, 2, key="x")
+
+            await wait_for_state("x", ("no-worker", "queued"), s)
+            who_wants = s.tasks["x"].who_wants
+            await async_poll_for(
+                lambda: {cs.client_key for cs in who_wants} == {c.id, c2.id}, timeout=5
+            )
+
+        assert "Detected different `run_spec` for key 'x'" in log.getvalue()
+
+        async with Worker(s.address):
+            assert await x1 == 2
+            assert await x2 == 2  # kept old run_spec
+
+
+@pytest.mark.parametrize(
+    "before,after,expect_msg",
+    [
+        (object(), 123, True),
+        (123, object(), True),
+        (o := object(), o, False),
+    ],
+)
+@gen_cluster(client=True, nthreads=[])
+async def test_resubmit_nondeterministic_task_same_deps(
+    c, s, before, after, expect_msg
+):
+    """Some run_specs can't be tokenized deterministically. Silently skip comparison on
+    the run_spec when both lhs and rhs are nondeterministic.
+    Dependencies must be the same.
+    """
+    x1 = c.submit(lambda x: x, before, key="x")
+    x2 = delayed(lambda x: x)(after, dask_key_name="x")
+    y = delayed(lambda x: x)(x2, dask_key_name="y")
+
+    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
+        fut = c.compute(y)
+        await async_poll_for(lambda: "y" in s.tasks, timeout=5)
+
+    has_msg = "Detected different `run_spec` for key 'x'" in log.getvalue()
+    assert has_msg == expect_msg
+
+    async with Worker(s.address):
+        assert type(await fut) is type(before)
+
+
+@pytest.mark.parametrize("add_deps", [False, True])
+@gen_cluster(client=True, nthreads=[])
+async def test_resubmit_nondeterministic_task_different_deps(c, s, add_deps):
+    """Some run_specs can't be tokenized deterministically. Silently skip comparison on
+    the run_spec in those cases. However, fail anyway if dependencies have changed.
+    """
+    o = object()
+    x1 = c.submit(inc, 1, key="x1") if not add_deps else 2
+    x2 = c.submit(inc, 2, key="x2")
+    y1 = delayed(lambda i, j: i)(x1, o, dask_key_name="y").persist()
+    y2 = delayed(lambda i, j: i)(x2, o, dask_key_name="y")
+    z = delayed(inc)(y2, dask_key_name="z")
+
+    if add_deps:  # add_deps=True corrupts the state machine and hangs
+        s.validate = False
+
+    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
+        fut = c.compute(z)
+        await wait_for_state("z", "waiting", s)
+    assert "Detected different `run_spec` for key 'y'" in log.getvalue()
+
+    if not add_deps:  # add_deps=True corrupts the state machine and hangs
+        async with Worker(s.address):
+            assert await fut == 3
+
+
+@pytest.mark.parametrize(
+    "loglevel,expect_loglines", [(logging.DEBUG, 3), (logging.WARNING, 1)]
+)
+@gen_cluster(client=True, nthreads=[])
+async def test_resubmit_different_task_same_key_warns_only_once(
+    c, s, loglevel, expect_loglines
+):
+    """If all tasks of a layer are affected by the same run_spec collision, warn
+    only once.
+    """
+    x1s = c.map(inc, [0, 1, 2], key=[("x", 0), ("x", 1), ("x", 2)])
+    dsk = {
+        ("x", 0): 3,
+        ("x", 1): 4,
+        ("x", 2): 5,
+        ("y", 0): (inc, ("x", 0)),
+        ("y", 1): (inc, ("x", 1)),
+        ("y", 2): (inc, ("x", 2)),
+    }
+    with captured_logger("distributed.scheduler", level=loglevel) as log:
+        ys = c.get(dsk, [("y", 0), ("y", 1), ("y", 2)], sync=False)
+        await wait_for_state(("y", 2), "waiting", s)
+
+    actual_loglines = len(
+        re.findall("Detected different `run_spec` for key ", log.getvalue())
+    )
+    assert actual_loglines == expect_loglines
+
+    async with Worker(s.address):
+        assert await c.gather(ys) == [2, 3, 4]
