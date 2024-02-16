@@ -4730,8 +4730,8 @@ async def test_resubmit_different_task_same_key(c, s, add_deps):
 
     assert "Detected different `run_spec` for key 'y'" in log.getvalue()
 
-    async with Worker(s.address):
-        if not add_deps:  # add_deps=True hangs
+    if not add_deps:  # add_deps=True hangs
+        async with Worker(s.address):
             assert await y1 == 2
             assert await fut == 3
 
