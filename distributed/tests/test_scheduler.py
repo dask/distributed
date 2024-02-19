@@ -4704,9 +4704,9 @@ async def test_html_repr(c, s, a, b):
     await f
 
 
-@pytest.mark.parametrize("add_deps", [False, True])
+@pytest.mark.parametrize("deps", ["same", "less", "more"])
 @gen_cluster(client=True, nthreads=[])
-async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, add_deps):
+async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, deps):
     """If an intermediate key has a different run_spec (either the callable function or
     the dependencies / arguments) that will conflict with what was previously defined,
     it should raise an error since this can otherwise break in many different places and
@@ -4721,8 +4721,9 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, ad
     x1 = c.submit(inc, 1, key="x1")
     y_old = c.submit(inc, x1, key="y")
 
-    x2 = delayed(inc)(10, dask_key_name="x2") if add_deps else 11
-    y_new = delayed(sum)([x1, x2], dask_key_name="y")
+    x1b = x1 if deps != "less" else 2
+    x2 = delayed(inc)(10, dask_key_name="x2") if deps == "more" else 11
+    y_new = delayed(sum)([x1b, x2], dask_key_name="y")
     z = delayed(inc)(y_new, dask_key_name="z")
 
     with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
@@ -4737,11 +4738,11 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, ad
         assert await fut == 4
 
 
-@pytest.mark.parametrize("add_deps", [False, True])
+@pytest.mark.parametrize("deps", ["same", "less", "more"])
 @pytest.mark.parametrize("release_previous", [False, True])
 @gen_cluster(client=True)
 async def test_resubmit_different_task_same_key_after_previous_is_done(
-    c, s, a, b, add_deps, release_previous
+    c, s, a, b, deps, release_previous
 ):
     """Same as test_resubmit_different_task_same_key, but now the replaced task has
     already been computed and is either in memory or released, and so are its old
@@ -4757,8 +4758,9 @@ async def test_resubmit_different_task_same_key_after_previous_is_done(
         await wait_for_state("x1", "released", s)
         await wait_for_state("y", "released", s)
 
-    x2 = delayed(inc)(10, dask_key_name="x2") if add_deps else 11
-    y_new = delayed(sum)([x1, x2], dask_key_name="y")
+    x1b = x1 if deps != "less" else 2
+    x2 = delayed(inc)(10, dask_key_name="x2") if deps == "more" else 11
+    y_new = delayed(sum)([x1b, x2], dask_key_name="y")
     z2 = delayed(inc)(y_new, dask_key_name="z2")
 
     with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
@@ -4769,7 +4771,7 @@ async def test_resubmit_different_task_same_key_after_previous_is_done(
 
     # _generate_taskstates won't run for a dependency that's already in memory
     has_warning = "Detected different `run_spec` for key 'y'" in log.getvalue()
-    assert has_warning is release_previous
+    assert has_warning is (release_previous or deps == "less")
 
 
 @gen_cluster(client=True, nthreads=[])
