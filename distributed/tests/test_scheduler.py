@@ -4706,23 +4706,24 @@ async def test_html_repr(c, s, a, b):
 
 @pytest.mark.parametrize("add_deps", [False, True])
 @gen_cluster(client=True, nthreads=[])
-async def test_resubmit_different_task_same_key(c, s, add_deps):
+async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, add_deps):
     """If an intermediate key has a different run_spec (either the callable function or
     the dependencies / arguments) that will conflict with what was previously defined,
     it should raise an error since this can otherwise break in many different places and
     cause either spurious exceptions or even deadlocks.
 
+    In this specific test, the previous run_spec has not been computed yet.
+    See also test_resubmit_different_task_same_key_after_previous_is_done.
+
     For a real world example where this can trigger, see
     https://github.com/dask/dask/issues/9888
     """
-    y1 = c.submit(inc, 1, key="y")
+    x1 = c.submit(inc, 1, key="x1")
+    y_old = c.submit(inc, x1, key="y")
 
-    x = delayed(inc)(1, dask_key_name="x") if add_deps else 2
-    y2 = delayed(inc)(x, dask_key_name="y")
-    z = delayed(inc)(y2, dask_key_name="z")
-
-    if add_deps:  # add_deps=True corrupts the state machine
-        s.validate = False
+    x2 = delayed(inc)(10, dask_key_name="x2") if add_deps else 11
+    y_new = delayed(sum)([x1, x2], dask_key_name="y")
+    z = delayed(inc)(y_new, dask_key_name="z")
 
     with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
         fut = c.compute(z)
@@ -4730,10 +4731,45 @@ async def test_resubmit_different_task_same_key(c, s, add_deps):
 
     assert "Detected different `run_spec` for key 'y'" in log.getvalue()
 
-    if not add_deps:  # add_deps=True hangs
-        async with Worker(s.address):
-            assert await y1 == 2
-            assert await fut == 3
+    async with Worker(s.address):
+        # Used old run_spec
+        assert await y_old == 3
+        assert await fut == 4
+
+
+@pytest.mark.parametrize("add_deps", [False, True])
+@pytest.mark.parametrize("release_previous", [False, True])
+@gen_cluster(client=True)
+async def test_resubmit_different_task_same_key_after_previous_is_done(
+    c, s, a, b, add_deps, release_previous
+):
+    """Same as test_resubmit_different_task_same_key, but now the replaced task has
+    already been computed and is either in memory or released, and so are its old
+    dependencies, so they may need to be recomputed.
+    """
+    x1 = delayed(inc)(1, dask_key_name="x1")
+    x1fut = c.compute(x1)
+    y_old = c.submit(inc, x1fut, key="y")
+    z1 = c.submit(inc, y_old, key="z1")
+    await wait(z1)
+    if release_previous:
+        del x1fut, y_old
+        await wait_for_state("x1", "released", s)
+        await wait_for_state("y", "released", s)
+
+    x2 = delayed(inc)(10, dask_key_name="x2") if add_deps else 11
+    y_new = delayed(sum)([x1, x2], dask_key_name="y")
+    z2 = delayed(inc)(y_new, dask_key_name="z2")
+
+    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
+        fut = c.compute(z2)
+        # Used old run_spec
+        assert await fut == 4
+        assert "x2" not in s.tasks
+
+    # _generate_taskstates won't run for a dependency that's already in memory
+    has_warning = "Detected different `run_spec` for key 'y'" in log.getvalue()
+    assert has_warning is release_previous
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -4801,21 +4837,17 @@ async def test_resubmit_nondeterministic_task_different_deps(c, s, add_deps):
     y2 = delayed(lambda i, j: i)(x2, o, dask_key_name="y")
     z = delayed(inc)(y2, dask_key_name="z")
 
-    if add_deps:  # add_deps=True corrupts the state machine and hangs
-        s.validate = False
-
     with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
         fut = c.compute(z)
         await wait_for_state("z", "waiting", s)
     assert "Detected different `run_spec` for key 'y'" in log.getvalue()
 
-    if not add_deps:  # add_deps=True corrupts the state machine and hangs
-        async with Worker(s.address):
-            assert await fut == 3
+    async with Worker(s.address):
+        assert await fut == 3
 
 
 @pytest.mark.parametrize(
-    "loglevel,expect_loglines", [(logging.DEBUG, 3), (logging.WARNING, 1)]
+    "loglevel,expect_loglines", [(logging.DEBUG, 2), (logging.WARNING, 1)]
 )
 @gen_cluster(client=True, nthreads=[])
 async def test_resubmit_different_task_same_key_warns_only_once(
@@ -4824,18 +4856,19 @@ async def test_resubmit_different_task_same_key_warns_only_once(
     """If all tasks of a layer are affected by the same run_spec collision, warn
     only once.
     """
-    x1s = c.map(inc, [0, 1, 2], key=[("x", 0), ("x", 1), ("x", 2)])
+    y1s = c.map(inc, [0, 1, 2], key=[("y", 0), ("y", 1), ("y", 2)])
     dsk = {
-        ("x", 0): 3,
-        ("x", 1): 4,
-        ("x", 2): 5,
-        ("y", 0): (inc, ("x", 0)),
-        ("y", 1): (inc, ("x", 1)),
-        ("y", 2): (inc, ("x", 2)),
+        "x": 3,
+        ("y", 0): (inc, "x"),  # run_spec and dependencies change
+        ("y", 1): (inc, 4),  # run_spec changes, dependencies don't
+        ("y", 2): (inc, 2),  # Doesn't change
+        ("z", 0): (inc, ("y", 0)),
+        ("z", 1): (inc, ("y", 1)),
+        ("z", 2): (inc, ("y", 2)),
     }
     with captured_logger("distributed.scheduler", level=loglevel) as log:
-        ys = c.get(dsk, [("y", 0), ("y", 1), ("y", 2)], sync=False)
-        await wait_for_state(("y", 2), "waiting", s)
+        zs = c.get(dsk, [("z", 0), ("z", 1), ("z", 2)], sync=False)
+        await wait_for_state(("z", 2), "waiting", s)
 
     actual_loglines = len(
         re.findall("Detected different `run_spec` for key ", log.getvalue())
@@ -4843,4 +4876,4 @@ async def test_resubmit_different_task_same_key_warns_only_once(
     assert actual_loglines == expect_loglines
 
     async with Worker(s.address):
-        assert await c.gather(ys) == [2, 3, 4]
+        assert await c.gather(zs) == [2, 3, 4]  # Kept old ys
