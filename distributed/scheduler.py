@@ -4787,12 +4787,18 @@ class Scheduler(SchedulerState, ServerNode):
                 # Additionally check dependency names. This should only be necessary
                 # if run_specs can't be tokenized deterministically.
                 deps_lhs = {dts.key for dts in ts.dependencies}
-                deps_rhs = dependencies.get(k, set())
+                deps_rhs = dependencies[k]
 
                 # FIXME It would be a really healthy idea to change this to a hard
                 # failure. However, this is not possible at the moment because of
                 # https://github.com/dask/dask/issues/9888
                 if tok_lhs != tok_rhs or deps_lhs != deps_rhs:
+                    # Retain old run_spec and dependencies; rerun them if necessary.
+                    # This sweeps the issue of collision under the carpet as long as the
+                    # old and new task produce the same output - such as in
+                    # dask/dask#9888.
+                    dependencies[k] = deps_lhs
+
                     if ts.group not in tgs_with_bad_run_spec:
                         tgs_with_bad_run_spec.add(ts.group)
                         logger.warning(
