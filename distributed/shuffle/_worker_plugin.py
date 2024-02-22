@@ -341,6 +341,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         spec: ShuffleSpec,
         **kwargs: Any,
     ) -> int:
+        spec.validate_data(data)
         shuffle_run = self.get_or_create_shuffle(spec)
         return shuffle_run.add_partition(
             data=data,

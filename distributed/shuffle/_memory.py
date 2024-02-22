@@ -6,6 +6,7 @@ from typing import Any, Callable
 from dask.sizeof import sizeof
 
 from distributed.shuffle._buffer import ShardsBuffer
+from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors
 
@@ -30,7 +31,10 @@ class MemoryShardsBuffer(ShardsBuffer):
         if not self._inputs_done:
             raise RuntimeError("Tried to read from file before done.")
 
-        shards = self._shards.pop(id)  # Raises KeyError
+        try:
+            shards = self._shards.pop(id)  # Raises KeyError
+        except KeyError:
+            raise DataUnavailable(id)
         self.bytes_read += sum(map(sizeof, shards))
         # Don't keep the serialized and the deserialized shards
         # in memory at the same time
