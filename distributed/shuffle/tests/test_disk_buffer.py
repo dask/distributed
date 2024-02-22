@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from distributed.shuffle._disk import DiskShardsBuffer
+from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils_test import gen_test
 
@@ -32,7 +33,7 @@ async def test_basic(tmp_path):
         x = mf.read("x")
         y = mf.read("y")
 
-        with pytest.raises(KeyError):
+        with pytest.raises(DataUnavailable):
             mf.read("z")
 
         assert x == b"0" * 2000
@@ -57,7 +58,7 @@ async def test_read_before_flush(tmp_path):
 
         await mf.flush()
         assert mf.read("1") == b"foo"
-        with pytest.raises(KeyError):
+        with pytest.raises(DataUnavailable):
             mf.read(2)
 
 

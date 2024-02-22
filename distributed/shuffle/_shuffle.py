@@ -48,6 +48,7 @@ from distributed.shuffle._core import (
     handle_transfer_errors,
     handle_unpack_errors,
 )
+from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -527,7 +528,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         try:
             data = self._read_from_disk((partition_id,))
             return convert_shards(data, self.meta)
-        except KeyError:
+        except DataUnavailable:
             return self.meta.copy()
 
     def _get_assigned_worker(self, id: int) -> str:
