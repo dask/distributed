@@ -2053,8 +2053,9 @@ async def test_statistical_profiling(c, s, a, b):
 
     await wait(futures)
 
-    profile = await s.get_profile()
+    profile, interval = await s.get_profile()
     assert profile["count"]
+    assert interval == 0.001
 
 
 @gen_cluster(
@@ -2074,8 +2075,9 @@ async def test_statistical_profiling_failure(c, s, a, b):
     b.handlers["profile"] = raise_timeout
     await wait(futures)
 
-    profile = await s.get_profile()
+    profile, interval = await s.get_profile()
     assert profile["count"]
+    assert interval == 0.001
 
 
 @gen_cluster(client=True)
