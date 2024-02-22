@@ -5196,7 +5196,7 @@ def test_quiet_client_close(loop):
             threads_per_worker=4,
         ) as c:
             futures = c.map(slowinc, range(1000), delay=0.01)
-            sleep(0.200)  # stop part-way
+            sleep(0.2)  # stop part-way
         sleep(0.1)  # let things settle
 
     out = logger.getvalue()
