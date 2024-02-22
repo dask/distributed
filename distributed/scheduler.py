@@ -7091,12 +7091,11 @@ class Scheduler(SchedulerState, ServerNode):
             If neither ``workers`` nor ``names`` are provided, we call
             ``workers_to_close`` which finds a good set.
         close_workers: bool (defaults to False)
-            Whether or not to actually close the worker explicitly from here.
-            Otherwise we expect some external job scheduler to finish off the
-            worker.
+            Whether to actually close the worker explicitly from here.
+            Otherwise, we expect some external job scheduler to finish off the worker.
         remove: bool (defaults to True)
-            Whether or not to remove the worker metadata immediately or else
-            wait for the worker to contact us.
+            Whether to remove the worker metadata immediately or else wait for the
+            worker to contact us.
 
             If close_workers=False and remove=False, this method just flushes the tasks
             in memory out of the workers and then returns.

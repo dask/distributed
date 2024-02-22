@@ -1272,12 +1272,24 @@ class Worker(BaseWorker, ServerNode):
             self._update_latency(end - start)
 
             if response["status"] == "missing":
-                # Scheduler thought we left. Reconnection is not supported, so just shut down.
-                logger.error(
-                    f"Scheduler was unaware of this worker {self.address!r}. Shutting down."
-                )
-                # Something is out of sync; have the nanny restart us if possible.
-                await self.close(nanny=False)
+                # Scheduler thought we left.
+                # Reconnection is not supported, so just shut down.
+
+                if self.status == Status.closing_gracefully:
+                    # Called Scheduler.retire_workers(remove=True, close_workers=False)
+                    # The worker will remain indefinitely in this state, unknown to the
+                    # scheduler, until something else shuts it down.
+                    # Stopping the heartbeat is just a nice-to-have to reduce
+                    # unnecessary warnings on the scheduler log.
+                    logger.info("Stopping heartbeat to the scheduler")
+                    self.periodic_callbacks["heartbeat"].stop()
+                else:
+                    logger.error(
+                        f"Scheduler was unaware of this worker {self.address!r}. "
+                        "Shutting down."
+                    )
+                    # Have the nanny restart us if possible
+                    await self.close(nanny=False, reason="worker-heartbeat-missing")
                 return
 
             self.scheduler_delay = response["time"] - middle
@@ -1290,7 +1302,7 @@ class Worker(BaseWorker, ServerNode):
             logger.exception("Failed to communicate with scheduler during heartbeat.")
         except Exception:
             logger.exception("Unexpected exception during heartbeat. Closing worker.")
-            await self.close()
+            await self.close(reason="worker-heartbeat-error")
             raise
 
     @fail_hard
