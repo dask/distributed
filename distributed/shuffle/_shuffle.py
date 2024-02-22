@@ -555,6 +555,10 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
     def pick_worker(self, partition: int, workers: Sequence[str]) -> str:
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
 
+    def validate_data(self, data: pd.DataFrame) -> None:
+        if set(data.columns) != set(self.meta.columns):
+            raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
+
     def create_run_on_worker(
         self,
         run_id: int,

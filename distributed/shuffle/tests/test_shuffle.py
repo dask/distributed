@@ -2749,3 +2749,23 @@ async def test_drop_duplicates_stable_ordering(c, s, a, b, keep, disk):
         )
     expected = expected.drop_duplicates(subset=["name"], keep=keep)
     dd.assert_eq(result, expected)
+
+
+@gen_cluster(client=True)
+async def test_wrong_meta_provided(c, s, a, b):
+    # https://github.com/dask/distributed/issues/8519
+    @dask.delayed
+    def data_gen():
+        return pd.DataFrame({"a": range(10)})
+
+    ddf = dd.from_delayed(
+        [data_gen()] * 2, meta=[("a", int), ("b", int)], verify_meta=False
+    )
+
+    with raises_with_cause(
+        RuntimeError,
+        r"shuffling \w* failed",
+        ValueError,
+        "meta",
+    ):
+        await c.gather(c.compute(ddf.shuffle(on="a")))
