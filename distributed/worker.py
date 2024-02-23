@@ -1292,6 +1292,7 @@ class Worker(BaseWorker, ServerNode):
             logger.warning("Failed to communicate with scheduler during heartbeat")
         except Exception:  # pragma: nocover
             logger.exception("Unexpected exception during heartbeat")
+            await self.close(reason="worker-heartbeat-exception")
             raise
 
     @fail_hard
