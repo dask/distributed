@@ -1766,27 +1766,88 @@ async def test_heartbeat_comm_closed(s, monkeypatch):
             assert w.status == Status.running
     logs = logger.getvalue()
     assert "Failed to communicate with scheduler during heartbeat" in logs
+    assert "Traceback" in logs
 
 
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
+async def test_heartbeat_missing(s, a, monkeypatch):
+    async def missing_heartbeat_worker(*args, **kwargs):
+        return {"status": "missing"}
+
+    with captured_logger("distributed.worker", level=logging.WARNING) as wlogger:
+        monkeypatch.setattr(a.scheduler, "heartbeat_worker", missing_heartbeat_worker)
+        await a.heartbeat()
+        assert a.status == Status.closed
+        assert "Scheduler was unaware of this worker" in wlogger.getvalue()
+
+        while s.workers:
+            await asyncio.sleep(0.01)
+
+
+@gen_cluster(nthreads=[("", 1)], worker_kwargs={"heartbeat_interval": "100s"})
+async def test_heartbeat_missing_real_cluster(s, a):
+    # The idea here is to create a situation where `s.workers[a.address]`,
+    # doesn't exist, but the worker is not yet closed and can still heartbeat.
+    # Ideally, this state would be impossible, and this test would be removed,
+    # and the `status: missing` handling would be replaced with an assertion error.
+    # However, `Scheduler.remove_worker` and `Worker.close` both currently leave things
+    # in degenerate, half-closed states while they're running (and yielding control
+    # via `await`).
+    # When https://github.com/dask/distributed/issues/6390 is fixed, this should no
+    # longer be possible.
+
+    assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
+
+    with captured_logger(
+        "distributed.worker", level=logging.WARNING
+    ) as wlogger, captured_logger(
+        "distributed.scheduler", level=logging.WARNING
+    ) as slogger:
+        with freeze_batched_send(s.stream_comms[a.address]):
+            await s.remove_worker(a.address, stimulus_id="foo")
+            assert not s.workers
+
+            # The scheduler has removed the worker state, but the close message has
+            # not reached the worker yet.
+            assert a.status == Status.running, assumption_msg
+            assert a.periodic_callbacks["heartbeat"].is_running(), assumption_msg
+
+            # The heartbeat PeriodicCallback is still running, so one _could_ fire
+            # before the `op: close` message reaches the worker. We simulate that explicitly.
+            await a.heartbeat()
+
+            # The heartbeat receives a `status: missing` from the scheduler, so it
+            # closes the worker. Heartbeats aren't sent over batched comms, so
+            # `freeze_batched_send` doesn't affect them.
+            assert a.status == Status.closed
+
+            assert "Scheduler was unaware of this worker" in wlogger.getvalue()
+            assert "Received heartbeat from unregistered worker" in slogger.getvalue()
+
+        assert not s.workers
+
+
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    worker_kwargs={"heartbeat_interval": "10ms"},
+    Worker=Nanny,
+    worker_kwargs={"heartbeat_interval": "1ms"},
 )
-async def test_heartbeat_missing(c, s, a):
-    with (
-        captured_logger("distributed.scheduler", level=logging.WARNING) as slog,
-        captured_logger("distributed.worker", level=logging.INFO) as wlog,
-    ):
-        await s.remove_worker(a.address, close=False, stimulus_id="test")
-        while "Received heartbeat from unregistered worker" not in slog.getvalue():
-            await asyncio.sleep(0.01)
-        await asyncio.sleep(0.2)
+async def test_heartbeat_missing_restarts(c, s, n):
+    old_heartbeat_handler = s.handlers["heartbeat_worker"]
+    s.handlers["heartbeat_worker"] = lambda *args, **kwargs: {"status": "missing"}
 
-    assert slog.getvalue().count("Received heartbeat from unregistered worker") == 1
-    assert wlog.getvalue().count("Stopping heartbeat") == 1
-    assert a.status == Status.running
-    assert a.address not in s.workers
+    assert n.process
+    await n.process.stopped.wait()
+
+    assert not s.workers
+    s.handlers["heartbeat_worker"] = old_heartbeat_handler
+
+    await n.process.running.wait()
+    assert n.status == Status.running
+
+    await c.wait_for_workers(1)
 
 
 @gen_cluster(nthreads=[])

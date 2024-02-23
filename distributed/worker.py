@@ -1265,33 +1265,44 @@ class Worker(BaseWorker, ServerNode):
                     if hasattr(extension, "heartbeat")
                 },
             )
+
             end = time()
             middle = (start + end) / 2
+
             self._update_latency(end - start)
 
             if response["status"] == "missing":
                 # Scheduler thought we left.
-                # This happens after one calls Scheduler.remove_worker(close=False).
-                # ***DO NOT call close()!***
-                # Read: https://github.com/dask/distributed/pull/8522
-                logger.info("Stopping heartbeat to the scheduler")
-                self.periodic_callbacks["heartbeat"].stop()
+                # Reconnection is not supported, so just shut down.
+
+                if self.status == Status.closing_gracefully:
+                    # Called Scheduler.retire_workers(remove=True, close_workers=False)
+                    # The worker will remain indefinitely in this state, unknown to the
+                    # scheduler, until something else shuts it down.
+                    # Stopping the heartbeat is just a nice-to-have to reduce
+                    # unnecessary warnings on the scheduler log.
+                    logger.info("Stopping heartbeat to the scheduler")
+                    self.periodic_callbacks["heartbeat"].stop()
+                else:
+                    logger.error(
+                        f"Scheduler was unaware of this worker {self.address!r}. "
+                        "Shutting down."
+                    )
+                    # Have the nanny restart us if possible
+                    await self.close(nanny=False, reason="worker-heartbeat-missing")
                 return
 
+            self.scheduler_delay = response["time"] - middle
             self.periodic_callbacks["heartbeat"].callback_time = (
                 response["heartbeat-interval"] * 1000
             )
-            self.scheduler_delay = response["time"] - middle
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
-
         except OSError:
-            # Hopefully a temporary network failure, or maybe the scheduler' CPU is at
-            # 100%. DO NOT call close() and try again later. Keep the worker alive for
-            # as long as the kernel keeps the batched comms TCP channel open.
-            logger.warning("Failed to communicate with scheduler during heartbeat")
-        except Exception:  # pragma: nocover
-            logger.exception("Unexpected exception during heartbeat")
+            logger.exception("Failed to communicate with scheduler during heartbeat.")
+        except Exception:
+            logger.exception("Unexpected exception during heartbeat. Closing worker.")
+            await self.close(reason="worker-heartbeat-error")
             raise
 
     @fail_hard
