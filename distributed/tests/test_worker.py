@@ -62,6 +62,7 @@ from distributed.utils_test import (
     captured_logger,
     dec,
     div,
+    freeze_batched_send,
     freeze_data_fetching,
     gen_cluster,
     gen_test,
