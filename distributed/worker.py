@@ -1272,12 +1272,15 @@ class Worker(BaseWorker, ServerNode):
             self._update_latency(end - start)
 
             if response["status"] == "missing":
-                # Scheduler thought we left. Reconnection is not supported, so just shut down.
-                logger.error(
-                    f"Scheduler was unaware of this worker {self.address!r}. Shutting down."
-                )
-                # Something is out of sync; have the nanny restart us if possible.
-                await self.close(nanny=False)
+                # Scheduler thought we left.
+                # This is a common race condition when the scheduler calls
+                # remove_worker(); there can be a heartbeat between when the scheduler
+                # removes the worker on its side and when the {"op": "close"} command
+                # arrives through batched comms to the worker.
+                logger.warning("Scheduler was unaware of this worker; shutting down.")
+                # We close here just for safety's sake - the {op: close} should
+                # arrive soon anyway.
+                await self.close(reason="worker-heartbeat-missing")
                 return
 
             self.scheduler_delay = response["time"] - middle
@@ -1290,7 +1293,7 @@ class Worker(BaseWorker, ServerNode):
             logger.exception("Failed to communicate with scheduler during heartbeat.")
         except Exception:
             logger.exception("Unexpected exception during heartbeat. Closing worker.")
-            await self.close()
+            await self.close(reason="worker-heartbeat-error")
             raise
 
     @fail_hard
