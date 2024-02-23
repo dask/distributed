@@ -269,14 +269,13 @@ def test_flight_cancelled_error(ws):
     assert not ws.tasks
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[("", 1)],
-    # heartbeat will close a worker after remove_worker(close=False)
-    worker_kwargs={"heartbeat_interval": "100s"},
-)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_in_flight_lost_after_resumed(c, s, b):
-    async with BlockedGetData(s.address) as a:
+    async with BlockedGetData(
+        s.address,
+        # heartbeat will close a worker after remove_worker(close=False)
+        heartbeat_interval="100s",
+    ) as a:
         fut1 = c.submit(inc, 1, workers=[a.address], key="fut1")
         # Ensure fut1 is in memory but block any further execution afterwards to
         # ensure we control when the recomputation happens
