@@ -849,7 +849,7 @@ class _LogErrors:
             return
 
         stack = traceback.extract_tb(tb)
-        frame = stack[self.unroll_stack]
+        frame = stack[min(self.unroll_stack, len(stack) - 1)]
         modname = _getmodulename_with_path(frame.filename)
 
         try:

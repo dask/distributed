@@ -2727,6 +2727,18 @@ async def test_retire_names_str(c, s):
         assert len(b.data) == 10
 
 
+@gen_cluster(client=True)
+async def test_retire_workers_bad_params(c, s, a, b):
+    with pytest.raises(TypeError, match="mutually exclusive"):
+        await s.retire_workers([a.address], names=[a.name])
+    with pytest.raises(TypeError, match="mutually exclusive"):
+        await s.retire_workers([a.address], n=1)
+    with pytest.raises(TypeError, match="mutually exclusive"):
+        await s.retire_workers(names=[a.name], n=1)
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        await s.retire_workers(foo=1)
+
+
 @gen_cluster(
     client=True, config={"distributed.scheduler.default-task-durations": {"inc": 100}}
 )
