@@ -442,6 +442,9 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
             participating_workers=set(worker_for.values()),
         )
 
+    def validate_data(self, data: Any) -> None:
+        """Validate payload data before shuffling"""
+
     @abc.abstractmethod
     def create_run_on_worker(
         self,
