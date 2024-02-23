@@ -956,33 +956,3 @@ async def test_nanny_plugin_register_nanny_killed(c, s, restart):
     finally:
         proc.kill()
     assert await register == {}
-
-
-@pytest.mark.slow
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    nthreads=[("", 1)],
-    worker_kwargs={"heartbeat_interval": "10ms"},
-)
-async def test_nanny_does_not_restart_worker_on_graceful_retirement(c, s, a):
-    """Tests https://github.com/dask/distributed/pull/8522
-
-    Some clusters (e.g. SpecCluster) implement downscaling by calling
-    `Scheduler.retire_workers()` without arguments, which defaults to
-     `remove=True, close_workers=False`.
-
-    and then use an external system to tear down the worker and the nanny. In these
-    cases, make sure that the worker doesn't kill itself and that the nanny doesn't
-    restart it after the heartbeat to the scheduler fails.
-    """
-    await s.retire_workers([a.worker_address], stimulus_id="test")
-    # On Linux, it takes ~3.5s for the nanny to resuscitate a worker
-    await asyncio.sleep(5)
-    assert not s.workers
-    events = [
-        ev
-        for _, ev in s.events["all"]
-        if isinstance(ev, dict) and ev.get("action") == "add-worker"
-    ]
-    assert len(events) == 1

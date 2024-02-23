@@ -1273,23 +1273,14 @@ class Worker(BaseWorker, ServerNode):
 
             if response["status"] == "missing":
                 # Scheduler thought we left.
-                # Reconnection is not supported, so just shut down.
-
-                if self.status == Status.closing_gracefully:
-                    # Called Scheduler.retire_workers(remove=True, close_workers=False)
-                    # The worker will remain indefinitely in this state, unknown to the
-                    # scheduler, until something else shuts it down.
-                    # Stopping the heartbeat is just a nice-to-have to reduce
-                    # unnecessary warnings on the scheduler log.
-                    logger.info("Stopping heartbeat to the scheduler")
-                    self.periodic_callbacks["heartbeat"].stop()
-                else:
-                    logger.error(
-                        f"Scheduler was unaware of this worker {self.address!r}. "
-                        "Shutting down."
-                    )
-                    # Have the nanny restart us if possible
-                    await self.close(nanny=False, reason="worker-heartbeat-missing")
+                # This is a common race condition when the scheduler calls
+                # remove_worker(); there can be a heartbeat between when the scheduler
+                # removes the worker on its side and when the {"op": "close"} command
+                # arrives through batched comms to the worker.
+                logger.warning("Scheduler was unaware of this worker; shutting down.")
+                # We close here just for safety's sake - the {op: close} should
+                # arrive soon anyway.
+                await self.close(reason="worker-heartbeat-missing")
                 return
 
             self.scheduler_delay = response["time"] - middle
