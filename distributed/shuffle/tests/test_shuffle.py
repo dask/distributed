@@ -62,6 +62,7 @@ from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils import Deadline
 from distributed.utils_test import (
     async_poll_for,
+    captured_logger,
     cluster,
     gen_cluster,
     gen_test,
@@ -2642,10 +2643,14 @@ async def test_flaky_connect_recover_with_retry(c, s, a, b):
         x = dd.shuffle.shuffle(df, "x")
 
     rpc = await FlakyConnectionPool(failing_connects=1)
-
-    with mock.patch.object(a, "rpc", rpc):
-        await c.compute(x)
-    assert rpc.failed_attempts == 1
+    with captured_logger("distributed.utils_comm") as caplog:
+        with mock.patch.object(a, "rpc", rpc):
+            await c.compute(x)
+        assert rpc.failed_attempts == 1
+    # Assert that we do not log the binary payload (or any other excessive amount of data)
+    logs = caplog.getvalue()
+    assert len(logs) < 600
+    assert "Retrying" in logs
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)

@@ -6,7 +6,15 @@ import contextlib
 import itertools
 import pickle
 import time
-from collections.abc import Callable, Generator, Hashable, Iterable, Iterator, Sequence
+from collections.abc import (
+    Callable,
+    Coroutine,
+    Generator,
+    Hashable,
+    Iterable,
+    Iterator,
+    Sequence,
+)
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
@@ -212,8 +220,11 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         else:
             shards_or_bytes = shards
 
+        def _send() -> Coroutine[Any, Any, None]:
+            return self._send(address, shards_or_bytes)
+
         return await retry(
-            partial(self._send, address, shards_or_bytes),
+            _send,
             count=self.RETRY_COUNT,
             delay_min=self.RETRY_DELAY_MIN,
             delay_max=self.RETRY_DELAY_MAX,
