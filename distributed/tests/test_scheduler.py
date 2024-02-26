@@ -2502,8 +2502,7 @@ async def test_no_workers_timeout_queued(c, s, a):
     """Don't trip no-workers-timeout when there are queued tasks AND processing tasks"""
     ev = Event()
     futures = [c.submit(lambda ev: ev.wait(), ev, pure=False) for _ in range(3)]
-    while not a.state.tasks:
-        await asyncio.sleep(0.01)
+    await async_poll_for(lambda: len(s.tasks) == 3 and a.state.tasks, timeout=5)
     assert s.queued or math.isinf(s.WORKER_SATURATION)
 
     s._check_no_workers()
