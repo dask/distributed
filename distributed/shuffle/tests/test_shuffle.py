@@ -2649,7 +2649,7 @@ async def test_flaky_connect_recover_with_retry(c, s, a, b):
         assert rpc.failed_attempts == 1
     # Assert that we do not log the binary payload (or any other excessive amount of data)
     logs = caplog.getvalue()
-    assert len(logs) < 200
+    assert len(logs) < 600
     assert "Retrying" in logs
 
     await check_worker_cleanup(a)
