@@ -269,7 +269,7 @@ async def test_spec_process():
 
 
 @gen_test()
-async def test_logs():
+async def test_get_logs():
     worker = {"cls": Worker, "options": {"nthreads": 1}}
     async with SpecCluster(
         asynchronous=True, scheduler=scheduler, worker=worker
@@ -302,6 +302,14 @@ async def test_logs():
         w = toolz.first(cluster.scheduler.workers)
         logs = await cluster.get_logs(cluster=False, scheduler=False, workers=[w])
         assert set(logs) == {w}
+
+
+@gen_test()
+async def test_logs_deprecated():
+    async with SpecCluster(asynchronous=True, scheduler=scheduler) as cluster:
+        with pytest.warns(FutureWarning, match="get_logs"):
+            logs = await cluster.logs()
+    assert logs["Scheduler"]
 
 
 @gen_test()

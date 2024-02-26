@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import random
 import socket
@@ -1481,3 +1482,27 @@ async def test_messages_are_ordered_raw():
             assert ledger == list(range(n))
         finally:
             await comm.close()
+
+
+@pytest.mark.slow
+@gen_test(timeout=180)
+async def test_large_payload(caplog):
+    """See also: protocol/tests/test_protocol.py::test_large_payload"""
+    critical_size = 2**31 + 1  # >2 GiB
+    data = b"0" * critical_size
+
+    async with Server({"echo": echo_serialize}) as server:
+        await server.listen(0)
+        comm = await connect(server.address)
+
+        # FIXME https://github.com/dask/distributed/issues/8465
+        # At debug level, messages are dumped into the log. By default, pytest captures
+        # all logs, which would make this test extremely expensive to run.
+        with caplog.at_level(logging.INFO, logger="distributed.core"):
+            # Note: if we wrap data in to_serialize, it will be sent as a buffer, which
+            # is not encoded by msgpack.
+            await comm.write({"op": "echo", "x": data})
+            response = await comm.read()
+
+        assert response["result"] == data
+        await comm.close()

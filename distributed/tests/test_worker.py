@@ -1834,7 +1834,8 @@ async def test_heartbeat_missing_real_cluster(s, a):
     Worker=Nanny,
     worker_kwargs={"heartbeat_interval": "1ms"},
 )
-async def test_heartbeat_missing_restarts(c, s, n):
+async def test_heartbeat_missing_doesnt_restart(c, s, n):
+    """Read: https://github.com/dask/distributed/pull/8522"""
     old_heartbeat_handler = s.handlers["heartbeat_worker"]
     s.handlers["heartbeat_worker"] = lambda *args, **kwargs: {"status": "missing"}
 
@@ -1843,11 +1844,8 @@ async def test_heartbeat_missing_restarts(c, s, n):
 
     assert not s.workers
     s.handlers["heartbeat_worker"] = old_heartbeat_handler
-
-    await n.process.running.wait()
-    assert n.status == Status.running
-
-    await c.wait_for_workers(1)
+    assert n.status == Status.closing_gracefully
+    assert not n.process.is_alive()
 
 
 @gen_cluster(nthreads=[])

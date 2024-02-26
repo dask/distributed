@@ -210,32 +210,6 @@ async def test_basic_integration(c, s, a, b, npartitions, disk):
     await check_scheduler_cleanup(s)
 
 
-@pytest.mark.parametrize("disk", [True, False])
-@gen_cluster(client=True)
-async def test_stable_ordering(c, s, a, b, disk):
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-02-01",
-        dtypes={"x": int, "y": int},
-        freq="10 s",
-    )
-    df["x"] = df["x"] % 19
-    df["y"] = df["y"] % 23
-    with dask.config.set(
-        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
-    ):
-        shuffled = dd.shuffle.shuffle(df, "x")
-    result, expected = await c.compute([shuffled, df], sync=True)
-    dd.assert_eq(
-        result.drop_duplicates("x", keep="first"),
-        expected.drop_duplicates("x", keep="first"),
-    )
-
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
-
-
 @pytest.mark.parametrize("processes", [True, False])
 @gen_test()
 async def test_basic_integration_local_cluster(processes):
@@ -2505,17 +2479,14 @@ def test_set_index_with_existing_index(client):
 
 
 def test_sort_values_with_existing_divisions(client):
-    "Regression test for #8165"
+    """Regression test for #8165"""
     df = pd.DataFrame(
         {"a": np.random.randint(0, 3, 20), "b": np.random.randint(0, 3, 20)}
     )
-    ddf = dd.from_pandas(
-        df,
-        npartitions=4,
-    )
+    ddf = dd.from_pandas(df, npartitions=4)
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         ddf = ddf.set_index("a").sort_values("b")
-        result = client.compute(ddf, sync=True)
+        result = ddf.compute()
         dd.assert_eq(
             result,
             df.set_index("a").sort_values("b"),
@@ -2725,3 +2696,76 @@ async def test_barrier_handles_stale_resumed_transfer(c, s, *workers):
     await wait_for_tasks_in_state("shuffle-transfer", "resumed", 1, barrier_worker)
     barrier_worker.block_gather_dep.set()
     await out
+
+
+@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("keep", ["first", "last"])
+@gen_cluster(client=True)
+async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
+    """Ensures that shuffling guarantees ordering for individual entries
+    belonging to the same shuffle key"""
+
+    def make_partition(partition_id, size):
+        """Return null column for every other partition"""
+        offset = partition_id * size
+        df = pd.DataFrame({"a": np.arange(start=offset, stop=offset + size)})
+        df["b"] = df["a"] % 23
+        return df
+
+    df = dd.from_map(make_partition, np.arange(19), args=(250,))
+
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+    ):
+        shuffled = df.shuffle("b")
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(result, expected)
+
+    for _, group in result.groupby("b"):
+        assert group["a"].is_monotonic_increasing
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("keep", ["first", "last"])
+@gen_cluster(client=True)
+async def test_drop_duplicates_stable_ordering(c, s, a, b, keep, disk):
+    df = dask.datasets.timeseries()
+
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+    ):
+        result, expected = await c.compute(
+            [
+                df.drop_duplicates(
+                    subset=["name"], keep=keep, split_out=df.npartitions
+                ),
+                df,
+            ],
+            sync=True,
+        )
+    expected = expected.drop_duplicates(subset=["name"], keep=keep)
+    dd.assert_eq(result, expected)
+
+
+@gen_cluster(client=True)
+async def test_wrong_meta_provided(c, s, a, b):
+    # https://github.com/dask/distributed/issues/8519
+    @dask.delayed
+    def data_gen():
+        return pd.DataFrame({"a": range(10)})
+
+    ddf = dd.from_delayed(
+        [data_gen()] * 2, meta=[("a", int), ("b", int)], verify_meta=False
+    )
+
+    with raises_with_cause(
+        RuntimeError,
+        r"shuffling \w* failed",
+        ValueError,
+        "meta",
+    ):
+        await c.gather(c.compute(ddf.shuffle(on="a")))

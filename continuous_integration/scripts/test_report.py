@@ -498,9 +498,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     overall = {name: grouped.get_group(name) for name in grouped.groups}
 
-    # Get all of the workflow run timestamps that we wound up with, which we can use
+    # Get all the workflow run timestamps that we wound up with, which we can use
     # below to align the different groups.
-    times = set()
+    times: set = set()
     for df in overall.values():
         times.update(df.date.unique())
 

@@ -219,7 +219,8 @@ async def test_close_async(c, s, a):
     while not semaphore_object.metrics["pending"]["t2"]:  # Wait for the pending lease
         await asyncio.sleep(0.01)
     with pytest.warns(
-        RuntimeWarning, match="Closing semaphore .* but there remain pending leases"
+        RuntimeWarning,
+        match=r"Closing semaphore .* but there remain (pending|unreleased) leases",
     ):
         await sem2.close()
 

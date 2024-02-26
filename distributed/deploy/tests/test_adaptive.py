@@ -203,7 +203,7 @@ async def test_adapt_quickly():
         assert len(adapt.log) == 1
 
         # Scale up when there is plenty of available work
-        futures = client.map(slowinc, range(1000), delay=0.100)
+        futures = client.map(slowinc, range(2, 1002), delay=0.100)
         while len(adapt.log) == 1:
             await asyncio.sleep(0.01)
         assert len(adapt.log) == 2

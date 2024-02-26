@@ -41,6 +41,7 @@ from dask.utils import (
     ensure_dict,
     format_bytes,
     funcname,
+    parse_bytes,
     parse_timedelta,
     shorten_traceback,
     typename,
@@ -1576,7 +1577,7 @@ class Client(SyncMethodMixin):
 
                 breakout = False
                 for msg in msgs:
-                    logger.debug("Client receives message %s", msg)
+                    logger.debug("Client %s receives message %s", self.id, msg)
 
                     if "status" in msg and "error" in msg["status"]:
                         typ, exc, tb = clean_exception(**msg)
@@ -3095,8 +3096,12 @@ class Client(SyncMethodMixin):
                 module_name = fr.f_back.f_globals["__name__"]  # type: ignore
                 if module_name == "__channelexec__":
                     break  # execnet; pytest-xdist  # pragma: nocover
+                try:
+                    module_name = sys.modules[module_name].__name__
+                except KeyError:
+                    # Ignore pathological cases where the module name isn't in `sys.modules`
+                    break
                 # Ignore IPython related wrapping functions to user code
-                module_name = sys.modules[module_name].__name__
                 if module_name.endswith("interactiveshell"):
                     break
 
@@ -3158,7 +3163,9 @@ class Client(SyncMethodMixin):
             header, frames = serialize(ToPickle(dsk), on_error="raise")
 
             pickled_size = sum(map(nbytes, [header] + frames))
-            if pickled_size > 10_000_000:
+            if pickled_size > parse_bytes(
+                dask.config.get("distributed.admin.large-graph-warning-threshold")
+            ):
                 warnings.warn(
                     f"Sending large graph of size {format_bytes(pickled_size)}.\n"
                     "This may cause some slowdown.\n"
@@ -4924,7 +4931,10 @@ class Client(SyncMethodMixin):
         )
 
     def register_scheduler_plugin(
-        self, plugin: SchedulerPlugin, name: str | None = None, idempotent: bool = False
+        self,
+        plugin: SchedulerPlugin,
+        name: str | None = None,
+        idempotent: bool | None = None,
     ):
         """
         Register a scheduler plugin.

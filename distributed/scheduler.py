@@ -52,7 +52,9 @@ from tlz import (
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.core import get_deps, validate_key
+import dask.utils
+from dask.base import TokenizationError, normalize_token, tokenize
+from dask.core import get_deps, iskey, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
     ensure_dict,
@@ -4721,6 +4723,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id or f"update-graph-{start}",
             )
         except RuntimeError as e:
+            logger.error(str(e))
             err = error_message(e)
             for key in keys:
                 self.report(
@@ -4729,7 +4732,10 @@ class Scheduler(SchedulerState, ServerNode):
                         "key": key,
                         "exception": err["exception"],
                         "traceback": err["traceback"],
-                    }
+                    },
+                    # This informs all clients in who_wants plus the current client
+                    # (which may not have been added to who_wants yet)
+                    client=client,
                 )
         end = time()
         self.digest_metric("update-graph-duration", end - start)
@@ -4747,6 +4753,7 @@ class Scheduler(SchedulerState, ServerNode):
         stack = list(keys)
         touched_keys = set()
         touched_tasks = []
+        tgs_with_bad_run_spec = set()
         while stack:
             k = stack.pop()
             if k in touched_keys:
@@ -4755,8 +4762,73 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is None:
                 ts = self.new_task(k, dsk.get(k), "released", computation=computation)
                 new_tasks.append(ts)
-            elif not ts.run_spec:
+            # It is possible to create the TaskState object before its runspec is known
+            # to the scheduler. For instance, this is possible when using a Variable:
+            # `f = c.submit(foo); await Variable().set(f)` since the Variable uses a
+            # different comm channel, so the `client_desires_key` message could arrive
+            # before `update_graph`.
+            # There are also anti-pattern processes possible;
+            # see for example test_scatter_creates_ts
+            elif ts.run_spec is None:
                 ts.run_spec = dsk.get(k)
+            # run_spec in the submitted graph may be None. This happens
+            # when an already persisted future is part of the graph
+            elif k in dsk:
+                # If both tokens are non-deterministic, skip comparison
+                try:
+                    tok_lhs = tokenize(ts.run_spec, ensure_deterministic=True)
+                except TokenizationError:
+                    tok_lhs = ""
+                try:
+                    tok_rhs = tokenize(dsk[k], ensure_deterministic=True)
+                except TokenizationError:
+                    tok_rhs = ""
+
+                # Additionally check dependency names. This should only be necessary
+                # if run_specs can't be tokenized deterministically.
+                deps_lhs = {dts.key for dts in ts.dependencies}
+                deps_rhs = dependencies[k]
+
+                # FIXME It would be a really healthy idea to change this to a hard
+                # failure. However, this is not possible at the moment because of
+                # https://github.com/dask/dask/issues/9888
+                if tok_lhs != tok_rhs or deps_lhs != deps_rhs:
+                    # Retain old run_spec and dependencies; rerun them if necessary.
+                    # This sweeps the issue of collision under the carpet as long as the
+                    # old and new task produce the same output - such as in
+                    # dask/dask#9888.
+                    dependencies[k] = deps_lhs
+
+                    if ts.group not in tgs_with_bad_run_spec:
+                        tgs_with_bad_run_spec.add(ts.group)
+                        logger.warning(
+                            f"Detected different `run_spec` for key {ts.key!r} between "
+                            "two consecutive calls to `update_graph`. "
+                            "This can cause failures and deadlocks down the line. "
+                            "Please ensure unique key names. "
+                            "If you are using a standard dask collections, consider "
+                            "releasing all the data before resubmitting another "
+                            "computation. More details and help can be found at "
+                            "https://github.com/dask/dask/issues/9888. "
+                            + textwrap.dedent(
+                                f"""
+                                Debugging information
+                                ---------------------
+                                old task state: {ts.state}
+                                old run_spec: {ts.run_spec!r}
+                                new run_spec: {dsk[k]!r}
+                                old token: {normalize_token(ts.run_spec)!r}
+                                new token: {normalize_token(dsk[k])!r}
+                                old dependencies: {deps_lhs}
+                                new dependencies: {deps_rhs}
+                                """
+                            )
+                        )
+                    else:
+                        logger.debug(
+                            f"Detected different `run_spec` for key {ts.key!r} between "
+                            "two consecutive calls to `update_graph`."
+                        )
 
             if ts.run_spec:
                 runnable.append(ts)
@@ -5538,28 +5610,28 @@ class Scheduler(SchedulerState, ServerNode):
                 tasks: dict = self.tasks
                 ts = tasks.get(msg_key)
 
-        client_comms: dict = self.client_comms
-        if ts is None:
+        if ts is None and client is None:
             # Notify all clients
-            client_keys = list(client_comms)
-        elif client:
-            # Notify clients interested in key
-            client_keys = [cs.client_key for cs in ts.who_wants or ()]
+            client_keys = list(self.client_comms)
+        elif ts is None:
+            client_keys = [client]
         else:
             # Notify clients interested in key (including `client`)
+            # Note that, if report() was called by update_graph(), `client` won't be in
+            # ts.who_wants yet.
             client_keys = [
                 cs.client_key for cs in ts.who_wants or () if cs.client_key != client
             ]
-            client_keys.append(client)
+            if client is not None:
+                client_keys.append(client)
 
-        k: str
         for k in client_keys:
-            c = client_comms.get(k)
+            c = self.client_comms.get(k)
             if c is None:
                 continue
             try:
                 c.send(msg)
-                # logger.debug("Scheduler sends message to client %s", msg)
+                # logger.debug("Scheduler sends message to client %s: %s", k, msg)
             except CommClosedError:
                 if self.status == Status.running:
                     logger.critical(
@@ -7019,12 +7091,11 @@ class Scheduler(SchedulerState, ServerNode):
             If neither ``workers`` nor ``names`` are provided, we call
             ``workers_to_close`` which finds a good set.
         close_workers: bool (defaults to False)
-            Whether or not to actually close the worker explicitly from here.
-            Otherwise we expect some external job scheduler to finish off the
-            worker.
+            Whether to actually close the worker explicitly from here.
+            Otherwise, we expect some external job scheduler to finish off the worker.
         remove: bool (defaults to True)
-            Whether or not to remove the worker metadata immediately or else
-            wait for the worker to contact us.
+            Whether to remove the worker metadata immediately or else wait for the
+            worker to contact us.
 
             If close_workers=False and remove=False, this method just flushes the tasks
             in memory out of the workers and then returns.
@@ -8724,9 +8795,17 @@ def _materialize_graph(
     dsk2 = {}
     fut_deps = {}
     for k, v in dsk.items():
-        dsk2[k], futs = unpack_remotedata(v, byte_keys=True)
+        v, futs = unpack_remotedata(v, byte_keys=True)
         if futs:
             fut_deps[k] = futs
+
+        # Remove aliases {x: x}.
+        # FIXME: This is an artifact generated by unpack_remotedata when using persisted
+        # collections. There should be a better way to achieve that tasks are not self
+        # referencing themselves.
+        if not iskey(v) or v != k:
+            dsk2[k] = v
+
     dsk = dsk2
 
     # - Add in deps for any tasks that depend on futures
@@ -8736,14 +8815,8 @@ def _materialize_graph(
     # Remove any self-dependencies (happens on test_publish_bag() and others)
     for k, v in dependencies.items():
         deps = set(v)
-        if k in deps:
-            deps.remove(k)
+        deps.discard(k)
         dependencies[k] = deps
 
-    # Remove aliases
-    for k in list(dsk):
-        if dsk[k] is k:
-            del dsk[k]
     dsk = valmap(_normalize_task, dsk)
-
     return dsk, dependencies, annotations_by_type
