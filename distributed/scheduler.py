@@ -7067,6 +7067,45 @@ class Scheduler(SchedulerState, ServerNode):
 
         return result
 
+    @overload
+    async def retire_workers(
+        self,
+        workers: list[str],
+        *,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    @overload
+    async def retire_workers(
+        self,
+        *,
+        names: list,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    @overload
+    async def retire_workers(
+        self,
+        *,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+        # Parameters for workers_to_close()
+        memory_ratio: int | float | None = None,
+        n: int | None = None,
+        key: Callable[[WorkerState], Hashable] | bytes | None = None,
+        minimum: int | None = None,
+        target: int | None = None,
+        attribute: str = "address",
+    ) -> dict[str, Any]:
+        ...
+
     @log_errors
     async def retire_workers(
         self,
@@ -7107,7 +7146,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         **kwargs: dict
             Extra options to pass to workers_to_close to determine which
-            workers we should drop
+            workers we should drop. Only accepted if ``workers`` and ``names`` are
+            omitted.
 
         Returns
         -------
@@ -7123,6 +7163,14 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.workers_to_close
         """
+        if names is not None and workers is not None:
+            raise TypeError("names and workers are mutually exclusive")
+        if (names is not None or workers is not None) and kwargs:
+            raise TypeError(
+                "Parameters for workers_to_close() are mutually exclusive with "
+                f"names and workers: {kwargs}"
+            )
+
         stimulus_id = stimulus_id or f"retire-workers-{time()}"
         # This lock makes retire_workers, rebalance, and replicate mutually
         # exclusive and will no longer be necessary once rebalance and replicate are
@@ -7130,15 +7178,12 @@ class Scheduler(SchedulerState, ServerNode):
         # However, it allows multiple instances of retire_workers to run in parallel.
         async with self._replica_lock("retire-workers"):
             if names is not None:
-                if workers is not None:
-                    raise TypeError("names and workers are mutually exclusive")
-                if names:
-                    logger.info("Retire worker names %s", names)
-                # Support cases where names are passed through a CLI and become
-                # strings
+                logger.info("Retire worker names %s", names)
+                # Support cases where names are passed through a CLI and become strings
                 names_set = {str(name) for name in names}
                 wss = {ws for ws in self.workers.values() if str(ws.name) in names_set}
             elif workers is not None:
+                logger.info("Retire worker addresses %s", workers)
                 wss = {
                     self.workers[address]
                     for address in workers
