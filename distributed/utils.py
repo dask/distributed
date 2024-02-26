@@ -801,7 +801,7 @@ def _getmodulename_with_path(fname: str) -> str:
     except KeyError:
         pass
 
-    for modname, mod in sys.modules.items():
+    for modname, mod in sys.modules.copy().items():
         fname2 = getattr(mod, "__file__", None)
         if fname2:
             _getmodulename_with_path_map[fname2] = modname
