@@ -51,7 +51,7 @@ from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
 from jinja2 import Environment, FileSystemLoader
-from tlz import curry, pipe, valmap
+from tlz import curry, pipe, second, valmap
 from tlz.curried import concat, groupby, map
 from tornado import escape
 
@@ -1523,42 +1523,44 @@ class ComputePerKey(DashboardComponent):
     def update(self):
         compute_times = defaultdict(float)
 
-        for key, ts in self.scheduler.task_prefixes.items():
-            name = key_split(key)
-            for action, t in ts.all_durations.items():
+        for name, tp in self.scheduler.task_prefixes.items():
+            for action, t in tp.all_durations.items():
                 if action == "compute":
                     compute_times[name] += t
 
+        if not compute_times:
+            return
+
         # order by largest time first
-        compute_times = sorted(compute_times.items(), key=lambda x: x[1], reverse=True)
+        compute_times = sorted(compute_times.items(), key=second, reverse=True)
 
-        # keep only time which are 2% of max or greater
-        if compute_times:
-            max_time = compute_times[0][1] * 0.02
-            compute_times = [(n, t) for n, t in compute_times if t > max_time]
-            compute_colors = list()
-            compute_names = list()
-            compute_time = list()
-            total_time = 0
-            for name, t in compute_times:
-                compute_names.append(name)
-                compute_colors.append(ts_color_of(name))
-                compute_time.append(t)
-                total_time += t
+        # Keep only times which are 2% of max or greater
+        max_time = compute_times[0][1] * 0.02
+        compute_colors = []
+        compute_names = []
+        compute_time = []
+        total_time = 0
+        for name, t in compute_times:
+            if t < max_time:
+                break
+            compute_names.append(name)
+            compute_colors.append(ts_color_of(name))
+            compute_time.append(t)
+            total_time += t
 
-            angles = [t / total_time * 2 * math.pi for t in compute_time]
+        angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            self.fig.x_range.factors = compute_names
+        self.fig.x_range.factors = compute_names
 
-            compute_result = dict(
-                angles=angles,
-                times=compute_time,
-                color=compute_colors,
-                names=compute_names,
-                formatted_time=[format_time(t) for t in compute_time],
-            )
+        compute_result = dict(
+            angles=angles,
+            times=compute_time,
+            color=compute_colors,
+            names=compute_names,
+            formatted_time=[format_time(t) for t in compute_time],
+        )
 
-            update(self.compute_source, compute_result)
+        update(self.compute_source, compute_result)
 
 
 class AggregateAction(DashboardComponent):

@@ -1286,7 +1286,6 @@ async def test_compute_per_key(c, s, a, b):
 
     da = pytest.importorskip("dask.array")
     x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
-
     await x
     y = await dask.delayed(inc)(1).persist()
     z = (x + x.T) - x.mean(axis=0)
@@ -1294,14 +1293,18 @@ async def test_compute_per_key(c, s, a, b):
     await c.compute(zsum)
 
     mbk.update()
+
+    # Keep only times which are 2% of max or greater.
+    # This means that the list of names is not stable (but max time is always preserved)
+    assert mbk.compute_source.data["names"]
+    assert set(mbk.compute_source.data["names"]).issubset(s.task_prefixes)
+    assert "angles" in mbk.compute_source.data
+
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(
         "http://localhost:%d/individual-compute-time-per-key" % s.http_server.port
     )
     assert response.code == 200
-    assert ("sum-aggregate") in mbk.compute_source.data["names"]
-    assert ("add") in mbk.compute_source.data["names"]
-    assert "angles" in mbk.compute_source.data.keys()
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})
