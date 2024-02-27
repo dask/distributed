@@ -20,6 +20,7 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
+  - jupyter-server-proxy
   - locket
   - lz4  # Only tested here
   - msgpack-python

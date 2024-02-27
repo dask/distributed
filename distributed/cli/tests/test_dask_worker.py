@@ -485,38 +485,29 @@ async def test_respect_host_listen_address(c, s, nanny, host):
 
 
 @pytest.mark.slow
-@gen_cluster(
-    client=True, nthreads=[], scheduler_kwargs={"dashboard_address": "localhost:8787"}
-)
-async def test_dashboard_non_standard_ports(c, s, requires_default_ports):
+def test_dashboard_non_standard_ports():
     pytest.importorskip("bokeh")
     requests = pytest.importorskip("requests")
 
-    try:
-        import jupyter_server_proxy  # noqa: F401
+    host = "127.0.0.1"
+    s_port = "3233"
+    s_dashboard_port = "3232"
+    w_dashboard_port = "4833"
+    s_cmd = f"dask scheduler --host {host} --port {s_port} --dashboard-address :{s_dashboard_port}"
+    w_cmd = f"dask worker {host}:{s_port} --dashboard-address :{w_dashboard_port} --host {host}"
 
-        proxy_exists = True
-    except ImportError:
-        proxy_exists = False
+    with popen(s_cmd.split()):
+        with popen(w_cmd.split()):
+            with Client(f"{host}:{s_port}") as c:
+                c.wait_for_workers(1)
 
-    with popen(
-        [
-            "dask",
-            "worker",
-            s.address,
-            "--dashboard-address",
-            ":4833",
-            "--host",
-            "127.0.0.1",
-        ]
-    ):
-        await c.wait_for_workers(1)
+            response = requests.get(f"http://{host}:{w_dashboard_port}/status")
+            response.raise_for_status()
 
-        response = requests.get("http://127.0.0.1:4833/status")
-        response.raise_for_status()
-        # TEST PROXYING WORKS
-        if proxy_exists:
-            response = requests.get("http://127.0.0.1:8787/proxy/4833/127.0.0.1/status")
+            # TEST PROXYING WORKS
+            response = requests.get(
+                f"http://{host}:{s_dashboard_port}/proxy/{w_dashboard_port}/{host}/status"
+            )
             response.raise_for_status()
 
     with pytest.raises(requests.ConnectionError):
