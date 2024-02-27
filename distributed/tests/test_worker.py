@@ -3008,11 +3008,13 @@ async def test_log_remove_worker(c, s, a, b):
 
     assert log.getvalue().splitlines() == [
         # Successful graceful
+        f"Retire worker addresses ['{a.address}']",
         f"Retiring worker '{a.address}' (stimulus_id='graceful')",
         f"Remove worker <WorkerState '{a.address}', name: 0, status: "
         "closing_gracefully, memory: 2, processing: 1> (stimulus_id='graceful')",
         f"Retired worker '{a.address}' (stimulus_id='graceful')",
         # Aborted graceful
+        f"Retire worker addresses ['{b.address}']",
         f"Retiring worker '{b.address}' (stimulus_id='graceful_abort')",
         f"Could not retire worker '{b.address}': unique data could not be "
         "moved to any other worker (stimulus_id='graceful_abort')",
