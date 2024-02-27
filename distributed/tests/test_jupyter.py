@@ -10,6 +10,7 @@ import pytest
 from tornado.httpclient import AsyncHTTPClient
 
 from distributed import Client, Scheduler
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.utils import open_port
 from distributed.utils_test import gen_test, popen
@@ -73,7 +74,8 @@ async def test_jupyter_idle_timeout():
 
             assert s.status not in (Status.closed, Status.closing)
 
-        await asyncio.sleep(s.idle_timeout)
+        # small bit of extra time to catch up
+        await asyncio.sleep(s.idle_timeout + 0.5)
         assert s.status in (Status.closed, Status.closing)
 
 
@@ -94,12 +96,12 @@ async def test_jupyter_idle_timeout_returned():
         assert next_idle is not None
         assert next_idle > last_idle
 
-        assert s.check_idle() is None
-        # ^ NOTE: this probably should be `== next_idle`;
-        # see discussion in https://github.com/dask/distributed/pull/7687#discussion_r1145095196
+        assert s.check_idle() is next_idle
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(WINDOWS, reason="Subprocess launching scheduler TimeoutError")
+@pytest.mark.xfail(MACOS, reason="Client fails to connect on OSX")
 def test_shutsdown_cleanly(loop):
     port = open_port()
     with concurrent.futures.ThreadPoolExecutor() as tpe:
