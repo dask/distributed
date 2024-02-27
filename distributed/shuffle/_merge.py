@@ -172,6 +172,7 @@ def merge_unpack(
     suffixes: Suffixes,
     left_index: bool,
     right_index: bool,
+    indicator: bool = False,
 ):
     from dask.dataframe.multi import merge_chunk
 
@@ -193,6 +194,7 @@ def merge_unpack(
         suffixes=suffixes,
         left_index=left_index,
         right_index=right_index,
+        indicator=indicator,
     )
 
 
@@ -430,5 +432,6 @@ class HashJoinP2PLayer(Layer):
                 self.suffixes,
                 self.left_index,
                 self.right_index,
+                self.indicator,
             )
         return dsk
