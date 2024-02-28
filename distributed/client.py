@@ -1497,8 +1497,7 @@ class Client(SyncMethodMixin):
         await self._close(
             # if we're handling an exception, we assume that it's more
             # important to deliver that exception than shutdown gracefully.
-            fast=exc_type
-            is not None
+            fast=(exc_type is not None)
         )
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -1669,16 +1668,15 @@ class Client(SyncMethodMixin):
                 await wait_for(handle_report_task, 0 if fast else 2)
 
     @log_errors
-    async def _close(self, fast=False):
-        """
-        Send close signal and wait until scheduler completes
+    async def _close(self, fast: bool = False) -> None:
+        """Send close signal and wait until scheduler completes
 
         If fast is True, the client will close forcefully, by cancelling tasks
         the background _handle_report_task.
         """
-        # TODO: aclose more forcefully by aborting the RPC and cancelling all
+        # TODO: close more forcefully by aborting the RPC and cancelling all
         # background tasks.
-        # see https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
+        # See https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
         if self.status == "closed":
             return
 
@@ -1773,18 +1771,7 @@ class Client(SyncMethodMixin):
                 coro = wait_for(coro, timeout)
             return coro
 
-        if self._start_arg is None:
-            with suppress(AttributeError):
-                f = self.cluster.close()
-                if asyncio.iscoroutine(f):
-
-                    async def _():
-                        await f
-
-                    self.sync(_)
-
         sync(self.loop, self._close, fast=True, callback_timeout=timeout)
-
         assert self.status == "closed"
 
         if not is_python_shutting_down():

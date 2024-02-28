@@ -3058,7 +3058,7 @@ class FlakyConnectionPool(ConnectionPool):
 
 
 @gen_cluster(client=True)
-async def test_gather_failing_cnn_recover(c, s, a, b):
+async def test_gather_failing_can_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
     rpc = await FlakyConnectionPool(failing_connections=1)
     with mock.patch.object(s, "rpc", rpc), dask.config.set(
