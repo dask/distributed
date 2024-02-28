@@ -4268,7 +4268,7 @@ class Client(SyncMethodMixin):
 
         To read::
             import gzip, msgpack
-            with gzip.open("filename") as fd:
+            with gzip.open("filename.msgpack.gz") as fd:
                 state = msgpack.unpack(fd)
 
         Parameters

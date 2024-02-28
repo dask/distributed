@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import Any
+from typing import Any, Literal
 
-from distributed.cluster_dump import DEFAULT_CLUSTER_DUMP_EXCLUDE
+from dask.utils import _deprecated_kwarg
+
+from distributed.cluster_dump import (
+    DEFAULT_CLUSTER_DUMP_EXCLUDE,
+    DEFAULT_CLUSTER_DUMP_FORMAT,
+)
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import Scheduler
 
@@ -17,12 +22,18 @@ class ClusterDump(SchedulerPlugin):
     for debugging purposes.
     """
 
+    @_deprecated_kwarg("format", None)
     def __init__(
         self,
         url: str,
         exclude: Collection[str] = DEFAULT_CLUSTER_DUMP_EXCLUDE,
+        format: Literal["msgpack"] = DEFAULT_CLUSTER_DUMP_FORMAT,
         **storage_options: dict[str, Any],
     ):
+        if format == "yaml":
+            raise ValueError(
+                "The 'yaml' format is not supported anymore; please use 'msgpack' instead."
+            )
         self.url = url
         self.exclude = exclude
         self.storage_options = storage_options
