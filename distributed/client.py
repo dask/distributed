@@ -37,6 +37,7 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
 from dask.typing import no_default
 from dask.utils import (
+    _deprecated_kwarg,
     apply,
     ensure_dict,
     format_bytes,
@@ -4232,12 +4233,13 @@ class Client(SyncMethodMixin):
             self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
+    @_deprecated_kwarg("format", None)
     def dump_cluster_state(
         self,
         filename: str = "dask-cluster-dump",
         write_from_scheduler: bool | None = None,
         exclude: Collection[str] = ("run_spec",),
-        format: Literal["msgpack", "yaml"] = "msgpack",
+        format: Literal["msgpack"] = "msgpack",
         **storage_options,
     ):
         """Extract a dump of the entire cluster state and persist to disk or a URL.
@@ -4247,7 +4249,7 @@ class Client(SyncMethodMixin):
         can be large. On a large or long-running cluster, this can take several minutes.
         The scheduler may be unresponsive while the dump is processed.
 
-        Results will be stored in a dict::
+        Results will be stored in a dict in a ``.msgpack.gz`` file::
 
             {
                 "scheduler": {...},  # scheduler state
@@ -4264,11 +4266,15 @@ class Client(SyncMethodMixin):
                 }
             }
 
+        To read::
+            import gzip, msgpack
+            with gzip.open("filename") as fd:
+                state = msgpack.unpack(fd)
+
         Parameters
         ----------
         filename:
-            The path or URL to write to. The appropriate file suffix (``.msgpack.gz`` or
-            ``.yaml``) will be appended automatically.
+            The path or URL to write to. The ``.msgpack.gz`` file suffix is appended automatically.
 
             Must be a path supported by :func:`fsspec.open` (like ``s3://my-bucket/cluster-dump``,
             or ``cluster-dumps/dump``). See ``write_from_scheduler`` to control whether
@@ -4296,25 +4302,6 @@ class Client(SyncMethodMixin):
             Defaults to exclude ``run_spec``, which is the serialized user code.
             This is typically not required for debugging. To allow serialization
             of this, pass an empty tuple.
-        format:
-            Either ``"msgpack"`` or ``"yaml"``. If msgpack is used (default),
-            the output will be stored in a gzipped file as msgpack.
-
-            To read::
-
-                import gzip, msgpack
-                with gzip.open("filename") as fd:
-                    state = msgpack.unpack(fd)
-
-            or::
-
-                import yaml
-                try:
-                    from yaml import CLoader as Loader
-                except ImportError:
-                    from yaml import Loader
-                with open("filename") as fd:
-                    state = yaml.load(fd, Loader=Loader)
         **storage_options:
             Any additional arguments to :func:`fsspec.open` when writing to a URL.
         """
@@ -4332,7 +4319,6 @@ class Client(SyncMethodMixin):
         filename: str = "dask-cluster-dump",
         write_from_scheduler: bool | None = None,
         exclude: Collection[str] = cluster_dump.DEFAULT_CLUSTER_DUMP_EXCLUDE,
-        format: Literal["msgpack", "yaml"] = cluster_dump.DEFAULT_CLUSTER_DUMP_FORMAT,
         **storage_options,
     ):
         filename = str(filename)
@@ -4343,14 +4329,12 @@ class Client(SyncMethodMixin):
             await self.scheduler.dump_cluster_state_to_url(
                 url=filename,
                 exclude=exclude,
-                format=format,
                 **storage_options,
             )
         else:
             await cluster_dump.write_state(
                 partial(self.scheduler.get_cluster_state, exclude=exclude),
                 filename,
-                format,
                 **storage_options,
             )
 

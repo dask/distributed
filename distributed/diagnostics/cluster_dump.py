@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import Any, Literal
+from typing import Any
 
-from distributed.cluster_dump import (
-    DEFAULT_CLUSTER_DUMP_EXCLUDE,
-    DEFAULT_CLUSTER_DUMP_FORMAT,
-)
+from distributed.cluster_dump import DEFAULT_CLUSTER_DUMP_EXCLUDE
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import Scheduler
 
@@ -24,12 +21,10 @@ class ClusterDump(SchedulerPlugin):
         self,
         url: str,
         exclude: Collection[str] = DEFAULT_CLUSTER_DUMP_EXCLUDE,
-        format_: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
         **storage_options: dict[str, Any],
     ):
         self.url = url
         self.exclude = exclude
-        self.format = format_
         self.storage_options = storage_options
 
     async def start(self, scheduler: Scheduler) -> None:
@@ -37,5 +32,5 @@ class ClusterDump(SchedulerPlugin):
 
     async def before_close(self) -> None:
         await self.scheduler.dump_cluster_state_to_url(
-            self.url, self.exclude, self.format, **self.storage_options
+            self.url, self.exclude, format="msgpack", **self.storage_options
         )

@@ -52,11 +52,11 @@ from tlz import (
 from tornado.ioloop import IOLoop
 
 import dask
-import dask.utils
 from dask.base import TokenizationError, normalize_token, tokenize
 from dask.core import get_deps, iskey, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
+    _deprecated_kwarg,
     ensure_dict,
     format_bytes,
     format_time,
@@ -3988,11 +3988,12 @@ class Scheduler(SchedulerState, ServerNode):
             "versions": {"scheduler": self.versions(), "workers": worker_versions},
         }
 
+    @_deprecated_kwarg("format", None)
     async def dump_cluster_state_to_url(
         self,
         url: str,
         exclude: Collection[str],
-        format: Literal["msgpack", "yaml"],
+        format: Literal["msgpack"] = "msgpack",
         **storage_options: dict[str, Any],
     ) -> None:
         "Write a cluster state dump to an fsspec-compatible URL."

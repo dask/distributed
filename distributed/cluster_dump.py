@@ -6,16 +6,17 @@ import asyncio
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from pathlib import Path
-from typing import IO, Any, Literal
+from typing import Any, Literal
 
 import msgpack
 
 from dask.typing import Key
+from dask.utils import _deprecated_kwarg
 
 from distributed._stories import scheduler_story as _scheduler_story
 from distributed._stories import worker_story as _worker_story
 
-DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack" | "yaml"] = "msgpack"
+DEFAULT_CLUSTER_DUMP_FORMAT: Literal["msgpack"] = "msgpack"
 DEFAULT_CLUSTER_DUMP_EXCLUDE: Collection[str] = ("run_spec",)
 
 
@@ -28,36 +29,28 @@ def _tuple_to_list(node):
         return node
 
 
+@_deprecated_kwarg("format", None)
 async def write_state(
     get_state: Callable[[], Awaitable[Any]],
     url: str,
-    format: Literal["msgpack", "yaml"] = DEFAULT_CLUSTER_DUMP_FORMAT,
+    format: Literal["msgpack"] = DEFAULT_CLUSTER_DUMP_FORMAT,
     **storage_options: dict[str, Any],
 ) -> None:
     "Await a cluster dump, then serialize and write it to a path"
     if format == "msgpack":
-        mode = "wb"
-        suffix = ".msgpack.gz"
-        if not url.endswith(suffix):
-            url += suffix
-        writer = msgpack.pack
-    elif format == "yaml":
-        import yaml
-
-        mode = "w"
-        suffix = ".yaml"
-        if not url.endswith(suffix):
-            url += suffix
-
-        def writer(state: dict, f: IO) -> None:
-            # YAML adds unnecessary `!!python/tuple` tags; convert tuples to lists to avoid them.
-            # Unnecessary for msgpack, since tuples and lists are encoded the same.
-            yaml.dump(_tuple_to_list(state), f)
-
+        pass
+    elif format == "yaml":  # type: ignore[unreachable]
+        raise ValueError(
+            "The 'yaml' format is not supported anymore; please use 'msgpack' instead."
+        )
     else:
         raise ValueError(
-            f"Unsupported format {format!r}. Possible values are 'msgpack' or 'yaml'."
+            f"Unsupported format {format!r}; please use 'msgpack' instead."
         )
+
+    suffix = ".msgpack.gz"
+    if not url.endswith(suffix):
+        url += suffix
 
     # Eagerly open the file to catch any errors before doing the full dump
     # NOTE: `compression="infer"` will automatically use gzip via the `.gz` suffix
@@ -65,11 +58,11 @@ async def write_state(
     # heavy import. Do lazy import to reduce import time
     import fsspec
 
-    with fsspec.open(url, mode, compression="infer", **storage_options) as f:
+    with fsspec.open(url, "wb", compression="infer", **storage_options) as f:
         state = await get_state()
         # Write from a thread so we don't block the event loop quite as badly
         # (the writer will still hold the GIL a lot though).
-        await asyncio.to_thread(writer, state, f)
+        await asyncio.to_thread(msgpack.pack, state, f)
 
 
 def load_cluster_dump(url: str, **kwargs: Any) -> dict:
@@ -78,8 +71,8 @@ def load_cluster_dump(url: str, **kwargs: Any) -> dict:
     Parameters
     ----------
     url : str
-        Name of the disk artefact. This should have either a
-        ``.msgpack.gz`` or ``yaml`` suffix, depending on the dump format.
+        Name of the disk artefact. This should have a
+        ``.msgpack.gz`` suffix.
     **kwargs :
         Extra arguments passed to :func:`fsspec.open`.
 
@@ -89,23 +82,23 @@ def load_cluster_dump(url: str, **kwargs: Any) -> dict:
         The cluster state at the time of the dump.
     """
     if url.endswith(".msgpack.gz"):
-        mode = "rb"
-        reader = msgpack.unpack
-    elif url.endswith(".yaml"):
-        import yaml
+        pass
 
-        mode = "r"
-        reader = yaml.safe_load
+    elif url.endswith(".yaml"):
+        raise ValueError(
+            "The 'yaml' format is not supported anymore; cluster dumps area written in"
+            " the 'msgpack' format instead."
+        )
     else:
-        raise ValueError(f"url ({url}) must have a .msgpack.gz or .yaml suffix")
+        raise ValueError(f"url ({url}) must have a .msgpack.gz suffix")
 
     kwargs.setdefault("compression", "infer")
     # This module is the only place where fsspec is used and it is a relatively
     # heavy import. Do lazy import to reduce import time
     import fsspec
 
-    with fsspec.open(url, mode, **kwargs) as f:
-        return reader(f)
+    with fsspec.open(url, "rb", **kwargs) as f:
+        return msgpack.unpack(f)
 
 
 class DumpArtefact(Mapping):
