@@ -539,3 +539,22 @@ async def test_merge_does_not_deadlock_if_worker_joins(c, s, a):
         result = await result
     expected = pd.merge(pdf1, pdf2, left_on="a", right_on="x")
     assert_eq(result, expected, check_index=False)
+
+
+@gen_cluster(client=True)
+async def test_merge_indicator(c, s, a, b):
+    data = {
+        "id": [1, 2, 3],
+        "test": [4, 5, 6],
+    }
+    pdf = pd.DataFrame(data)
+    df = dd.from_pandas(pdf, npartitions=2)
+    result = df.merge(df, on="id", how="outer", indicator=True)
+    x = c.compute(result)
+    x = await x
+    expected = pdf.merge(pdf, on="id", how="outer", indicator=True)
+
+    pd.testing.assert_frame_equal(
+        x.sort_values("id", ignore_index=True),
+        expected.sort_values("id", ignore_index=True),
+    )
