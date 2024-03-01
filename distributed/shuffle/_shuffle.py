@@ -374,7 +374,7 @@ def split_by_partition(
 
     partition = np.asarray(t[column])
     if drop_column:
-        t = t.drop(column)
+        t = t.drop([column])
     splits = np.where(partition[1:] != partition[:-1])[0] + 1
     splits = np.concatenate([[0], splits])
 
