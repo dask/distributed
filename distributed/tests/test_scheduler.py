@@ -4890,3 +4890,64 @@ async def test_resubmit_different_task_same_key_warns_only_once(
 
     async with Worker(s.address):
         assert await c.gather(zs) == [2, 3, 4]  # Kept old ys
+
+
+def block(x, in_event, block_event):
+    in_event.set()
+    block_event.wait()
+    return x
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1, {"resources": {"a": 1}}), ("", 1, {"resources": {"b": 1}})],
+    config={"distributed.scheduler.allowed-failures": 1},
+    Worker=Nanny,
+)
+async def test_fan_out_pattern_deadlock(c, s, a, b):
+    """Regression test for https://github.com/dask/distributed/issues/8548
+
+    Conceptually, this test simulates a fan-out based workload, where the worker
+    that processed the single input task of the fan-out dies once the fan-out task is processed
+    but before the scheduler recognizes that the single input task has successfully been sent to
+    another worker which now processes a fan-out task. Then, workers continue to die during processing
+    of the input tasks.
+
+    This test heavily uses resources to force scheduling decisions.
+    """
+    in_ancestor = Event()
+    block_ancestor = Event()
+    in_on_a_descendant = Event()
+    in_on_b_descendant = Event()
+    block_descendants = Event()
+    await block_ancestor.set()
+    f = c.submit(block, 1, in_ancestor, block_ancestor, key="f", resources={"a": 1})
+    g = c.submit(inc, f, key="g", resources={"a": 1})
+    h1 = c.submit(
+        block, g, in_on_a_descendant, block_descendants, key="h1", resources={"a": 1}
+    )
+    h2 = c.submit(
+        block, g, in_on_b_descendant, block_descendants, key="h2", resources={"b": 1}
+    )
+
+    await asyncio.gather(
+        wait_for_state("g", "memory", s),
+        in_on_a_descendant.wait(),
+        in_on_b_descendant.wait(),
+    )
+    await asyncio.gather(in_ancestor.clear(), block_ancestor.clear())
+    await a.process.process.kill()
+
+    await in_ancestor.wait()
+    await in_ancestor.clear()
+    await a.process.process.kill()
+
+    await in_ancestor.wait()
+    await in_ancestor.clear()
+    await a.process.process.kill()
+
+    await block_descendants.set()
+    # await block_ancestor.set()
+    await h2
+    with pytest.raises(KilledWorker, match="Attempted to run task 'h1'"):
+        await h1
