@@ -1964,7 +1964,7 @@ class SchedulerState:
                 )
 
                 v = a_recs.get(key, finish)
-                # The inner rec has higher priority? Why is that?
+                # The inner rec has higher priority? Is that always desired?
                 func = self._TRANSITIONS_TABLE["released", v]
                 b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
 
@@ -2084,9 +2084,8 @@ class SchedulerState:
             assert not ts.processing_on
             for dts in ts.dependencies:
                 assert dts.state not in {"forgotten", "erred"}, (
-                    key,
-                    dts.key,
-                    dts.state,
+                    ts,
+                    dts,
                     self.transition_log,
                 )
 
@@ -2492,7 +2491,6 @@ class SchedulerState:
             recommendations[key] = "waiting"
 
         for dts in ts.waiters or ():
-            # Why would a waiter be in processing?
             if dts.state in ("no-worker", "processing"):
                 recommendations[dts.key] = "waiting"
             elif dts.state == "waiting":
@@ -2514,7 +2512,6 @@ class SchedulerState:
             assert ts.exception_blame
             assert not ts.who_has
             assert not ts.waiting_on
-            # assert not ts.waiters
 
         failing_ts = ts.exception_blame
         assert failing_ts
