@@ -4900,11 +4900,10 @@ def block(x, in_event, block_event):
 
 @gen_cluster(
     client=True,
-    nthreads=[("", 1, {"resources": {"a": 1}}), ("", 1, {"resources": {"b": 1}})],
+    nthreads=[("", 1, {"resources": {"a": 1}})],
     config={"distributed.scheduler.allowed-failures": 1},
-    Worker=Nanny,
 )
-async def test_fan_out_pattern_deadlock(c, s, a, b):
+async def test_fan_out_pattern_deadlock(c, s, a):
     """Regression test for https://github.com/dask/distributed/issues/8548
 
     Conceptually, this test simulates a fan-out based workload, where the worker
@@ -4920,34 +4919,55 @@ async def test_fan_out_pattern_deadlock(c, s, a, b):
     in_on_a_descendant = Event()
     in_on_b_descendant = Event()
     block_descendants = Event()
-    await block_ancestor.set()
-    f = c.submit(block, 1, in_ancestor, block_ancestor, key="f", resources={"a": 1})
-    g = c.submit(inc, f, key="g", resources={"a": 1})
+    f = c.submit(block, 1, in_ancestor, block_ancestor, key="f", resources={"b": 1})
+    g = c.submit(inc, f, key="g", resources={"b": 1})
     h1 = c.submit(
-        block, g, in_on_a_descendant, block_descendants, key="h1", resources={"a": 1}
+        block, g, in_on_b_descendant, block_descendants, key="h1", resources={"b": 1}
     )
     h2 = c.submit(
-        block, g, in_on_b_descendant, block_descendants, key="h2", resources={"b": 1}
+        block, g, in_on_a_descendant, block_descendants, key="h2", resources={"a": 1}
     )
+    with captured_logger("distributed.scheduler", level=logging.ERROR) as logger:
+        async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
+            await block_ancestor.set()
+            await asyncio.gather(
+                in_on_a_descendant.wait(),
+                in_on_b_descendant.wait(),
+            )
+            await in_ancestor.clear()
+            while len(s.tasks["g"].who_has) < 2:
+                await asyncio.sleep(0.1)
+            await s.remove_worker(b.address, stimulus_id="remove_b")
+            await b.close(timeout=0)
+        await block_ancestor.clear()
 
-    await asyncio.gather(
-        wait_for_state("g", "memory", s),
-        in_on_a_descendant.wait(),
-        in_on_b_descendant.wait(),
+        async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
+            await in_ancestor.wait()
+            await in_ancestor.clear()
+            await s.remove_worker(b.address, stimulus_id="remove_b")
+            await block_ancestor.set()
+            await b.close(timeout=0)
+        await block_ancestor.clear()
+
+        async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
+            await in_ancestor.wait()
+            await in_ancestor.clear()
+            await s.remove_worker(b.address, stimulus_id="remove_b")
+            await block_ancestor.set()
+            await b.close(timeout=0)
+        await block_ancestor.clear()
+
+        await block_descendants.set()
+        await block_ancestor.set()
+        with pytest.raises(KilledWorker, match="Attempted to run task 'f'"):
+            await h2
+
+        with pytest.raises(KilledWorker, match="Attempted to run task 'h1'"):
+            await h1
+
+        # Make sure h2 gets forgotten on a
+        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+    assert (
+        logger.getvalue()
+        == "Task h1 marked as failed because 2 workers died while trying to run it\nTask f marked as failed because 2 workers died while trying to run it\n"
     )
-    await asyncio.gather(in_ancestor.clear(), block_ancestor.clear())
-    await a.process.process.kill()
-
-    await in_ancestor.wait()
-    await in_ancestor.clear()
-    await a.process.process.kill()
-
-    await in_ancestor.wait()
-    await in_ancestor.clear()
-    await a.process.process.kill()
-
-    await block_descendants.set()
-    # await block_ancestor.set()
-    await h2
-    with pytest.raises(KilledWorker, match="Attempted to run task 'h1'"):
-        await h1

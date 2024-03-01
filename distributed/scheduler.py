@@ -5049,6 +5049,19 @@ class Scheduler(SchedulerState, ServerNode):
                     "stimulus_id": stimulus_id,
                 }
             ]
+        elif ts.state == "erred":
+            logger.debug(
+                "Received already erred task, worker: %s" ", key: %s",
+                worker,
+                key,
+            )
+            worker_msgs[worker] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "stimulus_id": stimulus_id,
+                }
+            ]
         elif ts.run_id != run_id:
             if not ts.processing_on or ts.processing_on.address != worker:
                 logger.debug(
