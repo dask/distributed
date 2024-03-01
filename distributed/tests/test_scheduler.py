@@ -4948,17 +4948,13 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await in_ancestor.wait()
             await in_ancestor.clear()
             await s.remove_worker(b.address, stimulus_id="remove_b")
-            await block_ancestor.set()
             await b.close(timeout=0)
-        await block_ancestor.clear()
 
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
             await in_ancestor.wait()
             await in_ancestor.clear()
             await s.remove_worker(b.address, stimulus_id="remove_b")
-            await block_ancestor.set()
             await b.close(timeout=0)
-        await block_ancestor.clear()
 
         # The fanned-out tasks err because their transitive dependency 'f' erred before they were computed
         with pytest.raises(KilledWorker, match="Attempted to run task 'f'"):
