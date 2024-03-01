@@ -272,6 +272,7 @@ distributed:
       ignore-modules:
         - asyncio
         - functools
+        - threading
         - datashader
         - dask
         - debugpy
