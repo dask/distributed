@@ -2709,7 +2709,7 @@ class SchedulerState:
         )
 
         for dts in ts.dependents:
-            if dts.who_has:
+            if not dts.who_has:
                 dts.exception_blame = failing_ts
                 recommendations[dts.key] = "erred"
 
