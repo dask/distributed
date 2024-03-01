@@ -4915,16 +4915,21 @@ async def test_fan_out_pattern_deadlock(c, s, a):
     block_descendants = Event()
 
     # Input task to 'g' that we can fail
-    f = c.submit(block, 1, in_ancestor, block_ancestor, key="f", resources={"b": 1})
-    g = c.submit(inc, f, key="g", resources={"b": 1})
+    with dask.annotate(resources={"b": 1}):
+        f = delayed(block)(1, in_ancestor, block_ancestor, dask_key_name="f")
+        g = delayed(inc)(f, dask_key_name="g")
 
-    # Fan-out from 'g' and run h1 and h2 on different workers
-    h1 = c.submit(
-        block, g, in_on_b_descendant, block_descendants, key="h1", resources={"b": 1}
-    )
-    h2 = c.submit(
-        block, g, in_on_a_descendant, block_descendants, key="h2", resources={"a": 1}
-    )
+        # Fan-out from 'g' and run h1 and h2 on different workers
+        h1 = delayed(block)(
+            g, in_on_b_descendant, block_descendants, dask_key_name="h1"
+        )
+    with dask.annotate(resources={"a": 1}):
+        h2 = delayed(block)(
+            g, in_on_a_descendant, block_descendants, dask_key_name="h2"
+        )
+    del g
+
+    f, h1, h2 = c.compute([f, h1, h2])
     with captured_logger("distributed.scheduler", level=logging.ERROR) as logger:
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
             await block_ancestor.set()
@@ -4956,16 +4961,14 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await s.remove_worker(b.address, stimulus_id="remove_b")
             await b.close(timeout=0)
 
-        # The fanned-out tasks err because their transitive dependency 'f' erred before they were computed
-        with pytest.raises(KilledWorker, match="Attempted to run task 'f'"):
-            await h2
-
         await block_descendants.set()
-        await block_ancestor.set()
+        await h2
 
         with pytest.raises(KilledWorker, match="Attempted to run task 'h1'"):
             await h1
 
+        del h1, h2
+        await block_ancestor.set()
         # Make sure that h2 gets forgotten on worker 'a'
         await async_poll_for(lambda: not a.state.tasks, timeout=5)
     # Ensure that no other errors including transition failures were logged
