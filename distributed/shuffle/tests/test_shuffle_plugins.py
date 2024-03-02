@@ -104,7 +104,8 @@ def test_split_by_worker_many_workers():
     assert sum(map(len, out.values())) == len(df)
 
 
-def test_split_by_partition():
+@pytest.mark.parametrize("drop_column", [True, False])
+def test_split_by_partition(drop_column):
     pa = pytest.importorskip("pyarrow")
 
     df = pd.DataFrame(
@@ -115,7 +116,9 @@ def test_split_by_partition():
     )
     t = pa.Table.from_pandas(df)
 
-    out = split_by_partition(t, "_partition")
+    out = split_by_partition(t, "_partition", drop_column)
     assert set(out) == {1, 2, 3}
+    if drop_column:
+        df = df.drop(columns="_partition")
     assert out[1].column_names == list(df.columns)
     assert sum(map(len, out.values())) == len(df)
