@@ -4912,7 +4912,8 @@ async def test_fan_out_pattern_deadlock(c, s, a):
     block_ancestor = Event()
     in_on_a_descendant = Event()
     in_on_b_descendant = Event()
-    block_descendants = Event()
+    block_on_a_descendant = Event()
+    block_on_b_descendant = Event()
 
     # Input task to 'g' that we can fail
     with dask.annotate(resources={"b": 1}):
@@ -4921,11 +4922,11 @@ async def test_fan_out_pattern_deadlock(c, s, a):
 
         # Fan-out from 'g' and run h1 and h2 on different workers
         h1 = delayed(block)(
-            g, in_on_b_descendant, block_descendants, dask_key_name="h1"
+            g, in_on_b_descendant, block_on_b_descendant, dask_key_name="h1"
         )
     with dask.annotate(resources={"a": 1}):
         h2 = delayed(block)(
-            g, in_on_a_descendant, block_descendants, dask_key_name="h2"
+            g, in_on_a_descendant, block_on_a_descendant, dask_key_name="h2"
         )
     del g
 
@@ -4944,7 +4945,8 @@ async def test_fan_out_pattern_deadlock(c, s, a):
                 await asyncio.sleep(0.1)
             # Remove worker 'b' while it's processing h1
             await s.remove_worker(b.address, stimulus_id="remove_b")
-            await b.close(timeout=0)
+            await block_on_b_descendant.set()
+            await b.close()
         await block_ancestor.clear()
 
         # Repeatedly remove new instances of the 'b' worker while it processes 'f'
@@ -4953,22 +4955,24 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await in_ancestor.wait()
             await in_ancestor.clear()
             await s.remove_worker(b.address, stimulus_id="remove_b")
-            await b.close(timeout=0)
+            await block_ancestor.set()
+            await b.close()
+        await block_ancestor.clear()
 
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
             await in_ancestor.wait()
             await in_ancestor.clear()
             await s.remove_worker(b.address, stimulus_id="remove_b")
-            await b.close(timeout=0)
+            await block_ancestor.set()
+            await b.close()
 
-        await block_descendants.set()
+        await block_on_a_descendant.set()
         await h2
 
         with pytest.raises(KilledWorker, match="Attempted to run task 'h1'"):
             await h1
 
         del h1, h2
-        await block_ancestor.set()
         # Make sure that h2 gets forgotten on worker 'a'
         await async_poll_for(lambda: not a.state.tasks, timeout=5)
     # Ensure that no other errors including transition failures were logged
