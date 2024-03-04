@@ -1014,7 +1014,8 @@ async def test_heartbeat(c, s, a, b):
 
 
 @pytest.mark.filterwarnings("ignore:DatetimeTZBlock")  # pandas >=2.2 vs. pyarrow <15
-def test_processing_chain(tmp_path):
+@pytest.mark.parametrize("drop_column", [True, False])
+def test_processing_chain(tmp_path, drop_column):
     """
     This is a serial version of the entire compute chain
 
@@ -1161,7 +1162,8 @@ def test_processing_chain(tmp_path):
     # We split them again, and then dump them down to disk
 
     splits_by_worker = {
-        worker: split_by_partition(t, "_partitions") for worker, t in by_worker.items()
+        worker: split_by_partition(t, "_partitions", drop_column)
+        for worker, t in by_worker.items()
     }
 
     splits_by_worker = {
@@ -1186,7 +1188,9 @@ def test_processing_chain(tmp_path):
     out = {}
     for k in range(npartitions):
         shards, _ = read_from_disk(tmp_path / str(k))
-        out[k] = convert_shards(shards, meta)
+        out[k] = convert_shards(shards, meta, "_partitions", drop_column)
+    if drop_column:
+        df = df.drop(columns="_partitions")
 
     shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(
@@ -1613,6 +1617,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
         directory,
         loop,
         disk,
+        drop_column,
         Shuffle=DataFrameShuffleRun,
     ):
         s = Shuffle(
@@ -1631,6 +1636,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
             disk=disk,
+            drop_column=drop_column,
             loop=loop,
         )
         self.shuffles[name] = s
@@ -1644,6 +1650,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 @pytest.mark.parametrize("npartitions", [1, 20])
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
 @pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("drop_column", [True, False])
 @gen_test()
 async def test_basic_lowlevel_shuffle(
     tmp_path,
@@ -1652,6 +1659,7 @@ async def test_basic_lowlevel_shuffle(
     npartitions,
     barrier_first_worker,
     disk,
+    drop_column,
 ):
     pa = pytest.importorskip("pyarrow")
 
@@ -1686,6 +1694,7 @@ async def test_basic_lowlevel_shuffle(
                     directory=tmp_path,
                     loop=loop,
                     disk=disk,
+                    drop_column=drop_column,
                 )
             )
         random.seed(42)
@@ -1767,6 +1776,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
             Shuffle=ErrorOffload,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1776,6 +1786,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
         )
         try:
             sB.add_partition(dfs[0], 0)
@@ -1823,6 +1834,7 @@ async def test_error_send(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
             Shuffle=ErrorSend,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1832,6 +1844,7 @@ async def test_error_send(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
         )
         try:
             sA.add_partition(dfs[0], 0)
@@ -1878,6 +1891,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
             Shuffle=ErrorReceive,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1887,6 +1901,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
         )
         try:
             sB.add_partition(dfs[0], 0)
