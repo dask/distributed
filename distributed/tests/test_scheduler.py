@@ -4961,3 +4961,72 @@ async def test_fan_out_pattern_deadlock(c, s, a):
         logger.getvalue()
         == "Task hb marked as failed because 1 workers died while trying to run it\nTask f marked as failed because 1 workers died while trying to run it\n"
     )
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1, {"resources": {"a": 1}})],
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_stimulus_from_erred_task(c, s, a):
+    """This test heavily uses resources to force scheduling decisions."""
+    in_f, block_f = Event(), Event()
+    in_g, block_g = Event(), Event()
+
+    with dask.annotate(resources={"b": 1}):
+        f = delayed(block)(1, in_f, block_f, dask_key_name="f")
+
+    with dask.annotate(resources={"a": 1}):
+        g = delayed(block)(f, in_g, block_g, dask_key_name="g")
+
+    f, g = c.compute([f, g])
+    with captured_logger("distributed.scheduler", level=logging.ERROR) as logger:
+        frozen_stream_from_a_ctx = freeze_batched_send(a.batched_stream)
+        frozen_stream_from_a_ctx.__enter__()
+
+        async with Worker(s.address, nthreads=1, resources={"b": 1}) as b1:
+            await block_f.set()
+            await in_g.wait()
+            await in_f.clear()
+            frozen_stream_to_a_ctx = freeze_batched_send(s.stream_comms[a.address])
+            frozen_stream_to_a_ctx.__enter__()
+            await s.remove_worker(b1.address, stimulus_id="remove_b1")
+            await block_f.clear()
+
+        # Remove the new instance of the 'b' worker while it processes 'f'
+        # to trigger an transition for 'f' to 'erred'
+        async with Worker(s.address, nthreads=1, resources={"b": 1}) as b2:
+            await in_f.wait()
+            await in_f.clear()
+            await s.remove_worker(b2.address, stimulus_id="remove_b2")
+            await block_f.set()
+
+        with pytest.raises(KilledWorker, match="Attempted to run task 'f'"):
+            await f
+
+        # g has already been transitioned to 'erred' because 'f' failed
+        with pytest.raises(KilledWorker, match="Attempted to run task 'f'"):
+            await g
+
+        # Finish 'g' and let the scheduler know so it can trigger cleanup
+        await block_g.set()
+        with mock.patch.object(
+            s, "stimulus_task_finished", wraps=s.stimulus_task_finished
+        ) as wrapped_stimulus:
+            frozen_stream_from_a_ctx.__exit__(None, None, None)
+            # Make sure the `stimulus_task_finished` gets processed
+            await async_poll_for(lambda: wrapped_stimulus.call_count == 1, timeout=5)
+
+        # Allow the scheduler to talk to the worker again
+        frozen_stream_to_a_ctx.__exit__(None, None, None)
+        # Make sure all data gets forgotten on worker 'a'
+        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+
+        # del f, g
+        # await async_poll_for(lambda: not a.state.tasks, timeout=5)
+
+    # Ensure that no other errors including transition failures were logged
+    assert (
+        logger.getvalue()
+        == "Task f marked as failed because 1 workers died while trying to run it\n"
+    )
