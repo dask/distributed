@@ -801,7 +801,7 @@ def _getmodulename_with_path(fname: str) -> str:
     except KeyError:
         pass
 
-    for modname, mod in sys.modules.items():
+    for modname, mod in sys.modules.copy().items():
         fname2 = getattr(mod, "__file__", None)
         if fname2:
             _getmodulename_with_path_map[fname2] = modname
@@ -849,7 +849,7 @@ class _LogErrors:
             return
 
         stack = traceback.extract_tb(tb)
-        frame = stack[self.unroll_stack]
+        frame = stack[min(self.unroll_stack, len(stack) - 1)]
         modname = _getmodulename_with_path(frame.filename)
 
         try:

@@ -5182,14 +5182,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws = self.workers[address]
 
-        event_msg = {
-            "action": "remove-worker",
-            "processing-tasks": {ts.key for ts in ws.processing},
-        }
-        self.log_event(address, event_msg.copy())
-        event_msg["worker"] = address
-        self.log_event("all", event_msg)
-
         logger.info(f"Remove worker {ws} ({stimulus_id=})")
         if close:
             with suppress(AttributeError, CommClosedError):
@@ -5220,6 +5212,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: Recs = {}
 
+        processing_keys = {ts.key for ts in ws.processing}
         for ts in list(ws.processing):
             k = ts.key
             recommendations[k] = "released"
@@ -5244,20 +5237,48 @@ class Scheduler(SchedulerState, ServerNode):
                         worker=address,
                     )
                     recommendations.update(r)
-                    logger.info(
+                    logger.error(
                         "Task %s marked as failed because %d workers died"
                         " while trying to run it",
                         ts.key,
                         ts.suspicious,
                     )
 
+        recompute_keys = set()
+        lost_keys = set()
+
         for ts in list(ws.has_what):
             self.remove_replica(ts, ws)
             if not ts.who_has:
                 if ts.run_spec:
+                    recompute_keys.add(ts.key)
                     recommendations[ts.key] = "released"
                 else:  # pure data
+                    lost_keys.add(ts.key)
                     recommendations[ts.key] = "forgotten"
+
+        if recompute_keys:
+            logger.warning(
+                f"Removing worker {ws.address!r} caused the cluster to lose "
+                "already computed task(s), which will be recomputed elsewhere: "
+                f"{recompute_keys} ({stimulus_id=})"
+            )
+        if lost_keys:
+            logger.error(
+                f"Removing worker {ws.address!r} caused the cluster to lose scattered "
+                f"data, which can't be recovered: {lost_keys} ({stimulus_id=})"
+            )
+
+        event_msg = {
+            "action": "remove-worker",
+            "processing-tasks": processing_keys,
+            "lost-computed-tasks": recompute_keys,
+            "lost-scattered-tasks": lost_keys,
+            "stimulus_id": stimulus_id,
+        }
+        self.log_event(address, event_msg.copy())
+        event_msg["worker"] = address
+        self.log_event("all", event_msg)
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
@@ -5827,6 +5848,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "action": "worker-status-change",
                 "prev-status": prev_status.name,
                 "status": ws.status.name,
+                "stimulus_id": stimulus_id,
             },
         )
         logger.debug(f"Worker status {prev_status.name} -> {status} - {ws}")
@@ -7067,6 +7089,45 @@ class Scheduler(SchedulerState, ServerNode):
 
         return result
 
+    @overload
+    async def retire_workers(
+        self,
+        workers: list[str],
+        *,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    @overload
+    async def retire_workers(
+        self,
+        *,
+        names: list,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    @overload
+    async def retire_workers(
+        self,
+        *,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+        # Parameters for workers_to_close()
+        memory_ratio: int | float | None = None,
+        n: int | None = None,
+        key: Callable[[WorkerState], Hashable] | bytes | None = None,
+        minimum: int | None = None,
+        target: int | None = None,
+        attribute: str = "address",
+    ) -> dict[str, Any]:
+        ...
+
     @log_errors
     async def retire_workers(
         self,
@@ -7107,7 +7168,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         **kwargs: dict
             Extra options to pass to workers_to_close to determine which
-            workers we should drop
+            workers we should drop. Only accepted if ``workers`` and ``names`` are
+            omitted.
 
         Returns
         -------
@@ -7123,6 +7185,14 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.workers_to_close
         """
+        if names is not None and workers is not None:
+            raise TypeError("names and workers are mutually exclusive")
+        if (names is not None or workers is not None) and kwargs:
+            raise TypeError(
+                "Parameters for workers_to_close() are mutually exclusive with "
+                f"names and workers: {kwargs}"
+            )
+
         stimulus_id = stimulus_id or f"retire-workers-{time()}"
         # This lock makes retire_workers, rebalance, and replicate mutually
         # exclusive and will no longer be necessary once rebalance and replicate are
@@ -7130,15 +7200,12 @@ class Scheduler(SchedulerState, ServerNode):
         # However, it allows multiple instances of retire_workers to run in parallel.
         async with self._replica_lock("retire-workers"):
             if names is not None:
-                if workers is not None:
-                    raise TypeError("names and workers are mutually exclusive")
-                if names:
-                    logger.info("Retire worker names %s", names)
-                # Support cases where names are passed through a CLI and become
-                # strings
+                logger.info("Retire worker names %s", names)
+                # Support cases where names are passed through a CLI and become strings
                 names_set = {str(name) for name in names}
                 wss = {ws for ws in self.workers.values() if str(ws.name) in names_set}
             elif workers is not None:
+                logger.info("Retire worker addresses %s", workers)
                 wss = {
                     self.workers[address]
                     for address in workers
@@ -7162,7 +7229,7 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 coros = []
                 for ws in wss:
-                    logger.info("Retiring worker %s", ws.address)
+                    logger.info(f"Retiring worker {ws.address!r} ({stimulus_id=!r})")
 
                     policy = RetireWorker(ws.address)
                     amm.add_policy(policy)
@@ -7199,19 +7266,37 @@ class Scheduler(SchedulerState, ServerNode):
                 # time (depending on interval settings)
                 amm.run_once()
 
-                workers_info = {
-                    addr: info
-                    for addr, info in await asyncio.gather(*coros)
-                    if addr is not None
-                }
+                workers_info_ok = {}
+                workers_info_abort = {}
+                for addr, result, info in await asyncio.gather(*coros):
+                    if result == "OK":
+                        workers_info_ok[addr] = info
+                    else:
+                        workers_info_abort[addr] = info
+
             finally:
                 if stop_amm:
                     amm.stop()
 
-        self.log_event("all", {"action": "retire-workers", "workers": workers_info})
-        self.log_event(list(workers_info), {"action": "retired"})
+        self.log_event(
+            "all",
+            {
+                "action": "retire-workers",
+                "retired": workers_info_ok,
+                "could-not-retire": workers_info_abort,
+                "stimulus_id": stimulus_id,
+            },
+        )
+        self.log_event(
+            list(workers_info_ok),
+            {"action": "retired", "stimulus_id": stimulus_id},
+        )
+        self.log_event(
+            list(workers_info_abort),
+            {"action": "could-not-retire", "stimulus_id": stimulus_id},
+        )
 
-        return workers_info
+        return workers_info_ok
 
     async def _track_retire_worker(
         self,
@@ -7221,7 +7306,7 @@ class Scheduler(SchedulerState, ServerNode):
         close: bool,
         remove: bool,
         stimulus_id: str,
-    ) -> tuple[str | None, dict]:
+    ) -> tuple[str, Literal["OK", "no-recipients"], dict]:
         while not policy.done():
             # Sleep 0.01s when there are 4 tasks or less
             # Sleep 0.5s when there are 200 or more
@@ -7239,10 +7324,14 @@ class Scheduler(SchedulerState, ServerNode):
                     "stimulus_id": stimulus_id,
                 }
             )
-            return None, {}
+            logger.warning(
+                f"Could not retire worker {ws.address!r}: unique data could not be "
+                f"moved to any other worker ({stimulus_id=!r})"
+            )
+            return ws.address, "no-recipients", ws.identity()
 
         logger.debug(
-            "All unique keys on worker %s have been replicated elsewhere", ws.address
+            f"All unique keys on worker {ws.address!r} have been replicated elsewhere"
         )
 
         if remove:
@@ -7252,8 +7341,8 @@ class Scheduler(SchedulerState, ServerNode):
         elif close:
             self.close_worker(ws.address)
 
-        logger.info("Retired worker %s", ws.address)
-        return ws.address, ws.identity()
+        logger.info(f"Retired worker {ws.address!r} ({stimulus_id=!r})")
+        return ws.address, "OK", ws.identity()
 
     def add_keys(
         self, worker: str, keys: Collection[Key] = (), stimulus_id: str | None = None
@@ -7389,7 +7478,7 @@ class Scheduler(SchedulerState, ServerNode):
     def log_worker_event(
         self, worker: str, topic: str | Collection[str], msg: Any
     ) -> None:
-        if isinstance(msg, dict):
+        if isinstance(msg, dict) and worker != topic:
             msg["worker"] = worker
         self.log_event(topic, msg)
 

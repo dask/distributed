@@ -156,6 +156,7 @@ def merge_transfer(
         meta=meta,
         parts_out=parts_out,
         disk=disk,
+        drop_column=True,
     )
 
 
@@ -172,17 +173,14 @@ def merge_unpack(
     suffixes: Suffixes,
     left_index: bool,
     right_index: bool,
+    indicator: bool = False,
 ):
     from dask.dataframe.multi import merge_chunk
 
     ext = get_worker_plugin()
     # If the partition is empty, it doesn't contain the hash column name
-    left = ext.get_output_partition(
-        shuffle_id_left, barrier_left, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
-    right = ext.get_output_partition(
-        shuffle_id_right, barrier_right, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
+    left = ext.get_output_partition(shuffle_id_left, barrier_left, output_partition)
+    right = ext.get_output_partition(shuffle_id_right, barrier_right, output_partition)
     return merge_chunk(
         left,
         right,
@@ -193,6 +191,7 @@ def merge_unpack(
         suffixes=suffixes,
         left_index=left_index,
         right_index=right_index,
+        indicator=indicator,
     )
 
 
@@ -430,5 +429,6 @@ class HashJoinP2PLayer(Layer):
                 self.suffixes,
                 self.left_index,
                 self.right_index,
+                self.indicator,
             )
         return dsk

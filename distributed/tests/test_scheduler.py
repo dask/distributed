@@ -2502,8 +2502,7 @@ async def test_no_workers_timeout_queued(c, s, a):
     """Don't trip no-workers-timeout when there are queued tasks AND processing tasks"""
     ev = Event()
     futures = [c.submit(lambda ev: ev.wait(), ev, pure=False) for _ in range(3)]
-    while not a.state.tasks:
-        await asyncio.sleep(0.01)
+    await async_poll_for(lambda: len(s.tasks) == 3 and a.state.tasks, timeout=5)
     assert s.queued or math.isinf(s.WORKER_SATURATION)
 
     s._check_no_workers()
@@ -2725,6 +2724,18 @@ async def test_retire_names_str(c, s):
         await s.retire_workers(names=[0])
         assert all(f.done() for f in futures)
         assert len(b.data) == 10
+
+
+@gen_cluster(client=True)
+async def test_retire_workers_bad_params(c, s, a, b):
+    with pytest.raises(TypeError, match="mutually exclusive"):
+        await s.retire_workers([a.address], names=[a.name])
+    with pytest.raises(TypeError, match="mutually exclusive"):
+        await s.retire_workers([a.address], n=1)
+    with pytest.raises(TypeError, match="mutually exclusive"):
+        await s.retire_workers(names=[a.name], n=1)
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        await s.retire_workers(foo=1)
 
 
 @gen_cluster(
@@ -3047,7 +3058,7 @@ class FlakyConnectionPool(ConnectionPool):
 
 
 @gen_cluster(client=True)
-async def test_gather_failing_cnn_recover(c, s, a, b):
+async def test_gather_failing_can_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
     rpc = await FlakyConnectionPool(failing_connections=1)
     with mock.patch.object(s, "rpc", rpc), dask.config.set(
