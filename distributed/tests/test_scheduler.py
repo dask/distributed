@@ -4901,7 +4901,7 @@ def block(x, in_event, block_event):
 @gen_cluster(
     client=True,
     nthreads=[("", 1, {"resources": {"a": 1}})],
-    config={"distributed.scheduler.allowed-failures": 1},
+    config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_fan_out_pattern_deadlock(c, s, a):
     """Regression test for https://github.com/dask/distributed/issues/8548
@@ -4938,7 +4938,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await block_hb.set()
         await block_f.clear()
 
-        # Repeatedly remove new instances of the 'b' worker while it processes 'f'
+        # Remove the new instance of the 'b' worker while it processes 'f'
         # to trigger an transition for 'f' to 'erred'
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
             await in_f.wait()
@@ -4946,12 +4946,6 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await s.remove_worker(b.address, stimulus_id="remove_b2")
             await block_f.set()
         await block_f.clear()
-
-        async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
-            await in_f.wait()
-            await in_f.clear()
-            await s.remove_worker(b.address, stimulus_id="remove_b3")
-            await block_f.set()
 
         await block_ha.set()
         await ha
@@ -4965,5 +4959,5 @@ async def test_fan_out_pattern_deadlock(c, s, a):
     # Ensure that no other errors including transition failures were logged
     assert (
         logger.getvalue()
-        == "Task hb marked as failed because 2 workers died while trying to run it\nTask f marked as failed because 2 workers died while trying to run it\n"
+        == "Task hb marked as failed because 1 workers died while trying to run it\nTask f marked as failed because 1 workers died while trying to run it\n"
     )
