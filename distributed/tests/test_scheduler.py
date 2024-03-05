@@ -5022,9 +5022,6 @@ async def test_stimulus_from_erred_task(c, s, a):
         # Make sure all data gets forgotten on worker 'a'
         await async_poll_for(lambda: not a.state.tasks, timeout=5)
 
-        # del f, g
-        # await async_poll_for(lambda: not a.state.tasks, timeout=5)
-
     # Ensure that no other errors including transition failures were logged
     assert (
         logger.getvalue()
