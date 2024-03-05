@@ -2630,7 +2630,7 @@ class SchedulerState:
         self,
         key: Key,
         stimulus_id: str,
-        worker: str | None = None,
+        worker: str,
         *,
         cause: Key | None = None,
         exception: Serialized | None = None,
