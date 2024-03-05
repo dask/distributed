@@ -2667,7 +2667,7 @@ async def test_flaky_connect_recover_with_retry(c, s, a, b):
     lines = logs.split("\n")
     for line in lines:
         assert len(line) < 250
-        assert line.startswith("Retrying")
+        assert not line or line.startswith("Retrying")
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
