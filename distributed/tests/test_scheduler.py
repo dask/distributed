@@ -4936,7 +4936,6 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             # Remove worker 'b' while it's processing h1
             await s.remove_worker(b.address, stimulus_id="remove_b1")
             await block_hb.set()
-            await b.close()
         await block_f.clear()
 
         # Repeatedly remove new instances of the 'b' worker while it processes 'f'
@@ -4946,7 +4945,6 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await in_f.clear()
             await s.remove_worker(b.address, stimulus_id="remove_b2")
             await block_f.set()
-            await b.close()
         await block_f.clear()
 
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
@@ -4954,7 +4952,6 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await in_f.clear()
             await s.remove_worker(b.address, stimulus_id="remove_b3")
             await block_f.set()
-            await b.close()
 
         await block_ha.set()
         await ha
