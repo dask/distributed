@@ -4908,43 +4908,33 @@ async def test_fan_out_pattern_deadlock(c, s, a):
 
     This test heavily uses resources to force scheduling decisions.
     """
-    in_ancestor = Event()
-    block_ancestor = Event()
-    in_on_a_descendant = Event()
-    in_on_b_descendant = Event()
-    block_on_a_descendant = Event()
-    block_on_b_descendant = Event()
+    in_f, block_f = Event(), Event()
+    in_ha, block_ha = Event(), Event()
+    in_hb, block_hb = Event(), Event()
 
     # Input task to 'g' that we can fail
     with dask.annotate(resources={"b": 1}):
-        f = delayed(block)(1, in_ancestor, block_ancestor, dask_key_name="f")
+        f = delayed(block)(1, in_f, block_f, dask_key_name="f")
         g = delayed(inc)(f, dask_key_name="g")
 
         # Fan-out from 'g' and run h1 and h2 on different workers
-        h1 = delayed(block)(
-            g, in_on_b_descendant, block_on_b_descendant, dask_key_name="h1"
-        )
+        hb = delayed(block)(g, in_hb, block_hb, dask_key_name="hb")
     with dask.annotate(resources={"a": 1}):
-        h2 = delayed(block)(
-            g, in_on_a_descendant, block_on_a_descendant, dask_key_name="h2"
-        )
-    del g
+        ha = delayed(block)(g, in_ha, block_ha, dask_key_name="ha")
 
     f, h1, h2 = c.compute([f, h1, h2])
     with captured_logger("distributed.scheduler", level=logging.ERROR) as logger:
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
             await block_ancestor.set()
-            await asyncio.gather(
-                in_on_a_descendant.wait(),
-                in_on_b_descendant.wait(),
-            )
+            await in_on_a_descendant.wait()
+            await in_on_b_descendant.wait()
             await in_ancestor.clear()
 
             # Make sure that the scheduler knows that both workers hold 'g' in memory
             while len(s.tasks["g"].who_has) < 2:
                 await asyncio.sleep(0.1)
             # Remove worker 'b' while it's processing h1
-            await s.remove_worker(b.address, stimulus_id="remove_b")
+            await s.remove_worker(b.address, stimulus_id="remove_b1")
             await block_on_b_descendant.set()
             await b.close()
         await block_ancestor.clear()
@@ -4954,7 +4944,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
             await in_ancestor.wait()
             await in_ancestor.clear()
-            await s.remove_worker(b.address, stimulus_id="remove_b")
+            await s.remove_worker(b.address, stimulus_id="remove_b2")
             await block_ancestor.set()
             await b.close()
         await block_ancestor.clear()
@@ -4962,7 +4952,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
             await in_ancestor.wait()
             await in_ancestor.clear()
-            await s.remove_worker(b.address, stimulus_id="remove_b")
+            await s.remove_worker(b.address, stimulus_id="remove_b3")
             await block_ancestor.set()
             await b.close()
 
