@@ -2084,8 +2084,8 @@ class SchedulerState:
             assert not ts.processing_on
             for dts in ts.dependencies:
                 assert dts.state not in {"forgotten", "erred"}, (
-                    ts,
-                    dts,
+                    str(ts),
+                    str(dts),
                     self.transition_log,
                 )
 
