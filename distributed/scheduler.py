@@ -2708,10 +2708,9 @@ class SchedulerState:
             )
         )
 
-        for dts in ts.dependents:
-            if not dts.who_has:
-                dts.exception_blame = failing_ts
-                recommendations[dts.key] = "erred"
+        for dts in ts.waiters or set():
+            dts.exception_blame = failing_ts
+            recommendations[dts.key] = "erred"
 
         for dts in ts.dependencies:
             if dts.waiters:
