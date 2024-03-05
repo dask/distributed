@@ -23,6 +23,7 @@ pytest.importorskip("jupyter_server")
 pytestmark = pytest.mark.filterwarnings("ignore:Jupyter is migrating its paths")
 
 
+@pytest.mark.skipif(WINDOWS, reason="ValueError: I/O operation on closed file")
 @gen_test()
 async def test_jupyter_server():
     async with Scheduler(jupyter=True) as s:
