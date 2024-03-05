@@ -2486,7 +2486,7 @@ class SchedulerState:
         elif ts.has_lost_dependencies:
             recommendations[key] = "forgotten"
         elif (ts.who_wants or ts.waiters) and not any(
-            dts.state in ("erred",) for dts in ts.dependencies
+            dts.state == "erred" for dts in ts.dependencies
         ):
             recommendations[key] = "waiting"
 
