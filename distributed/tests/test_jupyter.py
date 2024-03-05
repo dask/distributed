@@ -22,8 +22,18 @@ pytest.importorskip("jupyter_server")
 
 pytestmark = pytest.mark.filterwarnings("ignore:Jupyter is migrating its paths")
 
+if WINDOWS:
+    try:
+        import jupyter_server  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        pytest.skip(
+            allow_module_level=True,
+            reason="Windows struggles running these tests w/ jupyter server",
+        )
 
-@pytest.mark.skipif(WINDOWS, reason="ValueError: I/O operation on closed file")
+
 @gen_test()
 async def test_jupyter_server():
     async with Scheduler(jupyter=True) as s:
