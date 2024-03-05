@@ -4922,51 +4922,51 @@ async def test_fan_out_pattern_deadlock(c, s, a):
     with dask.annotate(resources={"a": 1}):
         ha = delayed(block)(g, in_ha, block_ha, dask_key_name="ha")
 
-    f, h1, h2 = c.compute([f, h1, h2])
+    f, ha, hb = c.compute([f, ha, hb])
     with captured_logger("distributed.scheduler", level=logging.ERROR) as logger:
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
-            await block_ancestor.set()
-            await in_on_a_descendant.wait()
-            await in_on_b_descendant.wait()
-            await in_ancestor.clear()
+            await block_f.set()
+            await in_ha.wait()
+            await in_hb.wait()
+            await in_f.clear()
 
             # Make sure that the scheduler knows that both workers hold 'g' in memory
             while len(s.tasks["g"].who_has) < 2:
                 await asyncio.sleep(0.1)
             # Remove worker 'b' while it's processing h1
             await s.remove_worker(b.address, stimulus_id="remove_b1")
-            await block_on_b_descendant.set()
+            await block_hb.set()
             await b.close()
-        await block_ancestor.clear()
+        await block_f.clear()
 
         # Repeatedly remove new instances of the 'b' worker while it processes 'f'
         # to trigger an transition for 'f' to 'erred'
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
-            await in_ancestor.wait()
-            await in_ancestor.clear()
+            await in_f.wait()
+            await in_f.clear()
             await s.remove_worker(b.address, stimulus_id="remove_b2")
-            await block_ancestor.set()
+            await block_f.set()
             await b.close()
-        await block_ancestor.clear()
+        await block_f.clear()
 
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
-            await in_ancestor.wait()
-            await in_ancestor.clear()
+            await in_f.wait()
+            await in_f.clear()
             await s.remove_worker(b.address, stimulus_id="remove_b3")
-            await block_ancestor.set()
+            await block_f.set()
             await b.close()
 
-        await block_on_a_descendant.set()
-        await h2
+        await block_ha.set()
+        await ha
 
-        with pytest.raises(KilledWorker, match="Attempted to run task 'h1'"):
-            await h1
+        with pytest.raises(KilledWorker, match="Attempted to run task 'hb'"):
+            await hb
 
-        del h1, h2
+        del ha, hb
         # Make sure that h2 gets forgotten on worker 'a'
         await async_poll_for(lambda: not a.state.tasks, timeout=5)
     # Ensure that no other errors including transition failures were logged
     assert (
         logger.getvalue()
-        == "Task h1 marked as failed because 2 workers died while trying to run it\nTask f marked as failed because 2 workers died while trying to run it\n"
+        == "Task hb marked as failed because 2 workers died while trying to run it\nTask f marked as failed because 2 workers died while trying to run it\n"
     )
