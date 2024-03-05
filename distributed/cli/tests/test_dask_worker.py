@@ -18,7 +18,7 @@ from distributed.cli.dask_worker import _apportion_ports, main
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
-from distributed.utils import open_port
+from distributed.utils import get_ip, open_port
 from distributed.utils_test import (
     gen_cluster,
     inc,
@@ -489,24 +489,27 @@ def test_dashboard_non_standard_ports():
     pytest.importorskip("bokeh")
     requests = pytest.importorskip("requests")
 
-    host = "127.0.0.1"
+    s_host = "127.0.0.1"
+    # use internal ip instead of localhost ip to verify GlobalProxyHandler will update
+    # to allow internal host ip of a worker.
+    w_host = get_ip()
     s_port = "3233"
     s_dashboard_port = "3232"
     w_dashboard_port = "4833"
-    s_cmd = f"dask scheduler --host {host} --port {s_port} --dashboard-address :{s_dashboard_port}"
-    w_cmd = f"dask worker {host}:{s_port} --dashboard-address :{w_dashboard_port} --host {host}"
+    s_cmd = f"dask scheduler --host {s_host} --port {s_port} --dashboard-address :{s_dashboard_port}"
+    w_cmd = f"dask worker {s_host}:{s_port} --dashboard-address :{w_dashboard_port} --host {w_host}"
 
     with popen(s_cmd.split()):
         with popen(w_cmd.split()):
-            with Client(f"{host}:{s_port}") as c:
+            with Client(f"{s_host}:{s_port}") as c:
                 c.wait_for_workers(1)
 
-            response = requests.get(f"http://{host}:{w_dashboard_port}/status")
+            response = requests.get(f"http://{s_host}:{w_dashboard_port}/status")
             response.raise_for_status()
 
             # TEST PROXYING WORKS
             response = requests.get(
-                f"http://{host}:{s_dashboard_port}/proxy/{w_dashboard_port}/{host}/status"
+                f"http://{s_host}:{s_dashboard_port}/proxy/{w_dashboard_port}/{w_host}/status"
             )
             response.raise_for_status()
 
