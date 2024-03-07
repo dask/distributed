@@ -1342,6 +1342,9 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.skipif(
+    dd._dask_expr_enabled(), reason="worker restrictions are not supported in dask-expr"
+)
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_crashed_worker_after_shuffle(c, s, a):
     in_event = Event()
@@ -1369,7 +1372,7 @@ async def test_crashed_worker_after_shuffle(c, s, a):
             out = block(out, in_event, block_event)
         out = c.compute(out)
 
-        await wait_until_worker_has_tasks(UNPACK_PREFIX, n.worker_address, 1, s)
+        await wait_until_worker_has_tasks("shuffle_p2p", n.worker_address, 1, s)
         await in_event.wait()
         await n.process.process.kill()
         await block_event.set()
