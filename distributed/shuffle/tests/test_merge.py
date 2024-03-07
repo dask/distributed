@@ -11,7 +11,6 @@ from dask.typing import Key
 
 from distributed import Worker
 from distributed.shuffle._core import ShuffleId, ShuffleSpec, id_from_key
-from distributed.shuffle._merge import hash_join
 from distributed.shuffle._worker_plugin import ShuffleRun, _ShuffleRunManager
 from distributed.utils_test import gen_cluster
 
@@ -21,7 +20,6 @@ import pandas as pd
 import dask
 from dask.dataframe._compat import PANDAS_GE_200, tm
 from dask.dataframe.utils import assert_eq
-from dask.utils_test import hlg_layer_topological
 
 try:
     import pyarrow as pa
@@ -81,17 +79,14 @@ async def test_basic_merge(c, s, a, b, how):
     B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
     b = dd.repartition(B, [0, 2, 5])
 
-    joined = hash_join(a, "y", b, "y", how)
+    joined = a.merge(b, left_on="y", right_on="y", how=how)
 
-    assert not hlg_layer_topological(joined.dask, -1).is_materialized()
     result = await c.compute(joined)
     expected = pd.merge(A, B, how, "y")
     list_eq(result, expected)
 
     # Different columns and npartitions
-    joined = hash_join(a, "x", b, "z", "outer", npartitions=3)
-    assert not hlg_layer_topological(joined.dask, -1).is_materialized()
-    assert joined.npartitions == 3
+    joined = a.merge(b, left_on="x", right_on="z", how="outer")
 
     result = await c.compute(joined)
     expected = pd.merge(A, B, "outer", None, "x", "z")
@@ -99,12 +94,12 @@ async def test_basic_merge(c, s, a, b, how):
     list_eq(result, expected)
 
     assert (
-        hash_join(a, "y", b, "y", "inner")._name
-        == hash_join(a, "y", b, "y", "inner")._name
+        a.merge(b, left_on="y", right_on="y", how="inner")._name
+        == a.merge(b, left_on="y", right_on="y", how="inner")._name
     )
     assert (
-        hash_join(a, "y", b, "y", "inner")._name
-        != hash_join(a, "y", b, "y", "outer")._name
+        a.merge(b, left_on="y", right_on="y", how="inner")._name
+        != a.merge(b, left_on="y", right_on="y", how="outer")._name
     )
 
 
