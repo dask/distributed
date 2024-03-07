@@ -76,6 +76,8 @@ try:
 except ImportError:
     pa = None
 
+UNPACK_PREFIX = "p2pshuffle" if dd._dask_expr_enabled() else "shuffle_p2p"
+
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
 def lose_annotations(request):
@@ -921,7 +923,7 @@ async def test_closed_worker_during_unpack(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         shuffled = df.shuffle("x")
     fut = c.compute([shuffled, df], sync=True)
-    await wait_for_tasks_in_state("shuffle_p2p", "memory", 1, b)
+    await wait_for_tasks_in_state(UNPACK_PREFIX, "memory", 1, b)
     await b.close()
 
     result, expected = await fut
@@ -948,7 +950,7 @@ async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = df.shuffle("x")
     out = c.compute(out.x.size)
-    await wait_for_tasks_in_state("shuffle_p2p", "memory", 1, b)
+    await wait_for_tasks_in_state(UNPACK_PREFIX, "memory", 1, b)
     await b.close()
 
     with pytest.raises(KilledWorker):
@@ -976,7 +978,7 @@ async def test_crashed_worker_during_unpack(c, s, a):
             shuffled = df.shuffle("x")
         result = c.compute(shuffled)
 
-        await wait_until_worker_has_tasks("shuffle_p2p", killed_worker_address, 1, s)
+        await wait_until_worker_has_tasks(UNPACK_PREFIX, killed_worker_address, 1, s)
         await n.process.process.kill()
 
         result = await result
@@ -1367,7 +1369,7 @@ async def test_crashed_worker_after_shuffle(c, s, a):
             out = block(out, in_event, block_event)
         out = c.compute(out)
 
-        await wait_until_worker_has_tasks("shuffle_p2p", n.worker_address, 1, s)
+        await wait_until_worker_has_tasks(UNPACK_PREFIX, n.worker_address, 1, s)
         await in_event.wait()
         await n.process.process.kill()
         await block_event.set()
@@ -1396,7 +1398,7 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
             out = df.shuffle("x")
         out = out.persist()
 
-        await wait_until_worker_has_tasks("shuffle_p2p", n.worker_address, 1, s)
+        await wait_until_worker_has_tasks(UNPACK_PREFIX, n.worker_address, 1, s)
         await out
 
         await n.process.process.kill()
@@ -2548,7 +2550,7 @@ async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
         # Restrict an unpack task to B so that the previously non-participating
         # worker takes part in the unpack phase
         for key in s.tasks:
-            if key_split(key) == "shuffle_p2p":
+            if key_split(key) == UNPACK_PREFIX:
                 s.set_restrictions({key: {b.address}})
                 break
 
@@ -2584,7 +2586,7 @@ async def test_unpack_is_non_rootish(c, s, a, b):
 
     await scheduler_plugin.in_barrier.wait()
 
-    unpack_tss = [ts for key, ts in s.tasks.items() if key_split(key) == "shuffle_p2p"]
+    unpack_tss = [ts for key, ts in s.tasks.items() if key_split(key) == UNPACK_PREFIX]
     assert len(unpack_tss) == 20
     assert not any(s.is_rootish(ts) for ts in unpack_tss)
     del unpack_tss
