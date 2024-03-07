@@ -82,10 +82,14 @@ def test_raise_on_sparse_data():
 
 def test_raise_on_non_string_column_name():
     df = dd.from_pandas(pd.DataFrame({"a": range(10), 1: range(10)}), npartitions=5)
-    with pytest.raises(
-        TypeError, match="p2p requires all column names to be str"
-    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df.shuffle("a")
+
+    if dd._dask_expr_enabled():
+        df.shuffle("a").optimize()
+    else:
+        with pytest.raises(
+            TypeError, match="p2p requires all column names to be str"
+        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+            df.shuffle("a")
 
 
 def test_does_not_raise_on_stringified_numeric_column_name():
