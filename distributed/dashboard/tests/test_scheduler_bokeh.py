@@ -1346,7 +1346,7 @@ async def test_shuffling(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df2 = dd.shuffle.shuffle(df, "x").persist()
+        df2 = df.shuffle("x").persist()
     start = time()
     while not ss.source.data["comm_written"]:
         ss.update()
