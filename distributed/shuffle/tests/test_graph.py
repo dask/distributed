@@ -37,10 +37,16 @@ def test_raise_on_complex_numbers(dtype):
     df = dd.from_pandas(
         pd.DataFrame({"x": pd.array(range(10), dtype=dtype)}), npartitions=5
     )
-    with pytest.raises(
-        TypeError, match=f"p2p does not support data of type '{df.x.dtype}'"
-    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df.shuffle("x")
+
+    if dd._dask_expr_enabled():
+        np = pytest.importorskip("numpy")
+        with pytest.raises(np.exceptions.ComplexWarning):
+            df.shuffle("x").optimize()
+    else:
+        with pytest.raises(
+            TypeError, match=f"p2p does not support data of type '{df.x.dtype}'"
+        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+            df.shuffle("x")
 
 
 @pytest.mark.xfail(
