@@ -119,6 +119,7 @@ async def check_scheduler_cleanup(
     assert not plugin.heartbeats
 
 
+@pytest.mark.skipif(dd._dask_expr_enabled(), reason="pyarrow>=7.0.0 already required")
 @gen_cluster(client=True)
 async def test_minimal_version(c, s, a, b):
     no_pyarrow_ctx = (

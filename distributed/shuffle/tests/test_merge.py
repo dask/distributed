@@ -50,9 +50,7 @@ def list_eq(aa, bb):
     dd._compat.assert_numpy_array_equal(av, bv)
 
 
-@pytest.mark.xfail(
-    reason="P2P shuffling failed during transfer phase", raises=RuntimeError
-)
+@pytest.mark.skipif(dd._dask_expr_enabled(), reason="pyarrow>=7.0.0 already required")
 @gen_cluster(client=True)
 async def test_minimal_version(c, s, a, b):
     no_pyarrow_ctx = (
