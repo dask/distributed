@@ -73,8 +73,8 @@ async def test_prometheus_api_doc(c, s, a, _):
         gil_metrics = set()  # Already in worker_metrics
     except ImportError:
         gil_metrics = {
-            "dask_scheduler_gil_contention_total",
-            "dask_worker_gil_contention_total",
+            "dask_scheduler_gil_contention_seconds_total",
+            "dask_worker_gil_contention_seconds_total",
         }
 
     implemented = scheduler_metrics | worker_metrics | crick_metrics | gil_metrics

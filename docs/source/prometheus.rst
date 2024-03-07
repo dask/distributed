@@ -26,9 +26,11 @@ dask_scheduler_clients
     Number of clients connected
 dask_scheduler_desired_workers
     Number of workers scheduler needs for task graph
-dask_scheduler_gil_contention_total
-    Value representing cumulative total of GIL contention,
-    in the form of summed percentages.
+dask_scheduler_gil_contention_seconds_total
+    Value representing cumulative total of _potential_ GIL contention,
+    in the form of cumulative seconds during which a thread held the GIL locked.
+    Other threads may or may not have been actually trying to acquire the GIL in the
+    meantime.
 
     .. note::
        Requires ``gilknocker`` to be installed, and 
@@ -128,9 +130,11 @@ dask_worker_tasks
     Number of tasks at worker
 dask_worker_threads
     Number of worker threads
-dask_worker_gil_contention_total
-    Value representing cumulative total GIL contention on worker,
-    in the form of summed percentages.
+dask_worker_gil_contention_seconds_total
+    Value representing cumulative total of _potential_ GIL contention,
+    in the form of cumulative seconds during which a thread held the GIL locked.
+    Other threads may or may not have been actually trying to acquire the GIL in the
+    meantime.
 
     .. note::
        Requires ``gilknocker`` to be installed, and

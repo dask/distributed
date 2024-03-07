@@ -3911,7 +3911,6 @@ class Contention(DashboardComponent):
     @log_errors
     def update(self):
         s = self.scheduler
-        monitor_gil = s.monitor.monitor_gil_contention
 
         self.data["values"] = [
             s._tick_interval_observed,
@@ -3919,11 +3918,13 @@ class Contention(DashboardComponent):
             sum(w.metrics["event_loop_interval"] for w in s.workers.values())
             / (len(s.workers) or 1),
             self.gil_contention_workers,
-        ][:: 1 if monitor_gil else 2]
+        ][:: 1 if s.monitor.monitor_gil_contention else 2]
 
         # Format event loop as time and GIL (if configured) as %
         self.data["text"] = [
-            f"{x * 100:.1f}%" if i % 2 and monitor_gil else format_time(x)
+            f"{x * 100:.1f}%"
+            if i % 2 and s.monitor.monitor_gil_contention
+            else format_time(x)
             for i, x in enumerate(self.data["values"])
         ]
         update(self.source, self.data)
