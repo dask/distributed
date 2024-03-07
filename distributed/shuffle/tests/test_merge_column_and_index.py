@@ -20,7 +20,6 @@ import pandas as pd
 import dask
 from dask.dataframe.utils import assert_eq
 
-from distributed.shuffle import HashJoinP2PLayer, P2PShuffleLayer
 from distributed.utils_test import gen_cluster
 
 
@@ -178,11 +177,6 @@ async def test_merge_unknown_to_unknown(
     # Merge unknown to unknown
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         result_graph = ddf_left_unknown.merge(ddf_right_unknown, on=on, how=how)
-    if not dd._dask_expr_enabled() and not any(
-        isinstance(layer, (HashJoinP2PLayer, P2PShuffleLayer))
-        for layer in result_graph.dask.layers.values()
-    ):
-        pytest.skip("No HashJoin or P2P layer involved")
     result = await c.compute(result_graph)
     # Assertions
     assert_eq(result, expected)
