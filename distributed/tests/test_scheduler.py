@@ -4993,7 +4993,7 @@ async def test_stimulus_from_erred_task(c, s, a):
             await block_f.clear()
 
         # Remove the new instance of the 'b' worker while it processes 'f'
-        # to trigger an transition for 'f' to 'erred'
+        # to trigger a transition for 'f' to 'erred'
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b2:
             await in_f.wait()
             await in_f.clear()
