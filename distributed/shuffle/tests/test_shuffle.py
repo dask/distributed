@@ -1495,6 +1495,9 @@ async def test_multi(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.skipif(
+    dd._dask_expr_enabled(), reason="worker restrictions are not supported in dask-expr"
+)
 @gen_cluster(client=True)
 async def test_restrictions(c, s, a, b):
     df = dask.datasets.timeseries(
