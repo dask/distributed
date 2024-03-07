@@ -217,10 +217,8 @@ async def test_merge(c, s, a, b, how, disk):
             await c.compute(dd.merge(A, b, how=how)),
             pd.merge(A, B, how=how),
         )
-        # Note: No await since A and B are both pandas dataframes and this doesn't
-        # actually submit anything
         list_eq(
-            c.compute(dd.merge(A, B, how=how)),
+            await c.compute(dd.merge(A, B, how=how)),
             pd.merge(A, B, how=how),
         )
 
