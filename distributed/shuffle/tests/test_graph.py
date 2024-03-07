@@ -71,10 +71,13 @@ def test_raise_on_sparse_data():
     df = dd.from_pandas(
         pd.DataFrame({"x": pd.array(range(10), dtype="Sparse[float64]")}), npartitions=5
     )
-    with pytest.raises(
-        TypeError, match="p2p does not support sparse data"
-    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df.shuffle("x")
+    if dd._dask_expr_enabled():
+        df.shuffle("x").optimize()
+    else:
+        with pytest.raises(
+            TypeError, match="p2p does not support sparse data"
+        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+            df.shuffle("x")
 
 
 def test_raise_on_non_string_column_name():
