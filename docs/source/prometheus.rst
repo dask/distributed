@@ -28,7 +28,7 @@ dask_scheduler_desired_workers
     Number of workers scheduler needs for task graph
 dask_scheduler_gil_contention_seconds_total
     Value representing cumulative total of *potential* GIL contention,
-    in the form of cumulative seconds during which a thread held the GIL locked.
+    in the form of cumulative seconds during which any thread held the GIL locked.
     Other threads may or may not have been actually trying to acquire the GIL in the
     meantime.
 
@@ -132,7 +132,7 @@ dask_worker_threads
     Number of worker threads
 dask_worker_gil_contention_seconds_total
     Value representing cumulative total of *potential* GIL contention,
-    in the form of cumulative seconds during which a thread held the GIL locked.
+    in the form of cumulative seconds during which any thread held the GIL locked.
     Other threads may or may not have been actually trying to acquire the GIL in the
     meantime.
 
