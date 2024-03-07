@@ -4936,7 +4936,8 @@ async def test_recreate_task_collection(c, s, a, b):
 
     df = dd.from_pandas(pd.DataFrame({"a": [0, 1, 2, 3, 4]}), chunksize=2)
 
-    df2 = df.a.map(lambda x: x + 1)
+    with pytest.warns(UserWarning, match="You did not provide metadata"):
+        df2 = df.a.map(lambda x: x + 1)
     f = c.compute(df2)
 
     function, args, kwargs = await c._get_components_from_future(f)
