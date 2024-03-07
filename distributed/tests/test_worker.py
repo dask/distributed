@@ -3446,6 +3446,9 @@ class BreakingWorker(Worker):
         return super().get_data(comm, **kwargs)
 
 
+@pytest.mark.xfail(
+    reason="https://github.com/dask-contrib/dask-expr/issues/945", raises=UserWarning
+)
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=BreakingWorker)
 async def test_broken_comm(c, s, a, b):

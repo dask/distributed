@@ -6444,6 +6444,9 @@ async def test_wait_for_workers(c, s, a, b):
     assert "1 ms" in str(info.value)
 
 
+@pytest.mark.xfail(
+    reason="https://github.com/dask-contrib/dask-expr/issues/945", raises=UserWarning
+)
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.skipif(MACOS, reason="dask/distributed#8075")
 @pytest.mark.parametrize(
@@ -6557,6 +6560,9 @@ async def test_config_inherited_by_subprocess():
                 assert await c.submit(dask.config.get, "foo") == 100
 
 
+@pytest.mark.xfail(
+    reason="https://github.com/dask-contrib/dask-expr/issues/945", raises=UserWarning
+)
 @gen_cluster(client=True)
 async def test_futures_of_sorted(c, s, a, b):
     pytest.importorskip("dask.dataframe")
