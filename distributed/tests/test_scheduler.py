@@ -4931,8 +4931,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await in_f.clear()
 
             # Make sure that the scheduler knows that both workers hold 'g' in memory
-            while len(s.tasks["g"].who_has) < 2:
-                await asyncio.sleep(0.1)
+            await async_poll_for(lambda: len(s.tasks["g"].who_has) == 2, timeout=5)
             # Remove worker 'b' while it's processing h1
             await s.remove_worker(b.address, stimulus_id="remove_b1")
             await block_hb.set()
