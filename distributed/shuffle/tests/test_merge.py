@@ -226,8 +226,12 @@ async def test_merge(c, s, a, b, how, disk):
             await c.compute(dd.merge(A, b, how=how)),
             pd.merge(A, B, how=how),
         )
+
+        # dask-expr will return dask dataframe even if both are pandas flavored.
+        # w/o dask-expr enabled, no await is needed as dask will return pandas.
+        result = c.compute(dd.merge(A, B, how=how))
         list_eq(
-            await c.compute(dd.merge(A, B, how=how)),
+            (await result) if dd._dask_expr_enabled() else result,
             pd.merge(A, B, how=how),
         )
 
