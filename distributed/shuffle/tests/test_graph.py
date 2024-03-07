@@ -32,16 +32,10 @@ def test_raise_on_complex_numbers(dtype):
     df = dd.from_pandas(
         pd.DataFrame({"x": pd.array(range(10), dtype=dtype)}), npartitions=5
     )
-
-    if dd._dask_expr_enabled():
-        np = pytest.importorskip("numpy")
-        with pytest.raises(np.exceptions.ComplexWarning):
-            df.shuffle("x").optimize()
-    else:
-        with pytest.raises(
-            TypeError, match=f"p2p does not support data of type '{df.x.dtype}'"
-        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            df.shuffle("x")
+    with pytest.raises(
+        TypeError, match=f"p2p does not support data of type '{df.x.dtype}'"
+    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        df.shuffle("x")
 
 
 @pytest.mark.xfail(
@@ -66,25 +60,18 @@ def test_raise_on_sparse_data():
     df = dd.from_pandas(
         pd.DataFrame({"x": pd.array(range(10), dtype="Sparse[float64]")}), npartitions=5
     )
-    if dd._dask_expr_enabled():
-        df.shuffle("x").optimize()
-    else:
-        with pytest.raises(
-            TypeError, match="p2p does not support sparse data"
-        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            df.shuffle("x")
+    with pytest.raises(
+        TypeError, match="p2p does not support sparse data"
+    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        df.shuffle("x")
 
 
 def test_raise_on_non_string_column_name():
     df = dd.from_pandas(pd.DataFrame({"a": range(10), 1: range(10)}), npartitions=5)
-
-    if dd._dask_expr_enabled():
-        df.shuffle("a").optimize()
-    else:
-        with pytest.raises(
-            TypeError, match="p2p requires all column names to be str"
-        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            df.shuffle("a")
+    with pytest.raises(
+        TypeError, match="p2p requires all column names to be str"
+    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        df.shuffle("a")
 
 
 def test_does_not_raise_on_stringified_numeric_column_name():
