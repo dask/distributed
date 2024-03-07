@@ -58,7 +58,7 @@ from distributed.shuffle._shuffle import (
     split_by_worker,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin, _ShuffleRunManager
-from distributed.shuffle.tests.utils import AbstractShuffleTestPool
+from distributed.shuffle.tests.utils import UNPACK_PREFIX, AbstractShuffleTestPool
 from distributed.utils import Deadline
 from distributed.utils_test import (
     async_poll_for,
@@ -75,8 +75,6 @@ try:
     import pyarrow as pa
 except ImportError:
     pa = None
-
-UNPACK_PREFIX = "p2pshuffle" if dd._dask_expr_enabled() else "shuffle_p2p"
 
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])

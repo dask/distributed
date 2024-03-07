@@ -3,8 +3,12 @@ from __future__ import annotations
 import itertools
 from typing import Any
 
+import dask.dataframe as dd
+
 from distributed.core import PooledRPCCall
 from distributed.shuffle._core import ShuffleId, ShuffleRun
+
+UNPACK_PREFIX = "p2pshuffle" if dd._dask_expr_enabled() else "shuffle_p2p"
 
 
 class PooledRPCShuffle(PooledRPCCall):
