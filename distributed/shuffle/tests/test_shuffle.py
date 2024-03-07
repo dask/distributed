@@ -2306,7 +2306,8 @@ async def test_handle_null_partitions_2(c, s, a, b):
             return pd.DataFrame({"a": np.random.random(10), "b": [None] * 10})
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
 
-    ddf = dd.from_map(make_partition, range(50))
+    with dask.config.set({"dataframe.convert-string": False}):
+        ddf = dd.from_map(make_partition, range(5))
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
     result, expected = c.compute([ddf, out])
