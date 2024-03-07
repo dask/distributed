@@ -6559,7 +6559,10 @@ async def test_config_inherited_by_subprocess():
 
 @gen_cluster(client=True)
 async def test_futures_of_sorted(c, s, a, b):
-    pytest.importorskip("dask.dataframe")
+    dd = pytest.importorskip("dask.dataframe")
+    if dd._dask_expr_enabled():
+        pytest.xfail(reason="https://github.com/dask-contrib/dask-expr/issues/952")
+
     df = await dask.datasets.timeseries(dtypes={"x": int}).persist()
     futures = futures_of(df)
     for k, f in zip(df.__dask_keys__(), futures):
