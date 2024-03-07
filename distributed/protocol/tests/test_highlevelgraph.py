@@ -155,6 +155,7 @@ async def test_array_annotations(c, s, a, b):
     assert plugin.resource_matches == B.npartitions
 
 
+@pytest.mark.xfail(dd._dask_expr_enabled(), reason="Annotation is WIP in dask-expr")
 @gen_cluster(client=True)
 async def test_dataframe_annotations(c, s, a, b):
     retries = 5
