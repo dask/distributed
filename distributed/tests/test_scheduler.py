@@ -2769,9 +2769,6 @@ async def test_default_task_duration_splits(c, s, a, b):
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
 
-    if dd._dask_expr_enabled():
-        pytest.skip("No split task in dask-expr")
-
     # We don't care about the actual computation here but we'll schedule one anyway to
     # verify that we're looking for the correct key
     npart = 10
