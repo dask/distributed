@@ -8,6 +8,8 @@ from distributed import Scheduler
 from distributed.utils_test import gen_cluster
 
 da = pytest.importorskip("dask.array")
+dd = pytest.importorskip("dask.dataframe")
+from distributed.shuffle.tests.utils import UNPACK_PREFIX
 
 
 def assert_metrics(s: Scheduler, *keys: tuple[str, ...]) -> None:
@@ -79,7 +81,7 @@ async def test_dataframe(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x", npartitions=20)
+        shuffled = df.shuffle("x", npartitions=20)
     await c.compute(shuffled)
     await a.heartbeat()
     await b.heartbeat()
@@ -91,10 +93,10 @@ async def test_dataframe(c, s, a, b):
         ("execute", "shuffle-transfer", "p2p-shards", "bytes"),
         ("execute", "shuffle-transfer", "p2p-shards", "count"),
         ("execute", "shuffle-transfer", "p2p-comms-limiter", "count"),
-        ("execute", "shuffle_p2p", "p2p-disk-read", "bytes"),
-        ("execute", "shuffle_p2p", "p2p-disk-read", "count"),
-        ("execute", "shuffle_p2p", "p2p-get-output-cpu", "seconds"),
-        ("execute", "shuffle_p2p", "p2p-get-output-noncpu", "seconds"),
+        ("execute", UNPACK_PREFIX, "p2p-disk-read", "bytes"),
+        ("execute", UNPACK_PREFIX, "p2p-disk-read", "count"),
+        ("execute", UNPACK_PREFIX, "p2p-get-output-cpu", "seconds"),
+        ("execute", UNPACK_PREFIX, "p2p-get-output-noncpu", "seconds"),
         ("p2p", "background-comms", "compress", "seconds"),
         ("p2p", "background-comms", "idle", "seconds"),
         ("p2p", "background-comms", "process", "bytes"),

@@ -2763,13 +2763,13 @@ async def test_get_task_duration(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_default_task_duration_splits(c, s, a, b):
-    """Ensure that the default task durations for shuffle split tasks are, by default,
+    """Ensure that the default task durations for shuffle split tasks are
     aligned with the task names of dask.dask
     """
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
 
-    # We don't care about the actual computation here but we'll schedule one anyhow to
+    # We don't care about the actual computation here but we'll schedule one anyway to
     # verify that we're looking for the correct key
     npart = 10
     df = dd.from_pandas(pd.DataFrame({"A": range(100), "B": 1}), npartitions=npart)
