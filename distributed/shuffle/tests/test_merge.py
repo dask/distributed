@@ -21,6 +21,8 @@ import dask
 from dask.dataframe._compat import PANDAS_GE_200, tm
 from dask.dataframe.utils import assert_eq
 
+from distributed import get_client
+
 try:
     import pyarrow as pa
 except ImportError:
@@ -29,15 +31,10 @@ except ImportError:
 pytestmark = pytest.mark.ci1
 
 
-def list_eq(aa, bb):
-    if isinstance(aa, dd.DataFrame):
-        a = aa.compute(scheduler="sync")
-    else:
-        a = aa
-    if isinstance(bb, dd.DataFrame):
-        b = bb.compute(scheduler="sync")
-    else:
-        b = bb
+async def list_eq(a, b):
+    c = get_client()
+    a = await c.compute(a) if isinstance(a, dd.DataFrame) else a
+    b = await c.compute(b) if isinstance(b, dd.DataFrame) else b
     tm.assert_index_equal(a.columns, b.columns)
 
     if isinstance(a, pd.DataFrame):
@@ -90,17 +87,14 @@ async def test_basic_merge(c, s, a, b, how):
             isinstance(expr, HashJoinP2P) for expr in joined.optimize()._expr.walk()
         )
 
-    result = await c.compute(joined)
     expected = pd.merge(A, B, how, "y")
-    list_eq(result, expected)
+    await list_eq(joined, expected)
 
     # Different columns and npartitions
     joined = a.merge(b, left_on="x", right_on="z", how="outer")
 
-    result = await c.compute(joined)
     expected = pd.merge(A, B, "outer", None, "x", "z")
-
-    list_eq(result, expected)
+    await list_eq(joined, expected)
 
     assert (
         a.merge(b, left_on="y", right_on="y", how="inner")._name
@@ -192,84 +186,41 @@ async def test_merge(c, s, a, b, how, disk):
             pd.merge(A, B, left_index=True, right_index=True, how=how),
         )
         joined = dd.merge(a, b, on="y", how=how)
-        result = await c.compute(joined)
-        list_eq(result, pd.merge(A, B, on="y", how=how))
+        await list_eq(joined, pd.merge(A, B, on="y", how=how))
         assert all(d is None for d in joined.divisions)
 
-        list_eq(
-            await c.compute(dd.merge(a, b, left_on="x", right_on="z", how=how)),
+        await list_eq(
+            dd.merge(a, b, left_on="x", right_on="z", how=how),
             pd.merge(A, B, left_on="x", right_on="z", how=how),
         )
-        list_eq(
-            await c.compute(
-                dd.merge(
-                    a,
-                    b,
-                    left_on="x",
-                    right_on="z",
-                    how=how,
-                    suffixes=("1", "2"),
-                )
-            ),
+        await list_eq(
+            dd.merge(a, b, left_on="x", right_on="z", how=how, suffixes=("1", "2")),
             pd.merge(A, B, left_on="x", right_on="z", how=how, suffixes=("1", "2")),
         )
 
-        list_eq(
-            await c.compute(dd.merge(a, b, how=how)),
-            pd.merge(A, B, how=how),
-        )
-        list_eq(
-            await c.compute(dd.merge(a, B, how=how)),
-            pd.merge(A, B, how=how),
-        )
-        list_eq(
-            await c.compute(dd.merge(A, b, how=how)),
-            pd.merge(A, B, how=how),
-        )
-
-        # dask-expr will return dask dataframe even if both are pandas flavored.
-        # w/o dask-expr enabled, no await is needed as dask will return pandas.
-        result = c.compute(dd.merge(A, B, how=how))
-        list_eq(
-            (await result) if dd._dask_expr_enabled() else result,
-            pd.merge(A, B, how=how),
-        )
-
-        list_eq(
-            await c.compute(dd.merge(a, b, left_index=True, right_index=True, how=how)),
+        await list_eq(dd.merge(a, b, how=how), pd.merge(A, B, how=how))
+        await list_eq(dd.merge(a, B, how=how), pd.merge(A, B, how=how))
+        await list_eq(dd.merge(A, b, how=how), pd.merge(A, B, how=how))
+        await list_eq(dd.merge(A, B, how=how), pd.merge(A, B, how=how))
+        await list_eq(
+            dd.merge(a, b, left_index=True, right_index=True, how=how),
             pd.merge(A, B, left_index=True, right_index=True, how=how),
         )
-        list_eq(
-            await c.compute(
-                dd.merge(
-                    a,
-                    b,
-                    left_index=True,
-                    right_index=True,
-                    how=how,
-                    suffixes=("1", "2"),
-                )
+        await list_eq(
+            dd.merge(
+                a, b, left_index=True, right_index=True, how=how, suffixes=("1", "2")
             ),
             pd.merge(
                 A, B, left_index=True, right_index=True, how=how, suffixes=("1", "2")
             ),
         )
 
-        list_eq(
-            await c.compute(dd.merge(a, b, left_on="x", right_index=True, how=how)),
+        await list_eq(
+            dd.merge(a, b, left_on="x", right_index=True, how=how),
             pd.merge(A, B, left_on="x", right_index=True, how=how),
         )
-        list_eq(
-            await c.compute(
-                dd.merge(
-                    a,
-                    b,
-                    left_on="x",
-                    right_index=True,
-                    how=how,
-                    suffixes=("1", "2"),
-                )
-            ),
+        await list_eq(
+            dd.merge(a, b, left_on="x", right_index=True, how=how, suffixes=("1", "2")),
             pd.merge(A, B, left_on="x", right_index=True, how=how, suffixes=("1", "2")),
         )
 
@@ -397,65 +348,25 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 )
 
                 # hash join
-                list_eq(
-                    await c.compute(
-                        dd.merge(
-                            ddl,
-                            ddr,
-                            how=how,
-                            left_on="a",
-                            right_on="d",
-                        )
-                    ),
+                await list_eq(
+                    dd.merge(ddl, ddr, how=how, left_on="a", right_on="d"),
                     pd.merge(pdl, pdr, how=how, left_on="a", right_on="d"),
                 )
-                list_eq(
-                    await c.compute(
-                        dd.merge(
-                            ddl,
-                            ddr,
-                            how=how,
-                            left_on="b",
-                            right_on="e",
-                        )
-                    ),
+                await list_eq(
+                    dd.merge(ddl, ddr, how=how, left_on="b", right_on="e"),
                     pd.merge(pdl, pdr, how=how, left_on="b", right_on="e"),
                 )
-
-                list_eq(
-                    await c.compute(
-                        dd.merge(
-                            ddr,
-                            ddl,
-                            how=how,
-                            left_on="d",
-                            right_on="a",
-                        )
-                    ),
+                await list_eq(
+                    dd.merge(ddr, ddl, how=how, left_on="d", right_on="a"),
                     pd.merge(pdr, pdl, how=how, left_on="d", right_on="a"),
                 )
-                list_eq(
-                    await c.compute(
-                        dd.merge(
-                            ddr,
-                            ddl,
-                            how=how,
-                            left_on="e",
-                            right_on="b",
-                        )
-                    ),
+                await list_eq(
+                    dd.merge(ddr, ddl, how=how, left_on="e", right_on="b"),
                     pd.merge(pdr, pdl, how=how, left_on="e", right_on="b"),
                 )
-
-                list_eq(
-                    await c.compute(
-                        dd.merge(
-                            ddl,
-                            ddr,
-                            how=how,
-                            left_on=["a", "b"],
-                            right_on=["d", "e"],
-                        )
+                await list_eq(
+                    dd.merge(
+                        ddl, ddr, how=how, left_on=["a", "b"], right_on=["d", "e"]
                     ),
                     pd.merge(
                         pdl, pdr, how=how, left_on=["a", "b"], right_on=["d", "e"]
