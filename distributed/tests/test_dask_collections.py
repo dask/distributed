@@ -43,11 +43,6 @@ def assert_equal(a, b):
         assert a == b
 
 
-@pytest.mark.xfail(
-    dd._dask_expr_enabled(),
-    reason="https://github.com/dask-contrib/dask-expr/issues/955",
-    raises=RuntimeError,
-)
 @ignore_single_machine_warning
 @gen_cluster(client=True)
 async def test_dataframes(c, s, a, b):
@@ -68,11 +63,11 @@ async def test_dataframes(c, s, a, b):
     exprs = [
         lambda df: df.x.mean(),
         lambda df: df.y.std(),
-        lambda df: df.assign(z=df.x + df.y).drop_duplicates(),
+        lambda df: df.assign(z=df.x + df.y).drop_duplicates(split_out=1),
         lambda df: df.index,
         lambda df: df.x,
         lambda df: df.x.cumsum(),
-        lambda df: df.groupby(["x", "y"]).count(),
+        lambda df: df.groupby(["x", "y"]).count(split_out=1),
         lambda df: df.loc[50:75],
     ]
     for f in exprs:
