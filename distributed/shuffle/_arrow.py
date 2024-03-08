@@ -65,7 +65,6 @@ def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
 
 def convert_shards(
     shards: list[pa.Table], meta: pd.DataFrame, partition_column: str, drop_column: bool
-
 ) -> pd.DataFrame:
     import pandas as pd
     from pandas.core.dtypes.cast import find_common_type  # type: ignore[attr-defined]
