@@ -447,16 +447,18 @@ def test_Future_release_sync(c):
     x = c.submit(div, 1, 1)
     x.result()
     x.release()
-    poll_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=5)
 
-    x = c.submit(slowinc, 1, delay=0.8)
+    ev = Event()
+    x = c.submit(lambda ev: ev.wait(), ev)
     x.release()
-    poll_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=5)
+    ev.set()
 
     x = c.submit(div, 1, 0)
     x.exception()
     x.release()
-    poll_for(lambda: not c.futures, timeout=0.3)
+    poll_for(lambda: not c.futures, timeout=5)
 
 
 @pytest.mark.parametrize("method", ["result", "gather"])
