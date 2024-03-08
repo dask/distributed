@@ -1340,50 +1340,44 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
     await check_scheduler_cleanup(s)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_crashed_worker_after_shuffle(c, s, a):
+@gen_cluster(client=True)
+async def test_crashed_worker_after_shuffle(c, s, a, b):
     def block(df, in_event, block_event):
         in_event.set()
         block_event.wait()
         return df
 
-    async with Nanny(s.address, nthreads=1) as n:
-        df = df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-03-01",
-            dtypes={"x": float, "y": float},
-            freq="100 s",
-            seed=42,
-        )
-        with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            out = df.shuffle("x")
-        out = c.compute(out)
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="100 s",
+        seed=42,
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = df.shuffle("x")
+    out = c.compute(out)
 
-        in_event = Event()
-        block_event = Event()
+    in_event = Event()
+    block_event = Event()
 
-        out = c.submit(
-            block,
-            out,
-            in_event,
-            block_event,
-            workers=[n.worker_address],
-            allow_other_workers=True,
-        )
+    out = c.submit(
+        block, out, in_event, block_event, workers=[b.address], allow_other_workers=True
+    )
 
-        await wait_until_worker_has_tasks(UNPACK_PREFIX, n.worker_address, 1, s)
-        await in_event.wait()
-        await n.process.process.kill()
-        await block_event.set()
+    await wait_until_worker_has_tasks(UNPACK_PREFIX, b.address, 1, s)
+    await in_event.wait()
+    await s.remove_worker(b.address, stimulus_id="remove_b")
+    await block_event.set()
 
-        out = await out
-        result = out.x.size
-        expected = await c.compute(df.x.size)
-        assert result == expected
+    out = await out
+    result = out.x.size
+    expected = await c.compute(df.x.size)
+    assert result == expected
 
-        await c.close()
-        await check_worker_cleanup(a)
-        await check_scheduler_cleanup(s)
+    await c.close()
+    await check_worker_cleanup(a)
+    await check_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
