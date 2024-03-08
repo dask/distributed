@@ -542,4 +542,8 @@ def _get_thief(
     return min(potential_thieves, key=partial(scheduler.worker_objective, ts))
 
 
-fast_tasks = {"split-shuffle"}
+fast_tasks = {
+    k
+    for k, v in dask.config.get("distributed.scheduler.default-task-durations").items()
+    if parse_timedelta(v) <= 0.001
+}
