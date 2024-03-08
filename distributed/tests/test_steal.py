@@ -1027,10 +1027,10 @@ async def test_blocklist_shuffle_split(c, s, a, b):
 
     while not s.tasks:
         await asyncio.sleep(0.005)
-    prefixes = set(s.task_prefixes.keys())
+
     from distributed.stealing import fast_tasks
 
-    blocked = fast_tasks & prefixes
+    blocked = fast_tasks & s.task_prefixes.keys()
     assert blocked
     assert any(["split" in prefix for prefix in blocked])
 
