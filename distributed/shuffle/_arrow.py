@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from packaging.version import parse
 
+from dask.dataframe._compat import PANDAS_GE_300
 from dask.utils import parse_bytes
 
 if TYPE_CHECKING:
@@ -64,6 +65,7 @@ def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
 
 def convert_shards(
     shards: list[pa.Table], meta: pd.DataFrame, partition_column: str, drop_column: bool
+
 ) -> pd.DataFrame:
     import pandas as pd
     from pandas.core.dtypes.cast import find_common_type  # type: ignore[attr-defined]
@@ -93,7 +95,8 @@ def convert_shards(
         ):
             continue
         reconciled_dtypes[column] = find_common_type([actual, dtype])
-    return df.astype(reconciled_dtypes, copy=False)
+    kwargs = {} if PANDAS_GE_300 else {"copy": False}
+    return df.astype(reconciled_dtypes, **kwargs)
 
 
 def buffers_to_table(data: list[tuple[int, bytes]]) -> pa.Table:
