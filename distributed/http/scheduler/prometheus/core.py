@@ -56,7 +56,8 @@ class SchedulerMetricCollector(PrometheusCollector):
             yield CounterMetricFamily(
                 self.build_name("gil_contention"),
                 "GIL contention metric",
-                value=self.server.monitor._cumulative_gil_contention,
+                value=self.server.monitor.cumulative_gil_contention,
+                unit="seconds",
             )
 
         yield CounterMetricFamily(

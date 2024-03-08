@@ -59,7 +59,7 @@ async def test_prometheus(c, s, a):
     except ImportError:
         pass  # pragma: nocover
     else:
-        expected_metrics.add("dask_worker_gil_contention_total")
+        expected_metrics.add("dask_worker_gil_contention_seconds_total")
 
     try:
         import crick  # noqa: F401
