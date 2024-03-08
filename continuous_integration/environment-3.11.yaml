@@ -1,13 +1,14 @@
 name: dask-distributed
 channels:
   - conda-forge
+  - bokeh/label/dev
   - defaults
 dependencies:
   - python=3.11
   - packaging
   - pip
   - asyncssh
-  - bokeh
+  - bokeh=3.4.0rc1
   - click
   - cloudpickle
   - coverage
