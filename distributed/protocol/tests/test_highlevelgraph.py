@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -173,7 +175,13 @@ async def test_dataframe_annotations(c, s, a, b):
     acol = df["a"]
     bcol = df["b"]
 
-    with dask.annotate(retries=retries):
+    ctx = contextlib.nullcontext()
+    if dd._dask_expr_enabled():
+        ctx = pytest.warns(
+            UserWarning, match="Annotations will be ignored when using query-planning"
+        )
+
+    with dask.annotate(retries=retries), ctx:
         df = acol + bcol
 
     with dask.config.set(optimization__fuse__active=False):
@@ -182,5 +190,6 @@ async def test_dataframe_annotations(c, s, a, b):
     assert rdf.dtypes == np.float64
     assert (rdf == 10.0).all()
 
-    # There is an annotation match per partition (i.e. task)
-    assert plugin.retry_matches == df.npartitions
+    if not dd._dask_expr_enabled():
+        # There is an annotation match per partition (i.e. task)
+        assert plugin.retry_matches == df.npartitions

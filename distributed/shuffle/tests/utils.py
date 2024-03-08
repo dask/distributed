@@ -6,6 +6,15 @@ from typing import Any
 from distributed.core import PooledRPCCall
 from distributed.shuffle._core import ShuffleId, ShuffleRun
 
+UNPACK_PREFIX = "shuffle_p2p"
+try:
+    import dask.dataframe as dd
+
+    if dd._dask_expr_enabled():
+        UNPACK_PREFIX = "p2pshuffle"
+except ImportError:
+    pass
+
 
 class PooledRPCShuffle(PooledRPCCall):
     def __init__(self, shuffle: ShuffleRun):

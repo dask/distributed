@@ -1965,6 +1965,7 @@ class SchedulerState:
                 )
 
                 v = a_recs.get(key, finish)
+                # The inner rec has higher priority? Is that always desired?
                 func = self._TRANSITIONS_TABLE["released", v]
                 b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
 
@@ -2083,7 +2084,11 @@ class SchedulerState:
             assert not ts.who_has
             assert not ts.processing_on
             for dts in ts.dependencies:
-                assert dts.state not in {"forgotten", "erred"}
+                assert dts.state not in {"forgotten", "erred"}, (
+                    str(ts),
+                    str(dts),
+                    self.transition_log,
+                )
 
         if ts.has_lost_dependencies:
             return {key: "forgotten"}, {}, {}
@@ -2481,7 +2486,9 @@ class SchedulerState:
             recommendations[key] = "forgotten"
         elif ts.has_lost_dependencies:
             recommendations[key] = "forgotten"
-        elif ts.who_wants or ts.waiters:
+        elif (ts.who_wants or ts.waiters) and not any(
+            dts.state == "erred" for dts in ts.dependencies
+        ):
             recommendations[key] = "waiting"
 
         for dts in ts.waiters or ():
@@ -2506,14 +2513,13 @@ class SchedulerState:
             assert ts.exception_blame
             assert not ts.who_has
             assert not ts.waiting_on
-            assert not ts.waiters
 
         failing_ts = ts.exception_blame
         assert failing_ts
 
         for dts in ts.dependents:
-            dts.exception_blame = failing_ts
             if not dts.who_has:
+                dts.exception_blame = failing_ts
                 recommendations[dts.key] = "erred"
 
         report_msg = {
@@ -2548,6 +2554,9 @@ class SchedulerState:
 
         for dts in ts.dependents:
             if dts.state == "erred":
+                # Does this make sense?
+                # This goes via released
+                # dts -> released -> waiting
                 recommendations[dts.key] = "waiting"
 
         w_msg = {
@@ -2622,8 +2631,8 @@ class SchedulerState:
         self,
         key: Key,
         stimulus_id: str,
-        *,
         worker: str,
+        *,
         cause: Key | None = None,
         exception: Serialized | None = None,
         traceback: Serialized | None = None,
@@ -2699,7 +2708,7 @@ class SchedulerState:
             )
         )
 
-        for dts in ts.dependents:
+        for dts in ts.waiters or set():
             dts.exception_blame = failing_ts
             recommendations[dts.key] = "erred"
 
@@ -5032,6 +5041,19 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.state if ts else "forgotten",
                 key,
                 ts.who_has if ts else {},
+            )
+            worker_msgs[worker] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "stimulus_id": stimulus_id,
+                }
+            ]
+        elif ts.state == "erred":
+            logger.debug(
+                "Received already erred task, worker: %s" ", key: %s",
+                worker,
+                key,
             )
             worker_msgs[worker] = [
                 {

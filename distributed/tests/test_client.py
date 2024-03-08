@@ -4829,7 +4829,7 @@ async def test_recreate_error_collection(c, s, a, b):
             raise ValueError
         return x
 
-    df2 = df.a.map(make_err)
+    df2 = df.a.map(make_err, meta=df.a)
     f = c.compute(df2)
     error_f = await c._get_errored_future(f)
     function, args, kwargs = await c._get_components_from_future(error_f)
@@ -4937,7 +4937,7 @@ async def test_recreate_task_collection(c, s, a, b):
 
     df = dd.from_pandas(pd.DataFrame({"a": [0, 1, 2, 3, 4]}), chunksize=2)
 
-    df2 = df.a.map(lambda x: x + 1)
+    df2 = df.a.map(inc, meta=df.a)
     f = c.compute(df2)
 
     function, args, kwargs = await c._get_components_from_future(f)
@@ -6559,11 +6559,9 @@ async def test_config_inherited_by_subprocess():
 
 @gen_cluster(client=True)
 async def test_futures_of_sorted(c, s, a, b):
-    pytest.importorskip("dask.dataframe")
-    df = await dask.datasets.timeseries(dtypes={"x": int}).persist()
-    futures = futures_of(df)
-    for k, f in zip(df.__dask_keys__(), futures):
-        assert str(k) in str(f)
+    b = dask.bag.from_sequence(range(10), npartitions=5).persist()
+    futures = futures_of(b)
+    assert [fut.key for fut in futures] == [k for k in b.__dask_keys__()]
 
 
 @gen_cluster(
