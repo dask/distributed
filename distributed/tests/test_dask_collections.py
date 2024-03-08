@@ -5,8 +5,6 @@ import pytest
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 
-from concurrent.futures import CancelledError
-
 from packaging.version import parse as parse_version
 from pandas.testing import assert_frame_equal, assert_index_equal, assert_series_equal
 
@@ -140,19 +138,7 @@ async def test_bag_groupby_key_hashing(c, s, a, b):
     assert ("even", [0, 2, 4] * 3) in result
 
 
-@pytest.mark.parametrize(
-    "wait",
-    [
-        wait,
-        pytest.param(
-            lambda x: None,
-            marks=pytest.mark.xfail(
-                reason="https://github.com/dask/distributed/issues/8561",
-                raises=CancelledError,
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("wait", [wait, lambda x: None])
 def test_dataframe_set_index_sync(wait, client):
     partition_freq_unit = "ME" if PANDAS_GE_220 else "M"
     df = dask.datasets.timeseries(
