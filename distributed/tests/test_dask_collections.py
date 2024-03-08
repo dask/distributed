@@ -41,6 +41,11 @@ def assert_equal(a, b):
         assert a == b
 
 
+@pytest.mark.xfail(
+    dd._dask_expr_enabled(),
+    reason="https://github.com/dask-contrib/dask-expr/issues/955",
+    raises=RuntimeError,
+)
 @ignore_single_machine_warning
 @gen_cluster(client=True)
 async def test_dataframes(c, s, a, b):
