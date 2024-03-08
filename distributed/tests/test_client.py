@@ -6557,11 +6557,9 @@ async def test_config_inherited_by_subprocess():
 
 @gen_cluster(client=True)
 async def test_futures_of_sorted(c, s, a, b):
-    df = await dask.datasets.timeseries(dtypes={"x": int}).persist()
-    futures = futures_of(df)
-    # Note: not testing name, only partition numbers
-    # Read: https://github.com/dask-contrib/dask-expr/issues/952
-    assert [fut.key[1] for fut in futures] == [k[1] for k in df.__dask_keys__()]
+    b = dask.bag.from_sequence(range(10), npartitions=5).persist()
+    futures = futures_of(b)
+    assert [fut.key for fut in futures] == [k for k in b.__dask_keys__()]
 
 
 @gen_cluster(
