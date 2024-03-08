@@ -4827,8 +4827,7 @@ async def test_recreate_error_collection(c, s, a, b):
             raise ValueError
         return x
 
-    with pytest.warns(UserWarning, match="You did not provide metadata"):
-        df2 = df.a.map(make_err)
+    df2 = df.a.map(make_err, meta=df.a)
     f = c.compute(df2)
     error_f = await c._get_errored_future(f)
     function, args, kwargs = await c._get_components_from_future(error_f)
