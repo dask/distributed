@@ -15,7 +15,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from packaging.version import parse
+from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop
 
 from dask.utils import key_split
@@ -73,8 +73,13 @@ from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
     import pyarrow as pa
+
+    PYARROW_GE_12 = parse_version(pa.__version__).release >= (12,)
+    PYARROW_GE_14 = parse_version(pa.__version__).release >= (14,)
 except ImportError:
     pa = None
+    PYARROW_GE_12 = False
+    PYARROW_GE_14 = False
 
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
@@ -1014,6 +1019,7 @@ async def test_heartbeat(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.skipif("not pa", reason="Requires PyArrow")
 @pytest.mark.filterwarnings("ignore:DatetimeTZBlock")  # pandas >=2.2 vs. pyarrow <15
 @pytest.mark.parametrize("drop_column", [True, False])
 def test_processing_chain(tmp_path, drop_column):
@@ -1023,8 +1029,6 @@ def test_processing_chain(tmp_path, drop_column):
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
-    np = pytest.importorskip("numpy")
-    pa = pytest.importorskip("pyarrow")
 
     class Stub:
         def __init__(self, value: int) -> None:
@@ -1092,7 +1096,7 @@ def test_processing_chain(tmp_path, drop_column):
         # ),
     }
 
-    if parse(pa.__version__) >= parse("12.0.0"):
+    if PYARROW_GE_12:
         columns.update(
             {
                 # Extension types
@@ -1653,6 +1657,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 
 # 36 parametrizations
 # Runtime each ~0.1s
+@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @pytest.mark.parametrize("n_workers", [1, 10])
 @pytest.mark.parametrize("n_input_partitions", [1, 2, 10])
 @pytest.mark.parametrize("npartitions", [1, 20])
@@ -1669,8 +1674,6 @@ async def test_basic_lowlevel_shuffle(
     disk,
     drop_column,
 ):
-    pa = pytest.importorskip("pyarrow")
-
     loop = IOLoop.current()
 
     dfs = []
@@ -1748,10 +1751,9 @@ async def test_basic_lowlevel_shuffle(
         assert len(df_after) == len(pd.concat(dfs))
 
 
+@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_offload(tmp_path, loop_in_thread):
-    pa = pytest.importorskip("pyarrow")
-
     dfs = []
     rows_per_df = 10
     n_input_partitions = 2
@@ -1805,10 +1807,9 @@ async def test_error_offload(tmp_path, loop_in_thread):
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
+@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_send(tmp_path, loop_in_thread):
-    pa = pytest.importorskip("pyarrow")
-
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -1862,10 +1863,9 @@ async def test_error_send(tmp_path, loop_in_thread):
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
+@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_receive(tmp_path, loop_in_thread):
-    pa = pytest.importorskip("pyarrow")
-
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -2365,7 +2365,7 @@ async def test_reconcile_partitions(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
 
-    if parse(pa.__version__) >= parse("14.0.0"):
+    if PYARROW_GE_14:
         result, expected = c.compute([ddf, out])
         result = await result
         expected = await expected
@@ -2395,19 +2395,14 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
     ddf = dd.from_map(make_partition, range(50))
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
-    if parse(pa.__version__) >= parse("14.0.0"):
-        with raises_with_cause(
-            RuntimeError,
-            r"shuffling \w* failed",
-            pa.ArrowTypeError,
-            "incompatible types",
-        ):
-            await c.compute(out)
-    else:
-        with raises_with_cause(
-            RuntimeError, r"shuffling \w* failed", pa.ArrowInvalid, "incompatible types"
-        ):
-            await c.compute(out)
+
+    with raises_with_cause(
+        RuntimeError,
+        r"(shuffling \w*|shuffle_barrier) failed",
+        pa.ArrowTypeError if PYARROW_GE_14 else pa.ArrowInvalid,
+        "incompatible types",
+    ):
+        await c.compute(out)
 
     await c.close()
     await check_worker_cleanup(a)
