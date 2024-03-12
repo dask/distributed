@@ -434,7 +434,7 @@ class WorkerState:
     #: Read-only worker status, synced one way from the remote Worker object
     status: Status
 
-    #: Cached hash of :attr:`~WorkerState.address`
+    #: Cached hash of :attr:`~WorkerState.server_id`
     _hash: int
 
     #: The total memory size, in bytes, used by the tasks this worker holds in memory

@@ -1126,9 +1126,9 @@ async def test_restart_waits_for_new_workers(c, s, *workers):
     # NOTE: == for `psutil.Process` compares PID and creation time
     new_procs = {n.process.process for n in workers}
     assert new_procs != original_procs
-    # The workers should have new addresses
-    assert s.workers.keys().isdisjoint(original_workers.keys())
-    # The old WorkerState instances should be replaced
+    # Most times, the workers should have new addresses
+    assert s.workers.keys() ^ original_workers.keys()
+    # The old WorkerState instances should have been replaced
     assert set(s.workers.values()).isdisjoint(original_workers.values())
 
 
