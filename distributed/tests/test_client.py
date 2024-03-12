@@ -863,11 +863,13 @@ async def test_tokenize_on_futures(c, s, a, b):
     y = c.submit(inc, 1)
     tok = tokenize(x)
     assert tokenize(x) == tokenize(x)
-    assert tokenize(x) == tokenize(y)
+    # Tokens must be unique per instance
+    # See https://github.com/dask/distributed/issues/8561
+    assert tokenize(x) != tokenize(y)
 
     c.futures[x.key].finish()
 
-    assert tok == tokenize(y)
+    assert tok != tokenize(y)
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
