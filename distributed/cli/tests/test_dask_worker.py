@@ -499,18 +499,17 @@ def test_dashboard_non_standard_ports():
     s_cmd = f"dask scheduler --host {s_host} --port {s_port} --dashboard-address :{s_dashboard_port}"
     w_cmd = f"dask worker {s_host}:{s_port} --dashboard-address :{w_dashboard_port} --host {w_host}"
 
-    with popen(s_cmd.split()):
-        with popen(w_cmd.split()):
-            with Client(f"{s_host}:{s_port}") as c:
-                c.wait_for_workers(1)
+    with popen(s_cmd.split()), popen(w_cmd.split()):
+        with Client(f"{s_host}:{s_port}") as c:
+            c.wait_for_workers(1)
 
-            response = requests.get(f"http://{s_host}:{w_dashboard_port}/status")
-            response.raise_for_status()
+        response = requests.get(f"http://{s_host}:{w_dashboard_port}/status")
+        response.raise_for_status()
 
-            # TEST PROXYING WORKS
-            response = requests.get(
-                f"http://{s_host}:{s_dashboard_port}/proxy/{w_dashboard_port}/{w_host}/status"
-            )
+        # TEST PROXYING WORKS
+        response = requests.get(
+            f"http://{s_host}:{s_dashboard_port}/proxy/{w_dashboard_port}/{w_host}/status"
+        )
             response.raise_for_status()
 
     with pytest.raises(requests.ConnectionError):
