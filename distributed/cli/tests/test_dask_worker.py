@@ -510,7 +510,7 @@ def test_dashboard_non_standard_ports():
         response = requests.get(
             f"http://{s_host}:{s_dashboard_port}/proxy/{w_dashboard_port}/{w_host}/status"
         )
-            response.raise_for_status()
+        response.raise_for_status()
 
     with pytest.raises(requests.ConnectionError):
         requests.get("http://localhost:4833/status/")
