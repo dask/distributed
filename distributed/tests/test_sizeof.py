@@ -24,7 +24,7 @@ def test_safe_sizeof_logs_on_failure():
     with captured_logger("distributed.sizeof") as logs:
         assert safe_sizeof(foo) == 1e6
 
-    assert "Sizeof calculation failed. Defaulting to 0.95 MiB" in logs.getvalue()
+    assert f"Sizeof calculation for object of type 'test_sizeof.BadlySized' failed. Defaulting to 0.95 MiB" in logs.getvalue()
 
     # Can provide custom `default_size`
     with captured_logger("distributed.sizeof") as logs:
