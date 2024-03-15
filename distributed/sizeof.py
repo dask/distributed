@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from dask.sizeof import sizeof
-from dask.utils import format_bytes
+from dask.utils import format_bytes, typename
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,8 @@ def safe_sizeof(obj: object, default_size: float = 1e6) -> int:
         return sizeof(obj)
     except Exception:
         logger.warning(
-            f"Sizeof calculation failed. Defaulting to {format_bytes(int(default_size))}",
+            f"Sizeof calculation for object of type '{typename(obj)}' failed. "
+            f"Defaulting to {format_bytes(int(default_size))}",
             exc_info=True,
         )
         return int(default_size)
