@@ -132,7 +132,7 @@ async def test_prometheus(c, s, a, b):
     except ImportError:
         pass  # pragma: nocover
     else:
-        expected_metrics.add("dask_scheduler_gil_contention")
+        expected_metrics.add("dask_scheduler_gil_contention_seconds")
 
     assert set(active_metrics.keys()) == expected_metrics
     assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
