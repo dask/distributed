@@ -493,9 +493,9 @@ def test_dashboard_non_standard_ports():
     # use internal ip instead of localhost ip to verify GlobalProxyHandler will update
     # to allow internal host ip of a worker.
     w_host = get_ip()
-    s_port = "3233"
-    s_dashboard_port = "3232"
-    w_dashboard_port = "4833"
+    s_port = open_port(s_host)
+    s_dashboard_port = open_port(s_host)
+    w_dashboard_port = open_port(w_host)
     s_cmd = f"dask scheduler --host {s_host} --port {s_port} --dashboard-address :{s_dashboard_port}"
     w_cmd = f"dask worker {s_host}:{s_port} --dashboard-address :{w_dashboard_port} --host {w_host}"
 

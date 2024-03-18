@@ -113,7 +113,7 @@ async def test_jupyter_idle_timeout_returned():
 @pytest.mark.slow
 @pytest.mark.xfail(WINDOWS, reason="Subprocess launching scheduler TimeoutError")
 @pytest.mark.xfail(MACOS, reason="Client fails to connect on OSX")
-def test_shutsdown_cleanly(loop):
+def test_shutsdown_cleanly(requires_default_ports):
     port = open_port()
     with concurrent.futures.ThreadPoolExecutor() as tpe:
         subprocess_fut = tpe.submit(
@@ -133,7 +133,7 @@ def test_shutsdown_cleanly(loop):
         )
 
         # wait until scheduler is running
-        with Client(f"127.0.0.1:{port}", loop=loop):
+        with Client(f"127.0.0.1:{port}"):
             pass
 
         with requests.Session() as session:
