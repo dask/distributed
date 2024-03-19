@@ -151,18 +151,16 @@ class WrappedKey:
 _round_robin_counter = [0]
 
 
-async def scatter_to_workers(nthreads, data, rpc=rpc):
+async def scatter_to_workers(workers, data, rpc=rpc):
     """Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers.
-    nthreads should be a dictionary mapping worker identities to numbers of cores.
 
     See scatter for parameter docstring
     """
-    assert isinstance(nthreads, dict)
     assert isinstance(data, dict)
 
-    workers = sorted(nthreads.keys())
+    workers = sorted(workers)
     names, data = list(zip(*data.items()))
 
     worker_iter = drop(_round_robin_counter[0] % len(workers), cycle(workers))
