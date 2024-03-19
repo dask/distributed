@@ -143,19 +143,48 @@ memory as actual resources and uses these in normal scheduling operation.
 Resources with collections
 --------------------------
 
-You can also use resources with Dask collections, like arrays, dataframes, and
-delayed objects. You can annotate operations on collections with specific resources
-that should be required perform the computation using the dask annotations machinery.
+You can also use resources with Dask collections, like arrays and delayed objects. You
+can annotate operations on collections with specific resources that should be required
+perform the computation using the dask annotations machinery.
 
 .. code-block:: python
 
-    x = dd.read_csv(...)
+    # Read note below!
+    dask.config.set({"optimization.fuse.active": False})
+    x = da.read_zarr(...)
     with dask.annotate(resources={'GPU': 1}):
-        y = x.map_partitions(func1)
-    z = y.map_partitions(func2)
+        y = x.map_blocks(func1)
+    z = y.map_blocks(func2)
+    z.compute()
 
-    z.compute(optimize_graph=False)
+.. note::
 
-In most cases (such as the case above) the annotations for ``y`` may be lost during
-graph optimization before execution. You can avoid that by passing the
-``optimize_graph=False`` keyword.
+    This feature is currently supported for dataframes only when
+    ``with dask.annotate(...):`` wraps the `compute()` or `persist()` call; in that
+    case, the annotation applies to the whole graph, starting from and excluding
+    any previously persisted collections.
+
+    For other collections, like arrays and delayed objects, annotations can get lost
+    during the optimization phase. To prevent this issue, you must set:
+
+    >>> dask.config.set({"optimization.fuse.active": False})
+
+    Or in dask.yaml:
+
+    .. code-block:: yaml
+
+        optimization:
+          fuse:
+            active: false
+
+    A possible workaround, that also works for dataframes, can be to perform
+    intermediate calls to `persist()`:
+
+    .. code-block:: python
+
+        x = dd.read_parquet(...)
+        with dask.annotate(resources={'GPU': 1}):
+            y = x.map_partitions(func1).persist()
+        z = y.map_partitions(func2)
+        del y  # Release distributed memory for y as soon as possible
+        z.compute()

@@ -26,23 +26,21 @@ For example:
 .. code-block:: python
 
     import dask.config
-    import dask.dataframe as dd
+    import dask.array as da
     from distributed import Client, span
 
+    # Read important note below
     dask.config.set({"optimization.fuse.active": False})
     client = Client()
 
     with span("Alice's workflow"):
         with span("data load"):
-            df = dd.read_parquet(...)
-
+            a = da.read_zarr(...)
         with span("ML preprocessing"):
-            df = preprocess(df)
-
+            a = preprocess(a)
         with span("Model training"):
-            model = train(df)
-
-    model = model.compute()
+            model = train(a)
+        model = model.compute()
 
 Note how the :func:`span` context manager can be nested.
 The example will create the following spans on the scheduler:
@@ -95,10 +93,16 @@ Additionally, spans can be queried using scheduler extensions or
 
 User API
 --------
-.. warning::
+.. important::
 
-    Spans are based on annotations, and just like annotations they can be lost during
-    optimization. To prevent this issue, you must set
+    Dataframes have a minimum granularity of a single call to `compute()` or `persist()`
+    and can't break it down further into groups of operations - if the example above
+    used dataframes, everything would have been uniformly tagged as "Alice's Workflow",
+    as it is the span that's active during `compute()`.
+
+    In other collections, such as arrays and delayed objects, spans that don't wrap
+    around a call to `compute()` or `persist()` can get lost during the optimization
+    phase. To prevent this issue, you must set
 
     >>> dask.config.set({"optimization.fuse.active": False})
 
@@ -109,6 +113,22 @@ User API
         optimization:
           fuse:
             active: false
+
+    A possible workaround, that also works for dataframes, can be to perform
+    intermediate calls to `persist()`:
+
+    .. code-block:: python
+
+        with span("Alice's workflow"):
+            with span("data load"):
+                a = dd.read_parquet(...).persist()
+            with span("ML preprocessing"):
+                a = preprocess(a).persist()
+                del a  # Release distributed memory for a as soon as possible
+            with span("Model training"):
+                model = train(b).persist()
+                del b  # Release distributed memory for b as soon as possible
+                model = model.compute()
 
 .. autofunction:: span
 
