@@ -2302,7 +2302,7 @@ class TaskGraph(DashboardComponent):
             color="black",
             alpha=0.3,
         )
-        rect = self.root.square(
+        rect = self.root.scatter(
             x="x",
             y="y",
             size=10,
@@ -2310,6 +2310,7 @@ class TaskGraph(DashboardComponent):
             source=self.node_source,
             view=node_view,
             legend_field="state",
+            marker="square",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
