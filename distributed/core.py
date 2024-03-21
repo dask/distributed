@@ -54,7 +54,6 @@ from distributed.utils import (
     get_traceback,
     has_keyword,
     import_file,
-    is_python_shutting_down,
     iscoroutinefunction,
     offload,
     recursive_to_dict,
@@ -318,6 +317,8 @@ class Server:
     *  ``{'op': 'add', 'x': 10, 'y': 20}``
 
     """
+
+    _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
 
     default_ip: ClassVar[str] = ""
     default_port: ClassVar[int] = 0
@@ -900,7 +901,7 @@ class Server:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
                 except OSError as e:
-                    if not is_python_shutting_down():
+                    if not self._is_finalizing():
                         logger.debug(
                             "Lost connection to %r while reading message: %s."
                             " Last operation: %s",
@@ -1004,7 +1005,7 @@ class Server:
 
         finally:
             del self._comms[comm]
-            if not is_python_shutting_down() and not comm.closed():
+            if not self._is_finalizing() and not comm.closed():
                 try:
                     comm.abort()
                 except Exception as e:

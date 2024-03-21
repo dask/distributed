@@ -102,7 +102,6 @@ from distributed.utils import (
     format_dashboard_link,
     has_keyword,
     import_term,
-    is_python_shutting_down,
     log_errors,
     nbytes,
     sync,
@@ -208,6 +207,8 @@ class Future(WrappedKey):
     --------
     Client:  Creates futures
     """
+
+    _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
 
     _cb_executor = None
     _cb_executor_pid = None
@@ -521,7 +522,7 @@ class Future(WrappedKey):
         except AttributeError:
             # Occasionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
-            if not is_python_shutting_down():
+            if not self._is_finalizing():
                 raise
         except RuntimeError:  # closed event loop
             pass
@@ -831,6 +832,8 @@ class Client(SyncMethodMixin):
     distributed.scheduler.Scheduler: Internal scheduler
     distributed.LocalCluster:
     """
+
+    _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
 
     _instances: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
 
@@ -1554,7 +1557,7 @@ class Client(SyncMethodMixin):
                 try:
                     msgs = await self.scheduler_comm.comm.read()
                 except CommClosedError:
-                    if is_python_shutting_down():
+                    if self._is_finalizing():
                         return
                     if self.status == "running":
                         if self.cluster and self.cluster.status in (
@@ -1775,7 +1778,7 @@ class Client(SyncMethodMixin):
         sync(self.loop, self._close, fast=True, callback_timeout=timeout)
         assert self.status == "closed"
 
-        if not is_python_shutting_down():
+        if not self._is_finalizing():
             self._loop_runner.stop()
 
     async def _shutdown(self):
