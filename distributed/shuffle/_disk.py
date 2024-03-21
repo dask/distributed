@@ -21,13 +21,15 @@ from distributed.utils import Deadline, empty_context, log_errors, nbytes
 
 
 def open_file(*args: Any, **kwargs: Any) -> io.IOBase:
-    import pyarrow as pa
+    open_file = open
+    try:
+        import pyarrow as pa
 
-    if parse_version(pa.__version__) >= parse_version("15.0.0"):
-        # Only >15 support append mode
-        open_file = pa.OSFile
-    else:
-        open_file = open
+        if parse_version(pa.__version__) >= parse_version("15.0.0"):
+            # Only >15 support append mode
+            open_file = pa.OSFile
+    except ModuleNotFoundError:
+        pass
     return open_file(*args, **kwargs)
 
 
