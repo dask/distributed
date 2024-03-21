@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import pathlib
 import shutil
 import threading
@@ -8,7 +9,6 @@ from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from typing import Any
 
-import pyarrow as pa
 from packaging.version import parse as parse_version
 from toolz import concat
 
@@ -19,11 +19,16 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import pickle_bytelist
 from distributed.utils import Deadline, empty_context, log_errors, nbytes
 
-if parse_version(pa.__version__) >= parse_version("15.0.0"):
-    # Only >15 support append mode
-    open_file = pa.OSFile
-else:
-    open_file = open
+
+def open_file(*args: Any, **kwargs: Any) -> io.IOBase:
+    import pyarrow as pa
+
+    if parse_version(pa.__version__) >= parse_version("15.0.0"):
+        # Only >15 support append mode
+        open_file = pa.OSFile
+    else:
+        open_file = open
+    return open_file(*args, **kwargs)
 
 
 class ReadWriteLock:
