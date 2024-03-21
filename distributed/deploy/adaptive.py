@@ -8,7 +8,7 @@ from tornado.ioloop import IOLoop
 import dask.config
 from dask.utils import parse_timedelta
 
-from distributed.deploy.adaptive_core import AdaptiveCore
+from distributed.deploy.adaptive_core import AdaptiveCore, Recommendation
 from distributed.protocol import pickle
 from distributed.utils import log_errors
 
@@ -152,7 +152,7 @@ class Adaptive(AdaptiveCore):
             target_duration=self.target_duration
         )
 
-    async def recommendations(self, target: int) -> dict:
+    async def recommendations(self, target: int) -> Recommendation:
         if len(self.plan) != len(self.requested):
             # Ensure that the number of planned and requested workers
             # are in sync before making recommendations.

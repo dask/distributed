@@ -5,10 +5,11 @@ import math
 from collections import defaultdict, deque
 from collections.abc import Iterable
 from datetime import timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 import tlz as toolz
 from tornado.ioloop import IOLoop
+from typing_extensions import NotRequired
 
 import dask.config
 from dask.utils import parse_timedelta
@@ -21,6 +22,15 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+RecommendationStatus = Literal["up", "down", "same"]
+
+
+class Recommendation(TypedDict):
+    status: RecommendationStatus
+    workers: NotRequired[set[WorkerState]]
+    n: NotRequired[int]
 
 
 class AdaptiveCore:
@@ -169,13 +179,13 @@ class AdaptiveCore:
 
         return n
 
-    async def scale_down(self, n: int) -> None:
+    async def scale_down(self, workers: Iterable) -> None:
         raise NotImplementedError()
 
-    async def scale_up(self, workers: Iterable) -> None:
+    async def scale_up(self, n: int) -> None:
         raise NotImplementedError()
 
-    async def recommendations(self, target: int) -> dict:
+    async def recommendations(self, target: int) -> Recommendation:
         """
         Make scale up/down recommendations based on current state and target
         """
@@ -185,11 +195,11 @@ class AdaptiveCore:
 
         if target == len(plan):
             self.close_counts.clear()
-            return {"status": "same"}
+            return Recommendation(status="same")
 
         if target > len(plan):
             self.close_counts.clear()
-            return {"status": "up", "n": target}
+            return Recommendation(status="up", n=target)
 
         # target < len(plan)
         not_yet_arrived = requested - observed
@@ -212,9 +222,9 @@ class AdaptiveCore:
                 del self.close_counts[k]
 
         if firmly_close:
-            return {"status": "down", "workers": list(firmly_close)}
+            return Recommendation(status="down", workers=firmly_close)
         else:
-            return {"status": "same"}
+            return Recommendation(status="same")
 
     async def adapt(self) -> None:
         """
@@ -229,18 +239,16 @@ class AdaptiveCore:
 
         try:
             target = await self.safe_target()
-            recommendations = await self.recommendations(target)
+            recommendation = await self.recommendations(target)
 
-            if recommendations["status"] != "same":
-                self.log.append((time(), dict(recommendations)))
-
-            status = recommendations.pop("status")
-            if status == "same":
+            if recommendation["status"] == "same":
                 return
-            if status == "up":
-                await self.scale_up(**recommendations)
-            if status == "down":
-                await self.scale_down(**recommendations)
+            else:
+                self.log.append((time(), cast(dict, recommendation)))
+                if recommendation["status"] == "up":
+                    await self.scale_up(recommendation["n"])
+                elif recommendation["status"] == "down":
+                    await self.scale_down(recommendation["workers"])
         except OSError:
             if status != "down":
                 logger.error("Adaptive stopping due to error", exc_info=True)
