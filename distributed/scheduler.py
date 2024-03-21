@@ -6132,16 +6132,15 @@ class Scheduler(SchedulerState, ServerNode):
                 raise TimeoutError("No valid workers found")
             await asyncio.sleep(0.1)
 
-        nthreads = {ws.address: ws.nthreads for ws in wss}
-
         assert isinstance(data, dict)
 
-        keys, who_has, nbytes = await scatter_to_workers(nthreads, data, rpc=self.rpc)
+        workers = list(ws.address for ws in wss)
+        keys, who_has, nbytes = await scatter_to_workers(workers, data, rpc=self.rpc)
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
         if broadcast:
-            n = len(nthreads) if broadcast is True else broadcast
+            n = len(workers) if broadcast is True else broadcast
             await self.replicate(keys=keys, workers=workers, n=n)
 
         self.log_event(
