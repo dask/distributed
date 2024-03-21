@@ -29,6 +29,7 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
 from distributed.utils_test import (
+    BlockedInstantiateNanny,
     async_poll_for,
     captured_logger,
     gen_cluster,
@@ -217,7 +218,7 @@ async def test_nanny_timeout(c, s, a):
     with captured_logger(
         logging.getLogger("distributed.nanny"), level=logging.ERROR
     ) as logger:
-        response = await a.restart(timeout=0.1)
+        await a.restart(timeout=0.1)
 
     out = logger.getvalue()
     assert "timed out" in out.lower()
@@ -846,23 +847,11 @@ class DummyNannyPlugin(NannyPlugin):
         nanny._plugin_registered = False
 
 
-class SlowNanny(Nanny):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.in_instantiate = asyncio.Event()
-        self.wait_instantiate = asyncio.Event()
-
-    async def instantiate(self):
-        self.in_instantiate.set()
-        await self.wait_instantiate.wait()
-        return await super().instantiate()
-
-
 @pytest.mark.parametrize("restart", [True, False])
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_plugin_register_during_start_success(c, s, restart):
     plugin = DummyNannyPlugin("foo", restart=restart)
-    n = SlowNanny(s.address)
+    n = BlockedInstantiateNanny(s.address)
     assert not hasattr(n, "_plugin_registered")
     start = asyncio.create_task(n.start())
     try:
