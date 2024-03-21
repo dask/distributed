@@ -2396,7 +2396,7 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
         bcomm.comm = orig_comm
 
 
-class BlockedStartNanny(Nanny):
+class BlockedInstantiateNanny(Nanny):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.in_instantiate = asyncio.Event()

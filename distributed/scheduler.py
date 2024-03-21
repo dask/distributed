@@ -99,7 +99,7 @@ from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
 from distributed.http import get_handlers
 from distributed.lock import LockExtension
-from distributed.metrics import monotonic, time
+from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
@@ -117,6 +117,7 @@ from distributed.spans import SpansSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
+    Deadline,
     TimeoutError,
     format_dashboard_link,
     get_fileno_limit,
@@ -6317,7 +6318,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
         out: dict[str, Literal["OK", "removed", "timed out"]]
         out = {addr: "removed" for addr in no_nanny_workers}
-        start = monotonic()
+        deadline = Deadline.after(timeout)
 
         logger.debug("Send kill signal to nannies: %s", nanny_workers)
         async with contextlib.AsyncExitStack() as stack:
@@ -6390,7 +6391,7 @@ class Scheduler(SchedulerState, ServerNode):
         # NOTE: if new (unrelated) workers join while we're waiting, we may return
         # before our shut-down workers have come back up. That's fine; workers are
         # interchangeable.
-        while monotonic() < start + timeout and len(self.workers) < n_workers:
+        while not deadline.expired and len(self.workers) < n_workers:
             await asyncio.sleep(0.2)
 
         if len(self.workers) >= n_workers:

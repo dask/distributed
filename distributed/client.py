@@ -3652,7 +3652,7 @@ class Client(SyncMethodMixin):
         workers: list[str],
         timeout: str | int | float | NoDefault,
         raise_for_error: bool,
-    ) -> dict[str, Literal["OK", "timed out"]]:
+    ) -> dict[str, Literal["OK", "removed", "timed out"]]:
         if timeout is no_default:
             timeout = self._timeout * 4
         timeout = parse_timedelta(cast("str|int|float", timeout), "s")
@@ -3662,7 +3662,7 @@ class Client(SyncMethodMixin):
         worker_addrs = [name_to_addr.get(w, w) for w in workers]
 
         out: dict[
-            str, Literal["OK", "timed out"]
+            str, Literal["OK", "removed", "timed out"]
         ] = await self.scheduler.restart_workers(
             workers=worker_addrs,
             timeout=timeout,
@@ -3701,7 +3701,7 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        dict[str, "OK" | "timed out"]
+        dict[str, "OK" | "removed" | "timed out"]
             Mapping of worker and restart status, the keys will match the original
             values passed in via ``workers``.
 

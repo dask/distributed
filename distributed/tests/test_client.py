@@ -88,8 +88,8 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BlockedGetData,
+    BlockedInstantiateNanny,
     BlockedKillNanny,
-    BlockedStartNanny,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
     async_poll_for,
@@ -5061,7 +5061,7 @@ async def test_restart_workers_kill_timeout(c, s, a, raise_for_error):
 @pytest.mark.parametrize("raise_for_error", (True, False))
 @gen_cluster(client=True, nthreads=[])
 async def test_restart_workers_restart_timeout(c, s, raise_for_error):
-    a = BlockedStartNanny(s.address)
+    a = BlockedInstantiateNanny(s.address)
     a.wait_instantiate.set()
     async with a:
         a.wait_instantiate.clear()
