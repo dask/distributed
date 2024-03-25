@@ -1084,7 +1084,6 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b
 @gen_cluster(
     client=True,
     config={
-        "distributed.scheduler.worker-ttl": "500ms",
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.interval": 0.05,
         "distributed.scheduler.active-memory-manager.measure": "managed",
