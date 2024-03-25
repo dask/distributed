@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from collections.abc import MutableMapping
 
 from dask.utils import stringify
@@ -25,9 +27,21 @@ class PublishExtension:
             "publish_put": self.put,
             "publish_get": self.get,
             "publish_delete": self.delete,
+            "publish_wait_flush": self.flush_wait,
+        }
+        stream_handlers = {
+            "publish_flush_batched_send": self.flush_receive,
         }
 
         self.scheduler.handlers.update(handlers)
+        self.scheduler.stream_handlers.update(stream_handlers)
+        self._flush_received = defaultdict(asyncio.Event)
+
+    def flush_receive(self, uid, **kwargs):
+        self._flush_received[uid].set()
+
+    async def flush_wait(self, uid):
+        await self._flush_received[uid].wait()
 
     @log_errors
     def put(self, keys=None, data=None, name=None, override=False, client=None):
