@@ -145,7 +145,7 @@ Resources with collections
 
 You can also use resources with Dask collections, like arrays and delayed objects. You
 can annotate operations on collections with specific resources that should be required
-perform the computation using the dask annotations machinery.
+to perform the computation using the dask annotations machinery.
 
 .. code-block:: python
 
