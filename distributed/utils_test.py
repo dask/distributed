@@ -2396,6 +2396,30 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
         bcomm.comm = orig_comm
 
 
+class BlockedInstantiateNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = asyncio.Event()
+        self.wait_instantiate = asyncio.Event()
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        await self.wait_instantiate.wait()
+        return await super().instantiate()
+
+
+class BlockedKillNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_kill = asyncio.Event()
+        self.wait_kill = asyncio.Event()
+
+    async def kill(self, **kwargs):
+        self.in_kill.set()
+        await self.wait_kill.wait()
+        return await super().kill(**kwargs)
+
+
 async def wait_for_state(
     key: Key,
     state: str | Collection[str],

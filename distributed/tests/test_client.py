@@ -88,6 +88,8 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BlockedGetData,
+    BlockedInstantiateNanny,
+    BlockedKillNanny,
     TaskStateMetadataPlugin,
     _UnhashableCallable,
     async_poll_for,
@@ -863,11 +865,13 @@ async def test_tokenize_on_futures(c, s, a, b):
     y = c.submit(inc, 1)
     tok = tokenize(x)
     assert tokenize(x) == tokenize(x)
-    assert tokenize(x) == tokenize(y)
+    # Tokens must be unique per instance
+    # See https://github.com/dask/distributed/issues/8561
+    assert tokenize(x) != tokenize(y)
 
     c.futures[x.key].finish()
 
-    assert tok == tokenize(y)
+    assert tok != tokenize(y)
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
@@ -3651,7 +3655,7 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
     assert x.key in c.futures
 
     with pytest.raises(TimeoutError):
-        await c.restart(timeout=5)
+        await c.restart(timeout=1)
 
     assert x.key not in c.refcount
     assert not c.futures
@@ -5009,8 +5013,11 @@ async def test_restart_workers(c, s, a, b):
     # Restart a single worker
     a_worker_addr = a.worker_address
     results = await c.restart_workers(workers=[a.worker_address])
-    assert results[a_worker_addr] == "OK"
-    assert set(s.workers) == {a.worker_address, b.worker_address}
+    assert results == {a_worker_addr: "OK"}
+    # There can be some lag between a worker connecting to the scheduler and the
+    # nanny updating the worker's port
+    while set(s.workers) != {a.worker_address, b.worker_address}:
+        await asyncio.sleep(0.01)
 
     # Make sure worker start times are as expected
     results = await c.run(lambda dask_worker: dask_worker.start_time)
@@ -5030,48 +5037,64 @@ async def test_restart_workers_no_nanny_raises(c, s, a, b):
     assert a.address in msg
 
 
-class SlowKillNanny(Nanny):
-    async def kill(self, timeout=2, **kwargs):
-        await asyncio.sleep(2)
-        return await super().kill(timeout=timeout)
-
-
 @pytest.mark.slow
 @pytest.mark.parametrize("raise_for_error", (True, False))
-@gen_cluster(client=True, Worker=SlowKillNanny)
-async def test_restart_workers_timeout(c, s, a, b, raise_for_error):
-    kwargs = dict(workers=[a.worker_address], timeout=0.001)
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=BlockedKillNanny)
+async def test_restart_workers_kill_timeout(c, s, a, raise_for_error):
+    # FIXME a timeout _too_ tight causes the scheduler to hang as wait_for cancels
+    # the nanny.kill RPC too soon.
+    kwargs = dict(workers=[a.worker_address], timeout=2)
 
     if raise_for_error:  # default is to raise
         with pytest.raises(TimeoutError) as excinfo:
             await c.restart_workers(**kwargs)
-        msg = str(excinfo.value).lower()
-        assert "workers failed to restart" in msg
+        msg = str(excinfo.value)
+        assert "1/1 nanny worker(s) did not shut down within 2s" in msg
         assert a.worker_address in msg
     else:
         results = await c.restart_workers(raise_for_error=raise_for_error, **kwargs)
         assert results == {a.worker_address: "timed out"}
+    a.wait_kill.set()
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("raise_for_error", (True, False))
-@gen_cluster(client=True, Worker=SlowKillNanny)
-async def test_restart_workers_exception(c, s, a, b, raise_for_error):
+@gen_cluster(client=True, nthreads=[])
+async def test_restart_workers_restart_timeout(c, s, raise_for_error):
+    a = BlockedInstantiateNanny(s.address)
+    a.wait_instantiate.set()
+    async with a:
+        a.wait_instantiate.clear()
+
+        # FIXME a timeout _too_ tight causes the scheduler to hang as wait_for cancels
+        # the nanny.kill RPC too soon. We also don't want to accidentally time out on
+        # the previous step that calls nanny.kill().
+        kwargs = dict(workers=[a.worker_address], timeout=3)
+
+        if raise_for_error:  # default is to raise
+            with pytest.raises(TimeoutError) as excinfo:
+                await c.restart_workers(**kwargs)
+            msg = str(excinfo.value)
+            assert (
+                "Waited for 1 worker(s) to reconnect after restarting but, "
+                "after 3s, 1 have not returned"
+            ) in msg
+        else:
+            results = await c.restart_workers(raise_for_error=raise_for_error, **kwargs)
+            assert results == {a.worker_address: "timed out"}
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_restart_workers_exception(c, s, a, b):
     async def fail_instantiate(*_args, **_kwargs):
         raise ValueError("broken")
 
     a.instantiate = fail_instantiate
 
-    if raise_for_error:  # default is to raise
-        with pytest.raises(ValueError, match="broken"):
-            await c.restart_workers(workers=[a.worker_address])
-    else:
-        results = await c.restart_workers(
-            workers=[a.worker_address], raise_for_error=raise_for_error
-        )
-        msg = results[a.worker_address]
-        assert msg["status"] == "error"
-        assert msg["exception_text"] == "ValueError('broken')"
+    with captured_logger("distributed.nanny") as log, pytest.raises(TimeoutError):
+        await c.restart_workers(workers=[a.worker_address], timeout=3)
+    assert "broken" in log.getvalue()
 
 
 @pytest.mark.slow

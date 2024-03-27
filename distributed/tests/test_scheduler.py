@@ -53,6 +53,7 @@ from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
     BlockedGetData,
+    BlockedKillNanny,
     BrokenComm,
     NoSchedulerDelayWorker,
     assert_story,
@@ -1090,8 +1091,8 @@ async def test_restart(c, s, a, b):
         futures = c.map(inc, range(20))
         await wait(futures)
         with captured_logger("distributed.nanny") as nanny_logger:
-            await s.restart()
-        assert "Reason: scheduler-restart" in nanny_logger.getvalue()
+            await s.restart(stimulus_id="test123")
+        assert "Reason: test123" in nanny_logger.getvalue()
 
         assert not s.computations
         assert not s.task_prefixes
@@ -1126,28 +1127,14 @@ async def test_restart_waits_for_new_workers(c, s, *workers):
     # NOTE: == for `psutil.Process` compares PID and creation time
     new_procs = {n.process.process for n in workers}
     assert new_procs != original_procs
-    # The workers should have new addresses
-    assert s.workers.keys().isdisjoint(original_workers.keys())
-    # The old WorkerState instances should be replaced
+    # Most times, the workers should have new addresses
+    assert s.workers.keys() ^ original_workers.keys()
+    # The old WorkerState instances should have been replaced
     assert set(s.workers.values()).isdisjoint(original_workers.values())
 
 
-class SlowKillNanny(Nanny):
-    def __init__(self, *args, **kwargs):
-        self.kill_proceed = asyncio.Event()
-        self.kill_called = asyncio.Event()
-        super().__init__(*args, **kwargs)
-
-    async def kill(self, *, timeout, reason=None):
-        self.kill_called.set()
-        print("kill called")
-        await wait_for(self.kill_proceed.wait(), timeout)
-        print("kill proceed")
-        return await super().kill(timeout=timeout, reason=reason)
-
-
 @pytest.mark.slow
-@gen_cluster(client=True, Worker=SlowKillNanny, nthreads=[("", 1)] * 2)
+@gen_cluster(client=True, Worker=BlockedKillNanny, nthreads=[("", 1)] * 2)
 async def test_restart_nanny_timeout_exceeded(c, s, a, b):
     try:
         f = c.submit(div, 1, 0)
@@ -1162,8 +1149,8 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
             TimeoutError, match=r"2/2 nanny worker\(s\) did not shut down within 1s"
         ):
             await c.restart(timeout="1s")
-        assert a.kill_called.is_set()
-        assert b.kill_called.is_set()
+        assert a.in_kill.is_set()
+        assert b.in_kill.is_set()
 
         assert not s.workers
         assert not s.erred_tasks
@@ -1175,8 +1162,8 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
         assert f.status == "cancelled"
         assert fr.status == "cancelled"
     finally:
-        a.kill_proceed.set()
-        b.kill_proceed.set()
+        a.wait_kill.set()
+        b.wait_kill.set()
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -1194,7 +1181,7 @@ async def test_restart_worker_rejoins_after_timeout_expired(c, s, a):
     """
     We don't want to see an error message like:
 
-    ``Waited for 1 worker(s) to reconnect after restarting, but after 0s, only 1 have returned.``
+    ``Waited for 1 worker(s) to reconnect after restarting, but after 0s, 0 have not returned.``
 
     If a worker rejoins after our last poll for new workers, but before we raise the error,
     we shouldn't raise the error.
@@ -1217,7 +1204,7 @@ async def test_restart_worker_rejoins_after_timeout_expired(c, s, a):
     await Plugin.removed.wait()
     assert not s.workers
 
-    async with Worker(s.address, nthreads=1) as w:
+    async with Worker(s.address, nthreads=1):
         assert len(s.workers) == 1
         Plugin.proceed.set()
 
@@ -1231,7 +1218,8 @@ async def test_restart_no_wait_for_workers(c, s, a, b):
     await c.restart(timeout="1s", wait_for_workers=False)
 
     assert not s.workers
-    # Workers are not immediately closed because of https://github.com/dask/distributed/issues/6390
+    # Workers are not immediately closed because of
+    # https://github.com/dask/distributed/issues/6390
     # (the message is still waiting in the BatchedSend)
     await a.finished()
     await b.finished()
@@ -1259,7 +1247,7 @@ async def test_restart_some_nannies_some_not(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
-    Worker=SlowKillNanny,
+    Worker=BlockedKillNanny,
     worker_kwargs={"heartbeat_interval": "1ms"},
 )
 async def test_restart_heartbeat_before_closing(c, s, n):
@@ -1268,15 +1256,15 @@ async def test_restart_heartbeat_before_closing(c, s, n):
     https://github.com/dask/distributed/issues/6494
     """
     prev_workers = dict(s.workers)
-    restart_task = asyncio.create_task(s.restart())
+    restart_task = asyncio.create_task(s.restart(stimulus_id="test"))
 
-    await n.kill_called.wait()
+    await n.in_kill.wait()
     await asyncio.sleep(0.5)  # significantly longer than the heartbeat interval
 
     # WorkerState should not be removed yet, because the worker hasn't been told to close
     assert s.workers
 
-    n.kill_proceed.set()
+    n.wait_kill.set()
     # Wait until the worker has left (possibly until it's come back too)
     while s.workers == prev_workers:
         await asyncio.sleep(0.01)
@@ -2573,7 +2561,7 @@ async def test_bandwidth_clear(c, s, a, b):
 
     assert s.bandwidth_workers
 
-    await s.restart()
+    await s.restart(stimulus_id="test")
     assert not s.bandwidth_workers
 
 
