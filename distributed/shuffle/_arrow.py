@@ -8,11 +8,6 @@ from packaging.version import parse
 
 from dask.utils import parse_bytes
 
-try:
-    from dask.dataframe._compat import PANDAS_GE_300
-except ImportError:
-    PANDAS_GE_300 = False
-
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
@@ -98,6 +93,9 @@ def convert_shards(
         ):
             continue
         reconciled_dtypes[column] = find_common_type([actual, dtype])
+
+    from dask.dataframe._compat import PANDAS_GE_300
+
     kwargs = {} if PANDAS_GE_300 else {"copy": False}
     return df.astype(reconciled_dtypes, **kwargs)
 
