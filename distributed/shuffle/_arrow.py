@@ -6,8 +6,12 @@ from typing import TYPE_CHECKING
 
 from packaging.version import parse
 
-from dask.dataframe._compat import PANDAS_GE_300
 from dask.utils import parse_bytes
+
+try:
+    from dask.dataframe._compat import PANDAS_GE_300
+except ImportError:
+    PANDAS_GE_300 = False
 
 if TYPE_CHECKING:
     import pandas as pd
