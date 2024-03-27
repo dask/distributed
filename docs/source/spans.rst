@@ -115,7 +115,8 @@ User API
             active: false
 
     A possible workaround, that also works for dataframes, can be to perform
-    intermediate calls to `persist()`:
+    intermediate calls to `persist()`. Note however that this can significantly
+    impact optimizations and reduce overall performance.
 
     .. code-block:: python
 
