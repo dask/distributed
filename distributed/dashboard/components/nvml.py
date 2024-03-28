@@ -125,13 +125,11 @@ class GPUCurrentLoad(DashboardComponent):
 
         for idx, ws in enumerate(workers):
             try:
-                info = ws.extra["gpu"]
+                mem_used = ws.metrics["gpu_memory_used"]
+                mem_total = ws.metrics["gpu-memory-total"]
+                u = ws.metrics["gpu_utilization"]
             except KeyError:
                 continue
-            metrics = ws.metrics["gpu"]
-            u = metrics["utilization"]
-            mem_used = metrics["memory-used"]
-            mem_total = info["memory-total"]
             memory_max = max(memory_max, mem_total)
             memory_total += mem_total
             utilization.append(int(u))
