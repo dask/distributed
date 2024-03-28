@@ -18,6 +18,8 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
+  - jupyter-server-proxy
+  - jupyterlab
   - locket
   - msgpack-python
   - netcdf4

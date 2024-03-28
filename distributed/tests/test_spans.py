@@ -841,3 +841,21 @@ async def test_spans_are_visible_from_tasks(c, s, a, b):
 
     # No annotation is created for the default span
     assert await c.submit(dask.get_annotations) == {}
+
+
+@gen_cluster(client=True)
+async def test_span_on_persist(c, s, a, b):
+    """As a workaround to lack of annotations support in dask-expr and loss of
+    annotations due to low level optimization in dask.array, you can use span() to wrap
+    calls to persist() and compute()
+    """
+    x = delayed(inc)(1, dask_key_name="x")
+    with span("x") as x_id:
+        x = c.persist(x)
+    y = delayed(inc)(x, dask_key_name="y")
+    with span("y") as y_id:
+        y = c.compute(y)
+    assert await y == 3
+
+    assert s.tasks["x"].group.span_id == x_id
+    assert s.tasks["y"].group.span_id == y_id

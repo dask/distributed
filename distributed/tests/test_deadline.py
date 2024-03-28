@@ -9,32 +9,29 @@ from distributed.utils_test import gen_test
 
 
 def test_deadline():
-    before_start = time()
     deadline = Deadline.after(5)
-    after_start = time()
 
+    assert deadline.duration == 5
     assert deadline.expired is False
     assert deadline.expires is True
-    assert deadline.expires_at - deadline.started_at == 5
+    assert deadline.expires_at_mono - deadline.started_at_mono == 5
+    assert 4 < deadline.expires_at - deadline.started_at < 6
+    assert 0 <= deadline.elapsed <= 1
     assert 4 <= deadline.remaining <= 5
-
-    deadline2 = Deadline(deadline.expires_at)
-
-    assert deadline.expires_at == deadline2.expires_at
 
 
 def test_infinite_deadline():
     deadline = Deadline(None)
-
+    assert deadline.expires_at_mono is None
     assert deadline.expires_at is None
     assert deadline.expired is False
     assert deadline.expires is False
-    assert deadline.expires_at is None
     assert deadline.remaining is None
+    assert deadline.duration is None
+    assert 0 <= deadline.elapsed <= 1
 
     deadline2 = Deadline.after(None)
-
-    assert deadline2.expires_at is None
+    assert deadline2.expires_at_mono is None
 
 
 @gen_test()

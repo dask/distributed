@@ -28,7 +28,7 @@ requires-python = ">=3.9"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 1.5.0",
-    "dask == 2024.2.1",
+    "dask == 2024.3.1",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.0",
@@ -110,6 +110,9 @@ addopts = '''
 -p no:legacypath'''
 filterwarnings = [
     "error",
+    # xref: https://github.com/jupyter/jupyter_core/pull/292
+    # xref: https://github.com/jupyter/jupyter_core/issues/309
+    '''ignore:Jupyter is migrating its paths to use standard platformdirs''',
     # https://github.com/dask-contrib/dask-expr/issues/945
     '''ignore:dask_expr does not support the DataFrameIOFunction''',
     '''ignore:Please use `dok_matrix` from the `scipy\.sparse` namespace, the `scipy\.sparse\.dok` namespace is deprecated.:DeprecationWarning''',

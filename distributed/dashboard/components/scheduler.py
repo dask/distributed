@@ -1922,7 +1922,7 @@ class StealingEvents(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="level",
@@ -2016,7 +2016,7 @@ class Events(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="y",
@@ -2302,7 +2302,7 @@ class TaskGraph(DashboardComponent):
             color="black",
             alpha=0.3,
         )
-        rect = self.root.square(
+        rect = self.root.scatter(
             x="x",
             y="y",
             size=10,
@@ -2310,6 +2310,7 @@ class TaskGraph(DashboardComponent):
             source=self.node_source,
             view=node_view,
             legend_field="state",
+            marker="square",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -4198,7 +4199,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        mem_plot.circle(
+        mem_plot.scatter(
             source=self.source, x="memory_percent", y=0, size=10, fill_alpha=0.5
         )
         mem_plot.ygrid.visible = False
@@ -4228,7 +4229,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        cpu_plot.circle(
+        cpu_plot.scatter(
             source=self.source, x="cpu_fraction", y=0, size=10, fill_alpha=0.5
         )
         cpu_plot.ygrid.visible = False

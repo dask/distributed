@@ -93,7 +93,11 @@ def convert_shards(
         ):
             continue
         reconciled_dtypes[column] = find_common_type([actual, dtype])
-    return df.astype(reconciled_dtypes, copy=False)
+
+    from dask.dataframe._compat import PANDAS_GE_300
+
+    kwargs = {} if PANDAS_GE_300 else {"copy": False}
+    return df.astype(reconciled_dtypes, **kwargs)
 
 
 def buffers_to_table(data: list[tuple[int, bytes]]) -> pa.Table:
