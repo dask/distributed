@@ -38,8 +38,6 @@ async def test_installation_on_scheduler(s, a):
 
 
 def test_split_by_worker():
-    pytest.importorskip("pyarrow")
-
     df = pd.DataFrame(
         {
             "x": [1, 2, 3, 4, 5],
@@ -63,8 +61,6 @@ def test_split_by_worker():
 
 
 def test_split_by_worker_empty():
-    pytest.importorskip("pyarrow")
-
     df = pd.DataFrame(
         {
             "x": [1, 2, 3, 4, 5],
@@ -78,8 +74,6 @@ def test_split_by_worker_empty():
 
 
 def test_split_by_worker_many_workers():
-    pytest.importorskip("pyarrow")
-
     df = pd.DataFrame(
         {
             "x": [1, 2, 3, 4, 5],
@@ -106,17 +100,13 @@ def test_split_by_worker_many_workers():
 
 @pytest.mark.parametrize("drop_column", [True, False])
 def test_split_by_partition(drop_column):
-    pa = pytest.importorskip("pyarrow")
-
     df = pd.DataFrame(
         {
             "x": [1, 2, 3, 4, 5],
             "_partition": [3, 1, 2, 3, 1],
         }
     )
-    t = pa.Table.from_pandas(df)
-
-    out = split_by_partition(t, "_partition", drop_column)
+    out = split_by_partition(df, "_partition", drop_column)
     assert set(out) == {1, 2, 3}
     if drop_column:
         df = df.drop(columns="_partition")

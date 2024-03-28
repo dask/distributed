@@ -14,10 +14,9 @@ from collections.abc import (
 )
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import toolz
+from toolz import concat, first, second
 from tornado.ioloop import IOLoop
 
 import dask
@@ -29,15 +28,6 @@ from dask.typing import Key
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.metrics import context_meter
-from distributed.shuffle._arrow import (
-    buffers_to_table,
-    check_dtype_support,
-    check_minimal_arrow_version,
-    convert_shards,
-    deserialize_table,
-    read_from_disk,
-    serialize_table,
-)
 from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
@@ -56,7 +46,6 @@ from distributed.sizeof import sizeof
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
     import pandas as pd
-    import pyarrow as pa
 
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
@@ -123,7 +112,6 @@ def rearrange_by_column_p2p(
         raise TypeError(
             f"Expected meta {column=} to be an integer column, is {meta[column].dtype}."
         )
-    check_dtype_support(meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
@@ -180,7 +168,6 @@ class P2PShuffleLayer(Layer):
         annotations: dict | None = None,
         drop_column: bool = False,
     ):
-        check_minimal_arrow_version()
         self.name = name
         self.column = column
         self.npartitions = npartitions
@@ -310,81 +297,36 @@ class P2PShuffleLayer(Layer):
 def split_by_worker(
     df: pd.DataFrame,
     column: str,
-    meta: pd.DataFrame,
     worker_for: pd.Series,
-) -> dict[Any, pa.Table]:
-    """
-    Split data into many arrow batches, partitioned by destination worker
-    """
-    import numpy as np
-
-    from dask.dataframe.dispatch import to_pyarrow_table_dispatch
+) -> dict[str, pd.DataFrame]:
+    """Split data into many horizontal slices, partitioned by destination worker"""
+    nrows = len(df)
 
     # (cudf support) Avoid pd.Series
     constructor = df._constructor_sliced
     assert isinstance(constructor, type)
-    worker_for = constructor(worker_for)
+    if type(worker_for) is not constructor:
+        worker_for = constructor(worker_for)
+
     df = df.merge(
-        right=worker_for.cat.codes.rename("_worker"),
+        right=worker_for,
         left_on=column,
         right_index=True,
         how="inner",
     )
-    nrows = len(df)
-    if not nrows:
-        return {}
-    # assert len(df) == nrows  # Not true if some outputs aren't wanted
-    # FIXME: If we do not preserve the index something is corrupting the
-    # bytestream such that it cannot be deserialized anymore
-    t = to_pyarrow_table_dispatch(df, preserve_index=True)
-    t = t.sort_by("_worker")
-    codes = np.asarray(t["_worker"])
-    t = t.drop(["_worker"])
-    del df
-
-    splits = np.where(codes[1:] != codes[:-1])[0] + 1
-    splits = np.concatenate([[0], splits])
-
-    shards = [
-        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
-    ]
-    shards.append(t.slice(offset=splits[-1], length=None))
-
-    unique_codes = codes[splits]
-    out = {
-        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
-        worker_for.cat.categories[code]: shard
-        for code, shard in zip(unique_codes, shards)
-    }
+    out = dict(split_by_partition(df, "_workers", drop_column=True))
     assert sum(map(len, out.values())) == nrows
     return out
 
 
 def split_by_partition(
-    t: pa.Table, column: str, drop_column: bool
-) -> dict[int, pa.Table]:
-    """
-    Split data into many arrow batches, partitioned by final partition
-    """
-    import numpy as np
-
-    partitions = t.select([column]).to_pandas()[column].unique()
-    partitions.sort()
-    t = t.sort_by(column)
-
-    partition = np.asarray(t[column])
-    if drop_column:
-        t = t.drop([column])
-    splits = np.where(partition[1:] != partition[:-1])[0] + 1
-    splits = np.concatenate([[0], splits])
-
-    shards = [
-        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
-    ]
-    shards.append(t.slice(offset=splits[-1], length=None))
-    assert len(t) == sum(map(len, shards))
-    assert len(partitions) == len(shards)
-    return dict(zip(partitions, shards))
+    df: pd.DataFrame, column: str, drop_column: bool
+) -> Iterator[tuple[Any, pd.DataFrame]]:
+    """Split data into many horizontal slices, partitioned by final partition"""
+    for k, group in df.groupby(column, observed=True):
+        if drop_column:
+            del group[column]
+        yield k, group
 
 
 class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
@@ -483,15 +425,15 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
         self.drop_column = drop_column
 
-    async def _receive(self, data: list[tuple[int, bytes]]) -> None:
+    async def _receive(self, data: list[tuple[int, pd.DataFrame]]) -> None:
         self.raise_if_closed()
 
         filtered = []
-        for d in data:
-            if d[0] not in self.received:
-                filtered.append(d)
-                self.received.add(d[0])
-                self.total_recvd += sizeof(d)
+        for partition_id, part in data:
+            if partition_id not in self.received:
+                filtered.append((partition_id, part))
+                self.received.add(partition_id)
+                self.total_recvd += sizeof(part)
         del data
         if not filtered:
             return
@@ -504,33 +446,31 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             raise
 
     def _repartition_buffers(
-        self, data: list[tuple[int, bytes]]
-    ) -> dict[NDIndex, bytes]:
-        table = buffers_to_table(data)
-        groups = split_by_partition(table, self.column, self.drop_column)
-        assert len(table) == sum(map(len, groups.values()))
-        del data
-        return {(k,): serialize_table(v) for k, v in groups.items()}
+        self, data: list[tuple[int, pd.DataFrame]]
+    ) -> dict[NDIndex, list[tuple[int, pd.DataFrame]]]:
+        out: dict[NDIndex, list[tuple[int, pd.DataFrame]]] = defaultdict(list)
+
+        for input_part_id, part in data:
+            groups = split_by_partition(part, self.column, self.drop_column)
+            for output_part_id, part in groups:
+                out[output_part_id,].append((input_part_id, part))
+
+        assert sum(len(part) for _, part in data) == sum(
+            len(part) for parts in out.values() for _, part in parts
+        )
+        return out
 
     def _shard_partition(
         self,
         data: pd.DataFrame,
         partition_id: int,
         **kwargs: Any,
-    ) -> dict[str, tuple[int, bytes]]:
-        out = split_by_worker(
-            data,
-            self.column,
-            self.meta,
-            self.worker_for,
-        )
-        out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
-
-        nbytes = sum(len(b) for _, b in out.values())
+    ) -> dict[str, tuple[int, pd.DataFrame]]:
+        out = split_by_worker(data, self.column, self.worker_for)
+        nbytes = sum(map(sizeof, out.values()))
         context_meter.digest_metric("p2p-shards", nbytes, "bytes")
         context_meter.digest_metric("p2p-shards", len(out), "count")
-
-        return out
+        return {k: (partition_id, s) for k, s in out.items()}
 
     def _get_output_partition(
         self,
@@ -538,23 +478,24 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         key: Key,
         **kwargs: Any,
     ) -> pd.DataFrame:
+        import pandas as pd
+
         try:
-            data = self._read_from_disk((partition_id,))
-            return convert_shards(data, self.meta, self.column, self.drop_column)
+            parts = self._read_from_disk((partition_id,))
         except DataUnavailable:
             result = self.meta.copy()
             if self.drop_column:
                 result = self.meta.drop(columns=self.column)
             return result
 
+        # [[(input_partition_id, part), (...), ...], [...]] -> [part, ...]
+        shards = list(map(second, sorted(concat(parts), key=first)))
+        # Actually load memory-mapped buffers into memory and close the file
+        # descriptors
+        return pd.concat(shards, copy=True)
+
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
-
-    def read(self, path: Path) -> tuple[pa.Table, int]:
-        return read_from_disk(path)
-
-    def deserialize(self, buffer: Any) -> Any:
-        return deserialize_table(buffer)
 
 
 @dataclass(frozen=True)

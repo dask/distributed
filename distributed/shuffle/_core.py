@@ -19,7 +19,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
 
 from tornado.ioloop import IOLoop
@@ -38,6 +37,7 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
+from distributed.sizeof import safe_sizeof as sizeof
 from distributed.utils import run_in_executor_with_context, sync
 from distributed.utils_comm import retry
 
@@ -116,11 +116,10 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
                 if disk:
                     self._disk_buffer = DiskShardsBuffer(
                         directory=directory,
-                        read=self.read,
                         memory_limiter=memory_limiter_disk,
                     )
                 else:
-                    self._disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
+                    self._disk_buffer = MemoryShardsBuffer()
 
             with self._capture_metrics("background-comms"):
                 self._comm_buffer = CommShardsBuffer(
@@ -372,14 +371,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
 
-    @abc.abstractmethod
-    def read(self, path: Path) -> tuple[Any, int]:
-        """Read shards from disk"""
-
-    @abc.abstractmethod
-    def deserialize(self, buffer: Any) -> Any:
-        """Deserialize shards"""
-
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:
     from distributed import get_worker
@@ -518,7 +509,7 @@ def _mean_shard_size(shards: Iterable) -> int:
         if not isinstance(shard, int):
             # This also asserts that shard is a Buffer and that we didn't forget
             # a container or metadata type above
-            size += memoryview(shard).nbytes
+            size += sizeof(shard)
             count += 1
             if count == 10:
                 break

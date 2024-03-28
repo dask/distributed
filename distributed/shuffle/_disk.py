@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import contextlib
+import mmap
 import pathlib
 import shutil
 import threading
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
-
-from toolz import concat
 
 from distributed.metrics import context_meter, thread_time
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._pickle import pickle_bytelist
-from distributed.utils import Deadline, empty_context, log_errors, nbytes
+from distributed.shuffle._pickle import pickle_bytelist, unpickle_bytestream
+from distributed.utils import Deadline, log_errors, nbytes
 
 
 class ReadWriteLock:
@@ -126,7 +126,6 @@ class DiskShardsBuffer(ShardsBuffer):
     def __init__(
         self,
         directory: str | pathlib.Path,
-        read: Callable[[pathlib.Path], tuple[Any, int]],
         memory_limiter: ResourceLimiter,
     ):
         super().__init__(
@@ -137,11 +136,10 @@ class DiskShardsBuffer(ShardsBuffer):
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
         self._closed = False
-        self._read = read
         self._directory_lock = ReadWriteLock()
 
     @log_errors
-    async def _process(self, id: str, shards: list[Any]) -> None:
+    async def _process(self, id: str, shards: list[object]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -154,36 +152,30 @@ class DiskShardsBuffer(ShardsBuffer):
         future then we should consider simplifying this considerably and
         dropping the write into communicate above.
         """
-        frames: Iterable[bytes | bytearray | memoryview]
-        if isinstance(shards[0], bytes):
-            # Manually serialized dataframes
-            frames = shards
-            serialize_meter_ctx: Any = empty_context
-        else:
-            # Unserialized numpy arrays
-            # Note: no calls to pickle_bytelist will happen until we actually start
-            # writing to disk below.
-            frames = concat(pickle_bytelist(shard) for shard in shards)
-            serialize_meter_ctx = context_meter.meter("serialize", func=thread_time)
+        nbytes_acc = 0
+
+        def pickle_and_tally() -> Iterator[bytes | memoryview]:
+            nonlocal nbytes_acc
+            for shard in shards:
+                for frame in pickle_bytelist(shard):
+                    nbytes_acc += nbytes(frame)
+                    yield frame
 
         with (
             self._directory_lock.read(),
             context_meter.meter("disk-write"),
-            serialize_meter_ctx,
+            context_meter.meter("serialize", func=thread_time),
         ):
-            # Consider boosting total_size a bit here to account for duplication
-            # We only need shared (i.e., read) access to the directory to write
-            # to a file inside of it.
             if self._closed:
                 raise RuntimeError("Already closed")
 
             with open(self.directory / str(id), mode="ab") as f:
-                f.writelines(frames)
+                f.writelines(pickle_and_tally())
 
         context_meter.digest_metric("disk-write", 1, "count")
-        context_meter.digest_metric("disk-write", sum(map(nbytes, frames)), "bytes")
+        context_meter.digest_metric("disk-write", nbytes_acc, "bytes")
 
-    def read(self, id: str) -> Any:
+    def read(self, id: str) -> list[Any]:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:
@@ -209,6 +201,24 @@ class DiskShardsBuffer(ShardsBuffer):
             return data
         else:
             raise DataUnavailable(id)
+
+    @staticmethod
+    def _read(path: Path) -> tuple[list[Any], int]:
+        """Open a memory-mapped file descriptor to disk, read all metadata, and unpickle
+        all arrays. This is a fast sequence of short reads interleaved with seeks.
+        Do not read in memory the actual data; the arrays' buffers will point to the
+        memory-mapped area.
+
+        The file descriptor will be automatically closed by the kernel when all the
+        returned arrays are dereferenced, which will happen after the call to
+        concatenate3.
+        """
+        with path.open(mode="r+b") as fh:
+            buffer = memoryview(mmap.mmap(fh.fileno(), 0))
+
+        # The file descriptor has *not* been closed!
+        shards = list(unpickle_bytestream(buffer))
+        return shards, buffer.nbytes
 
     async def close(self) -> None:
         await super().close()
