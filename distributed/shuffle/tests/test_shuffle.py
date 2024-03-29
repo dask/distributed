@@ -46,7 +46,6 @@ from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
     DataFrameShuffleRun,
     _get_worker_for_range_sharding,
-    split_by_partition,
     split_by_worker,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin, _ShuffleRunManager
@@ -1822,7 +1821,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
 
     class ErrorReceive(DataFrameShuffleRun):
-        async def _receive(self, data: list[tuple[int, pd.DataFrame]]) -> None:
+        async def _receive(self, data: list[tuple[int, Any]]) -> None:
             raise RuntimeError("Error during receive")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:

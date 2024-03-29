@@ -5,11 +5,7 @@ from asyncio import iscoroutinefunction
 import pytest
 
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
-from distributed.shuffle._shuffle import (
-    _get_worker_for_range_sharding,
-    split_by_partition,
-    split_by_worker,
-)
+from distributed.shuffle._shuffle import _get_worker_for_range_sharding, split_by_worker
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.utils_test import gen_cluster
 
@@ -95,20 +91,4 @@ def test_split_by_worker_many_workers():
     assert _get_worker_for_range_sharding(npartitions, 7, workers) in out
     assert _get_worker_for_range_sharding(npartitions, 1, workers) in out
 
-    assert sum(map(len, out.values())) == len(df)
-
-
-@pytest.mark.parametrize("drop_column", [True, False])
-def test_split_by_partition(drop_column):
-    df = pd.DataFrame(
-        {
-            "x": [1, 2, 3, 4, 5],
-            "_partition": [3, 1, 2, 3, 1],
-        }
-    )
-    out = split_by_partition(df, "_partition", drop_column)
-    assert set(out) == {1, 2, 3}
-    if drop_column:
-        df = df.drop(columns="_partition")
-    assert out[1].column_names == list(df.columns)
     assert sum(map(len, out.values())) == len(df)

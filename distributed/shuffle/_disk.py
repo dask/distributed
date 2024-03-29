@@ -139,7 +139,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self._directory_lock = ReadWriteLock()
 
     @log_errors
-    async def _process(self, id: str, shards: list[object]) -> None:
+    async def _process(self, id: str, shards: list[Any]) -> None:
         """Write one buffer to file
 
         This function was built to offload the disk IO, but since then we've
@@ -154,12 +154,21 @@ class DiskShardsBuffer(ShardsBuffer):
         """
         nbytes_acc = 0
 
-        def pickle_and_tally() -> Iterator[bytes | memoryview]:
+        def pickle_and_tally() -> Iterator[bytes | bytearray | memoryview]:
             nonlocal nbytes_acc
             for shard in shards:
-                for frame in pickle_bytelist(shard):
-                    nbytes_acc += nbytes(frame)
-                    yield frame
+                if isinstance(shard, list) and isinstance(
+                    shard[0], (bytes, bytearray, memoryview)
+                ):
+                    # list[bytes | bytearray | memoryview] for dataframe shuffle
+                    # Shard was pre-serialized before being sent over the network.
+                    nbytes_acc += sum(map(nbytes, shard))
+                    yield from shard
+                else:
+                    # tuple[NDIndex, ndarray] for array rechunk
+                    frames = [s.raw() for s in pickle_bytelist(shard)]
+                    nbytes_acc += sum(frame.nbytes for frame in frames)
+                    yield from frames
 
         with (
             self._directory_lock.read(),

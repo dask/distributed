@@ -20,8 +20,6 @@ class MemoryShardsBuffer(ShardsBuffer):
 
     @log_errors
     async def _process(self, id: str, shards: list[Any]) -> None:
-        # TODO: This can be greatly simplified, there's no need for
-        # background threads at all.
         self._shards[id].extend(shards)
 
     def read(self, id: str) -> Any:
@@ -39,6 +37,7 @@ class MemoryShardsBuffer(ShardsBuffer):
         data = []
         while shards:
             shard = shards.pop()
+            # TODO unpickle dataframes
             data.append(shard)
 
         return data

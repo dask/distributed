@@ -37,7 +37,6 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
-from distributed.sizeof import safe_sizeof as sizeof
 from distributed.utils import run_in_executor_with_context, sync
 from distributed.utils_comm import retry
 
@@ -215,7 +214,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             # and unpickle it on the other side.
             # Performance tests informing the size threshold:
             # https://github.com/dask/distributed/pull/8318
-            shards_or_bytes: list | bytes = pickle.dumps(shards)
+            shards_or_bytes: list | bytes = pickle.dumps(shards, protocol=5)
         else:
             shards_or_bytes = shards
 
@@ -334,6 +333,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
         # Log metrics both in the "execute" and in the "p2p" contexts
+        context_meter.digest_metric("p2p-partitions", 1, "count")
         with self._capture_metrics("foreground"):
             with (
                 context_meter.meter("p2p-shard-partition-noncpu"),
@@ -509,7 +509,7 @@ def _mean_shard_size(shards: Iterable) -> int:
         if not isinstance(shard, int):
             # This also asserts that shard is a Buffer and that we didn't forget
             # a container or metadata type above
-            size += sizeof(shard)
+            size += memoryview(shard).nbytes
             count += 1
             if count == 10:
                 break

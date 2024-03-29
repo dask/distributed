@@ -14,9 +14,10 @@ from collections.abc import (
 )
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pickle import PickleBuffer
 from typing import TYPE_CHECKING, Any
 
-from toolz import concat, first, second
+from toolz import first, second
 from tornado.ioloop import IOLoop
 
 import dask
@@ -28,6 +29,7 @@ from dask.typing import Key
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.metrics import context_meter
+from distributed.protocol.utils import pack_frames_prelude
 from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
@@ -40,8 +42,9 @@ from distributed.shuffle._core import (
 )
 from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._pickle import pickle_bytelist
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
-from distributed.sizeof import sizeof
+from distributed.utils import nbytes
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
@@ -297,36 +300,51 @@ class P2PShuffleLayer(Layer):
 def split_by_worker(
     df: pd.DataFrame,
     column: str,
-    worker_for: pd.Series,
-) -> dict[str, pd.DataFrame]:
-    """Split data into many horizontal slices, partitioned by destination worker"""
-    nrows = len(df)
+    drop_column: bool,
+    worker_for: dict[int, str],
+    input_part_id: int,
+) -> dict[str, tuple[int, list[tuple[int, list[PickleBuffer]]]]]:
+    """Split data into many horizontal slices, partitioned by destination worker,
+    and serialize them once.
 
-    # (cudf support) Avoid pd.Series
-    constructor = df._constructor_sliced
-    assert isinstance(constructor, type)
-    if type(worker_for) is not constructor:
-        worker_for = constructor(worker_for)
+    Returns
+    -------
+    {worker addr: (input_part_id, [(output_part_id, buffers), ...]), ...}
 
-    df = df.merge(
-        right=worker_for,
-        left_on=column,
-        right_index=True,
-        how="inner",
-    )
-    out = dict(split_by_partition(df, "_workers", drop_column=True))
-    assert sum(map(len, out.values())) == nrows
-    return out
+    where buffers is a list of
 
+    [
+        PickleBuffer(pickle bytes)  # includes input_part_id
+        buffer,
+        buffer,
+        ...
+    ]
 
-def split_by_partition(
-    df: pd.DataFrame, column: str, drop_column: bool
-) -> Iterator[tuple[Any, pd.DataFrame]]:
-    """Split data into many horizontal slices, partitioned by final partition"""
-    for k, group in df.groupby(column, observed=True):
+    **Notes**
+
+    - The pickle header, which is a bytes object, is wrapped in PickleBuffer so
+      that it's not unnecessarily deep-copied when it's deserialized by the network
+      stack.
+    - We are not delegating serialization to the network stack because (1) it's quicker
+      with plain pickle and (2) we want to avoid deserializing everything on receive()
+      only to re-serialize it again immediately afterwards when writing it to disk.
+      So we serialize it once now and deserialize it once after reading back from disk.
+
+    See Also
+    --------
+    distributed.protocol.serialize._deserialize_bytes
+    distributed.protocol.serialize._deserialize_picklebuffer
+    """
+    out: defaultdict[str, list[tuple[int, list[PickleBuffer]]]] = defaultdict(list)
+
+    for output_part_id, part in df.groupby(column, observed=False):
+        assert isinstance(output_part_id, int)
         if drop_column:
-            del group[column]
-        yield k, group
+            del part[column]
+        frames = pickle_bytelist((input_part_id, part), prelude=False)
+        out[worker_for[output_part_id]].append((output_part_id, frames))
+
+    return {k: (input_part_id, v) for k, v in out.items()}
 
 
 class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
@@ -376,7 +394,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     column: str
     meta: pd.DataFrame
     partitions_of: dict[str, list[int]]
-    worker_for: pd.Series
+    worker_for: dict[int, str]
     drop_column: bool
 
     def __init__(
@@ -399,8 +417,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         drop_column: bool,
         loop: IOLoop,
     ):
-        import pandas as pd
-
         super().__init__(
             id=id,
             run_id=run_id,
@@ -422,55 +438,81 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
-        self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
+        self.worker_for = worker_for
         self.drop_column = drop_column
 
-    async def _receive(self, data: list[tuple[int, pd.DataFrame]]) -> None:
+    async def _receive(
+        # See split_by_worker to understand annotation of data.
+        # PickleBuffer objects may have been converted to bytearray by the
+        # pickle roundtrip that is done by _core.py when buffers are too small
+        self,
+        data: list[
+            tuple[int, list[tuple[int, list[PickleBuffer | bytes | bytearray]]]]
+        ],
+    ) -> None:
         self.raise_if_closed()
 
-        filtered = []
-        for partition_id, part in data:
-            if partition_id not in self.received:
-                filtered.append((partition_id, part))
-                self.received.add(partition_id)
-                self.total_recvd += sizeof(part)
-        del data
-        if not filtered:
+        to_write: defaultdict[
+            NDIndex, list[bytes | bytearray | memoryview]
+        ] = defaultdict(list)
+
+        for input_part_id, parts in data:
+            if input_part_id not in self.received:
+                self.received.add(input_part_id)
+                for output_part_id, frames in parts:
+                    frames_raw = [
+                        frame.raw() if isinstance(frame, PickleBuffer) else frame
+                        for frame in frames
+                    ]
+                    self.total_recvd += sum(map(nbytes, frames_raw))
+                    to_write[output_part_id,] += [
+                        pack_frames_prelude(frames_raw),
+                        *frames_raw,
+                    ]
+
+        if not to_write:
             return
         try:
-            groups = await self.offload(self._repartition_buffers, filtered)
-            del filtered
-            await self._write_to_disk(groups)
+            await self._write_to_disk(to_write)
         except Exception as e:
             self._exception = e
             raise
-
-    def _repartition_buffers(
-        self, data: list[tuple[int, pd.DataFrame]]
-    ) -> dict[NDIndex, list[tuple[int, pd.DataFrame]]]:
-        out: dict[NDIndex, list[tuple[int, pd.DataFrame]]] = defaultdict(list)
-
-        for input_part_id, part in data:
-            groups = split_by_partition(part, self.column, self.drop_column)
-            for output_part_id, part in groups:
-                out[output_part_id,].append((input_part_id, part))
-
-        assert sum(len(part) for _, part in data) == sum(
-            len(part) for parts in out.values() for _, part in parts
-        )
-        return out
 
     def _shard_partition(
         self,
         data: pd.DataFrame,
         partition_id: int,
-        **kwargs: Any,
-    ) -> dict[str, tuple[int, pd.DataFrame]]:
-        out = split_by_worker(data, self.column, self.worker_for)
-        nbytes = sum(map(sizeof, out.values()))
-        context_meter.digest_metric("p2p-shards", nbytes, "bytes")
-        context_meter.digest_metric("p2p-shards", len(out), "count")
-        return {k: (partition_id, s) for k, s in out.items()}
+        # See split_by_worker to understand annotation
+    ) -> dict[str, tuple[int, list[tuple[int, list[PickleBuffer]]]]]:
+        out = split_by_worker(
+            df=data,
+            column=self.column,
+            drop_column=self.drop_column,
+            worker_for=self.worker_for,
+            input_part_id=partition_id,
+        )
+
+        # Log metrics
+        # Note: more metrics for this function call are logged by _core.add_partitiion()
+        overhead_nbytes = 0
+        buffers_nbytes = 0
+        shards_count = 0
+        buffers_count = 0
+        for _, shards in out.values():
+            shards_count += len(shards)
+            for _, frames in shards:
+                # frames = [pickle bytes, buffer, buffer, ...]
+                buffers_count += len(frames) - 2
+                overhead_nbytes += frames[0].raw().nbytes
+                buffers_nbytes += sum(frame.raw().nbytes for frame in frames[1:])
+
+        context_meter.digest_metric("p2p-shards-overhead", overhead_nbytes, "bytes")
+        context_meter.digest_metric("p2p-shards-buffers", buffers_nbytes, "bytes")
+        context_meter.digest_metric("p2p-shards-buffers", buffers_count, "count")
+        context_meter.digest_metric("p2p-shards", shards_count, "count")
+        # End log metrics
+
+        return out
 
     def _get_output_partition(
         self,
@@ -488,8 +530,8 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
                 result = self.meta.drop(columns=self.column)
             return result
 
-        # [[(input_partition_id, part), (...), ...], [...]] -> [part, ...]
-        shards = list(map(second, sorted(concat(parts), key=first)))
+        # [(input_partition_id, part), ...]] -> [part, ...]
+        shards = list(map(second, sorted(parts, key=first)))
         # Actually load memory-mapped buffers into memory and close the file
         # descriptors
         return pd.concat(shards, copy=True)

@@ -1199,6 +1199,8 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
     """Number of bytes of a frame or memoryview"""
     if isinstance(frame, _bytes_like):
         return len(frame)
+    if isinstance(frame, PickleBuffer):
+        return frame.raw().nbytes
     else:
         try:
             return frame.nbytes
