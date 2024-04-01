@@ -129,6 +129,7 @@ class SystemMonitor:
             gpu_extra = nvml.one_time()
             self.gpu_name = gpu_extra["name"]
             self.gpu_memory_total = gpu_extra["memory-total"]
+            self.quantities["gpu-memory-total"] = deque(maxlen=1)
             self.quantities["gpu_utilization"] = deque(maxlen=maxlen)
             self.quantities["gpu_memory_used"] = deque(maxlen=maxlen)
         else:
@@ -207,6 +208,7 @@ class SystemMonitor:
 
         if self.gpu_name:
             gpu_metrics = nvml.real_time()
+            result["gpu-memory-total"] = self.gpu_memory_total
             result["gpu_utilization"] = gpu_metrics["utilization"]
             result["gpu_memory_used"] = gpu_metrics["memory-used"]
 

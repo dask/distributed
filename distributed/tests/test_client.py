@@ -7276,6 +7276,20 @@ async def test_annotations_submit_map(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_annotations_global_vs_local(c, s, a, b):
+    """Test that local annotations take precedence over global annotations"""
+    with dask.annotate(foo=1):
+        x = delayed(inc)(1, dask_key_name="x")
+    y = delayed(inc)(2, dask_key_name="y")
+    with dask.annotate(foo=2):
+        xf, yf = c.compute([x, y])
+
+    await c.gather(xf, yf)
+    assert s.tasks["x"].annotations == {"foo": 1}
+    assert s.tasks["y"].annotations == {"foo": 2}
+
+
+@gen_cluster(client=True)
 async def test_workers_collection_restriction(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
