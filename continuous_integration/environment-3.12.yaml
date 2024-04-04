@@ -46,7 +46,6 @@ dependencies:
   - zstandard
   - pip:
       - git+https://github.com/milesgranger/dask@milesgranger/rename-future-to-task
-      - git+https://github.com/dask/dask
       - git+https://github.com/dask-contrib/dask-expr
       - git+https://github.com/dask/s3fs
       - git+https://github.com/dask/zict
