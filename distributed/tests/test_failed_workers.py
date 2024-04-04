@@ -156,8 +156,7 @@ async def test_restart(c, s, a, b):
     assert s.tasks[y.key].state == "memory"
     assert s.tasks[z.key].state != "memory"
 
-    f = await c.restart()
-    assert f is c
+    await c.restart()
 
     assert len(s.workers) == 2
     assert not any(ws.occupancy for ws in s.workers.values())
@@ -259,7 +258,7 @@ async def test_restart_scheduler(s, a, b):
     assert pids[0]
     assert pids[1]
 
-    await s.restart()
+    await s.restart(stimulus_id="test")
 
     assert len(s.workers) == 2
     pids2 = (a.pid, b.pid)

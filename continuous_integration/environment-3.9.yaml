@@ -20,6 +20,8 @@ dependencies:
   - ipykernel
   - ipywidgets
   - jinja2
+  - jupyter-server-proxy
+  - jupyterlab
   - locket
   - lz4  # Only tested here
   - msgpack-python
@@ -51,5 +53,7 @@ dependencies:
   - zstandard
   - pip:
       - git+https://github.com/milesgranger/dask@milesgranger/rename-future-to-task
+      - git+https://github.com/dask/dask
+      - git+https://github.com/dask-contrib/dask-expr
       - git+https://github.com/dask/crick  # Only tested here
       - keras

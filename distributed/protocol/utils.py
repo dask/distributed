@@ -12,9 +12,7 @@ from distributed.utils import nbytes
 BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
 
-msgpack_opts = {
-    ("max_%s_len" % x): 2**31 - 1 for x in ["str", "bin", "array", "map", "ext"]
-}
+msgpack_opts = {}
 msgpack_opts["strict_map_key"] = False
 msgpack_opts["raw"] = False
 

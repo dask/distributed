@@ -851,6 +851,7 @@ class WorkerProcess:
         assert self.status in (
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
+            Status.closing_gracefully,
         ), self.status
         self.status = Status.stopping
         logger.info("Nanny asking worker to close. Reason: %s", reason)

@@ -15,7 +15,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from packaging.version import parse
+from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop
 
 from dask.utils import key_split
@@ -58,10 +58,11 @@ from distributed.shuffle._shuffle import (
     split_by_worker,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin, _ShuffleRunManager
-from distributed.shuffle.tests.utils import AbstractShuffleTestPool
+from distributed.shuffle.tests.utils import UNPACK_PREFIX, AbstractShuffleTestPool
 from distributed.utils import Deadline
 from distributed.utils_test import (
     async_poll_for,
+    captured_logger,
     cluster,
     gen_cluster,
     gen_test,
@@ -72,8 +73,13 @@ from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
     import pyarrow as pa
+
+    PYARROW_GE_12 = parse_version(pa.__version__).release >= (12,)
+    PYARROW_GE_14 = parse_version(pa.__version__).release >= (14,)
 except ImportError:
     pa = None
+    PYARROW_GE_12 = False
+    PYARROW_GE_14 = False
 
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
@@ -118,6 +124,7 @@ async def check_scheduler_cleanup(
     assert not plugin.heartbeats
 
 
+@pytest.mark.skipif(dd._dask_expr_enabled(), reason="pyarrow>=7.0.0 already required")
 @gen_cluster(client=True)
 async def test_minimal_version(c, s, a, b):
     no_pyarrow_ctx = (
@@ -135,7 +142,7 @@ async def test_minimal_version(c, s, a, b):
         with pytest.raises(
             ModuleNotFoundError, match="requires pyarrow"
         ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            await c.compute(dd.shuffle.shuffle(df, "x"))
+            await c.compute(df.shuffle("x"))
 
 
 @pytest.mark.gpu
@@ -161,7 +168,7 @@ async def test_basic_cudf_support(c, s, a, b):
         freq="10 s",
     ).to_backend("cudf")
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     assert shuffled.npartitions == df.npartitions
 
     result, expected = await c.compute([shuffled, df], sync=True)
@@ -197,39 +204,13 @@ async def test_basic_integration(c, s, a, b, npartitions, disk):
     with dask.config.set(
         {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
     ):
-        shuffled = dd.shuffle.shuffle(df, "x", npartitions=npartitions)
+        shuffled = df.shuffle("x", npartitions=npartitions)
     if npartitions is None:
         assert shuffled.npartitions == df.npartitions
     else:
         assert shuffled.npartitions == npartitions
     result, expected = await c.compute([shuffled, df], sync=True)
     dd.assert_eq(result, expected)
-
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
-
-
-@pytest.mark.parametrize("disk", [True, False])
-@gen_cluster(client=True)
-async def test_stable_ordering(c, s, a, b, disk):
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-02-01",
-        dtypes={"x": int, "y": int},
-        freq="10 s",
-    )
-    df["x"] = df["x"] % 19
-    df["y"] = df["y"] % 23
-    with dask.config.set(
-        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
-    ):
-        shuffled = dd.shuffle.shuffle(df, "x")
-    result, expected = await c.compute([shuffled, df], sync=True)
-    dd.assert_eq(
-        result.drop_duplicates("x", keep="first"),
-        expected.drop_duplicates("x", keep="first"),
-    )
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -253,7 +234,7 @@ async def test_basic_integration_local_cluster(processes):
         )
         c = cluster.get_client()
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            out = dd.shuffle.shuffle(df, "x")
+            out = df.shuffle("x")
         x, y = c.compute([df, out])
         x, y = await c.gather([x, y])
         dd.assert_eq(x, y)
@@ -269,7 +250,7 @@ async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x", npartitions=npartitions).values
+        out = df.shuffle("x", npartitions=npartitions).values
 
     if npartitions == 1:
         # FIXME: distributed#7816
@@ -295,7 +276,7 @@ def test_shuffle_before_categorize(loop_in_thread):
             freq="10 s",
         )
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            df = dd.shuffle.shuffle(df, "x")
+            df = df.shuffle("x")
         df.categorize(columns=["y"])
         c.compute(df)
 
@@ -309,8 +290,8 @@ async def test_concurrent(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = dd.shuffle.shuffle(df, "x")
-        y = dd.shuffle.shuffle(df, "y")
+        x = df.shuffle("x")
+        y = df.shuffle("y")
     df, x, y = await c.compute([df, x, y], sync=True)
     dd.assert_eq(x, df, check_index=False)
     dd.assert_eq(y, df, check_index=False)
@@ -329,7 +310,7 @@ async def test_bad_disk(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     while not get_active_shuffle_runs(a):
@@ -418,7 +399,7 @@ async def test_closed_worker_during_transfer(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
@@ -445,7 +426,7 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = c.compute(out.x.size)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     await b.close()
@@ -488,7 +469,7 @@ async def test_get_or_create_from_dangling_transfer(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = c.compute(out.x.size)
 
     shuffle_extA = a.plugins["shuffle"]
@@ -528,7 +509,7 @@ async def test_crashed_worker_during_transfer(c, s, a):
             freq="10 s",
         )
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            shuffled = dd.shuffle.shuffle(df, "x")
+            shuffled = df.shuffle("x")
         fut = c.compute([shuffled, df], sync=True)
         await wait_until_worker_has_tasks(
             "shuffle-transfer", killed_worker_address, 1, s
@@ -563,7 +544,7 @@ async def test_restarting_does_not_deadlock(c, s):
                     freq="10 s",
                 )
             with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-                out = dd.shuffle.shuffle(df, "x")
+                out = df.shuffle("x")
             fut = c.compute(out.x.size)
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", b.worker_address, 1, s
@@ -599,7 +580,7 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
             freq="10 s",
         )
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            shuffled = dd.shuffle.shuffle(df, "x")
+            shuffled = df.shuffle("x")
         fut = c.compute([shuffled, df], sync=True)
         await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b, 0.001)
         await b.close()
@@ -634,7 +615,7 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
                 freq="10 s",
             )
             with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-                shuffled = dd.shuffle.shuffle(df, "x")
+                shuffled = df.shuffle("x")
             fut = c.compute([shuffled, df], sync=True)
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", n.worker_address, 1, s
@@ -660,7 +641,7 @@ async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
             freq="10 s",
         )
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            shuffled = dd.shuffle.shuffle(df, "x")
+            shuffled = df.shuffle("x")
         fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w1)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w2)
@@ -697,7 +678,7 @@ async def test_exception_on_close_cleans_up(c, s, caplog):
                 freq="10 s",
             )
             with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-                shuffled = dd.shuffle.shuffle(df, "x")
+                shuffled = df.shuffle("x")
             await c.compute([shuffled, df], sync=True)
 
     assert any("test-exception-on-close" in record.message for record in caplog.records)
@@ -729,7 +710,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     fut = c.compute([shuffled, df], sync=True)
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
@@ -792,7 +773,7 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = c.compute(out.x.size)
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
@@ -837,7 +818,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     fut = c.compute([shuffled, df], sync=True)
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
 
@@ -900,7 +881,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
             freq="10 s",
         )
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            shuffled = dd.shuffle.shuffle(df, "x")
+            shuffled = df.shuffle("x")
         fut = c.compute([shuffled, df], sync=True)
         shuffle_id = await wait_until_new_shuffle_is_initialized(s)
         key = barrier_key(shuffle_id)
@@ -943,9 +924,9 @@ async def test_closed_worker_during_unpack(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     fut = c.compute([shuffled, df], sync=True)
-    await wait_for_tasks_in_state("shuffle_p2p", "memory", 1, b)
+    await wait_for_tasks_in_state(UNPACK_PREFIX, "memory", 1, b)
     await b.close()
 
     result, expected = await fut
@@ -970,9 +951,9 @@ async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = c.compute(out.x.size)
-    await wait_for_tasks_in_state("shuffle_p2p", "memory", 1, b)
+    await wait_for_tasks_in_state(UNPACK_PREFIX, "memory", 1, b)
     await b.close()
 
     with pytest.raises(KilledWorker):
@@ -997,10 +978,10 @@ async def test_crashed_worker_during_unpack(c, s, a):
         )
         expected = await c.compute(df)
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            shuffled = dd.shuffle.shuffle(df, "x")
+            shuffled = df.shuffle("x")
         result = c.compute(shuffled)
 
-        await wait_until_worker_has_tasks("shuffle_p2p", killed_worker_address, 1, s)
+        await wait_until_worker_has_tasks(UNPACK_PREFIX, killed_worker_address, 1, s)
         await n.process.process.kill()
 
         result = await result
@@ -1022,7 +1003,7 @@ async def test_heartbeat(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
 
     while not s.plugins["shuffle"].heartbeats:
@@ -1038,16 +1019,16 @@ async def test_heartbeat(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.skipif("not pa", reason="Requires PyArrow")
 @pytest.mark.filterwarnings("ignore:DatetimeTZBlock")  # pandas >=2.2 vs. pyarrow <15
-def test_processing_chain(tmp_path):
+@pytest.mark.parametrize("drop_column", [True, False])
+def test_processing_chain(tmp_path, drop_column):
     """
     This is a serial version of the entire compute chain
 
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
-    np = pytest.importorskip("numpy")
-    pa = pytest.importorskip("pyarrow")
 
     class Stub:
         def __init__(self, value: int) -> None:
@@ -1115,7 +1096,7 @@ def test_processing_chain(tmp_path):
         # ),
     }
 
-    if parse(pa.__version__) >= parse("12.0.0"):
+    if PYARROW_GE_12:
         columns.update(
             {
                 # Extension types
@@ -1186,7 +1167,8 @@ def test_processing_chain(tmp_path):
     # We split them again, and then dump them down to disk
 
     splits_by_worker = {
-        worker: split_by_partition(t, "_partitions") for worker, t in by_worker.items()
+        worker: split_by_partition(t, "_partitions", drop_column)
+        for worker, t in by_worker.items()
     }
 
     splits_by_worker = {
@@ -1211,7 +1193,9 @@ def test_processing_chain(tmp_path):
     out = {}
     for k in range(npartitions):
         shards, _ = read_from_disk(tmp_path / str(k))
-        out[k] = convert_shards(shards, meta)
+        out[k] = convert_shards(shards, meta, "_partitions", drop_column)
+    if drop_column:
+        df = df.drop(columns="_partitions")
 
     shuffled_df = pd.concat(df for df in out.values())
     pd.testing.assert_frame_equal(
@@ -1234,7 +1218,7 @@ async def test_head(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = await out.head(compute=False).persist()  # Only ask for one key
 
     assert list(os.walk(a.local_directory)) == a_files  # cleaned up files?
@@ -1264,7 +1248,7 @@ async def test_clean_after_forgotten_early(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
@@ -1283,7 +1267,7 @@ async def test_tail(c, s, a, b):
         freq="1 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = dd.shuffle.shuffle(df, "x")
+        x = df.shuffle("x")
     full = await x.persist()
     ntasks_full = len(s.tasks)
     del full
@@ -1315,7 +1299,7 @@ async def test_repeat_shuffle_instance(c, s, a, b, wait_until_forgotten):
         freq="100 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x").size
+        out = df.shuffle("x").size
     await c.compute(out)
 
     if wait_until_forgotten:
@@ -1346,14 +1330,14 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
         freq="100 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        await c.compute(dd.shuffle.shuffle(df, "x"))
+        await c.compute(df.shuffle("x"))
 
     if wait_until_forgotten:
         while s.tasks:
             await asyncio.sleep(0)
 
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        await c.compute(dd.shuffle.shuffle(df, "x"))
+        await c.compute(df.shuffle("x"))
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -1365,14 +1349,13 @@ async def test_crashed_worker_after_shuffle(c, s, a):
     in_event = Event()
     block_event = Event()
 
-    @dask.delayed
     def block(df, in_event, block_event):
         in_event.set()
         block_event.wait()
         return df
 
     async with Nanny(s.address, nthreads=1) as n:
-        df = df = dask.datasets.timeseries(
+        df = dask.datasets.timeseries(
             start="2000-01-01",
             end="2000-03-01",
             dtypes={"x": float, "y": float},
@@ -1380,14 +1363,19 @@ async def test_crashed_worker_after_shuffle(c, s, a):
             seed=42,
         )
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            out = dd.shuffle.shuffle(df, "x")
-        in_event = Event()
-        block_event = Event()
-        with dask.annotate(workers=[n.worker_address], allow_other_workers=True):
-            out = block(out, in_event, block_event)
-        out = c.compute(out)
+            out = df.shuffle("x")
 
-        await wait_until_worker_has_tasks("shuffle_p2p", n.worker_address, 1, s)
+        out = c.compute(out)
+        out = c.submit(
+            block,
+            out,
+            in_event,
+            block_event,
+            workers=[n.worker_address],
+            allow_other_workers=True,
+        )
+
+        await wait_until_worker_has_tasks(UNPACK_PREFIX, n.worker_address, 1, s)
         await in_event.wait()
         await n.process.process.kill()
         await block_event.set()
@@ -1413,10 +1401,10 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
             seed=42,
         )
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            out = dd.shuffle.shuffle(df, "x")
+            out = df.shuffle("x")
         out = out.persist()
 
-        await wait_until_worker_has_tasks("shuffle_p2p", n.worker_address, 1, s)
+        await wait_until_worker_has_tasks(UNPACK_PREFIX, n.worker_address, 1, s)
         await out
 
         await n.process.process.kill()
@@ -1441,7 +1429,7 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
         seed=42,
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     await c.compute(out.head(compute=False))
 
     await check_worker_cleanup(w1)
@@ -1474,7 +1462,7 @@ async def test_new_worker(c, s, a, b):
         freq="1 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     persisted = shuffled.persist()
     while not s.plugins["shuffle"].active_shuffles:
         await asyncio.sleep(0.001)
@@ -1515,6 +1503,9 @@ async def test_multi(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
+@pytest.mark.skipif(
+    dd._dask_expr_enabled(), reason="worker restrictions are not supported in dask-expr"
+)
 @gen_cluster(client=True)
 async def test_restrictions(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -1528,8 +1519,8 @@ async def test_restrictions(c, s, a, b):
     assert not b.data
 
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = dd.shuffle.shuffle(df, "x")
-        y = dd.shuffle.shuffle(df, "y")
+        x = df.shuffle("x")
+        y = df.shuffle("y")
 
     x = x.persist(workers=b.address)
     y = y.persist(workers=a.address)
@@ -1550,7 +1541,7 @@ async def test_delete_some_results(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = dd.shuffle.shuffle(df, "x").persist()
+        x = df.shuffle("x").persist()
     while not s.tasks or not any(ts.state == "memory" for ts in s.tasks.values()):
         await asyncio.sleep(0.01)
 
@@ -1572,7 +1563,7 @@ async def test_add_some_results(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = dd.shuffle.shuffle(df, "x")
+        x = df.shuffle("x")
     y = x.partitions[: x.npartitions // 2].persist()
 
     while not s.tasks or not any(ts.state == "memory" for ts in s.tasks.values()):
@@ -1600,7 +1591,7 @@ async def test_clean_after_close(c, s, a, b):
     )
 
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
 
     await wait_for_tasks_in_state("shuffle-transfer", "executing", 1, a)
@@ -1638,6 +1629,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
         directory,
         loop,
         disk,
+        drop_column,
         Shuffle=DataFrameShuffleRun,
     ):
         s = Shuffle(
@@ -1656,6 +1648,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
             disk=disk,
+            drop_column=drop_column,
             loop=loop,
         )
         self.shuffles[name] = s
@@ -1664,11 +1657,13 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 
 # 36 parametrizations
 # Runtime each ~0.1s
+@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @pytest.mark.parametrize("n_workers", [1, 10])
 @pytest.mark.parametrize("n_input_partitions", [1, 2, 10])
 @pytest.mark.parametrize("npartitions", [1, 20])
 @pytest.mark.parametrize("barrier_first_worker", [True, False])
 @pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("drop_column", [True, False])
 @gen_test()
 async def test_basic_lowlevel_shuffle(
     tmp_path,
@@ -1677,9 +1672,8 @@ async def test_basic_lowlevel_shuffle(
     npartitions,
     barrier_first_worker,
     disk,
+    drop_column,
 ):
-    pa = pytest.importorskip("pyarrow")
-
     loop = IOLoop.current()
 
     dfs = []
@@ -1711,6 +1705,7 @@ async def test_basic_lowlevel_shuffle(
                     directory=tmp_path,
                     loop=loop,
                     disk=disk,
+                    drop_column=drop_column,
                 )
             )
         random.seed(42)
@@ -1756,10 +1751,9 @@ async def test_basic_lowlevel_shuffle(
         assert len(df_after) == len(pd.concat(dfs))
 
 
+@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_offload(tmp_path, loop_in_thread):
-    pa = pytest.importorskip("pyarrow")
-
     dfs = []
     rows_per_df = 10
     n_input_partitions = 2
@@ -1792,6 +1786,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
             Shuffle=ErrorOffload,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1801,6 +1796,7 @@ async def test_error_offload(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
         )
         try:
             sB.add_partition(dfs[0], 0)
@@ -1811,10 +1807,9 @@ async def test_error_offload(tmp_path, loop_in_thread):
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
+@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_send(tmp_path, loop_in_thread):
-    pa = pytest.importorskip("pyarrow")
-
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -1848,6 +1843,7 @@ async def test_error_send(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
             Shuffle=ErrorSend,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1857,6 +1853,7 @@ async def test_error_send(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
         )
         try:
             sA.add_partition(dfs[0], 0)
@@ -1866,10 +1863,9 @@ async def test_error_send(tmp_path, loop_in_thread):
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
+@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_receive(tmp_path, loop_in_thread):
-    pa = pytest.importorskip("pyarrow")
-
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -1903,6 +1899,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
             Shuffle=ErrorReceive,
         )
         sB = local_shuffle_pool.new_shuffle(
@@ -1912,6 +1909,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
             directory=tmp_path,
             loop=loop_in_thread,
             disk=True,
+            drop_column=True,
         )
         try:
             sB.add_partition(dfs[0], 0)
@@ -1944,7 +1942,7 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
         freq="100 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     shuffled = shuffled.persist()
 
     shuffle_extA = a.plugins["shuffle"]
@@ -1958,7 +1956,7 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
         while s.tasks or get_active_shuffle_runs(a) or get_active_shuffle_runs(b):
             await asyncio.sleep(0)
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     result = c.compute(shuffled)
     await wait_until_new_shuffle_is_initialized(s)
     shuffle_extA.block_shuffle_receive.set()
@@ -1996,7 +1994,7 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
         freq="100 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     shuffled = shuffled.persist()
 
     shuffle_extA = a.plugins["shuffle"]
@@ -2016,7 +2014,7 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
             await asyncio.sleep(0)
 
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x")
+        shuffled = df.shuffle("x")
     fut = c.compute([shuffled, df], sync=True)
     await wait_until_new_shuffle_is_initialized(s)
     shuffle_extA.block_barrier.set()
@@ -2055,7 +2053,7 @@ async def test_shuffle_run_consistency(c, s, a):
     )
     # Initialize first shuffle execution
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
@@ -2079,7 +2077,7 @@ async def test_shuffle_run_consistency(c, s, a):
 
     # Initialize second shuffle execution
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
 
     new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
@@ -2106,7 +2104,7 @@ async def test_shuffle_run_consistency(c, s, a):
 
     # Create an unrelated shuffle on a different column
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "y")
+        out = df.shuffle("y")
     out = out.persist()
     independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id != independent_shuffle_id
@@ -2147,7 +2145,7 @@ async def test_fail_fetch_race(c, s, a):
         freq="100 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
@@ -2228,7 +2226,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
     )
     # Initialize first shuffle execution
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
@@ -2254,7 +2252,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
 
     # Initialize second shuffle execution
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = out.persist()
 
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
@@ -2309,7 +2307,8 @@ async def test_handle_null_partitions_2(c, s, a, b):
             return pd.DataFrame({"a": np.random.random(10), "b": [None] * 10})
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
 
-    ddf = dd.from_map(make_partition, range(50))
+    with dask.config.set({"dataframe.convert-string": False}):
+        ddf = dd.from_map(make_partition, range(5))
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
     result, expected = c.compute([ddf, out])
@@ -2366,7 +2365,7 @@ async def test_reconcile_partitions(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
 
-    if parse(pa.__version__) >= parse("14.0.0"):
+    if PYARROW_GE_14:
         result, expected = c.compute([ddf, out])
         result = await result
         expected = await expected
@@ -2396,19 +2395,14 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
     ddf = dd.from_map(make_partition, range(50))
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
-    if parse(pa.__version__) >= parse("14.0.0"):
-        with raises_with_cause(
-            RuntimeError,
-            r"shuffling \w* failed",
-            pa.ArrowTypeError,
-            "incompatible types",
-        ):
-            await c.compute(out)
-    else:
-        with raises_with_cause(
-            RuntimeError, r"shuffling \w* failed", pa.ArrowInvalid, "incompatible types"
-        ):
-            await c.compute(out)
+
+    with raises_with_cause(
+        RuntimeError,
+        r"(shuffling \w*|shuffle_barrier) failed",
+        pa.ArrowTypeError if PYARROW_GE_14 else pa.ArrowInvalid,
+        "incompatible types",
+    ):
+        await c.compute(out)
 
     await c.close()
     await check_worker_cleanup(a)
@@ -2505,17 +2499,14 @@ def test_set_index_with_existing_index(client):
 
 
 def test_sort_values_with_existing_divisions(client):
-    "Regression test for #8165"
+    """Regression test for #8165"""
     df = pd.DataFrame(
         {"a": np.random.randint(0, 3, 20), "b": np.random.randint(0, 3, 20)}
     )
-    ddf = dd.from_pandas(
-        df,
-        npartitions=4,
-    )
+    ddf = dd.from_pandas(df, npartitions=4)
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         ddf = ddf.set_index("a").sort_values("b")
-        result = client.compute(ddf, sync=True)
+        result = ddf.compute()
         dd.assert_eq(
             result,
             df.set_index("a").sort_values("b"),
@@ -2557,7 +2548,7 @@ async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
         # Restrict an unpack task to B so that the previously non-participating
         # worker takes part in the unpack phase
         for key in s.tasks:
-            if key_split(key) == "shuffle_p2p":
+            if key_split(key) == UNPACK_PREFIX:
                 s.set_restrictions({key: {b.address}})
                 break
 
@@ -2593,7 +2584,7 @@ async def test_unpack_is_non_rootish(c, s, a, b):
 
     await scheduler_plugin.in_barrier.wait()
 
-    unpack_tss = [ts for key, ts in s.tasks.items() if key_split(key) == "shuffle_p2p"]
+    unpack_tss = [ts for key, ts in s.tasks.items() if key_split(key) == UNPACK_PREFIX]
     assert len(unpack_tss) == 20
     assert not any(s.is_rootish(ts) for ts in unpack_tss)
     del unpack_tss
@@ -2637,7 +2628,7 @@ async def test_flaky_connect_fails_without_retry(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = dd.shuffle.shuffle(df, "x")
+        x = df.shuffle("x")
 
     rpc = await FlakyConnectionPool(failing_connects=1)
 
@@ -2668,13 +2659,19 @@ async def test_flaky_connect_recover_with_retry(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = dd.shuffle.shuffle(df, "x")
+        x = df.shuffle("x")
 
     rpc = await FlakyConnectionPool(failing_connects=1)
-
-    with mock.patch.object(a, "rpc", rpc):
-        await c.compute(x)
-    assert rpc.failed_attempts == 1
+    with captured_logger("distributed.utils_comm") as caplog:
+        with mock.patch.object(a, "rpc", rpc):
+            await c.compute(x)
+        assert rpc.failed_attempts == 1
+    # Assert that we do not log the binary payload (or any other excessive amount of data)
+    logs = caplog.getvalue()
+    lines = logs.split("\n")
+    for line in lines:
+        assert len(line) < 250
+        assert not line or line.startswith("Retrying")
 
     await check_worker_cleanup(a)
     await check_worker_cleanup(b)
@@ -2703,7 +2700,7 @@ async def test_barrier_handles_stale_resumed_transfer(c, s, *workers):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        out = dd.shuffle.shuffle(df, "x")
+        out = df.shuffle("x")
     out = c.compute(out)
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     key = barrier_key(shuffle_id)
@@ -2725,3 +2722,76 @@ async def test_barrier_handles_stale_resumed_transfer(c, s, *workers):
     await wait_for_tasks_in_state("shuffle-transfer", "resumed", 1, barrier_worker)
     barrier_worker.block_gather_dep.set()
     await out
+
+
+@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("keep", ["first", "last"])
+@gen_cluster(client=True)
+async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
+    """Ensures that shuffling guarantees ordering for individual entries
+    belonging to the same shuffle key"""
+
+    def make_partition(partition_id, size):
+        """Return null column for every other partition"""
+        offset = partition_id * size
+        df = pd.DataFrame({"a": np.arange(start=offset, stop=offset + size)})
+        df["b"] = df["a"] % 23
+        return df
+
+    df = dd.from_map(make_partition, np.arange(19), args=(250,))
+
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+    ):
+        shuffled = df.shuffle("b")
+    result, expected = await c.compute([shuffled, df], sync=True)
+    dd.assert_eq(result, expected)
+
+    for _, group in result.groupby("b"):
+        assert group["a"].is_monotonic_increasing
+
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b)
+    await check_scheduler_cleanup(s)
+
+
+@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("keep", ["first", "last"])
+@gen_cluster(client=True)
+async def test_drop_duplicates_stable_ordering(c, s, a, b, keep, disk):
+    df = dask.datasets.timeseries()
+
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+    ):
+        result, expected = await c.compute(
+            [
+                df.drop_duplicates(
+                    subset=["name"], keep=keep, split_out=df.npartitions
+                ),
+                df,
+            ],
+            sync=True,
+        )
+    expected = expected.drop_duplicates(subset=["name"], keep=keep)
+    dd.assert_eq(result, expected)
+
+
+@gen_cluster(client=True)
+async def test_wrong_meta_provided(c, s, a, b):
+    # https://github.com/dask/distributed/issues/8519
+    @dask.delayed
+    def data_gen():
+        return pd.DataFrame({"a": range(10)})
+
+    ddf = dd.from_delayed(
+        [data_gen()] * 2, meta=[("a", int), ("b", int)], verify_meta=False
+    )
+
+    with raises_with_cause(
+        RuntimeError,
+        r"shuffling \w* failed",
+        ValueError,
+        "meta",
+    ):
+        await c.gather(c.compute(ddf.shuffle(on="a")))

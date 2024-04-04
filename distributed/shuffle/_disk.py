@@ -12,6 +12,7 @@ from toolz import concat
 
 from distributed.metrics import context_meter, thread_time
 from distributed.shuffle._buffer import ShardsBuffer
+from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import pickle_bytelist
 from distributed.utils import Deadline, empty_context, log_errors, nbytes
@@ -201,13 +202,13 @@ class DiskShardsBuffer(ShardsBuffer):
                 context_meter.digest_metric("p2p-disk-read", 1, "count")
                 context_meter.digest_metric("p2p-disk-read", size, "bytes")
         except FileNotFoundError:
-            raise KeyError(id)
+            raise DataUnavailable(id)
 
         if data:
             self.bytes_read += size
             return data
         else:
-            raise KeyError(id)
+            raise DataUnavailable(id)
 
     async def close(self) -> None:
         await super().close()

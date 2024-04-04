@@ -44,14 +44,14 @@ from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nb
 logger = logging.getLogger(__name__)
 
 
-# Workaround for OpenSSL 1.0.2.
-# Can drop with OpenSSL 1.1.1 used by Python 3.10+.
-# ref: https://bugs.python.org/issue42853
-if sys.version_info < (3, 10):
-    OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
-else:
-    OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_size_t) - 1
+# We must not load more than this into a buffer at a time
+# It's currently unclear why that is
+# see
+# - https://github.com/dask/distributed/pull/5854
+# - https://bugs.python.org/issue42853
+# - https://github.com/dask/distributed/pull/8507
 
+C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
@@ -286,8 +286,8 @@ class TCP(Comm):
                         2,
                         range(
                             0,
-                            each_frame_nbytes + OPENSSL_MAX_CHUNKSIZE,
-                            OPENSSL_MAX_CHUNKSIZE,
+                            each_frame_nbytes + C_INT_MAX,
+                            C_INT_MAX,
                         ),
                     ):
                         chunk = each_frame[i:j]
@@ -360,7 +360,7 @@ async def read_bytes_rw(stream: IOStream, n: int) -> memoryview:
 
     for i, j in sliding_window(
         2,
-        range(0, n + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE),
+        range(0, n + C_INT_MAX, C_INT_MAX),
     ):
         chunk = buf[i:j]
         actual = await stream.read_into(chunk)  # type: ignore[arg-type]
@@ -432,7 +432,8 @@ class TLS(TCP):
     A TLS-specific version of TCP.
     """
 
-    max_shard_size = min(OPENSSL_MAX_CHUNKSIZE, TCP.max_shard_size)
+    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+    max_shard_size = min(C_INT_MAX, TCP.max_shard_size)
 
     def _read_extra(self):
         TCP._read_extra(self)

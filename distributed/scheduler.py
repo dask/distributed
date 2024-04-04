@@ -52,7 +52,9 @@ from tlz import (
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.core import get_deps, validate_key
+import dask.utils
+from dask.base import TokenizationError, normalize_token, tokenize
+from dask.core import get_deps, iskey, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
     ensure_dict,
@@ -97,7 +99,7 @@ from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
 from distributed.http import get_handlers
 from distributed.lock import LockExtension
-from distributed.metrics import monotonic, time
+from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
@@ -115,6 +117,7 @@ from distributed.spans import SpansSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
+    Deadline,
     TimeoutError,
     format_dashboard_link,
     get_fileno_limit,
@@ -137,7 +140,8 @@ from distributed.worker import _normalize_task
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
+    # TODO import from typing (requires Python >=3.11)
+    from typing_extensions import Self, TypeAlias
 
     from dask.highlevelgraph import HighLevelGraph
 
@@ -426,12 +430,12 @@ class WorkerState:
     versions: dict[str, Any]
 
     #: Address of the associated :class:`~distributed.nanny.Nanny`, if present
-    nanny: str
+    nanny: str | None
 
     #: Read-only worker status, synced one way from the remote Worker object
     status: Status
 
-    #: Cached hash of :attr:`~WorkerState.address`
+    #: Cached hash of :attr:`~WorkerState.server_id`
     _hash: int
 
     #: The total memory size, in bytes, used by the tasks this worker holds in memory
@@ -520,7 +524,7 @@ class WorkerState:
         nthreads: int = 0,
         memory_limit: int,
         local_directory: str,
-        nanny: str,
+        nanny: str | None,
         server_id: str,
         services: dict[str, int] | None = None,
         versions: dict[str, Any] | None = None,
@@ -1941,9 +1945,9 @@ class SchedulerState:
             if self.transition_counter_max:
                 assert self.transition_counter < self.transition_counter_max
 
-            recommendations: dict = {}
-            worker_msgs: dict = {}
-            client_msgs: dict = {}
+            recommendations: Recs = {}
+            worker_msgs: Msgs = {}
+            client_msgs: Msgs = {}
 
             if self.plugins:
                 dependents = set(ts.dependents)
@@ -1962,6 +1966,7 @@ class SchedulerState:
                 )
 
                 v = a_recs.get(key, finish)
+                # The inner rec has higher priority? Is that always desired?
                 func = self._TRANSITIONS_TABLE["released", v]
                 b_recs, b_cmsgs, b_wmsgs = func(self, key, stimulus_id)
 
@@ -2080,7 +2085,11 @@ class SchedulerState:
             assert not ts.who_has
             assert not ts.processing_on
             for dts in ts.dependencies:
-                assert dts.state not in {"forgotten", "erred"}
+                assert dts.state not in {"forgotten", "erred"}, (
+                    str(ts),
+                    str(dts),
+                    self.transition_log,
+                )
 
         if ts.has_lost_dependencies:
             return {key: "forgotten"}, {}, {}
@@ -2478,7 +2487,9 @@ class SchedulerState:
             recommendations[key] = "forgotten"
         elif ts.has_lost_dependencies:
             recommendations[key] = "forgotten"
-        elif ts.who_wants or ts.waiters:
+        elif (ts.who_wants or ts.waiters) and not any(
+            dts.state == "erred" for dts in ts.dependencies
+        ):
             recommendations[key] = "waiting"
 
         for dts in ts.waiters or ():
@@ -2503,14 +2514,13 @@ class SchedulerState:
             assert ts.exception_blame
             assert not ts.who_has
             assert not ts.waiting_on
-            assert not ts.waiters
 
         failing_ts = ts.exception_blame
         assert failing_ts
 
         for dts in ts.dependents:
-            dts.exception_blame = failing_ts
             if not dts.who_has:
+                dts.exception_blame = failing_ts
                 recommendations[dts.key] = "erred"
 
         report_msg = {
@@ -2545,6 +2555,9 @@ class SchedulerState:
 
         for dts in ts.dependents:
             if dts.state == "erred":
+                # Does this make sense?
+                # This goes via released
+                # dts -> released -> waiting
                 recommendations[dts.key] = "waiting"
 
         w_msg = {
@@ -2619,8 +2632,8 @@ class SchedulerState:
         self,
         key: Key,
         stimulus_id: str,
-        *,
         worker: str,
+        *,
         cause: Key | None = None,
         exception: Serialized | None = None,
         traceback: Serialized | None = None,
@@ -2696,7 +2709,7 @@ class SchedulerState:
             )
         )
 
-        for dts in ts.dependents:
+        for dts in ts.waiters or set():
             dts.exception_blame = failing_ts
             recommendations[dts.key] = "erred"
 
@@ -3721,7 +3734,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._last_client = None
         self._last_time = 0
         unrunnable = set()
-        queued: HeapSet[TaskState] = HeapSet(key=operator.attrgetter("priority"))
+        queued = HeapSet(key=operator.attrgetter("priority"))
 
         self.datasets = {}
 
@@ -3811,6 +3824,7 @@ class Scheduler(SchedulerState, ServerNode):
             "replicate": self.replicate,
             "run_function": self.run_function,
             "restart": self.restart,
+            "restart_workers": self.restart_workers,
             "update_data": self.update_data,
             "set_resources": self.add_resources,
             "retire_workers": self.retire_workers,
@@ -3892,7 +3906,7 @@ class Scheduler(SchedulerState, ServerNode):
     # Administration #
     ##################
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<Scheduler {self.address_safe!r}, "
             f"workers: {len(self.workers)}, "
@@ -3900,7 +3914,7 @@ class Scheduler(SchedulerState, ServerNode):
             f"tasks: {len(self.tasks)}>"
         )
 
-    def _repr_html_(self):
+    def _repr_html_(self) -> str:
         return get_template("scheduler.html.j2").render(
             address=self.address,
             workers=self.workers,
@@ -3908,7 +3922,7 @@ class Scheduler(SchedulerState, ServerNode):
             tasks=self.tasks,
         )
 
-    def identity(self):
+    def identity(self) -> dict[str, Any]:
         """Basic information about ourselves and our cluster"""
         d = {
             "type": type(self).__name__,
@@ -4027,7 +4041,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return ws.host, port
 
-    async def start_unsafe(self):
+    async def start_unsafe(self) -> Self:
         """Clear out old state and restart all running coroutines"""
         await super().start_unsafe()
 
@@ -4078,7 +4092,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             fn = self.scheduler_file  # remove file when we close the process
 
-            def del_scheduler_file():
+            def del_scheduler_file() -> None:
                 if os.path.exists(fn):
                     os.remove(fn)
 
@@ -4205,7 +4219,7 @@ class Scheduler(SchedulerState, ServerNode):
         local_now = time()
         host_info = host_info or {}
 
-        dh: dict = self.host_info.setdefault(host, {})
+        dh = self.host_info.setdefault(host, {})
         dh["last-seen"] = local_now
 
         frac = 1 / len(self.workers)
@@ -4721,6 +4735,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id or f"update-graph-{start}",
             )
         except RuntimeError as e:
+            logger.error(str(e))
             err = error_message(e)
             for key in keys:
                 self.report(
@@ -4729,7 +4744,10 @@ class Scheduler(SchedulerState, ServerNode):
                         "key": key,
                         "exception": err["exception"],
                         "traceback": err["traceback"],
-                    }
+                    },
+                    # This informs all clients in who_wants plus the current client
+                    # (which may not have been added to who_wants yet)
+                    client=client,
                 )
         end = time()
         self.digest_metric("update-graph-duration", end - start)
@@ -4747,6 +4765,7 @@ class Scheduler(SchedulerState, ServerNode):
         stack = list(keys)
         touched_keys = set()
         touched_tasks = []
+        tgs_with_bad_run_spec = set()
         while stack:
             k = stack.pop()
             if k in touched_keys:
@@ -4755,8 +4774,73 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is None:
                 ts = self.new_task(k, dsk.get(k), "released", computation=computation)
                 new_tasks.append(ts)
-            elif not ts.run_spec:
+            # It is possible to create the TaskState object before its runspec is known
+            # to the scheduler. For instance, this is possible when using a Variable:
+            # `f = c.submit(foo); await Variable().set(f)` since the Variable uses a
+            # different comm channel, so the `client_desires_key` message could arrive
+            # before `update_graph`.
+            # There are also anti-pattern processes possible;
+            # see for example test_scatter_creates_ts
+            elif ts.run_spec is None:
                 ts.run_spec = dsk.get(k)
+            # run_spec in the submitted graph may be None. This happens
+            # when an already persisted future is part of the graph
+            elif k in dsk:
+                # If both tokens are non-deterministic, skip comparison
+                try:
+                    tok_lhs = tokenize(ts.run_spec, ensure_deterministic=True)
+                except TokenizationError:
+                    tok_lhs = ""
+                try:
+                    tok_rhs = tokenize(dsk[k], ensure_deterministic=True)
+                except TokenizationError:
+                    tok_rhs = ""
+
+                # Additionally check dependency names. This should only be necessary
+                # if run_specs can't be tokenized deterministically.
+                deps_lhs = {dts.key for dts in ts.dependencies}
+                deps_rhs = dependencies[k]
+
+                # FIXME It would be a really healthy idea to change this to a hard
+                # failure. However, this is not possible at the moment because of
+                # https://github.com/dask/dask/issues/9888
+                if tok_lhs != tok_rhs or deps_lhs != deps_rhs:
+                    # Retain old run_spec and dependencies; rerun them if necessary.
+                    # This sweeps the issue of collision under the carpet as long as the
+                    # old and new task produce the same output - such as in
+                    # dask/dask#9888.
+                    dependencies[k] = deps_lhs
+
+                    if ts.group not in tgs_with_bad_run_spec:
+                        tgs_with_bad_run_spec.add(ts.group)
+                        logger.warning(
+                            f"Detected different `run_spec` for key {ts.key!r} between "
+                            "two consecutive calls to `update_graph`. "
+                            "This can cause failures and deadlocks down the line. "
+                            "Please ensure unique key names. "
+                            "If you are using a standard dask collections, consider "
+                            "releasing all the data before resubmitting another "
+                            "computation. More details and help can be found at "
+                            "https://github.com/dask/dask/issues/9888. "
+                            + textwrap.dedent(
+                                f"""
+                                Debugging information
+                                ---------------------
+                                old task state: {ts.state}
+                                old run_spec: {ts.run_spec!r}
+                                new run_spec: {dsk[k]!r}
+                                old token: {normalize_token(ts.run_spec)!r}
+                                new token: {normalize_token(dsk[k])!r}
+                                old dependencies: {deps_lhs}
+                                new dependencies: {deps_rhs}
+                                """
+                            )
+                        )
+                    else:
+                        logger.debug(
+                            f"Detected different `run_spec` for key {ts.key!r} between "
+                            "two consecutive calls to `update_graph`."
+                        )
 
             if ts.run_spec:
                 runnable.append(ts)
@@ -4940,7 +5024,9 @@ class Scheduler(SchedulerState, ServerNode):
                 assert qts.state == "processing"
                 assert not self.queued or self.queued.peek() != qts
 
-    def stimulus_task_finished(self, key, worker, stimulus_id, run_id, **kwargs):
+    def stimulus_task_finished(
+        self, key: Key, worker: str, stimulus_id: str, run_id: int, **kwargs: Any
+    ) -> RecsMsgs:
         """Mark that a task has finished execution on a particular worker"""
         logger.debug("Stimulus task finished %s[%d] %s", key, run_id, worker)
 
@@ -4948,8 +5034,7 @@ class Scheduler(SchedulerState, ServerNode):
         client_msgs: Msgs = {}
         worker_msgs: Msgs = {}
 
-        ws: WorkerState = self.workers[worker]
-        ts: TaskState = self.tasks.get(key)
+        ts = self.tasks.get(key)
         if ts is None or ts.state in ("released", "queued", "no-worker"):
             logger.debug(
                 "Received already computed task, worker: %s, state: %s"
@@ -4958,6 +5043,19 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.state if ts else "forgotten",
                 key,
                 ts.who_has if ts else {},
+            )
+            worker_msgs[worker] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "stimulus_id": stimulus_id,
+                }
+            ]
+        elif ts.state == "erred":
+            logger.debug(
+                "Received already erred task, worker: %s" ", key: %s",
+                worker,
+                key,
             )
             worker_msgs[worker] = [
                 {
@@ -4991,14 +5089,8 @@ class Scheduler(SchedulerState, ServerNode):
                 if ts.metadata is None:
                     ts.metadata = dict()
                 ts.metadata.update(kwargs["metadata"])
-            r: tuple = self._transition(
-                key, "memory", stimulus_id, worker=worker, **kwargs
-            )
-            recommendations, client_msgs, worker_msgs = r
+            return self._transition(key, "memory", stimulus_id, worker=worker, **kwargs)
 
-            if ts.state == "memory":
-                assert ts.who_has
-                assert ws in ts.who_has
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
@@ -5014,7 +5106,7 @@ class Scheduler(SchedulerState, ServerNode):
         """Mark that a task has erred on a particular worker"""
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
-        ts: TaskState = self.tasks.get(key)
+        ts = self.tasks.get(key)
         if ts is None or ts.state != "processing":
             return {}, {}, {}
 
@@ -5038,7 +5130,9 @@ class Scheduler(SchedulerState, ServerNode):
                 **kwargs,
             )
 
-    def stimulus_retry(self, keys, client=None):
+    def stimulus_retry(
+        self, keys: Collection[Key], client: str | None = None
+    ) -> tuple[Key, ...]:
         logger.info("Client %s requests to retry %d keys", client, len(keys))
         if client:
             self.log_event(client, {"action": "retry", "count": len(keys)})
@@ -5110,14 +5204,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws = self.workers[address]
 
-        event_msg = {
-            "action": "remove-worker",
-            "processing-tasks": {ts.key for ts in ws.processing},
-        }
-        self.log_event(address, event_msg.copy())
-        event_msg["worker"] = address
-        self.log_event("all", event_msg)
-
         logger.info(f"Remove worker {ws} ({stimulus_id=})")
         if close:
             with suppress(AttributeError, CommClosedError):
@@ -5148,6 +5234,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: Recs = {}
 
+        processing_keys = {ts.key for ts in ws.processing}
         for ts in list(ws.processing):
             k = ts.key
             recommendations[k] = "released"
@@ -5172,20 +5259,48 @@ class Scheduler(SchedulerState, ServerNode):
                         worker=address,
                     )
                     recommendations.update(r)
-                    logger.info(
+                    logger.error(
                         "Task %s marked as failed because %d workers died"
                         " while trying to run it",
                         ts.key,
                         ts.suspicious,
                     )
 
+        recompute_keys = set()
+        lost_keys = set()
+
         for ts in list(ws.has_what):
             self.remove_replica(ts, ws)
             if not ts.who_has:
                 if ts.run_spec:
+                    recompute_keys.add(ts.key)
                     recommendations[ts.key] = "released"
                 else:  # pure data
+                    lost_keys.add(ts.key)
                     recommendations[ts.key] = "forgotten"
+
+        if recompute_keys:
+            logger.warning(
+                f"Removing worker {ws.address!r} caused the cluster to lose "
+                "already computed task(s), which will be recomputed elsewhere: "
+                f"{recompute_keys} ({stimulus_id=})"
+            )
+        if lost_keys:
+            logger.error(
+                f"Removing worker {ws.address!r} caused the cluster to lose scattered "
+                f"data, which can't be recovered: {lost_keys} ({stimulus_id=})"
+            )
+
+        event_msg = {
+            "action": "remove-worker",
+            "processing-tasks": processing_keys,
+            "lost-computed-tasks": recompute_keys,
+            "lost-scattered-tasks": lost_keys,
+            "stimulus_id": stimulus_id,
+        }
+        self.log_event(address, event_msg.copy())
+        event_msg["worker"] = address
+        self.log_event("all", event_msg)
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
@@ -5253,20 +5368,17 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
-        if client:
-            self.log_event(
-                client, {"action": "cancel", "count": len(keys), "force": force}
-            )
+        self.log_event(client, {"action": "cancel", "count": len(keys), "force": force})
+        cs = self.clients.get(client)
+        if not cs:
+            return
+
         cancelled_keys = []
         clients = []
         for key in keys:
-            ts: TaskState | None = self.tasks.get(key)
+            ts = self.tasks.get(key)
             if not ts:
                 continue
-            try:
-                cs: ClientState = self.clients[client]
-            except KeyError:
-                return
 
             if force or ts.who_wants == {cs}:  # no one else wants this key
                 if ts.dependents:
@@ -5285,11 +5397,12 @@ class Scheduler(SchedulerState, ServerNode):
             )
         self.report({"op": "cancelled-keys", "keys": cancelled_keys})
 
-    def client_desires_keys(self, keys=None, client=None):
-        cs: ClientState = self.clients.get(client)
+    def client_desires_keys(self, keys: Collection[Key], client: str) -> None:
+        cs = self.clients.get(client)
         if cs is None:
             # For publish, queues etc.
             self.clients[client] = cs = ClientState(client)
+
         for k in keys:
             ts = self.tasks.get(k)
             if ts is None:
@@ -5303,7 +5416,9 @@ class Scheduler(SchedulerState, ServerNode):
             if ts.state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
-    def client_releases_keys(self, keys=None, client=None, stimulus_id=None):
+    def client_releases_keys(
+        self, keys: Collection[Key], client: str, stimulus_id: str | None = None
+    ) -> None:
         """Remove keys from client desired list"""
         stimulus_id = stimulus_id or f"client-releases-keys-{time()}"
         if not isinstance(keys, list):
@@ -5316,9 +5431,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
-    def client_heartbeat(self, client=None):
+    def client_heartbeat(self, client: str) -> None:
         """Handle heartbeats from Client"""
-        cs: ClientState = self.clients[client]
+        cs = self.clients[client]
         cs.last_seen = time()
 
     ###################
@@ -5326,7 +5441,7 @@ class Scheduler(SchedulerState, ServerNode):
     ###################
 
     def validate_released(self, key: Key) -> None:
-        ts: TaskState = self.tasks[key]
+        ts = self.tasks[key]
         assert ts.state == "released"
         assert not ts.waiters
         assert not ts.waiting_on
@@ -5337,7 +5452,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts not in self.queued
 
     def validate_waiting(self, key: Key) -> None:
-        ts: TaskState = self.tasks[key]
+        ts = self.tasks[key]
         assert ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
@@ -5349,8 +5464,7 @@ class Scheduler(SchedulerState, ServerNode):
             assert ts in (dts.waiters or ())  # XXX even if dts._who_has?
 
     def validate_queued(self, key: Key) -> None:
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
+        ts = self.tasks[key]
         assert ts in self.queued
         assert not ts.waiting_on
         assert not ts.who_has
@@ -5363,8 +5477,7 @@ class Scheduler(SchedulerState, ServerNode):
             assert ts in (dts.waiters or ())
 
     def validate_processing(self, key: Key) -> None:
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
+        ts = self.tasks[key]
         assert not ts.waiting_on
         ws = ts.processing_on
         assert ws
@@ -5376,8 +5489,7 @@ class Scheduler(SchedulerState, ServerNode):
             assert ts in (dts.waiters or ())
 
     def validate_memory(self, key: Key) -> None:
-        ts: TaskState = self.tasks[key]
-        dts: TaskState
+        ts = self.tasks[key]
         assert ts.who_has
         assert bool(ts in self.replicated_tasks) == (len(ts.who_has) > 1)
         assert not ts.processing_on
@@ -5391,7 +5503,7 @@ class Scheduler(SchedulerState, ServerNode):
             assert ts not in (dts.waiting_on or ())
 
     def validate_no_worker(self, key: Key) -> None:
-        ts: TaskState = self.tasks[key]
+        ts = self.tasks[key]
         assert ts in self.unrunnable
         assert not ts.waiting_on
         assert ts in self.unrunnable
@@ -5402,7 +5514,7 @@ class Scheduler(SchedulerState, ServerNode):
             assert dts.who_has
 
     def validate_erred(self, key: Key) -> None:
-        ts: TaskState = self.tasks[key]
+        ts = self.tasks[key]
         assert ts.exception_blame
         assert not ts.who_has
         assert ts not in self.queued
@@ -5535,31 +5647,30 @@ class Scheduler(SchedulerState, ServerNode):
         if ts is None:
             msg_key = msg.get("key")
             if msg_key is not None:
-                tasks: dict = self.tasks
-                ts = tasks.get(msg_key)
+                ts = self.tasks.get(msg_key)
 
-        client_comms: dict = self.client_comms
-        if ts is None:
+        if ts is None and client is None:
             # Notify all clients
-            client_keys = list(client_comms)
-        elif client:
-            # Notify clients interested in key
-            client_keys = [cs.client_key for cs in ts.who_wants or ()]
+            client_keys = list(self.client_comms)
+        elif ts is None:
+            client_keys = [client]
         else:
             # Notify clients interested in key (including `client`)
+            # Note that, if report() was called by update_graph(), `client` won't be in
+            # ts.who_wants yet.
             client_keys = [
                 cs.client_key for cs in ts.who_wants or () if cs.client_key != client
             ]
-            client_keys.append(client)
+            if client is not None:
+                client_keys.append(client)
 
-        k: str
         for k in client_keys:
-            c = client_comms.get(k)
+            c = self.client_comms.get(k)
             if c is None:
                 continue
             try:
                 c.send(msg)
-                # logger.debug("Scheduler sends message to client %s", msg)
+                # logger.debug("Scheduler sends message to client %s: %s", k, msg)
             except CommClosedError:
                 if self.status == Status.running:
                     logger.critical(
@@ -5640,7 +5751,7 @@ class Scheduler(SchedulerState, ServerNode):
                 except Exception as e:
                     logger.exception(e)
 
-        async def remove_client_from_events():
+        async def remove_client_from_events() -> None:
             # If the client isn't registered anymore after the delay, remove from events
             if client not in self.clients and client in self.events:
                 del self.events[client]
@@ -5658,7 +5769,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         """Send a single computational task to a worker"""
         try:
-            msg: dict = self._task_to_msg(ts, duration)
+            msg = self._task_to_msg(ts, duration)
             self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
@@ -5755,6 +5866,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "action": "worker-status-change",
                 "prev-status": prev_status.name,
                 "status": ws.status.name,
+                "stimulus_id": stimulus_id,
             },
         )
         logger.debug(f"Worker status {prev_status.name} -> {status} - {ws}")
@@ -5932,9 +6044,8 @@ class Scheduler(SchedulerState, ServerNode):
         This also handles connection failures by adding a callback to remove
         the worker on the next cycle.
         """
-        stream_comms: dict = self.stream_comms
         try:
-            stream_comms[worker].send(msg)
+            self.stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
             self._ongoing_background_tasks.call_soon(
                 self.remove_worker,  # type: ignore[arg-type]
@@ -5944,8 +6055,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def client_send(self, client, msg):
         """Send message to client"""
-        client_comms: dict = self.client_comms
-        c = client_comms.get(client)
+        c = self.client_comms.get(client)
         if c is None:
             return
         try:
@@ -6082,39 +6192,30 @@ class Scheduler(SchedulerState, ServerNode):
         return {"status": "error", "keys": list(failed_keys)}
 
     @log_errors
-    async def restart(self, client=None, timeout=30, wait_for_workers=True):
-        """
-        Restart all workers. Reset local state. Optionally wait for workers to return.
-
-        Workers without nannies are shut down, hoping an external deployment system
-        will restart them. Therefore, if not using nannies and your deployment system
-        does not automatically restart workers, ``restart`` will just shut down all
-        workers, then time out!
-
-        After ``restart``, all connected workers are new, regardless of whether ``TimeoutError``
-        was raised. Any workers that failed to shut down in time are removed, and
-        may or may not shut down on their own in the future.
+    async def restart(
+        self,
+        *,
+        client: str | None = None,
+        timeout: float = 30,
+        wait_for_workers: bool = True,
+        stimulus_id: str,
+    ) -> None:
+        """Forget all tasks and call restart_workers on all workers.
 
         Parameters
         ----------
         timeout:
-            How long to wait for workers to shut down and come back, if ``wait_for_workers``
-            is True, otherwise just how long to wait for workers to shut down.
-            Raises ``asyncio.TimeoutError`` if this is exceeded.
+            See restart_workers
         wait_for_workers:
-            Whether to wait for all workers to reconnect, or just for them to shut down
-            (default True). Use ``restart(wait_for_workers=False)`` combined with
-            :meth:`Client.wait_for_workers` for granular control over how many workers to
-            wait for.
+            See restart_workers
 
         See also
         --------
         Client.restart
         Client.restart_workers
+        Scheduler.restart_workers
         """
-        stimulus_id = f"restart-{time()}"
-
-        logger.info("Restarting workers and releasing all keys.")
+        logger.info(f"Restarting workers and releasing all keys ({stimulus_id=})")
         for cs in self.clients.values():
             self.client_releases_keys(
                 keys=[ts.key for ts in cs.wants_what],
@@ -6132,19 +6233,92 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        n_workers = len(self.workers)
-        nanny_workers = {
-            addr: ws.nanny for addr, ws in self.workers.items() if ws.nanny
-        }
-        # Close non-Nanny workers. We have no way to restart them, so we just let them go,
-        # and assume a deployment system is going to restart them for us.
-        await asyncio.gather(
-            *(
-                self.remove_worker(address=addr, stimulus_id=stimulus_id)
-                for addr in self.workers
-                if addr not in nanny_workers
-            )
+        await self.restart_workers(
+            client=client,
+            timeout=timeout,
+            wait_for_workers=wait_for_workers,
+            stimulus_id=stimulus_id,
         )
+
+    @log_errors
+    async def restart_workers(
+        self,
+        workers: list[str] | None = None,
+        *,
+        client: str | None = None,
+        timeout: float = 30,
+        wait_for_workers: bool = True,
+        on_error: Literal["raise", "return"] = "raise",
+        stimulus_id: str,
+    ) -> dict[str, Literal["OK", "removed", "timed out"]]:
+        """Restart selected workers. Optionally wait for workers to return.
+
+        Workers without nannies are shut down, hoping an external deployment system
+        will restart them. Therefore, if not using nannies and your deployment system
+        does not automatically restart workers, ``restart`` will just shut down all
+        workers, then time out!
+
+        After ``restart``, all connected workers are new, regardless of whether
+        ``TimeoutError`` was raised. Any workers that failed to shut down in time are
+        removed, and may or may not shut down on their own in the future.
+
+        Parameters
+        ----------
+        workers:
+            List of worker addresses to restart. If omitted, restart all workers.
+        timeout:
+            How long to wait for workers to shut down and come back, if ``wait_for_workers``
+            is True, otherwise just how long to wait for workers to shut down.
+            Raises ``asyncio.TimeoutError`` if this is exceeded.
+        wait_for_workers:
+            Whether to wait for all workers to reconnect, or just for them to shut down
+            (default True). Use ``restart(wait_for_workers=False)`` combined with
+            :meth:`Client.wait_for_workers` for granular control over how many workers to
+            wait for.
+        on_error:
+            If 'raise' (the default), raise if any nanny times out while restarting the
+            worker. If 'return', return error messages.
+
+        Returns
+        -------
+        {worker address: "OK", "no nanny", or "timed out" or error message}
+
+        See also
+        --------
+        Client.restart
+        Client.restart_workers
+        Scheduler.restart
+        """
+        n_workers = len(self.workers)
+        if workers is None:
+            workers = list(self.workers)
+            logger.info(f"Restarting all workers ({stimulus_id=}")
+        else:
+            workers = list(set(workers).intersection(self.workers))
+            logger.info(f"Restarting {len(workers)} workers: {workers} ({stimulus_id=}")
+
+        nanny_workers = {
+            addr: self.workers[addr].nanny
+            for addr in workers
+            if self.workers[addr].nanny
+        }
+        # Close non-Nanny workers. We have no way to restart them, so we just let them
+        # go, and assume a deployment system is going to restart them for us.
+        no_nanny_workers = [addr for addr in workers if addr not in nanny_workers]
+        if no_nanny_workers:
+            logger.warning(
+                f"Workers {no_nanny_workers} do not use a nanny and will be terminated "
+                "without restarting them"
+            )
+            await asyncio.gather(
+                *(
+                    self.remove_worker(address=addr, stimulus_id=stimulus_id)
+                    for addr in no_nanny_workers
+                )
+            )
+        out: dict[str, Literal["OK", "removed", "timed out"]]
+        out = {addr: "removed" for addr in no_nanny_workers}
+        deadline = Deadline.after(timeout)
 
         logger.debug("Send kill signal to nannies: %s", nanny_workers)
         async with contextlib.AsyncExitStack() as stack:
@@ -6156,18 +6330,13 @@ class Scheduler(SchedulerState, ServerNode):
                     for nanny_address in nanny_workers.values()
                 )
             )
-
-            start = monotonic()
             resps = await asyncio.gather(
                 *(
                     wait_for(
                         # FIXME does not raise if the process fails to shut down,
                         # see https://github.com/dask/distributed/pull/6427/files#r894917424
                         # NOTE: Nanny will automatically restart worker process when it's killed
-                        nanny.kill(
-                            reason="scheduler-restart",
-                            timeout=timeout,
-                        ),
+                        nanny.kill(reason=stimulus_id, timeout=timeout),
                         timeout,
                     )
                     for nanny in nannies
@@ -6179,53 +6348,87 @@ class Scheduler(SchedulerState, ServerNode):
 
             # Remove any workers that failed to shut down, so we can guarantee
             # that after `restart`, there are no old workers around.
-            bad_nannies = [
-                addr for addr, resp in zip(nanny_workers, resps) if resp is not None
-            ]
+            bad_nannies = set()
+            for addr, resp in zip(nanny_workers, resps):
+                if resp is None:
+                    out[addr] = "OK"
+                elif isinstance(resp, (OSError, TimeoutError)):
+                    bad_nannies.add(addr)
+                    out[addr] = "timed out"
+                else:  # pragma: nocover
+                    raise resp
+
             if bad_nannies:
+                logger.error(
+                    f"Workers {list(bad_nannies)} did not shut down within {timeout}s; "
+                    "force closing"
+                )
                 await asyncio.gather(
                     *(
                         self.remove_worker(addr, stimulus_id=stimulus_id)
                         for addr in bad_nannies
                     )
                 )
-
-                raise TimeoutError(
-                    f"{len(bad_nannies)}/{len(nannies)} nanny worker(s) did not shut down within {timeout}s"
-                )
-
-        self.log_event([client, "all"], {"action": "restart", "client": client})
-
-        if wait_for_workers:
-            while len(self.workers) < n_workers:
-                # NOTE: if new (unrelated) workers join while we're waiting, we may return before
-                # our shut-down workers have come back up. That's fine; workers are interchangeable.
-                if monotonic() < start + timeout:
-                    await asyncio.sleep(0.2)
-                else:
-                    msg = (
-                        f"Waited for {n_workers} worker(s) to reconnect after restarting, "
-                        f"but after {timeout}s, only {len(self.workers)} have returned. "
-                        "Consider a longer timeout, or `wait_for_workers=False`."
+                if on_error == "raise":
+                    raise TimeoutError(
+                        f"{len(bad_nannies)}/{len(nannies)} nanny worker(s) did not "
+                        f"shut down within {timeout}s: {bad_nannies}"
                     )
 
-                    if (n_nanny := len(nanny_workers)) < n_workers:
-                        msg += (
-                            f" The {n_workers - n_nanny} worker(s) not using Nannies were just shut "
-                            "down instead of restarted (restart is only possible with Nannies). If "
-                            "your deployment system does not automatically re-launch terminated "
-                            "processes, then those workers will never come back, and `Client.restart` "
-                            "will always time out. Do not use `Client.restart` in that case."
-                        )
-                    raise TimeoutError(msg) from None
-        logger.info("Restarting finished.")
+        if client:
+            self.log_event(client, {"action": "restart-workers", "workers": workers})
+        self.log_event(
+            "all", {"action": "restart-workers", "workers": workers, "client": client}
+        )
+
+        if not wait_for_workers:
+            logger.info(
+                "Workers restart finished (did not wait for new workers) "
+                f"({stimulus_id=}"
+            )
+            return out
+
+        # NOTE: if new (unrelated) workers join while we're waiting, we may return
+        # before our shut-down workers have come back up. That's fine; workers are
+        # interchangeable.
+        while not deadline.expired and len(self.workers) < n_workers:
+            await asyncio.sleep(0.2)
+
+        if len(self.workers) >= n_workers:
+            logger.info(f"Workers restart finished ({stimulus_id=}")
+            return out
+
+        msg = (
+            f"Waited for {len(workers)} worker(s) to reconnect after restarting but, "
+            f"after {timeout}s, {n_workers - len(self.workers)} have not returned. "
+            "Consider a longer timeout, or `wait_for_workers=False`."
+        )
+        if no_nanny_workers:
+            msg += (
+                f" The {len(no_nanny_workers)} worker(s) not using Nannies were just shut "
+                "down instead of restarted (restart is only possible with Nannies). If "
+                "your deployment system does not automatically re-launch terminated "
+                "processes, then those workers will never come back, and `Client.restart` "
+                "will always time out. Do not use `Client.restart` in that case."
+            )
+
+        if on_error == "raise":
+            raise TimeoutError(msg)
+        logger.error(f"{msg} ({stimulus_id=})")
+
+        new_nannies = {ws.nanny for ws in self.workers.values() if ws.nanny}
+        for worker_addr, nanny_addr in nanny_workers.items():
+            if nanny_addr not in new_nannies:
+                out[worker_addr] = "timed out"
+
+        return out
 
     async def broadcast(
         self,
         *,
         msg: dict,
-        workers: list[str] | None = None,
-        hosts: list[str] | None = None,
+        workers: Collection[str] | None = None,
+        hosts: Collection[str] | None = None,
         nanny: bool = False,
         serializers: Any = None,
         on_error: Literal["raise", "return", "return_pickle", "ignore"] = "raise",
@@ -6236,15 +6439,16 @@ class Scheduler(SchedulerState, ServerNode):
                 workers = list(self.workers)
             else:
                 workers = []
+        else:
+            workers = list(workers)
         if hosts is not None:
             for host in hosts:
-                dh: dict = self.host_info.get(host)  # type: ignore
+                dh = self.host_info.get(host)
                 if dh is not None:
                     workers.extend(dh["addresses"])
-        # TODO replace with worker_list
 
         if nanny:
-            addresses = [self.workers[w].nanny for w in workers]
+            addresses = [n for w in workers if (n := self.workers[w].nanny) is not None]
         else:
             addresses = workers
 
@@ -6277,10 +6481,7 @@ class Scheduler(SchedulerState, ServerNode):
                         f"or 'ignore'; got {on_error!r}"
                     )
 
-        results = await All(
-            [send_message(address) for address in addresses if address is not None]
-        )
-
+        results = await All([send_message(address) for address in addresses])
         return {k: v for k, v in zip(workers, results) if v is not ERROR}
 
     async def proxy(
@@ -6341,7 +6542,7 @@ class Scheduler(SchedulerState, ServerNode):
             raise ValueError(f"Unexpected message from {worker_address}: {result}")
 
         for key in keys_ok:
-            ts: TaskState = self.tasks.get(key)  # type: ignore
+            ts = self.tasks.get(key)
             if ts is None or ts.state != "memory":
                 logger.warning(f"Key lost during replication: {key}")
                 continue
@@ -6381,7 +6582,7 @@ class Scheduler(SchedulerState, ServerNode):
             return
 
         for key in keys:
-            ts: TaskState = self.tasks.get(key)  # type: ignore
+            ts = self.tasks.get(key)
             if ts is not None and ws in (ts.who_has or ()):
                 assert ts.state == "memory"
                 self.remove_replica(ts, ws)
@@ -6995,6 +7196,45 @@ class Scheduler(SchedulerState, ServerNode):
 
         return result
 
+    @overload
+    async def retire_workers(
+        self,
+        workers: list[str],
+        *,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    @overload
+    async def retire_workers(
+        self,
+        *,
+        names: list,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    @overload
+    async def retire_workers(
+        self,
+        *,
+        close_workers: bool = False,
+        remove: bool = True,
+        stimulus_id: str | None = None,
+        # Parameters for workers_to_close()
+        memory_ratio: int | float | None = None,
+        n: int | None = None,
+        key: Callable[[WorkerState], Hashable] | bytes | None = None,
+        minimum: int | None = None,
+        target: int | None = None,
+        attribute: str = "address",
+    ) -> dict[str, Any]:
+        ...
+
     @log_errors
     async def retire_workers(
         self,
@@ -7019,12 +7259,11 @@ class Scheduler(SchedulerState, ServerNode):
             If neither ``workers`` nor ``names`` are provided, we call
             ``workers_to_close`` which finds a good set.
         close_workers: bool (defaults to False)
-            Whether or not to actually close the worker explicitly from here.
-            Otherwise we expect some external job scheduler to finish off the
-            worker.
+            Whether to actually close the worker explicitly from here.
+            Otherwise, we expect some external job scheduler to finish off the worker.
         remove: bool (defaults to True)
-            Whether or not to remove the worker metadata immediately or else
-            wait for the worker to contact us.
+            Whether to remove the worker metadata immediately or else wait for the
+            worker to contact us.
 
             If close_workers=False and remove=False, this method just flushes the tasks
             in memory out of the workers and then returns.
@@ -7036,7 +7275,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         **kwargs: dict
             Extra options to pass to workers_to_close to determine which
-            workers we should drop
+            workers we should drop. Only accepted if ``workers`` and ``names`` are
+            omitted.
 
         Returns
         -------
@@ -7052,6 +7292,14 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.workers_to_close
         """
+        if names is not None and workers is not None:
+            raise TypeError("names and workers are mutually exclusive")
+        if (names is not None or workers is not None) and kwargs:
+            raise TypeError(
+                "Parameters for workers_to_close() are mutually exclusive with "
+                f"names and workers: {kwargs}"
+            )
+
         stimulus_id = stimulus_id or f"retire-workers-{time()}"
         # This lock makes retire_workers, rebalance, and replicate mutually
         # exclusive and will no longer be necessary once rebalance and replicate are
@@ -7059,15 +7307,12 @@ class Scheduler(SchedulerState, ServerNode):
         # However, it allows multiple instances of retire_workers to run in parallel.
         async with self._replica_lock("retire-workers"):
             if names is not None:
-                if workers is not None:
-                    raise TypeError("names and workers are mutually exclusive")
-                if names:
-                    logger.info("Retire worker names %s", names)
-                # Support cases where names are passed through a CLI and become
-                # strings
+                logger.info("Retire worker names %s", names)
+                # Support cases where names are passed through a CLI and become strings
                 names_set = {str(name) for name in names}
                 wss = {ws for ws in self.workers.values() if str(ws.name) in names_set}
             elif workers is not None:
+                logger.info("Retire worker addresses %s", workers)
                 wss = {
                     self.workers[address]
                     for address in workers
@@ -7091,7 +7336,7 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 coros = []
                 for ws in wss:
-                    logger.info("Retiring worker %s", ws.address)
+                    logger.info(f"Retiring worker {ws.address!r} ({stimulus_id=!r})")
 
                     policy = RetireWorker(ws.address)
                     amm.add_policy(policy)
@@ -7128,19 +7373,37 @@ class Scheduler(SchedulerState, ServerNode):
                 # time (depending on interval settings)
                 amm.run_once()
 
-                workers_info = {
-                    addr: info
-                    for addr, info in await asyncio.gather(*coros)
-                    if addr is not None
-                }
+                workers_info_ok = {}
+                workers_info_abort = {}
+                for addr, result, info in await asyncio.gather(*coros):
+                    if result == "OK":
+                        workers_info_ok[addr] = info
+                    else:
+                        workers_info_abort[addr] = info
+
             finally:
                 if stop_amm:
                     amm.stop()
 
-        self.log_event("all", {"action": "retire-workers", "workers": workers_info})
-        self.log_event(list(workers_info), {"action": "retired"})
+        self.log_event(
+            "all",
+            {
+                "action": "retire-workers",
+                "retired": workers_info_ok,
+                "could-not-retire": workers_info_abort,
+                "stimulus_id": stimulus_id,
+            },
+        )
+        self.log_event(
+            list(workers_info_ok),
+            {"action": "retired", "stimulus_id": stimulus_id},
+        )
+        self.log_event(
+            list(workers_info_abort),
+            {"action": "could-not-retire", "stimulus_id": stimulus_id},
+        )
 
-        return workers_info
+        return workers_info_ok
 
     async def _track_retire_worker(
         self,
@@ -7150,7 +7413,7 @@ class Scheduler(SchedulerState, ServerNode):
         close: bool,
         remove: bool,
         stimulus_id: str,
-    ) -> tuple[str | None, dict]:
+    ) -> tuple[str, Literal["OK", "no-recipients"], dict]:
         while not policy.done():
             # Sleep 0.01s when there are 4 tasks or less
             # Sleep 0.5s when there are 200 or more
@@ -7168,10 +7431,14 @@ class Scheduler(SchedulerState, ServerNode):
                     "stimulus_id": stimulus_id,
                 }
             )
-            return None, {}
+            logger.warning(
+                f"Could not retire worker {ws.address!r}: unique data could not be "
+                f"moved to any other worker ({stimulus_id=!r})"
+            )
+            return ws.address, "no-recipients", ws.identity()
 
         logger.debug(
-            "All unique keys on worker %s have been replicated elsewhere", ws.address
+            f"All unique keys on worker {ws.address!r} have been replicated elsewhere"
         )
 
         if remove:
@@ -7181,8 +7448,8 @@ class Scheduler(SchedulerState, ServerNode):
         elif close:
             self.close_worker(ws.address)
 
-        logger.info("Retired worker %s", ws.address)
-        return ws.address, ws.identity()
+        logger.info(f"Retired worker {ws.address!r} ({stimulus_id=!r})")
+        return ws.address, "OK", ws.identity()
 
     def add_keys(
         self, worker: str, keys: Collection[Key] = (), stimulus_id: str | None = None
@@ -7195,7 +7462,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         if worker not in self.workers:
             return "not found"
-        ws: WorkerState = self.workers[worker]
+        ws = self.workers[worker]
         redundant_replicas = []
         for key in keys:
             ts = self.tasks.get(key)
@@ -7318,11 +7585,11 @@ class Scheduler(SchedulerState, ServerNode):
     def log_worker_event(
         self, worker: str, topic: str | Collection[str], msg: Any
     ) -> None:
-        if isinstance(msg, dict):
+        if isinstance(msg, dict) and worker != topic:
             msg["worker"] = worker
         self.log_event(topic, msg)
 
-    def subscribe_worker_status(self, comm: Comm) -> str:
+    def subscribe_worker_status(self, comm: Comm) -> dict[str, Any]:
         WorkerStatusPlugin(self, comm)
         ident = self.identity()
         for v in ident["workers"].values():
@@ -7758,7 +8025,7 @@ class Scheduler(SchedulerState, ServerNode):
     def add_resources(
         self, worker: str, resources: dict | None = None
     ) -> Literal["OK"]:
-        ws: WorkerState = self.workers[worker]
+        ws = self.workers[worker]
         if resources:
             ws.resources.update(resources)
         ws.used_resources = {}
@@ -7771,7 +8038,7 @@ class Scheduler(SchedulerState, ServerNode):
         return "OK"
 
     def remove_resources(self, worker: str) -> None:
-        ws: WorkerState = self.workers[worker]
+        ws = self.workers[worker]
         for resource in ws.resources:
             dr = self.resources.setdefault(resource, {})
             del dr[worker]
@@ -8724,9 +8991,17 @@ def _materialize_graph(
     dsk2 = {}
     fut_deps = {}
     for k, v in dsk.items():
-        dsk2[k], futs = unpack_remotedata(v, byte_keys=True)
+        v, futs = unpack_remotedata(v, byte_keys=True)
         if futs:
             fut_deps[k] = futs
+
+        # Remove aliases {x: x}.
+        # FIXME: This is an artifact generated by unpack_remotedata when using persisted
+        # collections. There should be a better way to achieve that tasks are not self
+        # referencing themselves.
+        if not iskey(v) or v != k:
+            dsk2[k] = v
+
     dsk = dsk2
 
     # - Add in deps for any tasks that depend on tasks
@@ -8736,14 +9011,8 @@ def _materialize_graph(
     # Remove any self-dependencies (happens on test_publish_bag() and others)
     for k, v in dependencies.items():
         deps = set(v)
-        if k in deps:
-            deps.remove(k)
+        deps.discard(k)
         dependencies[k] = deps
 
-    # Remove aliases
-    for k in list(dsk):
-        if dsk[k] is k:
-            del dsk[k]
     dsk = valmap(_normalize_task, dsk)
-
     return dsk, dependencies, annotations_by_type
