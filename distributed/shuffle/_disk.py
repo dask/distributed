@@ -6,7 +6,7 @@ import pathlib
 import shutil
 import threading
 from collections.abc import Generator, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +123,11 @@ class DiskShardsBuffer(ShardsBuffer):
         implementation of this scheme.
     """
 
+    directory: pathlib.Path
+    _closed: bool
+    _use_raw_buffers: bool | None
+    _directory_lock: ReadWriteLock
+
     def __init__(
         self,
         directory: str | pathlib.Path,
@@ -136,6 +141,7 @@ class DiskShardsBuffer(ShardsBuffer):
         self.directory = pathlib.Path(directory)
         self.directory.mkdir(exist_ok=True)
         self._closed = False
+        self._use_raw_buffers = None
         self._directory_lock = ReadWriteLock()
 
     @log_errors
@@ -152,14 +158,23 @@ class DiskShardsBuffer(ShardsBuffer):
         future then we should consider simplifying this considerably and
         dropping the write into communicate above.
         """
+        assert shards
+        if self._use_raw_buffers is None:
+            self._use_raw_buffers = isinstance(shards[0], list) and isinstance(
+                shards[0][0], (bytes, bytearray, memoryview)
+            )
+        serialize_ctx = (
+            nullcontext()
+            if self._use_raw_buffers
+            else context_meter.meter("serialize", func=thread_time)
+        )
+
         nbytes_acc = 0
 
         def pickle_and_tally() -> Iterator[bytes | bytearray | memoryview]:
             nonlocal nbytes_acc
             for shard in shards:
-                if isinstance(shard, list) and isinstance(
-                    shard[0], (bytes, bytearray, memoryview)
-                ):
+                if self._use_raw_buffers:
                     # list[bytes | bytearray | memoryview] for dataframe shuffle
                     # Shard was pre-serialized before being sent over the network.
                     nbytes_acc += sum(map(nbytes, shard))
@@ -173,7 +188,7 @@ class DiskShardsBuffer(ShardsBuffer):
         with (
             self._directory_lock.read(),
             context_meter.meter("disk-write"),
-            context_meter.meter("serialize", func=thread_time),
+            serialize_ctx,
         ):
             if self._closed:
                 raise RuntimeError("Already closed")
@@ -184,7 +199,7 @@ class DiskShardsBuffer(ShardsBuffer):
         context_meter.digest_metric("disk-write", 1, "count")
         context_meter.digest_metric("disk-write", nbytes_acc, "bytes")
 
-    def read(self, id: str) -> list[Any]:
+    def read(self, id: str) -> Any:
         """Read a complete file back into memory"""
         self.raise_on_exception()
         if not self._inputs_done:
@@ -211,8 +226,7 @@ class DiskShardsBuffer(ShardsBuffer):
         else:
             raise DataUnavailable(id)
 
-    @staticmethod
-    def _read(path: Path) -> tuple[list[Any], int]:
+    def _read(self, path: Path) -> tuple[Any, int]:
         """Open a memory-mapped file descriptor to disk, read all metadata, and unpickle
         all arrays. This is a fast sequence of short reads interleaved with seeks.
         Do not read in memory the actual data; the arrays' buffers will point to the
@@ -224,10 +238,14 @@ class DiskShardsBuffer(ShardsBuffer):
         """
         with path.open(mode="r+b") as fh:
             buffer = memoryview(mmap.mmap(fh.fileno(), 0))
-
         # The file descriptor has *not* been closed!
-        shards = list(unpickle_bytestream(buffer))
-        return shards, buffer.nbytes
+
+        assert self._use_raw_buffers is not None
+        if self._use_raw_buffers:
+            return buffer, buffer.nbytes
+        else:
+            shards = list(unpickle_bytestream(buffer))
+            return shards, buffer.nbytes
 
     async def close(self) -> None:
         await super().close()

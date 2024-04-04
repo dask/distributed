@@ -296,7 +296,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if not self.closed:
             self._exception = exception
 
-    def _read_from_disk(self, id: NDIndex) -> list[Any]:  # TODO: Typing
+    def _read_from_disk(self, id: NDIndex) -> Any:
         self.raise_if_closed()
         return self._disk_buffer.read("_".join(str(i) for i in id))
 

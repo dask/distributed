@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from pickle import PickleBuffer
 from typing import TYPE_CHECKING, Any
 
-from toolz import first, second
 from tornado.ioloop import IOLoop
 
 import dask
@@ -42,7 +41,10 @@ from distributed.shuffle._core import (
 )
 from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._pickle import pickle_bytelist
+from distributed.shuffle._pickle import (
+    pickle_dataframe_shard,
+    unpickle_and_concat_dataframe_shards,
+)
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.utils import nbytes
 
@@ -311,14 +313,8 @@ def split_by_worker(
     -------
     {worker addr: (input_part_id, [(output_part_id, buffers), ...]), ...}
 
-    where buffers is a list of
-
-    [
-        PickleBuffer(pickle bytes)  # includes input_part_id
-        buffer,
-        buffer,
-        ...
-    ]
+    where buffers is the serialized output (pickle bytes, buffer, buffer, ...) of
+    (input_part_id, index, *blocks)
 
     **Notes**
 
@@ -341,7 +337,7 @@ def split_by_worker(
         assert isinstance(output_part_id, int)
         if drop_column:
             del part[column]
-        frames = pickle_bytelist((input_part_id, part), prelude=False)
+        frames = pickle_dataframe_shard(input_part_id, part)
         out[worker_for[output_part_id]].append((output_part_id, frames))
 
     return {k: (input_part_id, v) for k, v in out.items()}
@@ -520,21 +516,16 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         key: Key,
         **kwargs: Any,
     ) -> pd.DataFrame:
-        import pandas as pd
+        meta = self.meta.copy()
+        if self.drop_column:
+            meta = self.meta.drop(columns=self.column)
 
         try:
-            parts = self._read_from_disk((partition_id,))
+            buffer = self._read_from_disk((partition_id,))
         except DataUnavailable:
-            result = self.meta.copy()
-            if self.drop_column:
-                result = self.meta.drop(columns=self.column)
-            return result
+            return meta
 
-        # [(input_partition_id, part), ...]] -> [part, ...]
-        shards = list(map(second, sorted(parts, key=first)))
-        # Actually load memory-mapped buffers into memory and close the file
-        # descriptors
-        return pd.concat(shards, copy=True)
+        return unpickle_and_concat_dataframe_shards(buffer, meta)
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pickle import PickleBuffer
+
 import pytest
 
 from distributed.shuffle._core import _mean_shard_size
@@ -12,7 +14,17 @@ def test_mean_shard_size():
     # Don't fully iterate over large collections
     assert _mean_shard_size([b"12" * n for n in range(1000)]) == 9
     # Support any Buffer object
-    assert _mean_shard_size([b"12", bytearray(b"1234"), memoryview(b"123456")]) == 4
+    assert (
+        _mean_shard_size(
+            [
+                b"12",
+                bytearray(b"1234"),
+                memoryview(b"123456"),
+                PickleBuffer(b"12345678"),
+            ]
+        )
+        == 5
+    )
     # Recursion into lists or tuples; ignore int
     assert _mean_shard_size([(1, 2, [3, b"123456"])]) == 6
     # Don't blindly call sizeof() on unexpected objects
