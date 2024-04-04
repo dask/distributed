@@ -81,8 +81,8 @@ async def test_client_worker(c, s, a, b):
         pub = Pub("a")
         pub.put(x)
 
-    futures = c.map(f, range(10))
-    await wait(futures)
+    tasks = c.map(f, range(10))
+    await wait(tasks)
 
     L = []
     for _ in range(10):

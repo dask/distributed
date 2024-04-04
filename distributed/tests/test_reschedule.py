@@ -47,17 +47,17 @@ async def test_raise_reschedule(c, s, a, b, state):
         if get_worker().address == a_address:
             raise Reschedule()
 
-    futures = c.map(f, range(4), key=["x1", "x2", "x3", "x4"])
-    futures2 = c.map(slowinc, range(10), delay=0.1, key="clog", workers=[a.address])
-    await wait(futures)
+    tasks = c.map(f, range(4), key=["x1", "x2", "x3", "x4"])
+    tasks2 = c.map(slowinc, range(10), delay=0.1, key="clog", workers=[a.address])
+    await wait(tasks)
     assert any(isinstance(ev, RescheduleEvent) for ev in a.state.stimulus_log)
-    assert all(f.key in b.data for f in futures)
+    assert all(f.key in b.data for f in tasks)
 
 
 @pytest.mark.parametrize("state", ["executing", "long-running"])
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_cancelled_reschedule(c, s, a, state):
-    """A task raises Reschedule(), but the future was released by the client.
+    """A task raises Reschedule(), but the task was released by the client.
     Same as test_cancelled_reschedule_worker_state"""
     ev1 = Event()
     ev2 = Event()

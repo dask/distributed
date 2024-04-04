@@ -91,12 +91,12 @@ async def test_adaptive():
     ) as cluster:
         cluster.adapt(minimum=1, maximum=4, target_duration="1s", interval="20ms")
         async with Client(cluster, asynchronous=True) as client:
-            futures = client.map(slowinc, range(200), delay=0.1)
+            tasks = client.map(slowinc, range(200), delay=0.1)
 
             while len(cluster.worker_spec) <= 1:
                 await asyncio.sleep(0.05)
 
-            del futures
+            del tasks
 
             while len(cluster.worker_spec) > 1:
                 await asyncio.sleep(0.05)

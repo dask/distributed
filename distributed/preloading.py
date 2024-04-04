@@ -208,18 +208,18 @@ class Preload:
                 if inspect.isawaitable(result):
                     await result
             else:
-                future = dask_setup(self.dask_object)
-                if inspect.isawaitable(future):
-                    await future
+                task = dask_setup(self.dask_object)
+                if inspect.isawaitable(task):
+                    await task
 
     async def teardown(self):
         """Run when the server starts its close method"""
         dask_teardown = getattr(self.module, "dask_teardown", None)
         if dask_teardown:
             logger.info("Run preload teardown: %s", self.name)
-            future = dask_teardown(self.dask_object)
-            if inspect.isawaitable(future):
-                await future
+            task = dask_teardown(self.dask_object)
+            if inspect.isawaitable(task):
+                await task
 
 
 class PreloadManager(Sequence[Preload]):

@@ -205,8 +205,8 @@ def test_submit(loop):
         processes=False,
         loop=loop,
     ) as cluster, Client(cluster.scheduler_address, loop=loop) as client:
-        future = client.submit(lambda x: x + 1, 1)
-        assert future.result() == 2
+        task = client.submit(lambda x: x + 1, 1)
+        assert task.result() == 2
 
 
 def test_context_manager(loop):
@@ -770,7 +770,7 @@ async def test_adapt_then_manual():
         await wait_workers(0)
 
         async with Client(cluster, asynchronous=True) as client:
-            futures = client.map(slowinc, range(1000), delay=0.1)
+            tasks = client.map(slowinc, range(1000), delay=0.1)
             await wait_workers(4)
 
             cluster._adaptive.stop()

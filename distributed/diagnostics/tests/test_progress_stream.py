@@ -67,14 +67,14 @@ def test_progress_quads_too_many():
 
 @gen_cluster(client=True)
 async def test_progress_stream(c, s, a, b):
-    futures = c.map(div, [1] * 10, range(10))
+    tasks = c.map(div, [1] * 10, range(10))
 
     x = 1
     for _ in range(5):
         x = delayed(inc)(x)
-    future = c.compute(x)
+    task = c.compute(x)
 
-    await wait(futures + [future])
+    await wait(tasks + [task])
 
     comm = await progress_stream(s.address, interval=0.010)
     msg = await comm.read()

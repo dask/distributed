@@ -32,10 +32,10 @@ from distributed import (
     CancelledError,
     Client,
     Event,
-    Future,
     Lock,
     Nanny,
     SchedulerPlugin,
+    Task,
     Worker,
     fire_and_forget,
     wait,
@@ -175,7 +175,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     )
     async def test_decide_worker_coschedule_order_neighbors_(c, s, *workers):
         r"""
-        Ensure that sibling root tasks are scheduled to the same node, reducing future
+        Ensure that sibling root tasks are scheduled to the same node, reducing task
         data transfer.
 
         We generate a wide layer of "root" tasks (random NumPy arrays). All of those
@@ -430,9 +430,9 @@ async def test_graph_execution_width(c, s, *workers):
 async def test_forget_tasks_while_processing(c, s, a, b):
     events = [Event() for _ in range(10)]
 
-    futures = c.map(Event.wait, events)
+    tasks = c.map(Event.wait, events)
     await events[0].set()
-    await futures[0]
+    await tasks[0]
     await c.close()
     assert not s.tasks
 
@@ -442,9 +442,9 @@ async def test_forget_tasks_while_processing(c, s, a, b):
 async def test_restart_while_processing(c, s, a, b):
     events = [Event() for _ in range(10)]
 
-    futures = c.map(Event.wait, events)
+    tasks = c.map(Event.wait, events)
     await events[0].set()
-    await futures[0]
+    await tasks[0]
     # TODO slow because worker waits a while for the task to finish
     await c.restart()
     assert not s.tasks
@@ -483,7 +483,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
         ]
 
         # Cancel the first batch.
-        # Use `Client.close` instead of `del first_batch` because deleting futures sends cancellation
+        # Use `Client.close` instead of `del first_batch` because deleting tasks sends cancellation
         # messages one at a time. We're testing here that when multiple workers have open slots, we don't
         # recommend the same queued tasks for every worker, so we need a bulk cancellation operation.
         await c.close()
@@ -1088,8 +1088,8 @@ async def test_ready_remove_worker(c, s, a, b, worker_saturation):
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     with captured_logger("distributed.scheduler") as caplog:
-        futures = c.map(inc, range(20))
-        await wait(futures)
+        tasks = c.map(inc, range(20))
+        await wait(tasks)
         with captured_logger("distributed.nanny") as nanny_logger:
             await s.restart(stimulus_id="test123")
         assert "Reason: test123" in nanny_logger.getvalue()
@@ -1106,7 +1106,7 @@ async def test_restart(c, s, a, b):
 
         assert not s.tasks
 
-        assert all(f.status == "cancelled" for f in futures)
+        assert all(f.status == "cancelled" for f in tasks)
         x = c.submit(inc, 1)
         assert await x == 2
     assert "restart" in caplog.getvalue().lower()
@@ -1158,7 +1158,7 @@ async def test_restart_nanny_timeout_exceeded(c, s, a, b):
         assert not s.unrunnable
         assert not s.tasks
 
-        assert not c.futures
+        assert not c.tasks
         assert f.status == "cancelled"
         assert fr.status == "cancelled"
     finally:
@@ -1547,7 +1547,7 @@ async def test_workers_to_close(cl, s, *workers):
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"a": 4, "b": 4, "c": 1}}
     ):
-        futures = cl.map(slowinc, [1, 1, 1], key=["a-4", "b-4", "c-1"])
+        tasks = cl.map(slowinc, [1, 1, 1], key=["a-4", "b-4", "c-1"])
         while sum(len(w.processing) for w in s.workers.values()) < 3:
             await asyncio.sleep(0.001)
 
@@ -1571,13 +1571,13 @@ async def test_workers_to_close_grouped(c, s, *workers):
     assert set(s.workers_to_close(key=key)) == {w.address for w in workers}
 
     # Assert that job in one worker blocks closure of group
-    future = c.submit(slowinc, 1, delay=0.2, workers=workers[0].address)
+    task = c.submit(slowinc, 1, delay=0.2, workers=workers[0].address)
     while not any(ws.processing for ws in s.workers.values()):
         await asyncio.sleep(0.001)
 
     assert set(s.workers_to_close(key=key)) == {workers[2].address, workers[3].address}
 
-    del future
+    del task
 
     while any(ws.processing for ws in s.workers.values()):
         await asyncio.sleep(0.001)
@@ -1624,7 +1624,7 @@ async def test_workers_to_close_never_close_long_running(c, s, a, b, reverse):
 
 @gen_cluster(client=True)
 async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
-    future = c.submit(
+    task = c.submit(
         slowinc, 100, delay=0.5, workers=a.address, allow_other_workers=True
     )
     await asyncio.sleep(0.2)
@@ -1691,7 +1691,7 @@ async def test_file_descriptors(c, s):
 @nodebug
 @gen_cluster(client=True)
 async def test_learn_occupancy(c, s, a, b):
-    futures = c.map(slowinc, range(1000), delay=0.2)
+    tasks = c.map(slowinc, range(1000), delay=0.2)
     while sum(len(ts.who_has or ()) for ts in s.tasks.values()) < 10:
         await asyncio.sleep(0.01)
 
@@ -1708,7 +1708,7 @@ async def test_learn_occupancy(c, s, a, b):
 @nodebug
 @gen_cluster(client=True)
 async def test_learn_occupancy_2(c, s, a, b):
-    future = c.map(slowinc, range(1000), delay=0.2)
+    task = c.map(slowinc, range(1000), delay=0.2)
     while not any(ts.who_has for ts in s.tasks.values()):
         await asyncio.sleep(0.01)
 
@@ -1719,8 +1719,8 @@ async def test_learn_occupancy_2(c, s, a, b):
 @nodebug
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 30)
 async def test_balance_many_workers(c, s, *workers):
-    futures = c.map(slowinc, range(20), delay=0.2)
-    await wait(futures)
+    tasks = c.map(slowinc, range(20), delay=0.2)
+    await wait(tasks)
     assert {len(w.has_what) for w in s.workers.values()} == {0, 1}
 
 
@@ -1740,8 +1740,8 @@ async def test_balance_many_workers(c, s, *workers):
     config={"distributed.scheduler.work-stealing": False},
 )
 async def test_balance_many_workers_2(c, s, *workers):
-    futures = c.map(slowinc, range(90), delay=0.2)
-    await wait(futures)
+    tasks = c.map(slowinc, range(90), delay=0.2)
+    await wait(tasks)
     assert {len(w.has_what) for w in s.workers.values()} == {3}
 
 
@@ -1926,13 +1926,13 @@ async def test_retire_nannies_close(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)])
 async def test_fifo_submission(c, s, w):
-    futures = []
+    tasks = []
     for i in range(20):
-        future = c.submit(slowinc, i, delay=0.1, key="inc-%02d" % i, fifo_timeout=0.01)
-        futures.append(future)
+        task = c.submit(slowinc, i, delay=0.1, key="inc-%02d" % i, fifo_timeout=0.01)
+        tasks.append(task)
         await asyncio.sleep(0.02)
-    await wait(futures[-1])
-    assert futures[10].status == "finished"
+    await wait(tasks[-1])
+    assert tasks[10].status == "finished"
 
 
 @gen_test()
@@ -1970,8 +1970,8 @@ async def test_dashboard_host(host, dashboard_address, expect):
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile_metadata(c, s, a, b):
     start = time() - 1
-    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
-    await wait(futures)
+    tasks = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    await wait(tasks)
     await asyncio.sleep(0.200)
 
     meta = await s.get_profile_metadata(profile_cycle_interval=0.100)
@@ -1997,8 +1997,8 @@ async def test_profile_metadata_timeout(c, s, a, b):
 
     b.handlers["profile_metadata"] = raise_timeout
 
-    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
-    await wait(futures)
+    tasks = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    await wait(tasks)
     await asyncio.sleep(0.200)
 
     meta = await s.get_profile_metadata(profile_cycle_interval=0.100)
@@ -2037,9 +2037,9 @@ async def test_profile_metadata_keys(c, s, a, b):
     },
 )
 async def test_statistical_profiling(c, s, a, b):
-    futures = c.map(slowinc, range(10), delay=0.1)
+    tasks = c.map(slowinc, range(10), delay=0.1)
 
-    await wait(futures)
+    await wait(tasks)
 
     profile = await s.get_profile()
     assert profile["count"]
@@ -2054,13 +2054,13 @@ async def test_statistical_profiling(c, s, a, b):
     },
 )
 async def test_statistical_profiling_failure(c, s, a, b):
-    futures = c.map(slowinc, range(10), delay=0.1)
+    tasks = c.map(slowinc, range(10), delay=0.1)
 
     def raise_timeout(*args, **kwargs):
         raise TimeoutError
 
     b.handlers["profile"] = raise_timeout
-    await wait(futures)
+    await wait(tasks)
 
     profile = await s.get_profile()
     assert profile["count"]
@@ -2083,16 +2083,16 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     x = f(None, dask_key_name="x")
     y = g(x, ev1, ev2, dask_key_name="y")
     z = f(y, dask_key_name="z")
-    future = c.compute(z)
+    task = c.compute(z)
 
-    fire_and_forget(future)
+    fire_and_forget(task)
     await ev1.wait()
-    # Cancel the future for z when
+    # Cancel the task for z when
     # - x is in memory
     # - y is processing
     # - z is pending
-    await future.cancel(force=True)
-    assert future.status == "cancelled"
+    await task.cancel(force=True)
+    assert task.status == "cancelled"
     while s.tasks:
         await asyncio.sleep(0.01)
     await ev2.set()
@@ -2103,18 +2103,18 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     client=True, Worker=Nanny, clean_kwargs={"processes": False, "threads": False}
 )
 async def test_log_tasks_during_restart(c, s, a, b):
-    future = c.submit(sys.exit, 0)
-    await wait(future)
+    task = c.submit(sys.exit, 0)
+    await wait(task)
     assert "exit" in str(s.events)
 
 
 @gen_cluster(client=True)
 async def test_get_task_status(c, s, a, b):
-    future = c.submit(inc, 1)
-    await wait(future)
+    task = c.submit(inc, 1)
+    await wait(task)
 
-    result = await a.scheduler.get_task_status(keys=[future.key])
-    assert result == {future.key: "memory"}
+    result = await a.scheduler.get_task_status(keys=[task.key])
+    assert result == {task.key: "memory"}
 
 
 @gen_cluster(nthreads=[])
@@ -2133,26 +2133,26 @@ async def test_deque_handler(s):
 async def test_retries(c, s, a, b):
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 42]
 
-    future = c.submit(varying(args), retries=3)
-    result = await future
+    task = c.submit(varying(args), retries=3)
+    result = await task
     assert result == 42
-    assert s.tasks[future.key].retries == 1
-    assert not s.tasks[future.key].exception
+    assert s.tasks[task.key].retries == 1
+    assert not s.tasks[task.key].exception
 
-    future = c.submit(varying(args), retries=2, pure=False)
-    result = await future
+    task = c.submit(varying(args), retries=2, pure=False)
+    result = await task
     assert result == 42
-    assert s.tasks[future.key].retries == 0
-    assert not s.tasks[future.key].exception
+    assert s.tasks[task.key].retries == 0
+    assert not s.tasks[task.key].exception
 
-    future = c.submit(varying(args), retries=1, pure=False)
+    task = c.submit(varying(args), retries=1, pure=False)
     with pytest.raises(ZeroDivisionError) as exc_info:
-        await future
+        await task
     exc_info.match("two")
 
-    future = c.submit(varying(args), retries=0, pure=False)
+    task = c.submit(varying(args), retries=0, pure=False)
     with pytest.raises(ZeroDivisionError) as exc_info:
-        await future
+        await task
     exc_info.match("one")
 
 
@@ -2300,12 +2300,12 @@ async def test_resources_reset_after_cancelled_task(c, s, a):
     assert s.workers[a.address].used_resources == {"A": 0}
     assert a.state.available_resources == {"A": 1}
 
-    future = c.submit(block, lock, key="x", resources={"A": 1})
+    task = c.submit(block, lock, key="x", resources={"A": 1})
     await wait_for_state("x", "executing", a)
     assert s.workers[a.address].used_resources == {"A": 1}
     assert a.state.available_resources == {"A": 0}
 
-    await future.cancel()
+    await task.cancel()
     await wait_for_state("x", "cancelled", a)
     assert s.workers[a.address].used_resources == {"A": 0}
     assert a.state.available_resources == {"A": 0}
@@ -2365,12 +2365,12 @@ async def test_idle_timeout(c, s, a, b):
     assert s.check_idle() is not None  # Repeated calls should still not be None
     s.idle_timeout = 0.500
     pc = PeriodicCallback(s.check_idle, 10)
-    future = c.submit(slowinc, 1)
+    task = c.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.01)
     assert s.check_idle() is None
     pc.start()
-    await future
+    await task
     assert s.idle_since is None or s.idle_since > beginning
     _idle_since = s.check_idle()
     assert _idle_since == s.idle_since
@@ -2402,7 +2402,7 @@ async def test_idle_timeout_no_workers(c, s):
     s.periodic_callbacks["idle-timeout"].stop()
 
     s.idle_timeout = 0.1
-    future = c.submit(inc, 1)
+    task = c.submit(inc, 1)
     while not s.tasks:
         await asyncio.sleep(0.1)
 
@@ -2414,9 +2414,9 @@ async def test_idle_timeout_no_workers(c, s):
         assert s.tasks
 
     async with Worker(s.address):
-        await future
+        await task
     assert not s.check_idle()
-    del future
+    del task
 
     while s.tasks:
         await asyncio.sleep(0.1)
@@ -2435,7 +2435,7 @@ async def test_idle_timeout_no_workers(c, s):
 )
 async def test_no_workers_timeout_disabled(c, s, a, b):
     """no-workers-timeout has been disabled"""
-    future = c.submit(inc, 1, key="x")
+    task = c.submit(inc, 1, key="x")
     await wait_for_state("x", ("queued", "no-worker"), s)
 
     s._check_no_workers()
@@ -2462,7 +2462,7 @@ async def test_no_workers_timeout_without_workers(c, s):
 
     assert s.status == Status.running
 
-    future = c.submit(inc, 1)
+    task = c.submit(inc, 1)
     while s.status != Status.closed:
         await asyncio.sleep(0.01)
 
@@ -2476,7 +2476,7 @@ async def test_no_workers_timeout_bad_restrictions(c, s, a, b):
     """Trip no-workers-timeout when there are workers available but none satisfies
     task restrictions
     """
-    future = c.submit(inc, 1, key="x", workers=["127.0.0.2:1234"])
+    task = c.submit(inc, 1, key="x", workers=["127.0.0.2:1234"])
     while s.status != Status.closed:
         await asyncio.sleep(0.01)
 
@@ -2489,7 +2489,7 @@ async def test_no_workers_timeout_bad_restrictions(c, s, a, b):
 async def test_no_workers_timeout_queued(c, s, a):
     """Don't trip no-workers-timeout when there are queued tasks AND processing tasks"""
     ev = Event()
-    futures = [c.submit(lambda ev: ev.wait(), ev, pure=False) for _ in range(3)]
+    tasks = [c.submit(lambda ev: ev.wait(), ev, pure=False) for _ in range(3)]
     await async_poll_for(lambda: len(s.tasks) == 3 and a.state.tasks, timeout=5)
     assert s.queued or math.isinf(s.WORKER_SATURATION)
 
@@ -2705,12 +2705,12 @@ async def test_finished():
 @gen_cluster(nthreads=[], client=True)
 async def test_retire_names_str(c, s):
     async with Worker(s.address, name="0") as a, Worker(s.address, name="1") as b:
-        futures = c.map(inc, range(5), workers=[a.address])
-        futures.extend(c.map(inc, range(5, 10), workers=[b.address]))
-        await wait(futures)
+        tasks = c.map(inc, range(5), workers=[a.address])
+        tasks.extend(c.map(inc, range(5, 10), workers=[b.address]))
+        await wait(tasks)
         assert a.data and b.data
         await s.retire_workers(names=[0])
-        assert all(f.done() for f in futures)
+        assert all(f.done() for f in tasks)
         assert len(b.data) == 10
 
 
@@ -2730,8 +2730,8 @@ async def test_retire_workers_bad_params(c, s, a, b):
     client=True, config={"distributed.scheduler.default-task-durations": {"inc": 100}}
 )
 async def test_get_task_duration(c, s, a, b):
-    future = c.submit(inc, 1)
-    await future
+    task = c.submit(inc, 1)
+    await task
     assert 10 < s.task_prefixes["inc"].duration_average < 100
 
     ts_pref1 = s.new_task("inc-abcdefab", None, "released")
@@ -2981,8 +2981,8 @@ async def test_task_prefix(c, s, a, b):
     client=True, Worker=Nanny, config={"distributed.scheduler.allowed-failures": 0}
 )
 async def test_failing_task_increments_suspicious(client, s, a, b):
-    future = client.submit(sys.exit, 0)
-    await wait(future)
+    task = client.submit(sys.exit, 0)
+    await wait(task)
 
     assert s.task_prefixes["exit"].suspicious == 1
     assert sum(tp.suspicious for tp in s.task_prefixes.values()) == sum(
@@ -3160,12 +3160,12 @@ async def test_multiple_listeners(dashboard_link_template, expected_dashboard_li
                         assert b.scheduler.address.startswith("tcp")
 
                         async with Client(s.address, asynchronous=True) as c:
-                            futures = c.map(inc, range(20))
-                            await wait(futures)
+                            tasks = c.map(inc, range(20))
+                            await wait(tasks)
 
                             # Force inter-worker communication both ways
-                            await c.submit(sum, futures, workers=[a.address])
-                            await c.submit(len, futures, workers=[b.address])
+                            await c.submit(sum, tasks, workers=[a.address])
+                            await c.submit(len, tasks, workers=[b.address])
 
     log = log.getvalue()
     assert re.search(r"Scheduler at:\s*tcp://", log)
@@ -3201,12 +3201,12 @@ async def test_worker_name_collision(s, a):
 
 @gen_cluster(client=True, config={"distributed.scheduler.unknown-task-duration": "1h"})
 async def test_unknown_task_duration_config(client, s, a, b):
-    future = client.submit(slowinc, 1)
+    task = client.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.001)
     assert sum(s.get_task_duration(ts) for ts in s.tasks.values()) == 3600
     assert len(s.unknown_durations) == 1
-    await wait(future)
+    await wait(task)
     assert len(s.unknown_durations) == 0
 
 
@@ -3613,10 +3613,10 @@ async def test_rebalance(c, s, a, b):
     # Generate 500 buffers worth 512 MiB total on worker a. This sends its memory
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = c.map(
+    tasks = c.map(
         lambda _: "x" * (2**29 // 500), range(500), workers=[a.worker_address]
     )
-    await wait(futures)
+    await wait(tasks)
     # Wait for heartbeats
     await assert_memory(s, "process", 512, 1024)
     await assert_ndata(c, {a.worker_address: 500, b.worker_address: 0})
@@ -3648,7 +3648,7 @@ REBALANCE_MANAGED_CONFIG = merge(
 
 @gen_cluster(client=True, config=REBALANCE_MANAGED_CONFIG)
 async def test_rebalance_managed_memory(c, s, a, b):
-    futures = await c.scatter(range(100), workers=[a.address])
+    tasks = await c.scatter(range(100), workers=[a.address])
     assert len(a.data) == 100
     assert len(b.data) == 0
     await s.rebalance()
@@ -3658,7 +3658,7 @@ async def test_rebalance_managed_memory(c, s, a, b):
 
 @gen_cluster(nthreads=[("", 1)] * 3, client=True, config=REBALANCE_MANAGED_CONFIG)
 async def test_rebalance_workers_and_keys(client, s, a, b, c):
-    futures = await client.scatter(range(100), workers=[a.address])
+    tasks = await client.scatter(range(100), workers=[a.address])
     assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
 
     # Passing empty iterables is not the same as omitting the arguments
@@ -3667,9 +3667,7 @@ async def test_rebalance_workers_and_keys(client, s, a, b, c):
     assert (len(a.data), len(b.data), len(c.data)) == (100, 0, 0)
 
     # Limit rebalancing to two arbitrary keys and two arbitrary workers.
-    await s.rebalance(
-        keys=[futures[3].key, futures[7].key], workers=[a.address, b.address]
-    )
+    await s.rebalance(keys=[tasks[3].key, tasks[7].key], workers=[a.address, b.address])
     assert (len(a.data), len(b.data), len(c.data)) == (98, 2, 0)
 
     with pytest.raises(KeyError):
@@ -3685,12 +3683,12 @@ async def test_rebalance_missing_data1(s, a, b):
 
 @gen_cluster(client=True, config=NO_AMM)
 async def test_rebalance_missing_data2(c, s, a, b):
-    """keys exist but belong to unfinished futures. Unlike Client.rebalance(),
-    Scheduler.rebalance() does not wait for unfinished futures.
+    """keys exist but belong to unfinished tasks. Unlike Client.rebalance(),
+    Scheduler.rebalance() does not wait for unfinished tasks.
     """
-    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    tasks = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await asyncio.sleep(0.1)
-    out = await s.rebalance(keys=[f.key for f in futures])
+    out = await s.rebalance(keys=[f.key for f in tasks])
     assert out["status"] == "partial-fail"
     assert 8 <= len(out["keys"]) <= 10
 
@@ -3702,7 +3700,7 @@ async def test_rebalance_raises_missing_data3(c, s, a, b, explicit):
     actual data movement runs.
     There is an error message only if the keys are explicitly listed in the API call.
     """
-    futures = await c.scatter(range(100), workers=[a.address])
+    tasks = await c.scatter(range(100), workers=[a.address])
 
     if explicit:
         pytest.xfail(
@@ -3711,15 +3709,15 @@ async def test_rebalance_raises_missing_data3(c, s, a, b, explicit):
                    partial-fail is very timing sensitive and subject to a race
                    condition. This test assumes that the data is freed before
                    the rebalance get_data requests come in but merely deleting
-                   the futures is not sufficient to guarantee this"""
+                   the tasks is not sufficient to guarantee this"""
         )
-        keys = [f.key for f in futures]
-        del futures
+        keys = [f.key for f in tasks]
+        del tasks
         out = await s.rebalance(keys=keys)
         assert out["status"] == "partial-fail"
         assert 1 <= len(out["keys"]) <= 100
     else:
-        del futures
+        del tasks
         out = await s.rebalance()
         assert out == {"status": "OK"}
 
@@ -3735,7 +3733,7 @@ async def test_rebalance_no_workers(s):
     config=merge(NO_AMM, {"distributed.worker.memory.rebalance.measure": "managed"}),
 )
 async def test_rebalance_no_limit(c, s, a, b):
-    futures = await c.scatter(range(100), workers=[a.address])
+    tasks = await c.scatter(range(100), workers=[a.address])
     assert len(a.data) == 100
     assert len(b.data) == 0
     await s.rebalance()
@@ -3778,11 +3776,11 @@ async def test_rebalance_no_recipients(c, s, a, b):
 )
 async def test_rebalance_skip_recipient(client, s, a, b, c):
     """A recipient is skipped because it already holds a copy of the key to be sent"""
-    futures = await client.scatter(range(10), workers=[a.address])
-    await client.replicate(futures[0:2], workers=[a.address, b.address])
-    await client.replicate(futures[2:4], workers=[a.address, c.address])
+    tasks = await client.scatter(range(10), workers=[a.address])
+    await client.replicate(tasks[0:2], workers=[a.address, b.address])
+    await client.replicate(tasks[2:4], workers=[a.address, c.address])
     assert (len(a.data), len(b.data), len(c.data)) == (10, 2, 2)
-    await client.rebalance(futures[:2])
+    await client.rebalance(tasks[:2])
     assert (len(a.data), len(b.data), len(c.data)) == (8, 2, 4)
 
 
@@ -3793,11 +3791,11 @@ async def test_rebalance_skip_recipient(client, s, a, b, c):
 )
 async def test_rebalance_skip_all_recipients(c, s, a, b):
     """All recipients are skipped because they already hold copies"""
-    futures = await c.scatter(range(10), workers=[a.address])
-    await wait(futures)
-    await c.replicate([futures[0]])
+    tasks = await c.scatter(range(10), workers=[a.address])
+    await wait(tasks)
+    await c.replicate([tasks[0]])
     assert (len(a.data), len(b.data)) == (10, 1)
-    await c.rebalance(futures[:2])
+    await c.rebalance(tasks[:2])
     assert (len(a.data), len(b.data)) == (9, 2)
 
 
@@ -3840,21 +3838,21 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     2. workers below sender-min are never senders
     """
     a, b = s.workers
-    small_futures = c.map(lambda _: "x", range(10), workers=[a])
-    await wait(small_futures)
+    small_tasks = c.map(lambda _: "x", range(10), workers=[a])
+    await wait(small_tasks)
     await assert_ndata(c, {a: 10, b: 0})
     await s.rebalance()
     await assert_ndata(c, {a: 10, b: 0})
 
-    large_future = c.submit(lambda: "x" * (300 * 2**20), workers=[a])
-    await wait([large_future])
+    large_task = c.submit(lambda: "x" * (300 * 2**20), workers=[a])
+    await wait([large_task])
     await assert_memory(s, "managed", 300, 301)
     await assert_ndata(c, {a: 11, b: 0})
     await s.rebalance()
     await assert_ndata(c, {a: 1, b: 10})
     has_what = await c.has_what()
-    assert has_what[a] == (large_future.key,)
-    assert sorted(has_what[b]) == sorted(f.key for f in small_futures)
+    assert has_what[a] == (large_task.key,)
+    assert sorted(has_what[b]) == sorted(f.key for f in small_tasks)
 
 
 @gen_cluster(client=True)
@@ -4157,8 +4155,8 @@ async def test_avoid_paused_workers(c, s, w1, w2, w3):
     w2.status = Status.paused
     while s.workers[w2.address].status != Status.paused:
         await asyncio.sleep(0.01)
-    futures = c.map(slowinc, range(8), delay=0.1)
-    await wait(futures)
+    tasks = c.map(slowinc, range(8), delay=0.1)
+    await wait(tasks)
     assert w1.data
     assert not w2.data
     assert w3.data
@@ -4431,14 +4429,14 @@ async def test_KilledWorker_informative_message(s, a, b):
 
 @gen_cluster(client=True)
 async def test_count_task_prefix(c, s, a, b):
-    futures = c.map(inc, range(10))
-    await c.gather(futures)
+    tasks = c.map(inc, range(10))
+    await c.gather(tasks)
 
     assert s.task_prefixes["inc"].state_counts["memory"] == 10
     assert s.task_prefixes["inc"].state_counts["erred"] == 0
 
-    futures = c.map(inc, range(10, 20))
-    await c.gather(futures)
+    tasks = c.map(inc, range(10, 20))
+    await c.gather(tasks)
 
     assert s.task_prefixes["inc"].state_counts["memory"] == 20
     assert s.task_prefixes["inc"].state_counts["erred"] == 0
@@ -4623,7 +4621,7 @@ async def test_client_desires_keys_creates_ts(c, s, a, b):
     test_scheduler.py::test_scatter_creates_ts
     test_spans.py::test_client_desires_keys_creates_ts
     """
-    x = Future(key="x")
+    x = Task(key="x")
     await wait_for_state("x", "released", s)
     assert s.tasks["x"].run_spec is None
     async with Client(s.address, asynchronous=True) as c2:

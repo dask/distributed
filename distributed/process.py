@@ -12,7 +12,7 @@ from collections.abc import Callable
 from queue import Queue as PyQueue
 from typing import TYPE_CHECKING
 
-from tornado.concurrent import Future
+from tornado.concurrent import Future as TornadoFuture
 from tornado.ioloop import IOLoop
 
 import dask
@@ -38,27 +38,27 @@ def _loop_add_callback(loop, func, *args):
             raise
 
 
-def _future_set_result_unless_cancelled(future, value):
-    if not future.cancelled():
-        future.set_result(value)
+def _future_set_result_unless_cancelled(task, value):
+    if not task.cancelled():
+        task.set_result(value)
 
 
-def _future_set_exception_unless_cancelled(future, exc):
-    if not future.cancelled():
-        future.set_exception(exc)
+def _future_set_exception_unless_cancelled(task, exc):
+    if not task.cancelled():
+        task.set_exception(exc)
     else:
-        logger.error("Exception after Future was cancelled", exc_info=exc)
+        logger.error("Exception after Task was cancelled", exc_info=exc)
 
 
-def _call_and_set_future(loop, future, func, *args, **kwargs):
+def _call_and_set_task(loop, task, func, *args, **kwargs):
     try:
         res = func(*args, **kwargs)
     except Exception as exc:
         # Tornado futures are not thread-safe, need to
         # set_result() / set_exc_info() from the loop's thread
-        _loop_add_callback(loop, _future_set_exception_unless_cancelled, future, exc)
+        _loop_add_callback(loop, _future_set_exception_unless_cancelled, task, exc)
     else:
-        _loop_add_callback(loop, _future_set_result_unless_cancelled, future, res)
+        _loop_add_callback(loop, _future_set_result_unless_cancelled, task, res)
 
 
 class _ProcessState:
@@ -111,7 +111,7 @@ class AsyncProcess:
             self, _asyncprocess_finalizer, self._process
         )
         self._watch_q = PyQueue()
-        self._exit_future = Future()
+        self._exit_future = TornadoFuture()
         self._exit_callback = None
         self._closed = False
 
@@ -203,7 +203,7 @@ class AsyncProcess:
 
     @classmethod
     def _watch_message_queue(  # type: ignore[no-untyped-def]
-        cls, selfref, process: multiprocessing.Process, loop, state, q, exit_future
+        cls, selfref, process: multiprocessing.Process, loop, state, q, exit_task
     ):
         # As multiprocessing.Process is not thread-safe, we run all
         # blocking operations from this single loop and ship results
@@ -231,13 +231,13 @@ class AsyncProcess:
             logger.debug(f"[{r}] got message {msg!r}")
             op = msg["op"]
             if op == "start":
-                _call_and_set_future(loop, msg["future"], _start)
+                _call_and_set_task(loop, msg["task"], _start)
             elif op == "terminate":
                 # Send SIGTERM
-                _call_and_set_future(loop, msg["future"], process.terminate)
+                _call_and_set_task(loop, msg["task"], process.terminate)
             elif op == "kill":
                 # Send SIGKILL
-                _call_and_set_future(loop, msg["future"], process.kill)
+                _call_and_set_task(loop, msg["task"], process.kill)
 
             elif op == "stop":
                 break
@@ -279,40 +279,40 @@ class AsyncProcess:
         """
         Start the child process.
 
-        This method returns a future.
+        This method returns a task.
         """
         self._check_closed()
-        fut = Future()
-        self._watch_q.put_nowait({"op": "start", "future": fut})
+        fut = TornadoFuture()
+        self._watch_q.put_nowait({"op": "start", "task": fut})
         return fut
 
     def terminate(self) -> asyncio.Future[None]:
         """Terminate the child process.
 
-        This method returns a future.
+        This method returns a task.
 
         See also
         --------
         multiprocessing.Process.terminate
         """
         self._check_closed()
-        fut: Future[None] = Future()
-        self._watch_q.put_nowait({"op": "terminate", "future": fut})
+        fut: TornadoFuture[None] = TornadoFuture()
+        self._watch_q.put_nowait({"op": "terminate", "task": fut})
         return fut
 
     def kill(self) -> asyncio.Future[None]:
         """Send SIGKILL to the child process.
         On Windows, this is the same as terminate().
 
-        This method returns a future.
+        This method returns a task.
 
         See also
         --------
         multiprocessing.Process.kill
         """
         self._check_closed()
-        fut: Future[None] = Future()
-        self._watch_q.put_nowait({"op": "kill", "future": fut})
+        fut: TornadoFuture[None] = TornadoFuture()
+        self._watch_q.put_nowait({"op": "kill", "task": fut})
         return fut
 
     async def join(self, timeout=None):
@@ -325,8 +325,8 @@ class AsyncProcess:
         assert self._state.pid is not None, "can only join a started process"
         if self._state.exitcode is not None:
             return
-        # Shield otherwise the timeout cancels the future and our
-        # on_exit callback will try to set a result on a canceled future
+        # Shield otherwise the timeout cancels the task and our
+        # on_exit callback will try to set a result on a canceled task
         await wait_for(asyncio.shield(self._exit_future), timeout)
 
     def close(self):

@@ -24,8 +24,8 @@ async def test_lock(c, s, a, b):
             assert client.get_metadata("locked") is True
             client.set_metadata("locked", False)
 
-    futures = c.map(f, range(20))
-    await c.gather(futures)
+    tasks = c.map(f, range(20))
+    await c.gather(tasks)
     assert not s.extensions["locks"].events
     assert not s.extensions["locks"].ids
 
@@ -100,8 +100,8 @@ def test_lock_sync(client):
             client.set_metadata("locked", False)
 
     client.set_metadata("locked", False)
-    futures = client.map(f, range(10))
-    client.gather(futures)
+    tasks = client.map(f, range(10))
+    client.gather(tasks)
 
 
 @gen_cluster(client=True)
@@ -124,8 +124,8 @@ async def test_serializable(c, s, a, b):
             return x + 1
 
     lock = Lock("x")
-    futures = c.map(f, range(10), lock=lock)
-    await c.gather(futures)
+    tasks = c.map(f, range(10), lock=lock)
+    await c.gather(tasks)
 
     lock2 = pickle.loads(pickle.dumps(lock))
     assert lock2.name == lock.name

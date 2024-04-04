@@ -30,7 +30,7 @@ from distributed.utils_test import dec, gen_cluster, inc
 async def test_routes(c, s, a, b):
     port = a.http_server.port
 
-    future = c.submit(sleep, 1)
+    task = c.submit(sleep, 1)
     await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
@@ -52,7 +52,7 @@ async def test_simple(c, s, a, b):
     assert s.workers[a.address].services == {"dashboard": a.http_server.port}
     assert s.workers[b.address].services == {"dashboard": b.http_server.port}
 
-    future = c.submit(sleep, 1)
+    task = c.submit(sleep, 1)
     await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()

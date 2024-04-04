@@ -56,8 +56,8 @@ Map and Submit Functions
 
 Use the ``map`` and ``submit`` methods to launch computations on the cluster.
 The ``map/submit`` functions send the function and arguments to the remote
-workers for processing.  They return ``Future`` objects that refer to remote
-data on the cluster.  The ``Future`` returns immediately while the computations
+workers for processing.  They return ``Task`` objects that refer to remote
+data on the cluster.  The ``Task`` returns immediately while the computations
 run remotely in the background.
 
 .. code-block:: python
@@ -78,27 +78,27 @@ run remotely in the background.
 Gather
 ~~~~~~
 
-The ``map/submit`` functions return ``Future`` objects, lightweight tokens that
+The ``map/submit`` functions return ``Task`` objects, lightweight tokens that
 refer to results on the cluster.  By default the results of computations
 *stay on the cluster*.
 
 .. code-block:: python
 
    >>> total  # Function hasn't yet completed
-   <Future: status: waiting, key: sum-58999c52e0fa35c7d7346c098f5085c7>
+   <Task: status: waiting, key: sum-58999c52e0fa35c7d7346c098f5085c7>
 
    >>> total  # Function completed, result ready on remote worker
-   <Future: status: finished, key: sum-58999c52e0fa35c7d7346c098f5085c7>
+   <Task: status: finished, key: sum-58999c52e0fa35c7d7346c098f5085c7>
 
-Gather results to your local machine either with the ``Future.result`` method
-for a single future, or with the ``Client.gather`` method for many futures at
+Gather results to your local machine either with the ``Task.result`` method
+for a single task, or with the ``Client.gather`` method for many tasks at
 once.
 
 .. code-block:: python
 
-   >>> total.result()   # result for single future
+   >>> total.result()   # result for single task
    -285
-   >>> client.gather(A) # gather for many futures
+   >>> client.gather(A) # gather for many tasks
    [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
 
 

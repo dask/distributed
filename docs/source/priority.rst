@@ -15,8 +15,8 @@ Dask uses the following priorities, in order:
 
     .. code-block:: python
 
-       future = client.submit(func, *args, priority=10)  # high priority task
-       future = client.submit(func, *args, priority=-10)  # low priority task
+       task = client.submit(func, *args, priority=10)  # high priority task
+       task = client.submit(func, *args, priority=-10)  # low priority task
 
        df = df.persist(priority=10)  # high priority computation
 
@@ -25,9 +25,9 @@ Dask uses the following priorities, in order:
     .. code-block:: python
 
        with dask.annotate(priority=10):
-           future = client.submit(func, *args)  # high priority task
+           task = client.submit(func, *args)  # high priority task
        with dask.annotate(priority=-10):
-           future = client.submit(func, *args)  # low priority task
+           task = client.submit(func, *args)  # low priority task
 
        with dask.annotate(priority=10):
            df = df.persist()  # high priority computation

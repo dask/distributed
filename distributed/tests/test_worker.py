@@ -206,8 +206,8 @@ async def test_upload_file(c, s, a, b):
 
         return foobar.x
 
-    future = c.submit(g, workers=a.address)
-    result = await future
+    task = c.submit(g, workers=a.address)
+    result = await task
     assert result == 123
 
     await s.close()
@@ -238,8 +238,8 @@ async def test_upload_file_pyc(c, s, w):
 
                 return foo.x
 
-            future = c.submit(g)
-            result = await future
+            task = c.submit(g)
+            result = await task
             assert result == 123
         finally:
             sys.path.remove(dirname)
@@ -263,8 +263,8 @@ async def test_upload_egg(c, s, a, b):
 
         return testegg.inc(x)
 
-    future = c.submit(g, 10, workers=a.address)
-    result = await future
+    task = c.submit(g, 10, workers=a.address)
+    result = await task
     assert result == 10 + 1
 
     await c.close()
@@ -292,8 +292,8 @@ async def test_upload_pyz(c, s, a, b):
 
         return mytest.inc(x)
 
-    future = c.submit(g, 10, workers=a.address)
-    result = await future
+    task = c.submit(g, 10, workers=a.address)
+    result = await task
     assert result == 10 + 1
 
     await c.close()
@@ -609,8 +609,8 @@ async def test_access_key(c, s, a, b):
 
         return thread_state.key
 
-    futures = [c.submit(f, i, key="x-%d" % i) for i in range(20)]
-    results = await c._gather(futures)
+    tasks = [c.submit(f, i, key="x-%d" % i) for i in range(20)]
+    results = await c._gather(tasks)
     assert list(results) == ["x-%d" % i for i in range(20)]
 
 
@@ -648,8 +648,8 @@ async def test_Executor(c, s):
         async with Worker(s.address, executor=e) as w:
             assert w.executor is e
 
-            future = c.submit(inc, 1)
-            result = await future
+            task = c.submit(inc, 1)
+            result = await task
             assert result == 2
 
             assert e._threads  # had to do some work
@@ -679,8 +679,8 @@ async def test_memory_limit_auto(s):
 async def test_inter_worker_communication(c, s, a, b):
     [x, y] = await c._scatter([1, 2], workers=a.address)
 
-    future = c.submit(add, x, y, workers=b.address)
-    result = await future
+    task = c.submit(add, x, y, workers=b.address)
+    result = await task
     assert result == 3
 
 
@@ -772,8 +772,8 @@ async def test_clean_nbytes(c, s, a, b):
         L = [delayed(add)(x, y) for x, y in sliding_window(2, L)]
     total = delayed(sum)(L)
 
-    future = c.compute(total)
-    await wait(future)
+    task = c.compute(total)
+    await wait(task)
 
     await asyncio.sleep(1)
     assert (
@@ -791,17 +791,17 @@ async def test_gather_many_small(c, s, a, *snd_workers, as_deps):
     scheduled all at once, they will result in a single call to gather_dep.
     """
     a.state.transfer_incoming_count_limit = 2
-    futures = await c.scatter(
+    tasks = await c.scatter(
         {f"x{i}": i for i in range(100)},
         workers=[w.address for w in snd_workers],
     )
     assert all(w.data for w in snd_workers)
 
     if as_deps:
-        future = c.submit(lambda _: None, futures, key="y", workers=[a.address])
-        await wait(future)
+        task = c.submit(lambda _: None, tasks, key="y", workers=[a.address])
+        await wait(task)
     else:
-        s.request_acquire_replicas(a.address, list(futures), stimulus_id="test")
+        s.request_acquire_replicas(a.address, list(tasks), stimulus_id="test")
         while len(a.data) < 100:
             await asyncio.sleep(0.01)
 
@@ -903,8 +903,8 @@ async def test_log_event(c, s, a):
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
     with captured_logger("distributed.worker") as logger:
-        future = c.submit(div, 1, 0)
-        await wait(future)
+        task = c.submit(div, 1, 0)
+        await wait(task)
 
         await asyncio.sleep(0.1)
 
@@ -957,10 +957,10 @@ async def test_worker_death_timeout():
 
 @gen_cluster(client=True)
 async def test_stop_doing_unnecessary_work(c, s, a, b):
-    futures = c.map(slowinc, range(1000), delay=0.01)
+    tasks = c.map(slowinc, range(1000), delay=0.01)
     await asyncio.sleep(0.1)
 
-    del futures
+    del tasks
     await async_poll_for(lambda: a.state.executing_count == 0, timeout=0.5)
 
 
@@ -976,8 +976,8 @@ async def test_priorities(c, s, w):
         values.append(a2)
         values.append(b1)
 
-    futures = c.compute(values)
-    await wait(futures)
+    tasks = c.compute(values)
+    await wait(tasks)
 
     log = [
         t[0]
@@ -1032,8 +1032,8 @@ async def test_dataframe_attribute_error(c, s, a, b):
         def __sizeof__(self):
             raise TypeError("Hello")
 
-    future = c.submit(BadSize, 123)
-    result = await future
+    task = c.submit(BadSize, 123)
+    result = await task
     assert result.data == 123
 
 
@@ -1046,13 +1046,13 @@ async def test_pid(s, a, b):
 async def test_get_client(c, s, a, b):
     def f(x):
         cc = get_client()
-        future = cc.submit(inc, x)
-        return future.result()
+        task = cc.submit(inc, x)
+        return task.result()
 
     assert default_client() is c
 
-    future = c.submit(f, 10, workers=a.address)
-    result = await future
+    task = c.submit(f, 10, workers=a.address)
+    result = await task
     assert result == 11
 
     assert a._client
@@ -1072,11 +1072,11 @@ async def test_get_client(c, s, a, b):
 def test_get_client_sync(client):
     def f(x):
         cc = get_client()
-        future = cc.submit(inc, x)
-        return future.result()
+        task = cc.submit(inc, x)
+        return task.result()
 
-    future = client.submit(f, 10)
-    assert future.result() == 11
+    task = client.submit(f, 10)
+    assert task.result() == 11
 
 
 @gen_cluster(client=True)
@@ -1087,8 +1087,8 @@ async def test_get_client_coroutine(c, s, a, b):
         # if you do that. We really don't want users to do that.
         # https://github.com/dask/distributed/pull/6921/
         client = get_client()
-        future = client.submit(inc, 10)
-        result = await future
+        task = client.submit(inc, 10)
+        result = await task
         return result
 
     results = await c.run(f)
@@ -1101,8 +1101,8 @@ async def test_get_client_coroutine(c, s, a, b):
 def test_get_client_coroutine_sync(client, s, a, b):
     async def f():
         client = await get_client()
-        future = client.submit(inc, 10)
-        result = await future
+        task = client.submit(inc, 10)
+        result = await task
         return result
 
     for w in [a, b]:
@@ -1197,8 +1197,8 @@ async def test_scheduler_delay(c, s, a, b):
     },
 )
 async def test_statistical_profiling(c, s, a, b):
-    futures = c.map(slowinc, range(10), delay=0.1)
-    await wait(futures)
+    tasks = c.map(slowinc, range(10), delay=0.1)
+    await wait(tasks)
 
     profile = a.profile_keys["slowinc"]
     assert profile["count"]
@@ -1236,8 +1236,8 @@ async def test_statistical_profiling_2(c, s, a, b):
     },
 )
 async def test_statistical_profiling_cycle(c, s, a, b):
-    futures = c.map(slowinc, range(20), delay=0.05)
-    await wait(futures)
+    tasks = c.map(slowinc, range(20), delay=0.05)
+    await wait(tasks)
     await asyncio.sleep(0.01)
     end = time()
     assert len(a.profile_history) > 3
@@ -1290,9 +1290,9 @@ async def test_scheduler_address_config(c, s):
 async def test_wait_for_outgoing(c, s, a, b):
     np = pytest.importorskip("numpy")
     x = np.random.random(10000000)
-    future = await c.scatter(x, workers=a.address)
+    task = await c.scatter(x, workers=a.address)
 
-    y = c.submit(inc, future, workers=b.address)
+    y = c.submit(inc, task, workers=b.address)
     await wait(y)
 
     assert len(b.transfer_incoming_log) == len(a.transfer_outgoing_log) == 1
@@ -1329,9 +1329,9 @@ async def test_avoid_oversubscription(c, s, *workers):
     x = c.submit(np.random.random, 1000000, workers=[workers[0].address])
     await wait(x)
 
-    futures = [c.submit(len, x, pure=False, workers=[w.address]) for w in workers[1:]]
+    tasks = [c.submit(len, x, pure=False, workers=[w.address]) for w in workers[1:]]
 
-    await wait(futures)
+    await wait(tasks)
 
     # Original worker not responsible for all transfers
     assert len(workers[0].transfer_outgoing_log) < len(workers) - 2
@@ -1540,7 +1540,7 @@ def assert_amm_transfer_story(key: str, w_from: Worker, w_to: Worker) -> None:
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_close_gracefully(c, s, a, b):
-    futures = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
+    tasks = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
 
     # Note: keys will appear in b.data several milliseconds before they switch to
     # status=memory in s.tasks. It's important to sample the in-memory keys from the
@@ -1660,7 +1660,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
 async def test_lifetime(c, s, a):
     # Note: test was occasionally failing with lifetime="1 seconds"
     async with Worker(s.address, lifetime="2 seconds") as b:
-        futures = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
+        tasks = c.map(slowinc, range(200), delay=0.1, workers=[b.address])
 
         # Note: keys will appear in b.data several milliseconds before they switch to
         # status=memory in s.tasks. It's important to sample the in-memory keys from the
@@ -1907,9 +1907,9 @@ async def test_executor_offload(c, s, monkeypatch):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_story(c, s, w):
-    future = c.submit(inc, 1)
-    await future
-    ts = w.state.tasks[future.key]
+    task = c.submit(inc, 1)
+    await task
+    ts = w.state.tasks[task.key]
     assert ts.state in str(w.state.story(ts))
     assert w.state.story(ts) == w.state.story(ts.key)
 
@@ -2177,12 +2177,12 @@ async def test_multiple_executors(c, s):
         nthreads=2,
         executor={"foo": ThreadPoolExecutor(1, thread_name_prefix="Dask-Foo-Threads")},
     ):
-        futures = []
+        tasks = []
         with dask.annotate(executor="default"):
-            futures.append(c.submit(get_thread_name, pure=False))
+            tasks.append(c.submit(get_thread_name, pure=False))
         with dask.annotate(executor="foo"):
-            futures.append(c.submit(get_thread_name, pure=False))
-        default_result, gpu_result = await c.gather(futures)
+            tasks.append(c.submit(get_thread_name, pure=False))
+        default_result, gpu_result = await c.gather(tasks)
         assert "Dask-Default-Threads" in default_result
         assert "Dask-Foo-Threads" in gpu_result
 
@@ -2190,10 +2190,10 @@ async def test_multiple_executors(c, s):
 @gen_cluster(client=True)
 async def test_bad_executor_annotation(c, s, a, b):
     with dask.annotate(executor="bad"):
-        future = c.submit(inc, 1)
+        task = c.submit(inc, 1)
     with pytest.raises(ValueError, match="Invalid executor 'bad'; expected one of: "):
-        await future
-    assert future.status == "error"
+        await task
+    assert task.status == "error"
 
 
 @gen_cluster(client=True)
@@ -2202,13 +2202,13 @@ async def test_process_executor(c, s, a, b):
         a.executors["processes"] = e
         b.executors["processes"] = e
 
-        future = c.submit(os.getpid, pure=False)
-        assert (await future) == os.getpid()
+        task = c.submit(os.getpid, pure=False)
+        assert (await task) == os.getpid()
 
         with dask.annotate(executor="processes"):
-            future = c.submit(os.getpid, pure=False)
+            task = c.submit(os.getpid, pure=False)
 
-        assert (await future) != os.getpid()
+        assert (await task) != os.getpid()
 
 
 def kill_process():
@@ -2233,18 +2233,18 @@ async def test_process_executor_kills_process(c, s, a):
     with ProcessPoolExecutor() as e:
         a.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
-            future = c.submit(kill_process)
+            task = c.submit(kill_process)
 
         msg = "A child process terminated abruptly, the process pool is not usable anymore"
         with pytest.raises(BrokenProcessPool, match=msg):
-            await future
+            await task
 
         with dask.annotate(executor="processes", retries=1):
-            future = c.submit(inc, 1)
+            task = c.submit(inc, 1)
 
         # The process pool is now unusable and the worker is effectively dead
         with pytest.raises(BrokenProcessPool, match=msg):
-            await future
+            await task
 
 
 def raise_exc():
@@ -2257,10 +2257,10 @@ async def test_process_executor_raise_exception(c, s, a, b):
         a.executors["processes"] = e
         b.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
-            future = c.submit(raise_exc)
+            task = c.submit(raise_exc)
 
         with pytest.raises(RuntimeError, match="foo"):
-            await future
+            await task
 
 
 async def assert_task_states_on_worker(
@@ -2333,7 +2333,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         res.key: "error",
     }
     await assert_task_states_on_worker(expected_states, a)
-    # Expected states after we release references to the futures
+    # Expected states after we release references to the tasks
     f.release()
     g.release()
 
@@ -2401,7 +2401,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
         res.key: "error",
     }
     await assert_task_states_on_worker(expected_states, a)
-    # Expected states after we release references to the futures
+    # Expected states after we release references to the tasks
 
     res.release()
     # We no longer hold any refs to f or g and B didn't have any errors. It
@@ -2465,7 +2465,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
         res.key: "error",
     }
     await assert_task_states_on_worker(expected_states, a)
-    # Expected states after we release references to the futures
+    # Expected states after we release references to the tasks
 
     f.release()
     res.release()
@@ -3478,7 +3478,7 @@ async def test_do_not_block_event_loop_during_shutdown(s):
 
         await loop.run_in_executor(executor, fn)
 
-    async def set_future():
+    async def set_task():
         while True:
             try:
                 await loop.run_in_executor(executor, sleep, 0.1)
@@ -3491,7 +3491,7 @@ async def test_do_not_block_event_loop_during_shutdown(s):
         # executor_wait is True by default but we want to be explicit here
         await w.close(executor_wait=True)
 
-    await asyncio.gather(block(), close(), set_future())
+    await asyncio.gather(block(), close(), set_task())
 
 
 @gen_cluster(nthreads=[])

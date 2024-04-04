@@ -149,7 +149,7 @@ async def test_stress_scatter_death(c, s, *workers):
         for i, (a, b) in enumerate(sliding_window(2, adds))
     ]
 
-    futures = c.compute(adds)
+    tasks = c.compute(adds)
     del L
     del adds
 
@@ -162,7 +162,7 @@ async def test_stress_scatter_death(c, s, *workers):
         await w.close()
 
     with suppress(CancelledError):
-        await c.gather(futures)
+        await c.gather(tasks)
 
 
 def vsum(*args):
@@ -192,9 +192,9 @@ async def test_stress_communication(c, s, *workers):
     ys = [x + x.T for x in xs]
     z = da.blockwise(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
 
-    future = c.compute(z.sum())
+    task = c.compute(z.sum())
 
-    result = await future
+    result = await task
     assert isinstance(result, float)
 
 
@@ -216,9 +216,9 @@ async def test_stress_steal(c, s, *workers):
         L = [delayed(slowsum)(part, delay=0.005) for part in sliding_window(5, L)]
 
     total = delayed(sum)(L)
-    future = c.compute(total)
+    task = c.compute(total)
 
-    while future.status != "finished":
+    while task.status != "finished":
         await asyncio.sleep(0.1)
         for _ in range(3):
             a = random.choice(workers)
@@ -243,16 +243,16 @@ async def test_close_connections(c, s, *workers):
         x = x.map_blocks(slowinc, delay=0.1, dtype=x.dtype)
     x = x.sum()
 
-    future = c.compute(x)
+    task = c.compute(x)
     n = 0
-    while not future.done():
+    while not task.done():
         n += 1
         await asyncio.sleep(0.5)
         worker = random.choice(list(workers))
         for comm in worker._comms:
             comm.abort()
 
-    await future
+    await task
     assert n > 5
 
 
@@ -282,7 +282,7 @@ async def test_no_delay_during_large_transfer(c, s, w):
         server._last_tick = time()
 
     with ResourceProfiler(dt=0.01) as rprof:
-        future = await c.scatter(x, direct=True, hash=False)
+        task = await c.scatter(x, direct=True, hash=False)
         await asyncio.sleep(0.5)
 
     rprof.close()

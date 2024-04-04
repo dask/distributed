@@ -225,7 +225,7 @@ async def test_executing_cancelled_error(c, s, w):
     await wait_for_state(f1.key, "cancelled", w)
     await lock.release()
 
-    # At this point we do not fetch the result of the future since the future
+    # At this point we do not fetch the result of the task since the task
     # itself would raise a cancelled exception. At this point we're concerned
     # about the worker. The task should transition over error to be eventually
     # forgotten since we no longer hold a ref.
@@ -474,7 +474,7 @@ async def test_resumed_cancelled_handle_compute(
 
     await enter_compute.wait()
 
-    async def release_all_futures():
+    async def release_all_tasks():
         futs = [f1, f2, f3, f4]
         for fut in futs:
             fut.release()
@@ -482,7 +482,7 @@ async def test_resumed_cancelled_handle_compute(
         while any(fut.key in s.tasks for fut in futs):
             await asyncio.sleep(0.05)
 
-    await release_all_futures()
+    await release_all_tasks()
     await wait_for_state(f3.key, "cancelled", b)
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
@@ -491,7 +491,7 @@ async def test_resumed_cancelled_handle_compute(
     f4 = c.submit(sum, [f1, f3], key="f4", workers=[b.address])
 
     await wait_for_state(f3.key, "resumed", b)
-    await release_all_futures()
+    await release_all_tasks()
 
     if not wait_for_processing:
         await lock_compute.release()
@@ -652,7 +652,7 @@ async def test_cancelled_handle_compute(c, s, a, b, raise_error):
 
     await enter_compute.wait()
 
-    async def release_all_futures():
+    async def release_all_tasks():
         futs = [f1, f2, f3, f4]
         for fut in futs:
             fut.release()
@@ -660,7 +660,7 @@ async def test_cancelled_handle_compute(c, s, a, b, raise_error):
         while any(fut.key in s.tasks for fut in futs):
             await asyncio.sleep(0.05)
 
-    await release_all_futures()
+    await release_all_tasks()
     await wait_for_state(f3.key, "cancelled", b)
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
@@ -765,7 +765,7 @@ async def test_cancelled_task_error_rejected(c, s, a, b):
 
     await enter_compute_erring.wait()
 
-    async def release_all_futures():
+    async def release_all_tasks():
         futs = [f1, f2, f3, f4]
         for fut in futs:
             fut.release()
@@ -774,7 +774,7 @@ async def test_cancelled_task_error_rejected(c, s, a, b):
             await asyncio.sleep(0.05)
 
     with freeze_batched_send(s.stream_comms[b.address]):
-        await release_all_futures()
+        await release_all_tasks()
 
         f1 = c.submit(inc, 1, key="f1", workers=[a.address])
         f2 = c.submit(inc, f1, key="f2", workers=[a.address])

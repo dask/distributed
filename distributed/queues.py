@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from dask.utils import parse_timedelta
 
-from distributed.client import Future
+from distributed.client import Task
 from distributed.utils import wait_for
 from distributed.worker import get_client
 
@@ -42,7 +42,7 @@ class QueueExtension:
         )
 
         self.scheduler.stream_handlers.update(
-            {"queue-future-release": self.future_release, "queue_release": self.release}
+            {"queue-task-release": self.future_release, "queue_release": self.release}
         )
 
     def create(self, name=None, client=None, maxsize=0):
@@ -60,15 +60,15 @@ class QueueExtension:
         self.client_refcount[name] -= 1
         if self.client_refcount[name] == 0:
             del self.client_refcount[name]
-            futures = self.queues[name]._queue
+            tasks = self.queues[name]._queue
             del self.queues[name]
-            keys = [d["value"] for d in futures if d["type"] == "Future"]
+            keys = [d["value"] for d in tasks if d["type"] == "Task"]
             if keys:
                 self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
 
     async def put(self, name=None, key=None, data=None, client=None, timeout=None):
         if key is not None:
-            record = {"type": "Future", "value": key}
+            record = {"type": "Task", "value": key}
             self.future_refcount[name, key] += 1
             self.scheduler.client_desires_keys(keys=[key], client="queue-%s" % name)
         else:
@@ -84,7 +84,7 @@ class QueueExtension:
     async def get(self, name=None, client=None, timeout=None, batch=False):
         def process(record):
             """Add task status if known"""
-            if record["type"] == "Future":
+            if record["type"] == "Task":
                 record = record.copy()
                 key = record["value"]
                 ts = self.scheduler.tasks.get(key)
@@ -128,14 +128,14 @@ class QueueExtension:
 class Queue:
     """Distributed Queue
 
-    This allows multiple clients to share futures or small bits of data between
+    This allows multiple clients to share tasks or small bits of data between
     each other with a multi-producer/multi-consumer queue.  All metadata is
     sequentialized through the scheduler.
 
-    Elements of the Queue must be either Futures or msgpack-encodable data
+    Elements of the Queue must be either Tasks or msgpack-encodable data
     (ints, strings, lists, dicts).  All data is sent through the scheduler so
     it is wise not to send large objects.  To share large objects scatter the
-    data and share the future instead.
+    data and share the task instead.
 
     .. warning::
 
@@ -158,8 +158,8 @@ class Queue:
     >>> from dask.distributed import Client, Queue  # doctest: +SKIP
     >>> client = Client()  # doctest: +SKIP
     >>> queue = Queue('x')  # doctest: +SKIP
-    >>> future = client.submit(f, x)  # doctest: +SKIP
-    >>> queue.put(future)  # doctest: +SKIP
+    >>> task = client.submit(f, x)  # doctest: +SKIP
+    >>> queue.put(task)  # doctest: +SKIP
 
     See Also
     --------
@@ -212,7 +212,7 @@ class Queue:
             return _().__await__()
 
     async def _put(self, value, timeout=None):
-        if isinstance(value, Future):
+        if isinstance(value, Task):
             await self.client.scheduler.queue_put(
                 key=value.key, timeout=timeout, name=self.name
             )
@@ -264,12 +264,12 @@ class Queue:
         )
 
         def process(d):
-            if d["type"] == "Future":
-                value = Future(d["value"], self.client, inform=True, state=d["state"])
+            if d["type"] == "Task":
+                value = Task(d["value"], self.client, inform=True, state=d["state"])
                 if d["state"] == "erred":
                     value._state.set_error(d["exception"], d["traceback"])
                 self.client._send_to_scheduler(
-                    {"op": "queue-future-release", "name": self.name, "key": d["value"]}
+                    {"op": "queue-task-release", "name": self.name, "key": d["value"]}
                 )
             else:
                 value = d["value"]
@@ -289,7 +289,7 @@ class Queue:
 
     def close(self):
         self._verify_running()
-        if self.client.status == "running":  # TODO: can leave zombie futures
+        if self.client.status == "running":  # TODO: can leave zombie tasks
             self.client._send_to_scheduler({"op": "queue_release", "name": self.name})
 
     def __reduce__(self):

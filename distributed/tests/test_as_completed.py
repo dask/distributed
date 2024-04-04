@@ -71,7 +71,7 @@ def test_as_completed_sync(client):
     assert list(as_completed([])) == []
 
 
-def test_as_completed_with_non_futures(client):
+def test_as_completed_with_non_tasks(client):
     with pytest.raises(TypeError):
         list(as_completed([1, 2, 3]))
 
@@ -79,14 +79,14 @@ def test_as_completed_with_non_futures(client):
 def test_as_completed_add(client):
     total = 0
     expected = sum(map(inc, range(10)))
-    futures = client.map(inc, range(10))
-    ac = as_completed(futures)
-    for future in ac:
-        result = future.result()
+    tasks = client.map(inc, range(10))
+    ac = as_completed(tasks)
+    for task in ac:
+        result = task.result()
         total += result
         if random.random() < 0.5:
-            future = client.submit(add, future, 10)
-            ac.add(future)
+            task = client.submit(add, task, 10)
+            ac.add(task)
             expected += result + 10
     assert total == expected
 
@@ -170,8 +170,8 @@ def test_as_completed_cancel_last(client):
 
 @gen_cluster(client=True)
 async def test_async_for_py2_equivalent(c, s, a, b):
-    futures = c.map(sleep, [0.01] * 3, pure=False)
-    seq = as_completed(futures)
+    tasks = c.map(sleep, [0.01] * 3, pure=False)
+    seq = as_completed(tasks)
     x, y, z = [el async for el in seq]
     assert x.done()
     assert y.done()
@@ -251,8 +251,8 @@ def test_as_completed_with_results_no_raise(client):
 
 @gen_cluster(client=True)
 async def test_str(c, s, a, b):
-    futures = c.map(inc, range(3))
-    ac = as_completed(futures)
+    tasks = c.map(inc, range(3))
+    ac = as_completed(tasks)
     assert "waiting=3" in str(ac)
     assert "waiting=3" in repr(ac)
     assert "done=0" in str(ac)
@@ -289,13 +289,13 @@ async def test_as_completed_with_results_no_raise_async(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_clear(c, s, a, b):
-    futures = c.map(inc, range(3))
-    ac = as_completed(futures)
-    await wait(futures)
+    tasks = c.map(inc, range(3))
+    ac = as_completed(tasks)
+    await wait(tasks)
     ac.clear()
     with pytest.raises(StopAsyncIteration):
         await ac.__anext__()
-    del futures
+    del tasks
 
     while s.tasks:
         await asyncio.sleep(0.3)

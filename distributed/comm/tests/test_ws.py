@@ -224,8 +224,8 @@ async def test_quiet_close():
 async def test_ws_roundtrip(c, s, a, b):
     np = pytest.importorskip("numpy")
     x = np.arange(100)
-    future = await c.scatter(x)
-    y = await future
+    task = await c.scatter(x)
+    y = await task
     assert (x == y).all()
 
 
@@ -241,6 +241,6 @@ async def test_wss_roundtrip():
         async with Worker(s.address, security=security) as w:
             async with Client(s.address, security=security, asynchronous=True) as c:
                 x = np.arange(100)
-                future = await c.scatter(x)
-                y = await future
+                task = await c.scatter(x)
+                y = await task
                 assert (x == y).all()

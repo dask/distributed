@@ -136,7 +136,7 @@ async def test_drop(c, s, *workers):
     ):
         s.extensions["amm"].run_once()
 
-    futures = await c.scatter({"x": 123}, broadcast=True)
+    tasks = await c.scatter({"x": 123}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 4
     # Also test the extension handler
     with assert_amm_log(
@@ -182,7 +182,7 @@ async def test_start_stop(c, s, a, b):
 
 @gen_cluster(client=True, config=demo_config("drop", start=True, interval=0.1))
 async def test_auto_start(c, s, a, b):
-    futures = await c.scatter({"x": 123}, broadcast=True)
+    tasks = await c.scatter({"x": 123}, broadcast=True)
     # The AMM should run within 0.1s of the broadcast.
     # Add generous extra padding to prevent flakiness.
     await asyncio.sleep(0.5)
@@ -207,7 +207,7 @@ async def test_add_policy(c, s, a, b):
     m3.add_policy(p3)
     assert len(m3.policies) == 1
 
-    futures = await c.scatter({"x": 1, "y": 2, "z": 3}, broadcast=True)
+    tasks = await c.scatter({"x": 1, "y": 2, "z": 3}, broadcast=True)
     m1.run_once()
     while len(s.tasks["x"].who_has) == 2:
         await asyncio.sleep(0.01)
@@ -241,7 +241,7 @@ async def test_multi_start(c, s, a, b):
     assert m2.running
     assert m3.running
 
-    futures = await c.scatter({"x": 1, "y": 2, "z": 3}, broadcast=True)
+    tasks = await c.scatter({"x": 1, "y": 2, "z": 3}, broadcast=True)
 
     # The AMMs should run within 0.1s of the broadcast.
     # Add generous extra padding to prevent flakiness.
@@ -253,7 +253,7 @@ async def test_multi_start(c, s, a, b):
 
 @gen_cluster(client=True, config=NO_AMM)
 async def test_not_registered(c, s, a, b):
-    futures = await c.scatter({"x": 1}, broadcast=True)
+    tasks = await c.scatter({"x": 1}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 2
 
     class Policy(ActiveMemoryManagerPolicy):
@@ -328,7 +328,7 @@ async def test_double_drop(c, s, a, b):
 
     Test that, in this use case, the last replica of a key is never dropped.
     """
-    futures = await c.scatter({"x": 1}, broadcast=True)
+    tasks = await c.scatter({"x": 1}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 2
     ws_iter = iter(s.workers.values())
 
@@ -348,7 +348,7 @@ async def test_double_drop(c, s, a, b):
 @gen_cluster(client=True, config=demo_config("drop"))
 async def test_double_drop_stress(c, s, a, b):
     """AMM runs many times before the recommendations of the first run are enacted"""
-    futures = await c.scatter({"x": 1}, broadcast=True)
+    tasks = await c.scatter({"x": 1}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 2
     for _ in range(10):
         s.extensions["amm"].run_once()
@@ -362,7 +362,7 @@ async def test_double_drop_stress(c, s, a, b):
 async def test_drop_from_worker_with_least_free_memory(c, s, *workers):
     ws1, ws2, ws3, ws4 = s.workers.values()
 
-    futures = await c.scatter({"x": 1}, broadcast=True)
+    tasks = await c.scatter({"x": 1}, broadcast=True)
     assert s.tasks["x"].who_has == {ws1, ws2, ws3, ws4}
     clog = c.submit(lambda: "x" * 100, workers=[ws3.address])
     await wait(clog)
@@ -379,7 +379,7 @@ async def test_drop_from_worker_with_least_free_memory(c, s, *workers):
     config=demo_config("drop", n=1, candidates=[5, 6]),
 )
 async def test_drop_with_candidates(c, s, *workers):
-    futures = await c.scatter({"x": 1}, broadcast=True)
+    tasks = await c.scatter({"x": 1}, broadcast=True)
     s.extensions["amm"].run_once()
     wss = list(s.workers.values())
     expect1 = {wss[0], wss[1], wss[2], wss[3], wss[4], wss[6], wss[7]}
@@ -393,7 +393,7 @@ async def test_drop_with_empty_candidates(c, s, a, b):
     """Key is not dropped as the plugin proposes an empty set of candidates,
     not to be confused with None
     """
-    futures = await c.scatter({"x": 1}, broadcast=True)
+    tasks = await c.scatter({"x": 1}, broadcast=True)
     s.extensions["amm"].run_once()
     await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 2
@@ -568,7 +568,7 @@ async def test_drop_with_paused_workers_with_running_tasks_5(c, s, w1, w2, w3):
 
 @gen_cluster(nthreads=[("", 1)] * 4, client=True, config=demo_config("replicate", n=2))
 async def test_replicate(c, s, *workers):
-    futures = await c.scatter({"x": 123})
+    tasks = await c.scatter({"x": 123})
     assert len(s.tasks["x"].who_has) == 1
 
     s.extensions["amm"].run_once()
@@ -603,7 +603,7 @@ async def test_replicate_not_in_memory(c, s, a, b):
 @gen_cluster(client=True, config=demo_config("replicate"))
 async def test_double_replicate_stress(c, s, a, b):
     """AMM runs many times before the recommendations of the first run are enacted"""
-    futures = await c.scatter({"x": 1})
+    tasks = await c.scatter({"x": 1})
     assert len(s.tasks["x"].who_has) == 1
     for _ in range(10):
         s.extensions["amm"].run_once()
@@ -632,7 +632,7 @@ async def test_replicate_to_worker_with_most_free_memory(c, s, *workers):
 )
 async def test_replicate_with_candidates(c, s, *workers):
     wss = list(s.workers.values())
-    futures = await c.scatter({"x": 1}, workers=[wss[0].address])
+    tasks = await c.scatter({"x": 1}, workers=[wss[0].address])
     s.extensions["amm"].run_once()
     expect1 = {wss[0], wss[5]}
     expect2 = {wss[0], wss[6]}
@@ -645,7 +645,7 @@ async def test_replicate_with_empty_candidates(c, s, a, b):
     """Key is not replicated as the plugin proposes an empty set of candidates,
     not to be confused with None
     """
-    futures = await c.scatter({"x": 1})
+    tasks = await c.scatter({"x": 1})
     s.extensions["amm"].run_once()
     await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 1
@@ -655,7 +655,7 @@ async def test_replicate_with_empty_candidates(c, s, a, b):
 async def test_replicate_to_candidates_with_key(c, s, a, b):
     """Key is not replicated as all candidates already hold replicas"""
     ws0, ws1 = s.workers.values()  # Not necessarily a, b; it could be b, a!
-    futures = await c.scatter({"x": 1}, workers=[ws0.address])
+    tasks = await c.scatter({"x": 1}, workers=[ws0.address])
     s.extensions["amm"].run_once()
     await asyncio.sleep(0.2)
     assert s.tasks["x"].who_has == {ws0}
@@ -667,7 +667,7 @@ async def test_replicate_avoids_paused_workers_1(c, s, w0, w1, w2):
     while s.workers[w1.address].status != Status.paused:
         await asyncio.sleep(0.01)
 
-    futures = await c.scatter({"x": 1}, workers=[w0.address])
+    tasks = await c.scatter({"x": 1}, workers=[w0.address])
     s.extensions["amm"].run_once()
     while "x" not in w2.data:
         await asyncio.sleep(0.01)
@@ -681,7 +681,7 @@ async def test_replicate_avoids_paused_workers_2(c, s, a, b):
     while s.workers[b.address].status != Status.paused:
         await asyncio.sleep(0.01)
 
-    futures = await c.scatter({"x": 1}, workers=[a.address])
+    tasks = await c.scatter({"x": 1}, workers=[a.address])
     s.extensions["amm"].run_once()
     await asyncio.sleep(0.2)
     assert "x" not in b.data
@@ -722,7 +722,7 @@ async def test_ReduceReplicas(c, s, *workers):
     ):
         s.extensions["amm"].run_once()
 
-    futures = await c.scatter({"x": 123}, broadcast=True)
+    tasks = await c.scatter({"x": 123}, broadcast=True)
     assert len(s.tasks["x"].who_has) == 4
 
     with assert_amm_log(
@@ -818,7 +818,7 @@ async def test_RetireWorker_amm_on_off(c, s, a, b, start_amm):
     else:
         await c.amm.stop()
 
-    futures = await c.scatter({"x": 1}, workers=[a.address])
+    tasks = await c.scatter({"x": 1}, workers=[a.address])
     await c.retire_workers([a.address])
     assert a.address not in s.workers
     assert "x" in b.data
@@ -831,7 +831,7 @@ async def test_RetireWorker_amm_on_off(c, s, a, b, start_amm):
 )
 async def test_RetireWorker_no_extension(c, s, a, b):
     """retire_workers must work when the AMM extension is not loaded"""
-    futures = await c.scatter({"x": 1}, workers=[a.address])
+    tasks = await c.scatter({"x": 1}, workers=[a.address])
     await c.retire_workers([a.address])
     assert a.address not in s.workers
     assert "x" in b.data

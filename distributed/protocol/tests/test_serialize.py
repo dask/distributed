@@ -204,8 +204,8 @@ async def test_object_in_graph(c, s, a, b):
     v = delayed(o)
     v2 = delayed(identity)(v)
 
-    future = c.compute(v2)
-    result = await future
+    task = c.compute(v2)
+    result = await task
 
     assert isinstance(result, MyObj)
     assert result.data == 123
@@ -214,9 +214,9 @@ async def test_object_in_graph(c, s, a, b):
 @gen_cluster(client=True, config=NO_AMM)
 async def test_scatter(c, s, a, b):
     o = MyObj(123)
-    [future] = await c._scatter([o])
+    [task] = await c._scatter([o])
     await c._replicate(o)
-    o2 = await c._gather(future)
+    o2 = await c._gather(task)
     assert isinstance(o2, MyObj)
     assert o2.data == 123
 
@@ -224,9 +224,9 @@ async def test_scatter(c, s, a, b):
 @gen_cluster(client=True)
 async def test_inter_worker_comms(c, s, a, b):
     o = MyObj(123)
-    [future] = await c._scatter([o], workers=a.address)
-    future2 = c.submit(identity, future, workers=b.address)
-    o2 = await c._gather(future2)
+    [task] = await c._scatter([o], workers=a.address)
+    task2 = c.submit(identity, task, workers=b.address)
+    o2 = await c._gather(task2)
     assert isinstance(o2, MyObj)
     assert o2.data == 123
 
