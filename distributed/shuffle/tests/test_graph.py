@@ -6,7 +6,6 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
-pytest.importorskip("pyarrow")
 
 import dask
 from dask.blockwise import Blockwise

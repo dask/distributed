@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,20 +12,13 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils_test import gen_test
 
 
-def read_bytes(path: Path) -> tuple[bytes, int]:
-    with path.open("rb") as f:
-        data = f.read()
-        size = f.tell()
-    return data, size
-
-
 @gen_test()
 async def test_basic(tmp_path):
     async with DiskShardsBuffer(
-        directory=tmp_path, read=read_bytes, memory_limiter=ResourceLimiter(None)
+        directory=tmp_path, memory_limiter=ResourceLimiter(None)
     ) as mf:
-        await mf.write({"x": b"0" * 1000, "y": b"1" * 500})
-        await mf.write({"x": b"0" * 1000, "y": b"1" * 500})
+        await mf.write({"x": "foo", "y": "bar"})
+        await mf.write({"x": "baz", "y": "lol"})
 
         await mf.flush()
 
@@ -36,17 +28,17 @@ async def test_basic(tmp_path):
         with pytest.raises(DataUnavailable):
             mf.read("z")
 
-        assert x == b"0" * 2000
-        assert y == b"1" * 1000
+        assert x == ["foo", "baz"]
+        assert y == ["bar", "lol"]
 
     assert not os.path.exists(tmp_path)
 
 
 @gen_test()
 async def test_read_before_flush(tmp_path):
-    payload = {"1": b"foo"}
+    payload = {"1": "foo"}
     async with DiskShardsBuffer(
-        directory=tmp_path, read=read_bytes, memory_limiter=ResourceLimiter(None)
+        directory=tmp_path, memory_limiter=ResourceLimiter(None)
     ) as mf:
         with pytest.raises(RuntimeError):
             mf.read(1)
@@ -57,7 +49,7 @@ async def test_read_before_flush(tmp_path):
             mf.read(1)
 
         await mf.flush()
-        assert mf.read("1") == b"foo"
+        assert mf.read("1") == ["foo"]
         with pytest.raises(DataUnavailable):
             mf.read(2)
 
@@ -66,9 +58,9 @@ async def test_read_before_flush(tmp_path):
 @gen_test()
 async def test_many(tmp_path, count):
     async with DiskShardsBuffer(
-        directory=tmp_path, read=read_bytes, memory_limiter=ResourceLimiter(None)
+        directory=tmp_path, memory_limiter=ResourceLimiter(None)
     ) as mf:
-        d = {i: str(i).encode() * 100 for i in range(count)}
+        d = {i: str(i) * 100 for i in range(count)}
 
         for _ in range(10):
             await mf.write(d)
@@ -77,7 +69,7 @@ async def test_many(tmp_path, count):
 
         for i in d:
             out = mf.read(i)
-            assert out == str(i).encode() * 100 * 10
+            assert out == [str(i) * 100] * 10
 
     assert not os.path.exists(tmp_path)
 
@@ -93,7 +85,7 @@ class BrokenDiskShardsBuffer(DiskShardsBuffer):
 @gen_test()
 async def test_exceptions(tmp_path):
     async with BrokenDiskShardsBuffer(
-        directory=tmp_path, read=read_bytes, memory_limiter=ResourceLimiter(None)
+        directory=tmp_path, memory_limiter=ResourceLimiter(None)
     ) as mf:
         await mf.write({"x": [b"0" * 1000], "y": [b"1" * 500]})
 
@@ -124,7 +116,7 @@ async def test_high_pressure_flush_with_exception(tmp_path):
     payload = {f"shard-{ix}": [f"shard-{ix}".encode() * 100] for ix in range(100)}
 
     async with EventuallyBrokenDiskShardsBuffer(
-        directory=tmp_path, read=read_bytes, memory_limiter=ResourceLimiter(None)
+        directory=tmp_path, memory_limiter=ResourceLimiter(None)
     ) as mf:
         tasks = []
         for _ in range(10):

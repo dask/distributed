@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import itertools
 import logging
 import os
@@ -15,7 +14,6 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop
 
 from dask.utils import key_split
@@ -43,18 +41,11 @@ from distributed import (
 )
 from distributed.core import ConnectionPool
 from distributed.scheduler import TaskState as SchedulerTaskState
-from distributed.shuffle._arrow import (
-    buffers_to_table,
-    convert_shards,
-    read_from_disk,
-    serialize_table,
-)
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
     DataFrameShuffleRun,
     _get_worker_for_range_sharding,
-    split_by_partition,
     split_by_worker,
 )
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin, _ShuffleRunManager
@@ -73,13 +64,8 @@ from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
     import pyarrow as pa
-
-    PYARROW_GE_12 = parse_version(pa.__version__).release >= (12,)
-    PYARROW_GE_14 = parse_version(pa.__version__).release >= (14,)
 except ImportError:
     pa = None
-    PYARROW_GE_12 = False
-    PYARROW_GE_14 = False
 
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
@@ -124,42 +110,11 @@ async def check_scheduler_cleanup(
     assert not plugin.heartbeats
 
 
-@pytest.mark.skipif(dd._dask_expr_enabled(), reason="pyarrow>=7.0.0 already required")
-@gen_cluster(client=True)
-async def test_minimal_version(c, s, a, b):
-    no_pyarrow_ctx = (
-        mock.patch.dict("sys.modules", {"pyarrow": None})
-        if pa is not None
-        else contextlib.nullcontext()
-    )
-    with no_pyarrow_ctx:
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-01-10",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        with pytest.raises(
-            ModuleNotFoundError, match="requires pyarrow"
-        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            await c.compute(df.shuffle("x"))
-
-
 @pytest.mark.gpu
-@pytest.mark.filterwarnings(
-    "ignore:Ignoring the following arguments to `from_pyarrow_table_dispatch`."
-)
 @gen_cluster(client=True)
 async def test_basic_cudf_support(c, s, a, b):
     cudf = pytest.importorskip("cudf")
     pytest.importorskip("dask_cudf")
-
-    try:
-        from dask.dataframe.dispatch import to_pyarrow_table_dispatch
-
-        to_pyarrow_table_dispatch(cudf.DataFrame())
-    except TypeError:
-        pytest.skip(reason="Newer version of dask_cudf is required.")
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -1019,8 +974,11 @@ async def test_heartbeat(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
-@pytest.mark.skipif("not pa", reason="Requires PyArrow")
-@pytest.mark.filterwarnings("ignore:DatetimeTZBlock")  # pandas >=2.2 vs. pyarrow <15
+class Stub:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+
 @pytest.mark.parametrize("drop_column", [True, False])
 def test_processing_chain(tmp_path, drop_column):
     """
@@ -1029,10 +987,6 @@ def test_processing_chain(tmp_path, drop_column):
     In practice this takes place on many different workers.
     Here we verify its accuracy in a single threaded situation.
     """
-
-    class Stub:
-        def __init__(self, value: int) -> None:
-            self.value = value
 
     counter = count()
     workers = ["a", "b", "c"]
@@ -1061,11 +1015,9 @@ def test_processing_chain(tmp_path, drop_column):
             [np.timedelta64(1, "D") + i for i in range(100)],
             dtype="timedelta64[ns]",
         ),
-        # FIXME PyArrow does not support complex numbers:
-        #       https://issues.apache.org/jira/browse/ARROW-638
-        # f"col{next(counter)}": pd.array(range(100), dtype="csingle"),
-        # f"col{next(counter)}": pd.array(range(100), dtype="cdouble"),
-        # f"col{next(counter)}": pd.array(range(100), dtype="clongdouble"),
+        f"col{next(counter)}": pd.array(range(100), dtype="csingle"),
+        f"col{next(counter)}": pd.array(range(100), dtype="cdouble"),
+        f"col{next(counter)}": pd.array(range(100), dtype="clongdouble"),
         # Nullable dtypes
         f"col{next(counter)}": pd.array([True, False] * 50, dtype="boolean"),
         f"col{next(counter)}": pd.array(range(100), dtype="Int8"),
@@ -1083,31 +1035,18 @@ def test_processing_chain(tmp_path, drop_column):
         ),
         f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
         f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
-        # FIXME: PyArrow does not support sparse data:
-        #        https://issues.apache.org/jira/browse/ARROW-8679
-        # f"col{next(counter)}": pd.array(
-        #     [np.nan, np.nan, 1.0, np.nan, np.nan] * 20,
-        #     dtype="Sparse[float64]",
-        # ),
-        # custom objects
-        # FIXME: Serializing custom objects is not supported in P2P shuffling
-        # f"col{next(counter)}": pd.array(
-        #     [Stub(i) for i in range(100)], dtype="object"
-        # ),
+        f"col{next(counter)}": pd.array(
+            [np.nan, np.nan, 1.0, np.nan, np.nan] * 20,
+            dtype="Sparse[float64]",
+        ),
+        # custom objects (no cloudpickle)
+        f"col{next(counter)}": pd.array([Stub(i) for i in range(100)], dtype="object"),
+        # Extension types
+        f"col{next(counter)}": pd.period_range("2022-01-01", periods=100, freq="D"),
+        f"col{next(counter)}": pd.interval_range(start=0, end=100, freq=1),
     }
 
-    if PYARROW_GE_12:
-        columns.update(
-            {
-                # Extension types
-                f"col{next(counter)}": pd.period_range(
-                    "2022-01-01", periods=100, freq="D"
-                ),
-                f"col{next(counter)}": pd.interval_range(start=0, end=100, freq=1),
-            }
-        )
-
-    if PANDAS_GE_150:
+    if PANDAS_GE_150 and pa:
         columns.update(
             {
                 # PyArrow dtypes
@@ -1146,10 +1085,10 @@ def test_processing_chain(tmp_path, drop_column):
     df = pd.DataFrame(columns)
     df["_partitions"] = df.col4 % npartitions
     worker_for = {i: random.choice(workers) for i in list(range(npartitions))}
-    worker_for = pd.Series(worker_for, name="_worker").astype("category")
+    worker_for = pd.Series(worker_for, name="_workers").astype("category")
 
     meta = df.head(0)
-    data = split_by_worker(df, "_partitions", worker_for=worker_for, meta=meta)
+    data = split_by_worker(df, "_partitions", worker_for=worker_for)
     assert set(data) == set(worker_for.cat.categories)
     assert sum(map(len, data.values())) == len(df)
 
@@ -1657,7 +1596,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 
 # 36 parametrizations
 # Runtime each ~0.1s
-@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @pytest.mark.parametrize("n_workers", [1, 10])
 @pytest.mark.parametrize("n_input_partitions", [1, 2, 10])
 @pytest.mark.parametrize("npartitions", [1, 20])
@@ -1732,8 +1670,6 @@ async def test_basic_lowlevel_shuffle(
                 total_bytes_recvd += metrics["disk"]["total"]
                 total_bytes_recvd_shuffle += s.total_recvd
 
-            assert total_bytes_recvd_shuffle == total_bytes_sent
-
             all_parts = []
             for part, worker in worker_for_mapping.items():
                 s = local_shuffle_pool.shuffles[worker]
@@ -1751,7 +1687,6 @@ async def test_basic_lowlevel_shuffle(
         assert len(df_after) == len(pd.concat(dfs))
 
 
-@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_offload(tmp_path, loop_in_thread):
     dfs = []
@@ -1807,7 +1742,6 @@ async def test_error_offload(tmp_path, loop_in_thread):
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
-@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_send(tmp_path, loop_in_thread):
     dfs = []
@@ -1863,7 +1797,6 @@ async def test_error_send(tmp_path, loop_in_thread):
             await asyncio.gather(*[s.close() for s in [sA, sB]])
 
 
-@pytest.mark.skipif(not pa, reason="Requires PyArrow")
 @gen_test()
 async def test_error_receive(tmp_path, loop_in_thread):
     dfs = []
@@ -1888,7 +1821,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
 
     class ErrorReceive(DataFrameShuffleRun):
-        async def _receive(self, data: list[tuple[int, bytes]]) -> None:
+        async def _receive(self, data: list[tuple[int, Any]]) -> None:
             raise RuntimeError("Error during receive")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
@@ -2365,18 +2298,11 @@ async def test_reconcile_partitions(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
 
-    if PYARROW_GE_14:
-        result, expected = c.compute([ddf, out])
-        result = await result
-        expected = await expected
-        dd.assert_eq(result, expected)
-        del result
-    else:
-        with raises_with_cause(
-            RuntimeError, r"shuffling \w+ failed", pa.ArrowInvalid, "incompatible types"
-        ):
-            await c.compute(out)
-        await c.close()
+    result, expected = c.compute([ddf, out])
+    result = await result
+    expected = await expected
+    dd.assert_eq(result, expected)
+    del result
     del out
 
     await check_worker_cleanup(a)

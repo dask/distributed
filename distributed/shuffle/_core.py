@@ -19,7 +19,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
 
 from tornado.ioloop import IOLoop
@@ -116,11 +115,10 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
                 if disk:
                     self._disk_buffer = DiskShardsBuffer(
                         directory=directory,
-                        read=self.read,
                         memory_limiter=memory_limiter_disk,
                     )
                 else:
-                    self._disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
+                    self._disk_buffer = MemoryShardsBuffer()
 
             with self._capture_metrics("background-comms"):
                 self._comm_buffer = CommShardsBuffer(
@@ -216,7 +214,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             # and unpickle it on the other side.
             # Performance tests informing the size threshold:
             # https://github.com/dask/distributed/pull/8318
-            shards_or_bytes: list | bytes = pickle.dumps(shards)
+            shards_or_bytes: list | bytes = pickle.dumps(shards, protocol=5)
         else:
             shards_or_bytes = shards
 
@@ -298,7 +296,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if not self.closed:
             self._exception = exception
 
-    def _read_from_disk(self, id: NDIndex) -> list[Any]:  # TODO: Typing
+    def _read_from_disk(self, id: NDIndex) -> Any:
         self.raise_if_closed()
         return self._disk_buffer.read("_".join(str(i) for i in id))
 
@@ -335,6 +333,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
         # Log metrics both in the "execute" and in the "p2p" contexts
+        context_meter.digest_metric("p2p-partitions", 1, "count")
         with self._capture_metrics("foreground"):
             with (
                 context_meter.meter("p2p-shard-partition-noncpu"),
@@ -371,14 +370,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self, partition_id: _T_partition_id, key: Key, **kwargs: Any
     ) -> _T_partition_type:
         """Get an output partition to the shuffle run"""
-
-    @abc.abstractmethod
-    def read(self, path: Path) -> tuple[Any, int]:
-        """Read shards from disk"""
-
-    @abc.abstractmethod
-    def deserialize(self, buffer: Any) -> Any:
-        """Deserialize shards"""
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:

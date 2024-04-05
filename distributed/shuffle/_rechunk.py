@@ -96,14 +96,12 @@ the same output brick.
 
 from __future__ import annotations
 
-import mmap
 import os
 from collections import defaultdict
 from collections.abc import Callable, Generator, Hashable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import product
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import toolz
@@ -126,7 +124,6 @@ from distributed.shuffle._core import (
     handle_unpack_errors,
 )
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.shuffle._pickle import unpickle_bytestream
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -704,26 +701,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         # Copy the memory-mapped buffers from disk into memory.
         # This is where we'll spend most time.
         return convert_chunk(data)
-
-    def deserialize(self, buffer: Any) -> Any:
-        return buffer
-
-    def read(self, path: Path) -> tuple[list[list[tuple[NDIndex, np.ndarray]]], int]:
-        """Open a memory-mapped file descriptor to disk, read all metadata, and unpickle
-        all arrays. This is a fast sequence of short reads interleaved with seeks.
-        Do not read in memory the actual data; the arrays' buffers will point to the
-        memory-mapped area.
-
-        The file descriptor will be automatically closed by the kernel when all the
-        returned arrays are dereferenced, which will happen after the call to
-        concatenate3.
-        """
-        with path.open(mode="r+b") as fh:
-            buffer = memoryview(mmap.mmap(fh.fileno(), 0))
-
-        # The file descriptor has *not* been closed!
-        shards = list(unpickle_bytestream(buffer))
-        return shards, buffer.nbytes
 
     def _get_assigned_worker(self, id: NDIndex) -> str:
         return self.worker_for[id]

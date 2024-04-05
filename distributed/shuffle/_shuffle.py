@@ -14,10 +14,9 @@ from collections.abc import (
 )
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from pathlib import Path
+from pickle import PickleBuffer
 from typing import TYPE_CHECKING, Any
 
-import toolz
 from tornado.ioloop import IOLoop
 
 import dask
@@ -29,15 +28,7 @@ from dask.typing import Key
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.metrics import context_meter
-from distributed.shuffle._arrow import (
-    buffers_to_table,
-    check_dtype_support,
-    check_minimal_arrow_version,
-    convert_shards,
-    deserialize_table,
-    read_from_disk,
-    serialize_table,
-)
+from distributed.protocol.utils import pack_frames_prelude
 from distributed.shuffle._core import (
     NDIndex,
     ShuffleId,
@@ -50,13 +41,16 @@ from distributed.shuffle._core import (
 )
 from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
+from distributed.shuffle._pickle import (
+    pickle_dataframe_shard,
+    unpickle_and_concat_dataframe_shards,
+)
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
-from distributed.sizeof import sizeof
+from distributed.utils import nbytes
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
     import pandas as pd
-    import pyarrow as pa
 
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
@@ -123,7 +117,6 @@ def rearrange_by_column_p2p(
         raise TypeError(
             f"Expected meta {column=} to be an integer column, is {meta[column].dtype}."
         )
-    check_dtype_support(meta)
     npartitions = npartitions or df.npartitions
     token = tokenize(df, column, npartitions)
 
@@ -180,7 +173,6 @@ class P2PShuffleLayer(Layer):
         annotations: dict | None = None,
         drop_column: bool = False,
     ):
-        check_minimal_arrow_version()
         self.name = name
         self.column = column
         self.npartitions = npartitions
@@ -310,81 +302,45 @@ class P2PShuffleLayer(Layer):
 def split_by_worker(
     df: pd.DataFrame,
     column: str,
-    meta: pd.DataFrame,
-    worker_for: pd.Series,
-) -> dict[Any, pa.Table]:
+    drop_column: bool,
+    worker_for: dict[int, str],
+    input_part_id: int,
+) -> dict[str, tuple[int, list[tuple[int, list[PickleBuffer]]]]]:
+    """Split data into many horizontal slices, partitioned by destination worker,
+    and serialize them once.
+
+    Returns
+    -------
+    {worker addr: (input_part_id, [(output_part_id, buffers), ...]), ...}
+
+    where buffers is the serialized output (pickle bytes, buffer, buffer, ...) of
+    (input_part_id, index, *blocks)
+
+    **Notes**
+
+    - The pickle header, which is a bytes object, is wrapped in PickleBuffer so
+      that it's not unnecessarily deep-copied when it's deserialized by the network
+      stack.
+    - We are not delegating serialization to the network stack because (1) it's quicker
+      with plain pickle and (2) we want to avoid deserializing everything on receive()
+      only to re-serialize it again immediately afterwards when writing it to disk.
+      So we serialize it once now and deserialize it once after reading back from disk.
+
+    See Also
+    --------
+    distributed.protocol.serialize._deserialize_bytes
+    distributed.protocol.serialize._deserialize_picklebuffer
     """
-    Split data into many arrow batches, partitioned by destination worker
-    """
-    import numpy as np
+    out: defaultdict[str, list[tuple[int, list[PickleBuffer]]]] = defaultdict(list)
 
-    from dask.dataframe.dispatch import to_pyarrow_table_dispatch
+    for output_part_id, part in df.groupby(column, observed=False):
+        assert isinstance(output_part_id, int)
+        if drop_column:
+            del part[column]
+        frames = pickle_dataframe_shard(input_part_id, part)
+        out[worker_for[output_part_id]].append((output_part_id, frames))
 
-    # (cudf support) Avoid pd.Series
-    constructor = df._constructor_sliced
-    assert isinstance(constructor, type)
-    worker_for = constructor(worker_for)
-    df = df.merge(
-        right=worker_for.cat.codes.rename("_worker"),
-        left_on=column,
-        right_index=True,
-        how="inner",
-    )
-    nrows = len(df)
-    if not nrows:
-        return {}
-    # assert len(df) == nrows  # Not true if some outputs aren't wanted
-    # FIXME: If we do not preserve the index something is corrupting the
-    # bytestream such that it cannot be deserialized anymore
-    t = to_pyarrow_table_dispatch(df, preserve_index=True)
-    t = t.sort_by("_worker")
-    codes = np.asarray(t["_worker"])
-    t = t.drop(["_worker"])
-    del df
-
-    splits = np.where(codes[1:] != codes[:-1])[0] + 1
-    splits = np.concatenate([[0], splits])
-
-    shards = [
-        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
-    ]
-    shards.append(t.slice(offset=splits[-1], length=None))
-
-    unique_codes = codes[splits]
-    out = {
-        # FIXME https://github.com/pandas-dev/pandas-stubs/issues/43
-        worker_for.cat.categories[code]: shard
-        for code, shard in zip(unique_codes, shards)
-    }
-    assert sum(map(len, out.values())) == nrows
-    return out
-
-
-def split_by_partition(
-    t: pa.Table, column: str, drop_column: bool
-) -> dict[int, pa.Table]:
-    """
-    Split data into many arrow batches, partitioned by final partition
-    """
-    import numpy as np
-
-    partitions = t.select([column]).to_pandas()[column].unique()
-    partitions.sort()
-    t = t.sort_by(column)
-
-    partition = np.asarray(t[column])
-    if drop_column:
-        t = t.drop([column])
-    splits = np.where(partition[1:] != partition[:-1])[0] + 1
-    splits = np.concatenate([[0], splits])
-
-    shards = [
-        t.slice(offset=a, length=b - a) for a, b in toolz.sliding_window(2, splits)
-    ]
-    shards.append(t.slice(offset=splits[-1], length=None))
-    assert len(t) == sum(map(len, shards))
-    assert len(partitions) == len(shards)
-    return dict(zip(partitions, shards))
+    return {k: (input_part_id, v) for k, v in out.items()}
 
 
 class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
@@ -434,7 +390,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     column: str
     meta: pd.DataFrame
     partitions_of: dict[str, list[int]]
-    worker_for: pd.Series
+    worker_for: dict[int, str]
     drop_column: bool
 
     def __init__(
@@ -457,8 +413,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         drop_column: bool,
         loop: IOLoop,
     ):
-        import pandas as pd
-
         super().__init__(
             id=id,
             run_id=run_id,
@@ -480,55 +434,79 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         for part, addr in worker_for.items():
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
-        self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
+        self.worker_for = worker_for
         self.drop_column = drop_column
 
-    async def _receive(self, data: list[tuple[int, bytes]]) -> None:
+    async def _receive(
+        # See split_by_worker to understand annotation of data.
+        # PickleBuffer objects may have been converted to bytearray by the
+        # pickle roundtrip that is done by _core.py when buffers are too small
+        self,
+        data: list[
+            tuple[int, list[tuple[int, list[PickleBuffer | bytes | bytearray]]]]
+        ],
+    ) -> None:
         self.raise_if_closed()
 
-        filtered = []
-        for d in data:
-            if d[0] not in self.received:
-                filtered.append(d)
-                self.received.add(d[0])
-                self.total_recvd += sizeof(d)
-        del data
-        if not filtered:
+        to_write: defaultdict[
+            NDIndex, list[bytes | bytearray | memoryview]
+        ] = defaultdict(list)
+
+        for input_part_id, parts in data:
+            if input_part_id not in self.received:
+                self.received.add(input_part_id)
+                for output_part_id, frames in parts:
+                    frames_raw = [
+                        frame.raw() if isinstance(frame, PickleBuffer) else frame
+                        for frame in frames
+                    ]
+                    self.total_recvd += sum(map(nbytes, frames_raw))
+                    to_write[output_part_id,] += [
+                        pack_frames_prelude(frames_raw),
+                        *frames_raw,
+                    ]
+
+        if not to_write:
             return
         try:
-            groups = await self.offload(self._repartition_buffers, filtered)
-            del filtered
-            await self._write_to_disk(groups)
+            await self._write_to_disk(to_write)
         except Exception as e:
             self._exception = e
             raise
-
-    def _repartition_buffers(
-        self, data: list[tuple[int, bytes]]
-    ) -> dict[NDIndex, bytes]:
-        table = buffers_to_table(data)
-        groups = split_by_partition(table, self.column, self.drop_column)
-        assert len(table) == sum(map(len, groups.values()))
-        del data
-        return {(k,): serialize_table(v) for k, v in groups.items()}
 
     def _shard_partition(
         self,
         data: pd.DataFrame,
         partition_id: int,
-        **kwargs: Any,
-    ) -> dict[str, tuple[int, bytes]]:
+        # See split_by_worker to understand annotation
+    ) -> dict[str, tuple[int, list[tuple[int, list[PickleBuffer]]]]]:
         out = split_by_worker(
-            data,
-            self.column,
-            self.meta,
-            self.worker_for,
+            df=data,
+            column=self.column,
+            drop_column=self.drop_column,
+            worker_for=self.worker_for,
+            input_part_id=partition_id,
         )
-        out = {k: (partition_id, serialize_table(t)) for k, t in out.items()}
 
-        nbytes = sum(len(b) for _, b in out.values())
-        context_meter.digest_metric("p2p-shards", nbytes, "bytes")
-        context_meter.digest_metric("p2p-shards", len(out), "count")
+        # Log metrics
+        # Note: more metrics for this function call are logged by _core.add_partitiion()
+        overhead_nbytes = 0
+        buffers_nbytes = 0
+        shards_count = 0
+        buffers_count = 0
+        for _, shards in out.values():
+            shards_count += len(shards)
+            for _, frames in shards:
+                # frames = [pickle bytes, buffer, buffer, ...]
+                buffers_count += len(frames) - 2
+                overhead_nbytes += frames[0].raw().nbytes
+                buffers_nbytes += sum(frame.raw().nbytes for frame in frames[1:])
+
+        context_meter.digest_metric("p2p-shards-overhead", overhead_nbytes, "bytes")
+        context_meter.digest_metric("p2p-shards-buffers", buffers_nbytes, "bytes")
+        context_meter.digest_metric("p2p-shards-buffers", buffers_count, "count")
+        context_meter.digest_metric("p2p-shards", shards_count, "count")
+        # End log metrics
 
         return out
 
@@ -538,23 +516,19 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         key: Key,
         **kwargs: Any,
     ) -> pd.DataFrame:
+        meta = self.meta.copy()
+        if self.drop_column:
+            meta = self.meta.drop(columns=self.column)
+
         try:
-            data = self._read_from_disk((partition_id,))
-            return convert_shards(data, self.meta, self.column, self.drop_column)
+            buffer = self._read_from_disk((partition_id,))
         except DataUnavailable:
-            result = self.meta.copy()
-            if self.drop_column:
-                result = self.meta.drop(columns=self.column)
-            return result
+            return meta
+
+        return unpickle_and_concat_dataframe_shards(buffer, meta)
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
-
-    def read(self, path: Path) -> tuple[pa.Table, int]:
-        return read_from_disk(path)
-
-    def deserialize(self, buffer: Any) -> Any:
-        return deserialize_table(buffer)
 
 
 @dataclass(frozen=True)

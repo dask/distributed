@@ -839,6 +839,17 @@ def _deserialize_memoryview(header, frames):
     return out
 
 
+@dask_serialize.register(PickleBuffer)
+def _serialize_picklebuffer(obj):
+    return _serialize_memoryview(obj.raw())
+
+
+@dask_deserialize.register(PickleBuffer)
+def _deserialize_picklebuffer(header, frames):
+    out = _deserialize_memoryview(header, frames)
+    return PickleBuffer(out)
+
+
 #########################
 # Descend into __dict__ #
 #########################

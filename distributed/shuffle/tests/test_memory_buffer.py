@@ -13,7 +13,7 @@ def deserialize_bytes(buffer: bytes) -> bytes:
 
 @gen_test()
 async def test_basic():
-    async with MemoryShardsBuffer(deserialize=deserialize_bytes) as mf:
+    async with MemoryShardsBuffer() as mf:
         await mf.write({"x": b"0" * 1000, "y": b"1" * 500})
         await mf.write({"x": b"0" * 1000, "y": b"1" * 500})
 
@@ -32,7 +32,7 @@ async def test_basic():
 @gen_test()
 async def test_read_before_flush():
     payload = {"1": b"foo"}
-    async with MemoryShardsBuffer(deserialize=deserialize_bytes) as mf:
+    async with MemoryShardsBuffer() as mf:
         with pytest.raises(RuntimeError):
             mf.read("1")
 
@@ -50,7 +50,7 @@ async def test_read_before_flush():
 @pytest.mark.parametrize("count", [2, 100, 1000])
 @gen_test()
 async def test_many(count):
-    async with MemoryShardsBuffer(deserialize=deserialize_bytes) as mf:
+    async with MemoryShardsBuffer() as mf:
         d = {str(i): str(i).encode() * 100 for i in range(count)}
 
         for _ in range(10):
