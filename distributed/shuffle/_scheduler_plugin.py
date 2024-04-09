@@ -155,7 +155,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             self.active_shuffles[spec.id] = state
             self._shuffles[spec.id].add(state)
             state.participating_workers.add(worker)
-            logger.warning(
+            logger.debug(
                 "Shuffle %s initialized by task %r executed on worker %s",
                 spec.id,
                 key,
@@ -426,7 +426,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def _clean_on_scheduler(self, id: ShuffleId, stimulus_id: str) -> None:
         shuffle = self.active_shuffles.pop(id)
-        logger.warning("Shuffle %s deactivated due to stimulus '%s'", id, stimulus_id)
+        logger.debug("Shuffle %s deactivated due to stimulus '%s'", id, stimulus_id)
         if not shuffle._archived_by:
             shuffle._archived_by = stimulus_id
             self._archived_by_stimulus[stimulus_id].add(shuffle)

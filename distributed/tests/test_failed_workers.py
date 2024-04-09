@@ -215,9 +215,10 @@ def test_worker_doesnt_await_task_completion(loop):
 
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_multiple_clients_restart(s, a, b):
-    async with Client(s.address, asynchronous=True) as c1, Client(
-        s.address, asynchronous=True
-    ) as c2:
+    async with (
+        Client(s.address, asynchronous=True) as c1,
+        Client(s.address, asynchronous=True) as c2,
+    ):
         x = c1.submit(inc, 1)
         y = c2.submit(inc, 2)
         xx = await x
@@ -288,10 +289,7 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
 async def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100
     async with Nanny(s.address, nthreads=2) as n:
-        start = time()
-        while len(s.workers) < 3:
-            await asyncio.sleep(0.01)
-            assert time() < start + 5
+        await c.wait_for_workers(3)
 
         N = 256
         expected_result = N * (N + 1) // 2
@@ -308,10 +306,12 @@ async def test_broken_worker_during_computation(c, s, a, b):
         await asyncio.sleep(random.random() / 20)
         with suppress(CommClosedError):  # comm will be closed abrupty
             await c.run(os._exit, 1, workers=[n.worker_address])
+        assert not n.process.is_alive()
+        while not n.process.is_alive():
+            await asyncio.sleep(0.01)
+        await c.wait_for_workers(3)
 
         await asyncio.sleep(random.random() / 20)
-        while len(s.workers) < 3:
-            await asyncio.sleep(0.01)
 
         with suppress(
             CommClosedError, EnvironmentError
