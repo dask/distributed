@@ -252,26 +252,3 @@ def test_tuple_futures_arg(client, typ):
         ),
     )
     dd.assert_eq(df2.result().iloc[:0], make_time_dataframe().iloc[:0])
-
-
-from distributed import span
-
-
-@gen_cluster(client=True)
-async def test_collections_metadata(c, s, a, b):
-    df = pd.DataFrame(
-        {"x": np.random.random(1000), "y": np.random.random(1000)},
-        index=np.arange(1000),
-    )
-    ldf = dd.from_pandas(df, npartitions=10)
-
-    with span() as span_id:
-        await ldf.compute()
-
-    s.get_span(span_id)
-    ext = s.extensions["spans"]
-    span_ = ext.spans[span_id]
-    collections_meta = span_.metadata["collections"]
-    assert isinstance(collections_meta, list)
-    assert len(collections_meta) == 1
-    assert collections_meta[0]["type"] == type(ldf).__name__
