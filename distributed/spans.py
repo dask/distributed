@@ -178,7 +178,6 @@ class Span:
             self._metadata = copy.deepcopy(metadata)
         else:
             self._metadata["collections"].extend(metadata["collections"])
-            print("fo")
 
     @property
     def annotation(self) -> dict[str, tuple[str, ...]] | None:
