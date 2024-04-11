@@ -637,7 +637,7 @@ async def test_repeated_restarts(c, s, a, b):
         assert len(s.workers) == 2
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -659,6 +659,10 @@ async def test_restart_memory(c, s, n):
 
     while not s.workers:
         await asyncio.sleep(0.1)
+
+    assert all(
+        "memory budget" in msg[1] for msg in s.get_events("worker-restart-memory")
+    )
 
 
 class BlockClose(WorkerPlugin):
