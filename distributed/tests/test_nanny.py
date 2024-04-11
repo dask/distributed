@@ -637,7 +637,7 @@ async def test_repeated_restarts(c, s, a, b):
         assert len(s.workers) == 2
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny,
