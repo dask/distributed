@@ -92,6 +92,7 @@ from distributed.publish import Datasets
 from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
 from distributed.sizeof import sizeof
+from distributed.spans import SpanMetadata
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
     CancelledError,
@@ -1946,7 +1947,6 @@ class Client(SyncMethodMixin):
             dsk = {key: (apply, func, list(args), kwargs)}
         else:
             dsk = {key: (func,) + tuple(args)}
-
         futures = self._graph_to_futures(
             dsk,
             [key],
@@ -1958,6 +1958,7 @@ class Client(SyncMethodMixin):
             retries=retries,
             fifo_timeout=fifo_timeout,
             actors=actor,
+            span_metadata={"collections": [{"type": "Future"}]},
         )
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
@@ -2164,6 +2165,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actor,
+            span_metadata={"collections": [{"type": "Future"}]},
         )
         logger.debug("map(%s, ...)", funcname(func))
 
@@ -3099,6 +3101,7 @@ class Client(SyncMethodMixin):
         self,
         dsk,
         keys,
+        span_metadata,
         workers=None,
         allow_other_workers=None,
         internal_priority=None,
@@ -3175,6 +3178,7 @@ class Client(SyncMethodMixin):
                     "actors": actors,
                     "code": ToPickle(computations),
                     "annotations": ToPickle(annotations),
+                    "span_metadata": ToPickle(span_metadata),
                 }
             )
             return futures
@@ -3262,6 +3266,7 @@ class Client(SyncMethodMixin):
             retries=retries,
             user_priority=priority,
             actors=actors,
+            span_metadata={"collections": [{"type": "low-level-graph"}]},
         )
         packed = pack_data(keys, futures)
         if sync:
@@ -3444,6 +3449,9 @@ class Client(SyncMethodMixin):
             )
 
         variables = [a for a in collections if dask.is_dask_collection(a)]
+        metadata = SpanMetadata(
+            {"collections": [get_collections_metadata(v) for v in variables]}
+        )
 
         dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
         names = ["finalize-%s" % tokenize(v) for v in variables]
@@ -3477,6 +3485,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actors,
+            span_metadata=metadata,
         )
 
         i = 0
@@ -3568,7 +3577,9 @@ class Client(SyncMethodMixin):
             collections = [collections]
 
         assert all(map(dask.is_dask_collection, collections))
-
+        metadata = SpanMetadata(
+            {"collections": [get_collections_metadata(v) for v in collections]}
+        )
         dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
@@ -3583,6 +3594,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actors,
+            span_metadata=metadata,
         )
 
         postpersists = [c.__dask_postpersist__() for c in collections]
@@ -6148,6 +6160,12 @@ def _close_global_client():
                 c.loop.add_callback(c.close, timeout=3)
             else:
                 c.close(timeout=3)
+
+
+def get_collections_metadata(collection):
+    return {
+        "type": type(collection).__name__,
+    }
 
 
 atexit.register(_close_global_client)

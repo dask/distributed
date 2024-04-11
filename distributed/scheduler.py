@@ -113,7 +113,7 @@ from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
 from distributed.semaphore import SemaphoreExtension
 from distributed.shuffle import ShuffleSchedulerPlugin
-from distributed.spans import SpansSchedulerExtension
+from distributed.spans import SpanMetadata, SpansSchedulerExtension
 from distributed.stealing import WorkStealing
 from distributed.utils import (
     All,
@@ -4524,6 +4524,7 @@ class Scheduler(SchedulerState, ServerNode):
         global_annotations: dict | None,
         stimulus_id: str,
         submitting_task: Key | None,
+        span_metadata: SpanMetadata,
         user_priority: int | dict[Key, int] = 0,
         actors: bool | list[Key] | None = None,
         fifo_timeout: float = 0.0,
@@ -4632,7 +4633,9 @@ class Scheduler(SchedulerState, ServerNode):
             # _generate_taskstates is not the only thing that calls new_task(). A
             # TaskState may have also been created by client_desires_keys or scatter,
             # and only later gained a run_spec.
-            span_annotations = spans_ext.observe_tasks(runnable, code=code)
+            span_annotations = spans_ext.observe_tasks(
+                runnable, span_metadata=span_metadata, code=code
+            )
             # In case of TaskGroup collision, spans may have changed
             # FIXME: Is this used anywhere besides tests?
             if span_annotations:
@@ -4667,6 +4670,7 @@ class Scheduler(SchedulerState, ServerNode):
         graph_header: dict,
         graph_frames: list[bytes],
         keys: set[Key],
+        span_metadata: SpanMetadata,
         internal_priority: dict[Key, int] | None,
         submitting_task: Key | None,
         user_priority: int | dict[Key, int] = 0,
@@ -4727,6 +4731,7 @@ class Scheduler(SchedulerState, ServerNode):
                 actors=actors,
                 fifo_timeout=fifo_timeout,
                 code=code,
+                span_metadata=span_metadata,
                 annotations_by_type=annotations_by_type,
                 # FIXME: This is just used to attach to Computation
                 # objects. This should be removed
