@@ -426,8 +426,8 @@ class NannyMemoryManager:
             self._last_terminated_pid = process.pid
             msg = {
                 "worker": nanny.worker_address,
-                 "pid": process.pid,
-                 "rss": memory,
+                "pid": process.pid,
+                "rss": memory,
             }
             nanny.log_event("worker-restart-memory", msg)
             process.terminate()
