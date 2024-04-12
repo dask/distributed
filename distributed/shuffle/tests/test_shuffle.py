@@ -18,6 +18,7 @@ import pytest
 from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop
 
+import dask
 from dask.utils import key_split
 
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
@@ -28,7 +29,6 @@ dd = pytest.importorskip("dask.dataframe")
 import numpy as np
 import pandas as pd
 
-import dask
 from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_200
 from dask.typing import Key
 
@@ -139,9 +139,10 @@ async def test_minimal_version(c, s, a, b):
             dtypes={"x": float, "y": float},
             freq="10 s",
         )
-        with pytest.raises(
-            ModuleNotFoundError, match="requires pyarrow"
-        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        with (
+            pytest.raises(ModuleNotFoundError, match="requires pyarrow"),
+            dask.config.set({"dataframe.shuffle.method": "p2p"}),
+        ):
             await c.compute(df.shuffle("x"))
 
 
@@ -2795,3 +2796,43 @@ async def test_wrong_meta_provided(c, s, a, b):
         "meta",
     ):
         await c.gather(c.compute(ddf.shuffle(on="a")))
+
+
+@gen_cluster(client=True)
+async def test_dont_downscale_participating_workers(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        shuffled = df.shuffle("x")
+
+    workers_to_close = s.workers_to_close(n=2)
+    assert len(workers_to_close) == 2
+    res = c.compute(shuffled)
+
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    while not get_active_shuffle_runs(a):
+        await asyncio.sleep(0.01)
+    while not get_active_shuffle_runs(b):
+        await asyncio.sleep(0.01)
+
+    workers_to_close = s.workers_to_close(n=2)
+    assert len(workers_to_close) == 0
+
+    async with Worker(s.address) as w:
+        c.submit(lambda: None, workers=[w.address])
+
+        workers_to_close = s.workers_to_close(n=3)
+        assert len(workers_to_close) == 1
+
+    workers_to_close = s.workers_to_close(n=2)
+    assert len(workers_to_close) == 0
+
+    await c.gather(res)
+    del res
+
+    workers_to_close = s.workers_to_close(n=2)
+    assert len(workers_to_close) == 2

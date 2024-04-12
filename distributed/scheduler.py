@@ -7151,6 +7151,9 @@ class Scheduler(SchedulerState, ServerNode):
         # running on, as it would cause them to restart from scratch
         # somewhere else.
         valid_workers = [ws for ws in self.workers.values() if not ws.long_running]
+        for plugin in list(self.plugins.values()):
+            valid_workers = plugin.valid_workers_downscaling(self, valid_workers)
+
         groups = groupby(key, valid_workers)
 
         limit_bytes = {k: sum(ws.memory_limit for ws in v) for k, v in groups.items()}
