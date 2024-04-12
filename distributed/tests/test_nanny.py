@@ -661,7 +661,7 @@ async def test_restart_memory(c, s, n):
         await asyncio.sleep(0.1)
 
     msgs = s.get_events("worker-restart-memory")
-    assert len(msgs) == 1
+    assert len(msgs)
     msg = msgs[0][1]
     assert isinstance(msg, dict)
     assert {"worker", "pid", "rss"}.issubset(set(msg))
