@@ -366,6 +366,7 @@ class Nanny(ServerNode):
                         self._reconciler(), name="WorkerProcess reconciler"
                     )
 
+                assert self.worker_address, self.worker_address
                 for name, plugin in msg["nanny-plugins"].items():
                     await self.plugin_add(plugin=plugin, name=name)
             except Exception:
@@ -381,8 +382,6 @@ class Nanny(ServerNode):
                 await comm.write({"status": "ok"})
         finally:
             await comm.close()
-
-        assert self.worker_address
 
         self.start_periodic_callbacks()
 
@@ -511,7 +510,10 @@ class Nanny(ServerNode):
             finally:
                 response = await self._reconciler_queue.get()
                 if response["status"] != Status.running:
-                    raise response["exception"]
+                    if "exception" in response:
+                        raise response["exception"]
+                    else:
+                        raise RuntimeError("Worker failed to start")
 
     async def restart(
         self, timeout: float = 30, reason: str = "nanny-restart"
@@ -566,7 +568,6 @@ class Nanny(ServerNode):
             if self.status in (Status.starting, Status.running):
                 await self._unregister(old_proc)
         except OSError:
-            self.status = Status.failed
             logger.exception("Failed to unregister")
         except asyncio.CancelledError:
             # Can happen during teardown.
@@ -599,9 +600,12 @@ class Nanny(ServerNode):
         """
         Close the worker process, stop all comms.
         """
+        if self.status == Status.starting:
+            await self
+            assert self.status in (Status.running, Status.failed)
         if self.status == Status.closing:
             await self.finished()
-            assert self.status == Status.closed
+            assert self.status in (Status.closed, Status.failed), self.status
 
         if self.status == Status.closed:
             return "OK"
@@ -699,6 +703,9 @@ class WorkerProcess:
         except ValueError:
             pass
 
+        self.process_up = asyncio.Event()
+        self.running = asyncio.Event()
+        self.stopped = asyncio.Event()
         # Initialized when worker is ready
         self.worker_dir = None
         self.worker_address = None
@@ -741,38 +748,36 @@ class WorkerProcess:
         )
         self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)
-        self.running = asyncio.Event()
-        self.process_up = asyncio.Event()
-        self.stopped = asyncio.Event()
         self.status = Status.starting
 
         # Set selected environment variables before spawning the subprocess.
         # See note in Nanny docstring.
         os.environ.update(self.pre_spawn_env)
-
         try:
-            await self.process.start()
-        except OSError:
-            logger.exception("Nanny failed to start process", exc_info=True)
-            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
-            await self.process.terminate()
-            self.status = Status.failed
+            try:
+                await self.process.start()
+            except OSError:
+                logger.exception("Nanny failed to start process", exc_info=True)
+                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+                await self.process.terminate()
+                self.status = Status.failed
+            finally:
+                self.process_up.set()
+            try:
+                msg = await self._wait_until_connected(uid)
+            except Exception:
+                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+                await self.process.terminate()
+                self.status = Status.failed
+                raise
+            if not msg:
+                return self.status
+            self.worker_address = msg["address"]
+            self.worker_dir = msg["dir"]
+            assert self.worker_address
+            self.status = Status.running
         finally:
-            self.process_up.set()
-        try:
-            msg = await self._wait_until_connected(uid)
-        except Exception:
-            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
-            await self.process.terminate()
-            self.status = Status.failed
-            raise
-        if not msg:
-            return self.status
-        self.worker_address = msg["address"]
-        self.worker_dir = msg["dir"]
-        assert self.worker_address
-        self.status = Status.running
-        self.running.set()
+            self.running.set()
 
         return self.status
 

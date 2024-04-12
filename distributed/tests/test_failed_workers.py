@@ -303,11 +303,16 @@ async def test_broken_worker_during_computation(c, s, a, b):
                 key=["add-%d-%d" % (i, j) for j in range(len(L) // 2)],
             )
 
+        old_worker_address = n.worker_address
         await asyncio.sleep(random.random() / 20)
         with suppress(CommClosedError):  # comm will be closed abrupty
             await c.run(os._exit, 1, workers=[n.worker_address])
         assert not n.process.is_alive()
-        while not n.process.is_alive():
+        while (
+            not n.process.is_alive()
+            or n.worker_address == old_worker_address
+            or n.worker_address is None
+        ):
             await asyncio.sleep(0.01)
         await c.wait_for_workers(3)
 

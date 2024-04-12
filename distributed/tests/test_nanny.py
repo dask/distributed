@@ -971,6 +971,7 @@ async def test_restart_stress(c, s, a, api):
     assert a.status == Status.running
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "api",
     [
