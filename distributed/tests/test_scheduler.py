@@ -1439,6 +1439,7 @@ async def test_update_graph_culls(s, a, b):
         client="client",
         internal_priority={k: 0 for k in "xyz"},
         submitting_task=None,
+        span_metadata={},
     )
     assert "z" not in s.tasks
 
