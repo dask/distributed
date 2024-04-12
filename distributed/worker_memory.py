@@ -424,12 +424,12 @@ class NannyMemoryManager:
             )
             nanny_logger.warning(msg)
             self._last_terminated_pid = process.pid
-            msg = {
+            event = {
                 "worker": nanny.worker_address,
                 "pid": process.pid,
                 "rss": memory,
             }
-            nanny.log_event("worker-restart-memory", msg)
+            nanny.log_event("worker-restart-memory", event)
             process.terminate()
         else:
             # We already sent SIGTERM to the worker, but the process is still alive
