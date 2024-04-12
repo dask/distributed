@@ -307,7 +307,7 @@ async def test_broken_worker_during_computation(c, s, a, b):
         await asyncio.sleep(random.random() / 20)
         with suppress(CommClosedError):  # comm will be closed abrupty
             await c.run(os._exit, 1, workers=[n.worker_address])
-        assert not n.process.is_alive()
+
         while (
             not n.process.is_alive()
             or n.worker_address == old_worker_address

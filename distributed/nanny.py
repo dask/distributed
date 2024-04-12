@@ -439,11 +439,6 @@ class Nanny(ServerNode):
         try:
             result = await wait_for(self.process.start(), self.death_timeout)
         except asyncio.TimeoutError:
-            logger.error(
-                "Timed out connecting Nanny '%s' to scheduler '%s'",
-                self,
-                self.scheduler_addr,
-            )
             raise
         except Exception:
             logger.error("Failed to start process", exc_info=True)
@@ -573,6 +568,8 @@ class Nanny(ServerNode):
             # Can happen during teardown.
             pass
         finally:
+            # NOTE: This causes the new worker to only be started once the old
+            # one is unregistered
             self._proc_changed.set()
 
     @property
@@ -600,12 +597,10 @@ class Nanny(ServerNode):
         """
         Close the worker process, stop all comms.
         """
-        if self.status == Status.starting:
-            await self
-            assert self.status in (Status.running, Status.failed)
         if self.status == Status.closing:
             await self.finished()
             assert self.status in (Status.closed, Status.failed), self.status
+            return "OK"
 
         if self.status == Status.closed:
             return "OK"
