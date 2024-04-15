@@ -2650,18 +2650,23 @@ class Client(SyncMethodMixin):
     @log_errors
     async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
         coroutines = []
+        uid = uuid.uuid4().hex
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
 
         def add_coro(name, data):
             keys = [f.key for f in futures_of(data)]
-            coroutines.append(
-                self.scheduler.publish_put(
+
+            async def _():
+                await self.scheduler.publish_wait_flush(uid=uid)
+                await self.scheduler.publish_put(
                     keys=keys,
                     name=name,
                     data=to_serialize(data),
                     override=override,
                     client=self.id,
                 )
-            )
+
+            coroutines.append(_())
 
         if name:
             if len(args) == 0:
