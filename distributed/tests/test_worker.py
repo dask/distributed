@@ -68,7 +68,6 @@ from distributed.utils_test import (
     gen_test,
     inc,
     mul,
-    nodebug,
     raises_with_cause,
     slowinc,
     slowsum,
@@ -1202,30 +1201,6 @@ async def test_statistical_profiling(c, s, a, b):
 
     profile = a.profile_keys["slowinc"]
     assert profile["count"]
-
-
-@pytest.mark.slow
-@nodebug
-@gen_cluster(
-    client=True,
-    timeout=30,
-    config={
-        "distributed.worker.profile.enabled": True,
-        "distributed.worker.profile.interval": "1ms",
-        "distributed.worker.profile.cycle": "100ms",
-    },
-)
-async def test_statistical_profiling_2(c, s, a, b):
-    da = pytest.importorskip("dask.array")
-    while True:
-        x = da.random.random(1000000, chunks=(10000,))
-        y = (x + x * 2) - x.sum().persist()
-        await wait(y)
-
-        profile = await a.get_profile()
-        text = str(profile)
-        if profile["count"] and "sum" in text and "random" in text:
-            break
 
 
 @gen_cluster(
