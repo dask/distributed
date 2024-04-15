@@ -3178,7 +3178,7 @@ class Client(SyncMethodMixin):
                     "actors": actors,
                     "code": ToPickle(computations),
                     "annotations": ToPickle(annotations),
-                    "span_metadata": ToPickle(span_metadata),
+                    "span_metadata": span_metadata,
                 }
             )
             return futures
