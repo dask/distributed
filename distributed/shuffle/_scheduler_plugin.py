@@ -410,6 +410,14 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                     if not archived:
                         del self._archived_by_stimulus[shuffle._archived_by]
 
+    def valid_workers_downscaling(
+        self, scheduler: Scheduler, workers: list[WorkerState]
+    ) -> list[WorkerState]:
+        all_participating_workers = set()
+        for shuffle in self.active_shuffles.values():
+            all_participating_workers.update(shuffle.participating_workers)
+        return [w for w in workers if w.address not in all_participating_workers]
+
     def _fail_on_workers(self, shuffle: SchedulerShuffleState, message: str) -> None:
         worker_msgs = {
             worker: [
