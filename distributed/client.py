@@ -2450,10 +2450,9 @@ class Client(SyncMethodMixin):
                     nthreads = await self.scheduler.ncores_running(workers=workers)
                 if not nthreads:  # pragma: no cover
                     raise ValueError("No valid workers found")
+                workers = list(nthreads.keys())
 
-                _, who_has, nbytes = await scatter_to_workers(
-                    nthreads, data2, rpc=self.rpc
-                )
+                _, who_has, nbytes = await scatter_to_workers(workers, data2, self.rpc)
 
                 await self.scheduler.update_data(
                     who_has=who_has, nbytes=nbytes, client=self.id
