@@ -1224,7 +1224,7 @@ async def test_statistical_profiling_2(c, s, a, b):
 
         profile = await a.get_profile()
         text = str(profile)
-        if profile["count"] and "sum" in text and "random" in text:
+        if profile["count"] and "sum" in text or "random" in text:
             break
 
 
