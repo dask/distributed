@@ -4683,6 +4683,8 @@ class Scheduler(SchedulerState, ServerNode):
         # FIXME: Apparently empty dicts arrive as a ToPickle object
         if isinstance(annotations, ToPickle):
             annotations = annotations.data  # type: ignore[unreachable]
+        if isinstance(span_metadata, ToPickle):
+            span_metadata = span_metadata.data  # type: ignore[unreachable]
         start = time()
         try:
             try:
