@@ -118,7 +118,9 @@ class Span:
     #: stop
     enqueued: float
 
-    _code: dict
+    #: Source code snippets, if it was sent by the client.
+    #: We're using a dict without values as an insertion-sorted set.
+    _code: dict[tuple[SourceCode, ...], None]
     _metadata: SpanMetadata | None
 
     _cumulative_worker_metrics: defaultdict[tuple[Hashable, ...], float]
