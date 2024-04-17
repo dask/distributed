@@ -4676,9 +4676,6 @@ class Scheduler(SchedulerState, ServerNode):
         annotations: dict | None = None,
         stimulus_id: str | None = None,
     ) -> None:
-        # FIXME: Apparently empty dicts arrive as a ToPickle object
-        if isinstance(annotations, ToPickle):
-            annotations = annotations.data  # type: ignore[unreachable]
         start = time()
         try:
             try:
