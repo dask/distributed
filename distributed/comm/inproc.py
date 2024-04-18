@@ -13,7 +13,7 @@ from tornado.ioloop import IOLoop
 
 from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend, backends
-from distributed.protocol import nested_deserialize
+from distributed.protocol.serialize import _nested_deserialize
 from distributed.utils import get_ip, is_python_shutting_down
 
 logger = logging.getLogger(__name__)
@@ -218,8 +218,7 @@ class InProc(Comm):
             self._finalizer.detach()
             raise CommClosedError()
 
-        if self.deserialize:
-            msg = nested_deserialize(msg)
+        msg = _nested_deserialize(msg, self.deserialize)
         return msg
 
     async def write(self, msg, serializers=None, on_error=None):

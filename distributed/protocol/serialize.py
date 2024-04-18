@@ -3,6 +3,7 @@ from __future__ import annotations
 import codecs
 import importlib
 import traceback
+import warnings
 from array import array
 from enum import Enum
 from functools import partial
@@ -621,6 +622,14 @@ class Pickled:
 
 
 def nested_deserialize(x):
+    warnings.warn(
+        "nested_deserialize is deprecated and will be removed in a future release.",
+        DeprecationWarning,
+    )
+    return _nested_deserialize(x, emulate_deserialize=True)
+
+
+def _nested_deserialize(x, emulate_deserialize=True):
     """
     Replace all Serialize and Serialized values nested in *x*
     with the original values.  Returns a copy of *x*.
@@ -637,10 +646,13 @@ def nested_deserialize(x):
                 typ = type(v)
                 if typ is dict or typ is list:
                     x[k] = replace_inner(v)
-                elif typ is Serialize:
+                if emulate_deserialize:
+                    if typ is Serialize:
+                        x[k] = v.data
+                    elif typ is Serialized:
+                        x[k] = deserialize(v.header, v.frames)
+                if typ is ToPickle:
                     x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
 
         elif type(x) is list:
             x = list(x)
@@ -648,10 +660,13 @@ def nested_deserialize(x):
                 typ = type(v)
                 if typ is dict or typ is list:
                     x[k] = replace_inner(v)
-                elif typ is Serialize:
+                if emulate_deserialize:
+                    if typ is Serialize:
+                        x[k] = v.data
+                    elif typ is Serialized:
+                        x[k] = deserialize(v.header, v.frames)
+                if typ is ToPickle:
                     x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
 
         return x
 
