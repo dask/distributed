@@ -390,17 +390,14 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout: float = 2, reason: str = "nanny-kill") -> None:
+    async def kill(self, timeout: float = 5, reason: str = "nanny-kill") -> None:
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
         informed
         """
-        if self.process is None:
-            return
-
-        deadline = time() + timeout
-        await self.process.kill(reason=reason, timeout=0.8 * (deadline - time()))
+        if self.process is not None:
+            await self.process.kill(reason=reason, timeout=timeout)
 
     async def instantiate(self) -> Status:
         """Start a local worker process
@@ -822,7 +819,7 @@ class WorkerProcess:
 
     async def kill(
         self,
-        timeout: float = 2,
+        timeout: float = 5,
         executor_wait: bool = True,
         reason: str = "workerprocess-kill",
     ) -> None:
@@ -876,7 +873,7 @@ class WorkerProcess:
                 pass
 
             logger.warning(
-                f"Worker process still alive after {wait_timeout} seconds, killing"
+                f"Worker process still alive after {wait_timeout:.1f} seconds, killing"
             )
             await process.kill()
             await process.join(max(0, deadline - time()))

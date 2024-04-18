@@ -20,12 +20,12 @@ from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (
     Serialize,
     Serialized,
+    ToPickle,
     dask_serialize,
     deserialize,
     deserialize_bytes,
     dumps,
     loads,
-    nested_deserialize,
     register_serialization,
     register_serialization_family,
     serialize,
@@ -35,6 +35,7 @@ from distributed.protocol import (
 )
 from distributed.protocol.serialize import (
     _is_msgpack_serializable,
+    _nested_deserialize,
     check_dask_serializable,
 )
 from distributed.utils import ensure_memoryview, nbytes
@@ -166,12 +167,24 @@ def test_nested_deserialize():
         "x": [to_serialize(123), to_serialize(456), 789],
         "y": {"a": ["abc", Serialized(*serialize("def"))], "b": b"ghi"},
     }
-    x_orig = copy.deepcopy(x)
 
-    assert nested_deserialize(x) == {
+    x_orig = copy.deepcopy(x)
+    assert _nested_deserialize(x, emulate_deserialize=False) == x_orig
+
+    assert x == x_orig  # x wasn't mutated
+    x["topickle"] = ToPickle(1)
+    x["topickle_nested"] = [1, ToPickle(2)]
+    x_orig = copy.deepcopy(x)
+    assert (out := _nested_deserialize(x, emulate_deserialize=False)) != x_orig
+    assert out["topickle"] == 1
+    assert out["topickle_nested"] == [1, 2]
+
+    assert _nested_deserialize(x) == {
         "op": "update",
         "x": [123, 456, 789],
         "y": {"a": ["abc", "def"], "b": b"ghi"},
+        "topickle": 1,
+        "topickle_nested": [1, 2],
     }
     assert x == x_orig  # x wasn't mutated
 

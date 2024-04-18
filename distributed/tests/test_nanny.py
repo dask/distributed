@@ -660,6 +660,12 @@ async def test_restart_memory(c, s, n):
     while not s.workers:
         await asyncio.sleep(0.1)
 
+    msgs = s.get_events("worker-restart-memory")
+    assert len(msgs)
+    msg = msgs[0][1]
+    assert isinstance(msg, dict)
+    assert {"worker", "pid", "rss"}.issubset(set(msg))
+
 
 class BlockClose(WorkerPlugin):
     def __init__(self, close_happened):

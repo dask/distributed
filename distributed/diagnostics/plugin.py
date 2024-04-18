@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     # circular imports
     from distributed.scheduler import Scheduler
     from distributed.scheduler import TaskStateState as SchedulerTaskStateState
+    from distributed.scheduler import WorkerState
     from distributed.worker import Worker
     from distributed.worker_state_machine import TaskStateState as WorkerTaskStateState
 
@@ -204,6 +205,29 @@ class SchedulerPlugin:
 
     def remove_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a client disconnects"""
+
+    def valid_workers_downscaling(
+        self, scheduler: Scheduler, workers: list[WorkerState]
+    ) -> list[WorkerState]:
+        """Determine which workers can be removed from the cluster
+
+        This method is called when the scheduler is about to downscale the cluster
+        by removing workers. The method should return a set of worker states that
+        can be removed from the cluster.
+
+        Parameters
+        ----------
+        workers : list
+            The list of worker states that are candidates for removal.
+        stimulus_id : str
+            ID of stimulus causing the downscaling.
+
+        Returns
+        -------
+        list
+            The list of worker states that can be removed from the cluster.
+        """
+        return workers
 
     def log_event(self, topic: str, msg: Any) -> None:
         """Run when an event is logged"""
