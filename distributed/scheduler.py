@@ -4497,6 +4497,8 @@ class Scheduler(SchedulerState, ServerNode):
             computation=computation,
         )
 
+        logger.info(f"task_states {runnable=} {touched_tasks=} {new_tasks=}")
+
         keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
             annotations_by_type=annotations_by_type,
@@ -4821,6 +4823,9 @@ class Scheduler(SchedulerState, ServerNode):
                     generation,
                     internal_priority[ts.key],
                 )
+                logger.info(f"priority_set {ts=}")
+            else:
+                logger.info(f"no_priority_set {ts=}")
 
             if self.validate and ts.run_spec:
                 assert isinstance(ts.priority, tuple) and all(
