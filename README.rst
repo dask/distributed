@@ -1,6 +1,19 @@
 Distributed
 ===========
 
+[PEARLSTREET CUSTOM BUILD INSTRUCTIONS]
+
+First, follow instructions here: https://docs.dask.org/en/latest/develop.html#development-environment
+
+Then run:
+```
+python -m build
+```
+
+Then copy the resulting wheel file into the pst-compute repo and install it in the dockerfile.
+
+[END PEARLSTREET CUSTOM BUILD INSTRUCTIONS]
+
 |Test Status| |Longitudinal Report (full)| |Longitudinal Report (short)| |Coverage| |Doc Status| |Discourse| |Version Status| |NumFOCUS|
 
 A library for distributed computation.  See documentation_ for more details.
