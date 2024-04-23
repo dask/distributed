@@ -4541,7 +4541,10 @@ class Scheduler(SchedulerState, ServerNode):
                 if dts.exception_blame:
                     ts.exception_blame = dts.exception_blame
                     recommendations[ts.key] = "erred"
+                    logger.warning(f"Encountered erred dependency. target={ts} dep={dts} {dts.exception_text=} {dts.exception_blame=} {dts.traceback_text}")
                     break
+
+        logger.info(f"recommendations: {recommendations}")
 
         annotations_for_plugin: defaultdict[str, dict[str, Any]] = defaultdict(dict)
         for key in keys_with_annotations:
