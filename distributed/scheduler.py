@@ -4500,7 +4500,7 @@ class Scheduler(SchedulerState, ServerNode):
             computation=computation,
         )
 
-        logger.info(f"task_states {runnable=} {touched_tasks=} {new_tasks=}")
+        logger.info(f"task_states {client=} {runnable=} {touched_tasks=} {new_tasks=}")
 
         keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
@@ -5224,7 +5224,8 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is None:
                 # For publish, queues etc.
                 ts = self.new_task(k, None, "released")
-                logger.info(f"Created task {ts} {ts.priority} for client {client} from key {k}")
+                stack = inspect.stack()
+                logger.info(f"Created task {ts} {ts.priority} for client {client} from key {k} {stack=}")
             ts.who_wants.add(cs)
             cs.wants_what.add(ts)
 
