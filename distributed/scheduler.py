@@ -1905,6 +1905,7 @@ class SchedulerState:
         """
         try:
             ts = self.tasks.get(key)
+            logger.info("Transition %r %s->%s", key, ts._state, finish)
             if ts is None:
                 return {}, {}, {}
             start = ts._state
@@ -2286,6 +2287,7 @@ class SchedulerState:
         runnable), it will be recommended to ``no-worker`` or ``queued``.
         """
         ts = self.tasks[key]
+        logger.info(f"Transitioning {key} from waiting to processing, {ts.priority} {ts}")
 
         if self.is_rootish(ts):
             # NOTE: having two root-ish methods is temporary. When the feature flag is
@@ -3368,6 +3370,7 @@ class SchedulerState:
         """Convert a single computational task to a message"""
         # FIXME: The duration attribute is not used on worker. We could save ourselves the
         #        time to compute and submit this
+        logger.info(f"Sending task compute message: {ts.key} {ts.priority}")
         if duration < 0:
             duration = self.get_task_duration(ts)
         ts.run_id = next(TaskState._run_id_iterator)
@@ -5221,6 +5224,7 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is None:
                 # For publish, queues etc.
                 ts = self.new_task(k, None, "released")
+                logger.info(f"Created task {ts} {ts.priority} for client {client} from key {k}")
             ts.who_wants.add(cs)
             cs.wants_what.add(ts)
 
@@ -7153,6 +7157,7 @@ class Scheduler(SchedulerState, ServerNode):
             ts = self.tasks.get(key)
             if ts is None:
                 ts = self.new_task(key, None, "memory")
+                logger.info(f"New task {ts} with key {key}")
             ts.state = "memory"
             ts_nbytes = nbytes.get(key, -1)
             if ts_nbytes >= 0:
