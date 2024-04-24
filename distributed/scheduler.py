@@ -1905,9 +1905,9 @@ class SchedulerState:
         """
         try:
             ts = self.tasks.get(key)
-            logger.info("Transition %r %s->%s", key, ts._state, finish)
             if ts is None:
                 return {}, {}, {}
+            logger.info("Transition %r %s->%s", key, ts._state, finish)
             start = ts._state
             if start == finish:
                 return {}, {}, {}
@@ -3161,6 +3161,9 @@ class SchedulerState:
         ws.add_to_processing(ts)
         ts.processing_on = ws
         ts.state = "processing"
+        if ts.priority is None:
+            #If we have already decided to add this task to processing, then the priority doesn't matter anymore.
+            ts.priority = (0, -0.01, 0)
         self.acquire_resources(ts, ws)
         self.check_idle_saturated(ws)
         self.n_tasks += 1
