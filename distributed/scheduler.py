@@ -4503,7 +4503,7 @@ class Scheduler(SchedulerState, ServerNode):
             computation=computation,
         )
 
-        logger.info(f"task_states {client=} {runnable=} {touched_tasks=} {new_tasks=}")
+        logger.info(f"task_states {client=} {runnable=} {new_tasks=}")
 
         keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
