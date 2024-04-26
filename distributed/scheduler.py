@@ -2071,7 +2071,7 @@ class SchedulerState:
         for dts in ts.dependencies:
             if not dts.who_has:
                 ts.waiting_on.add(dts)
-            if dts.state == "released":
+            if dts.state == "released" and dts.run_spec:
                 recommendations[dts.key] = "waiting"
             else:
                 dts.waiters.add(ts)
