@@ -547,7 +547,7 @@ class WorkerState:
         self._memory_unmanaged_old = 0
         self._memory_unmanaged_history = deque()
         self.metrics = {}
-        self.last_seen = 0
+        self.last_seen = time()
         self.time_delay = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.actors = set()
@@ -4676,9 +4676,6 @@ class Scheduler(SchedulerState, ServerNode):
         annotations: dict | None = None,
         stimulus_id: str | None = None,
     ) -> None:
-        # FIXME: Apparently empty dicts arrive as a ToPickle object
-        if isinstance(annotations, ToPickle):
-            annotations = annotations.data  # type: ignore[unreachable]
         start = time()
         try:
             try:
@@ -6132,16 +6129,15 @@ class Scheduler(SchedulerState, ServerNode):
                 raise TimeoutError("No valid workers found")
             await asyncio.sleep(0.1)
 
-        nthreads = {ws.address: ws.nthreads for ws in wss}
-
         assert isinstance(data, dict)
 
-        keys, who_has, nbytes = await scatter_to_workers(nthreads, data, rpc=self.rpc)
+        workers = list(ws.address for ws in wss)
+        keys, who_has, nbytes = await scatter_to_workers(workers, data, rpc=self.rpc)
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
         if broadcast:
-            n = len(nthreads) if broadcast is True else broadcast
+            n = len(workers) if broadcast is True else broadcast
             await self.replicate(keys=keys, workers=workers, n=n)
 
         self.log_event(
@@ -6336,7 +6332,10 @@ class Scheduler(SchedulerState, ServerNode):
                         # FIXME does not raise if the process fails to shut down,
                         # see https://github.com/dask/distributed/pull/6427/files#r894917424
                         # NOTE: Nanny will automatically restart worker process when it's killed
-                        nanny.kill(reason=stimulus_id, timeout=timeout),
+                        # NOTE: Don't propagate timeout to kill(): we don't want to
+                        # spend (.8*.8)=64% of our end-to-end timeout waiting for a hung
+                        # process to restart.
+                        nanny.kill(reason=stimulus_id),
                         timeout,
                     )
                     for nanny in nannies
@@ -7153,6 +7152,9 @@ class Scheduler(SchedulerState, ServerNode):
         # running on, as it would cause them to restart from scratch
         # somewhere else.
         valid_workers = [ws for ws in self.workers.values() if not ws.long_running]
+        for plugin in list(self.plugins.values()):
+            valid_workers = plugin.valid_workers_downscaling(self, valid_workers)
+
         groups = groupby(key, valid_workers)
 
         limit_bytes = {k: sum(ws.memory_limit for ws in v) for k, v in groups.items()}
@@ -8404,19 +8406,29 @@ class Scheduler(SchedulerState, ServerNode):
     # Cleanup #
     ###########
 
-    async def check_worker_ttl(self):
+    @log_errors
+    async def check_worker_ttl(self) -> None:
         now = time()
         stimulus_id = f"check-worker-ttl-{now}"
+        assert self.worker_ttl
+        ttl = max(self.worker_ttl, 10 * heartbeat_interval(len(self.workers)))
+        to_restart = []
+
         for ws in self.workers.values():
-            if (ws.last_seen < now - self.worker_ttl) and (
-                ws.last_seen < now - 10 * heartbeat_interval(len(self.workers))
-            ):
+            last_seen = now - ws.last_seen
+            if last_seen > ttl:
+                to_restart.append(ws.address)
                 logger.warning(
-                    "Worker failed to heartbeat within %s seconds. Closing: %s",
-                    self.worker_ttl,
-                    ws,
+                    f"Worker failed to heartbeat for {last_seen:.0f}s; "
+                    f"{'attempting restart' if ws.nanny else 'removing'}: {ws}"
                 )
-                await self.remove_worker(address=ws.address, stimulus_id=stimulus_id)
+
+        if to_restart:
+            await self.restart_workers(
+                to_restart,
+                wait_for_workers=False,
+                stimulus_id=stimulus_id,
+            )
 
     def check_idle(self) -> float | None:
         if self.status in (Status.closing, Status.closed):

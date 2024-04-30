@@ -28,7 +28,7 @@ requires-python = ">=3.9"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 1.5.0",
-    "dask == 2024.4.1",
+    "dask == 2024.4.2",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.0",
@@ -97,7 +97,7 @@ parentdir_prefix = "distributed-"
 
 [tool.pytest.ini_options]
 addopts = '''
--v -rsxfE
+-v -rsfE
 --durations=20
 --color=yes
 --ignore=continuous_integration

@@ -16,6 +16,7 @@ from unittest import mock
 import pytest
 from tornado.ioloop import IOLoop
 
+import dask
 from dask.utils import key_split
 
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
@@ -26,7 +27,6 @@ dd = pytest.importorskip("dask.dataframe")
 import numpy as np
 import pandas as pd
 
-import dask
 from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_200
 from dask.typing import Key
 
@@ -1170,12 +1170,70 @@ async def test_head(c, s, a, b):
 
 
 def test_split_by_worker():
-    workers = ["a", "b", "c"]
-    npartitions = 5
-    df = pd.DataFrame({"x": range(100), "y": range(100)})
-    df["_partitions"] = df.x % npartitions
-    worker_for = {i: random.choice(workers) for i in range(npartitions)}
-    s = pd.Series(worker_for, name="_worker").astype("category")
+    pytest.importorskip("pyarrow")
+
+    df = pd.DataFrame(
+        {
+            "x": [1, 2, 3, 4, 5],
+            "_partition": [0, 1, 2, 0, 1],
+        }
+    )
+    meta = df[["x"]].head(0)
+    workers = ["alice", "bob"]
+    worker_for_mapping = {}
+    npartitions = 3
+    for part in range(npartitions):
+        worker_for_mapping[part] = _get_worker_for_range_sharding(
+            npartitions, part, workers
+        )
+    worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
+    out = split_by_worker(df, "_partition", meta, worker_for)
+    assert set(out) == {"alice", "bob"}
+    assert list(out["alice"].to_pandas().columns) == list(df.columns)
+
+    assert sum(map(len, out.values())) == len(df)
+
+
+def test_split_by_worker_empty():
+    pytest.importorskip("pyarrow")
+
+    df = pd.DataFrame(
+        {
+            "x": [1, 2, 3, 4, 5],
+            "_partition": [0, 1, 2, 0, 1],
+        }
+    )
+    meta = df[["x"]].head(0)
+    worker_for = pd.Series({5: "chuck"}, name="_workers").astype("category")
+    out = split_by_worker(df, "_partition", meta, worker_for)
+    assert out == {}
+
+
+def test_split_by_worker_many_workers():
+    pytest.importorskip("pyarrow")
+
+    df = pd.DataFrame(
+        {
+            "x": [1, 2, 3, 4, 5],
+            "_partition": [5, 7, 5, 0, 1],
+        }
+    )
+    meta = df[["x"]].head(0)
+    workers = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    npartitions = 10
+    worker_for_mapping = {}
+    for part in range(npartitions):
+        worker_for_mapping[part] = _get_worker_for_range_sharding(
+            npartitions, part, workers
+        )
+    worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
+    out = split_by_worker(df, "_partition", meta, worker_for)
+    assert _get_worker_for_range_sharding(npartitions, 5, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 0, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 7, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 1, workers) in out
+
+    assert sum(map(len, out.values())) == len(df)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -2721,3 +2779,43 @@ async def test_wrong_meta_provided(c, s, a, b):
         "meta",
     ):
         await c.gather(c.compute(ddf.shuffle(on="a")))
+
+
+@gen_cluster(client=True)
+async def test_dont_downscale_participating_workers(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        shuffled = df.shuffle("x")
+
+    workers_to_close = s.workers_to_close(n=2)
+    assert len(workers_to_close) == 2
+    res = c.compute(shuffled)
+
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    while not get_active_shuffle_runs(a):
+        await asyncio.sleep(0.01)
+    while not get_active_shuffle_runs(b):
+        await asyncio.sleep(0.01)
+
+    workers_to_close = s.workers_to_close(n=2)
+    assert len(workers_to_close) == 0
+
+    async with Worker(s.address) as w:
+        c.submit(lambda: None, workers=[w.address])
+
+        workers_to_close = s.workers_to_close(n=3)
+        assert len(workers_to_close) == 1
+
+    workers_to_close = s.workers_to_close(n=2)
+    assert len(workers_to_close) == 0
+
+    await c.gather(res)
+    del res
+
+    workers_to_close = s.workers_to_close(n=2)
+    assert len(workers_to_close) == 2

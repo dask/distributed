@@ -22,7 +22,7 @@ class PooledRPCShuffle(PooledRPCCall):
 
     def __getattr__(self, key):
         async def _(**kwargs):
-            from distributed.protocol.serialize import nested_deserialize
+            from distributed.protocol.serialize import _nested_deserialize
 
             method_name = key.replace("shuffle_", "")
             kwargs.pop("shuffle_id", None)
@@ -30,7 +30,7 @@ class PooledRPCShuffle(PooledRPCCall):
             # TODO: This is a bit awkward. At some point the arguments are
             # already getting wrapped with a `Serialize`. We only want to unwrap
             # here.
-            kwargs = nested_deserialize(kwargs)
+            kwargs = _nested_deserialize(kwargs)
             meth = getattr(self.shuffle, method_name)
             return await meth(**kwargs)
 
