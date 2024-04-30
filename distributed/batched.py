@@ -112,6 +112,7 @@ class BatchedSend:
                         payload, serializers=self.serializers, on_error="raise"
                     )
                 ) as coro:
+                    logger.info("BatchedSend sending %d messages", len(payload))
                     nbytes = yield coro
                 if nbytes < 1e6:
                     self.recent_message_log.append(payload)

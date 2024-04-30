@@ -1779,9 +1779,11 @@ class Worker(BaseWorker, ServerNode):
         self.transfer_outgoing_bytes_total += total_bytes
 
         try:
+            logger.info("Sending data to %s (%d bytes)", who, total_bytes)
             with context_meter.meter("network", func=time) as m:
                 compressed = await comm.write(msg, serializers=serializers)
                 response = await comm.read(deserializers=serializers)
+            logger.info("Finished sending data to %s", who)
             assert response == "OK", response
         except OSError:
             logger.exception(
