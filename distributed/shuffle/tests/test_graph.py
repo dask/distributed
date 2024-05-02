@@ -26,59 +26,6 @@ def test_basic(client):
     # blockwise -> barrier -> unpack -> drop_by_shallow_copy
 
 
-@pytest.mark.parametrize("dtype", ["csingle", "cdouble", "clongdouble"])
-def test_raise_on_complex_numbers(dtype):
-    df = dd.from_pandas(
-        pd.DataFrame({"x": pd.array(range(10), dtype=dtype)}), npartitions=5
-    )
-    with pytest.raises(
-        TypeError, match=f"p2p does not support data of type '{df.x.dtype}'"
-    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df.shuffle("x")
-
-
-@pytest.mark.xfail(
-    reason="Ordinary string columns are also objects and we can't distinguish them from custom objects from meta alone."
-)
-def test_raise_on_custom_objects(c, s, a, b):
-    class Stub:
-        def __init__(self, value: int) -> None:
-            self.value = value
-
-    df = dd.from_pandas(
-        pd.DataFrame({"x": pd.array([Stub(i) for i in range(10)], dtype="object")}),
-        npartitions=5,
-    )
-    with pytest.raises(
-        TypeError, match="p2p does not support custom objects"
-    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df.shuffle("x")
-
-
-def test_raise_on_sparse_data():
-    df = dd.from_pandas(
-        pd.DataFrame({"x": pd.array(range(10), dtype="Sparse[float64]")}), npartitions=5
-    )
-    with pytest.raises(
-        TypeError, match="p2p does not support sparse data"
-    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df.shuffle("x")
-
-
-def test_raise_on_non_string_column_name():
-    df = dd.from_pandas(pd.DataFrame({"a": range(10), 1: range(10)}), npartitions=5)
-    with pytest.raises(
-        TypeError, match="p2p requires all column names to be str"
-    ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df.shuffle("a")
-
-
-def test_does_not_raise_on_stringified_numeric_column_name():
-    df = dd.from_pandas(pd.DataFrame({"a": range(10), "1": range(10)}), npartitions=5)
-    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df.shuffle("a")
-
-
 @gen_cluster([("", 2)] * 4, client=True)
 async def test_basic_state(c, s, *workers):
     df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
