@@ -9,7 +9,6 @@ import random
 import shutil
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from itertools import count
 from typing import Any, cast
 from unittest import mock
@@ -1638,16 +1637,12 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._executor = ThreadPoolExecutor(2)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        try:
-            self._executor.shutdown(cancel_futures=True)
-        except Exception:  # pragma: no cover
-            self._executor.shutdown()
+        pass
 
     def new_shuffle(
         self,
@@ -1669,7 +1664,6 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             span_id=None,
             local_address=name,
-            executor=self._executor,
             rpc=self,
             digest_metric=lambda name, value: None,
             scheduler=self,

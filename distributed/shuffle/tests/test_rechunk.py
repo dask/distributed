@@ -11,8 +11,6 @@ from packaging.version import parse as parse_version
 np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
 
-from concurrent.futures import ThreadPoolExecutor
-
 from tornado.ioloop import IOLoop
 
 import dask
@@ -41,16 +39,12 @@ NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._executor = ThreadPoolExecutor(2)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        try:
-            self._executor.shutdown(cancel_futures=True)
-        except Exception:  # pragma: no cover
-            self._executor.shutdown()
+        pass
 
     def new_shuffle(
         self,
@@ -72,7 +66,6 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
             span_id=None,
             local_address=name,
-            executor=self._executor,
             rpc=self,
             digest_metric=lambda name, value: None,
             scheduler=self,
