@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pickle
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
 from toolz import first
@@ -10,6 +10,7 @@ from distributed.protocol.utils import pack_frames_prelude, unpack_frames
 
 if TYPE_CHECKING:
     import pandas as pd
+    from pandas.core.internals import Block
 
 
 def pickle_bytelist(obj: object, prelude: bool = True) -> list[pickle.PickleBuffer]:
@@ -93,30 +94,37 @@ def unpickle_and_concat_dataframe_shards(
     >>> df2 = unpickle_and_concat_dataframe_shards(blob, meta)
     """
     import pandas as pd
-    from pandas.core.internals import BlockManager, make_block
 
     parts = list(unpickle_bytestream(b))
     # [(input_part_id, index, *blocks), ...]
     parts.sort(key=first)
     shards = []
-    for _, idx, *blocks in parts:
-        blocks = [
-            blk
-            if not (
-                isinstance(blk.dtype, pd.StringDtype) and blk.dtype.storage == "pyarrow"
-            )
-            else make_block(
-                pd.arrays.ArrowStringArray(blk.values._pa_array.combine_chunks()),
-                blk.mgr_locs,
-            )
-            for blk in blocks
-        ]
-        axes = [meta.columns, idx]
-        df = pd.DataFrame._from_mgr(  # type: ignore[attr-defined]
-            BlockManager(blocks, axes, verify_integrity=False), axes
-        )
-        shards.append(df)
+    for _, index, *blocks in parts:
+        shards.append(restore_dataframe_shard(index, blocks, meta))
 
     # Actually load memory-mapped buffers into memory and close the file
     # descriptors
     return pd.concat(shards, copy=True)
+
+
+def restore_dataframe_shard(
+    index: pd.Index, blocks: Sequence[Block], meta: pd.DataFrame
+) -> pd.DataFrame:
+    import pandas as pd
+    from pandas.core.internals import BlockManager, make_block
+
+    blocks = [
+        blk
+        if not (
+            isinstance(blk.dtype, pd.StringDtype) and blk.dtype.storage == "pyarrow"
+        )
+        else make_block(
+            pd.arrays.ArrowStringArray(blk.values._pa_array.combine_chunks()),
+            blk.mgr_locs,
+        )
+        for blk in blocks
+    ]
+    axes = [meta.columns, index]
+    return pd.DataFrame._from_mgr(  # type: ignore[attr-defined]
+        BlockManager(blocks, axes, verify_integrity=False), axes
+    )

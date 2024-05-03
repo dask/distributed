@@ -442,9 +442,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         # PickleBuffer objects may have been converted to bytearray by the
         # pickle roundtrip that is done by _core.py when buffers are too small
         self,
-        data: list[
-            tuple[int, list[tuple[int, list[PickleBuffer | bytes | bytearray]]]]
-        ],
+        data: list[tuple[int, list[PickleBuffer | bytes | bytearray]]],
     ) -> None:
         self.raise_if_closed()
 
@@ -452,22 +450,17 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             NDIndex, list[bytes | bytearray | memoryview]
         ] = defaultdict(list)
 
-        for input_part_id, parts in data:
-            if input_part_id not in self.received:
-                self.received.add(input_part_id)
-                for output_part_id, frames in parts:
-                    frames_raw = [
-                        frame.raw() if isinstance(frame, PickleBuffer) else frame
-                        for frame in frames
-                    ]
-                    self.total_recvd += sum(map(nbytes, frames_raw))
-                    to_write[output_part_id,] += [
-                        pack_frames_prelude(frames_raw),
-                        *frames_raw,
-                    ]
+        for output_partition_id, frames in data:
+            frames_raw = [
+                frame.raw() if isinstance(frame, PickleBuffer) else frame
+                for frame in frames
+            ]
+            self.total_recvd += sum(map(nbytes, frames_raw))
+            to_write[output_partition_id,] += [
+                pack_frames_prelude(frames_raw),
+                *frames_raw,
+            ]
 
-        if not to_write:
-            return
         try:
             await self._write_to_disk(to_write)
         except Exception as e:

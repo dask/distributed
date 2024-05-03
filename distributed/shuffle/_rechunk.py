@@ -98,7 +98,7 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
-from collections.abc import Callable, Generator, Hashable, Sequence
+from collections.abc import Callable, Generator, Hashable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import product
@@ -637,23 +637,15 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
 
     async def _receive(
         self,
-        data: list[tuple[NDIndex, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]]],
+        data: Iterable[tuple[NDIndex, np.ndarray]],
     ) -> None:
         self.raise_if_closed()
 
-        # Repartition shards and filter out already received ones
+        # Repartition shards
         shards = defaultdict(list)
-        for d in data:
-            id1, payload = d
-            if id1 in self.received:
-                continue
-            self.received.add(id1)
-            for id2, shard in payload:
-                shards[id2].append(shard)
-            self.total_recvd += sizeof(d)
-        del data
-        if not shards:
-            return
+        for output_partition_id, shard in data:
+            shards[output_partition_id].append(shard)
+        self.total_recvd += sizeof(data)
 
         try:
             await self._write_to_disk(shards)

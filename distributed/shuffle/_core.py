@@ -304,7 +304,21 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if isinstance(data, bytes):
             # Unpack opaque blob. See send()
             data = cast(list[tuple[_T_partition_id, Any]], pickle.loads(data))
-        await self._receive(data)
+        deduplicated = self._deduplicate_inputs(data)
+        if deduplicated:
+            await self._receive(deduplicated)
+
+    def _deduplicate_inputs(
+        self,
+        data: Iterable[tuple[_T_partition_id, Iterable[tuple[_T_partition_id, _T]]]],
+    ) -> list[_T]:
+        deduplicated = []
+        for input_partition_id, batch in data:
+            if input_partition_id in self.received:
+                continue
+            deduplicated.extend(batch)
+            self.received.add(input_partition_id)
+        return deduplicated
 
     async def _ensure_output_worker(self, i: _T_partition_id, key: Key) -> None:
         assigned_worker = self._get_assigned_worker(i)
@@ -323,7 +337,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Get the address of the worker assigned to the output partition"""
 
     @abc.abstractmethod
-    async def _receive(self, data: list[tuple[_T_partition_id, Any]]) -> None:
+    async def _receive(self, data: Iterable[Any]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
     def add_partition(
