@@ -1784,61 +1784,6 @@ async def test_basic_lowlevel_shuffle(
 
 
 @gen_test()
-async def test_error_offload(tmp_path, loop_in_thread):
-    dfs = []
-    rows_per_df = 10
-    n_input_partitions = 2
-    npartitions = 2
-    for ix in range(n_input_partitions):
-        df = pd.DataFrame({"x": range(rows_per_df * ix, rows_per_df * (ix + 1))})
-        df["_partition"] = df.x % npartitions
-        dfs.append(df)
-    meta = dfs[0].head(0)
-    workers = ["A", "B"]
-
-    worker_for_mapping = {}
-    partitions_for_worker = defaultdict(list)
-
-    for part in range(npartitions):
-        worker_for_mapping[part] = w = _get_worker_for_range_sharding(
-            npartitions, part, workers
-        )
-        partitions_for_worker[w].append(part)
-
-    class ErrorOffload(DataFrameShuffleRun):
-        async def offload(self, func, *args):
-            raise RuntimeError("Error during deserialization")
-
-    with DataFrameShuffleTestPool() as local_shuffle_pool:
-        sA = local_shuffle_pool.new_shuffle(
-            name="A",
-            meta=meta,
-            worker_for_mapping=worker_for_mapping,
-            directory=tmp_path,
-            loop=loop_in_thread,
-            disk=True,
-            drop_column=True,
-            Shuffle=ErrorOffload,
-        )
-        sB = local_shuffle_pool.new_shuffle(
-            name="B",
-            meta=meta,
-            worker_for_mapping=worker_for_mapping,
-            directory=tmp_path,
-            loop=loop_in_thread,
-            disk=True,
-            drop_column=True,
-        )
-        try:
-            sB.add_partition(dfs[0], 0)
-            with pytest.raises(RuntimeError, match="Error during deserialization"):
-                sB.add_partition(dfs[1], 1)
-                await sB.barrier(run_ids=[sB.run_id, sB.run_id])
-        finally:
-            await asyncio.gather(*[s.close() for s in [sA, sB]])
-
-
-@gen_test()
 async def test_error_send(tmp_path, loop_in_thread):
     dfs = []
     rows_per_df = 10

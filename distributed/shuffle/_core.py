@@ -15,7 +15,6 @@ from collections.abc import (
     Iterator,
     Sequence,
 )
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
@@ -37,7 +36,7 @@ from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.shuffle._exceptions import ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
-from distributed.utils import run_in_executor_with_context, sync
+from distributed.utils import sync
 from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
@@ -63,7 +62,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     run_id: int
     span_id: str | None
     local_address: str
-    executor: ThreadPoolExecutor
     rpc: Callable[[str], PooledRPCCall]
     digest_metric: Callable[[Hashable, float], None]
     scheduler: PooledRPCCall
@@ -88,7 +86,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         span_id: str | None,
         local_address: str,
         directory: str,
-        executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         digest_metric: Callable[[Hashable, float], None],
         scheduler: PooledRPCCall,
@@ -101,7 +98,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.run_id = run_id
         self.span_id = span_id
         self.local_address = local_address
-        self.executor = executor
         self.rpc = rpc
         self.digest_metric = digest_metric
         self.scheduler = scheduler
@@ -227,15 +223,6 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             delay_min=self.RETRY_DELAY_MIN,
             delay_max=self.RETRY_DELAY_MAX,
         )
-
-    async def offload(
-        self, func: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
-    ) -> _T:
-        self.raise_if_closed()
-        with context_meter.meter("offload"):
-            return await run_in_executor_with_context(
-                self.executor, func, *args, **kwargs
-            )
 
     def heartbeat(self) -> dict[str, Any]:
         comm_heartbeat = self._comm_buffer.heartbeat()

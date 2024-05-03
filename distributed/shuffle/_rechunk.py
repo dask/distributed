@@ -617,7 +617,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
             span_id=span_id,
             local_address=local_address,
             directory=directory,
-            executor=executor,
             rpc=rpc,
             digest_metric=digest_metric,
             scheduler=scheduler,

@@ -442,7 +442,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         # PickleBuffer objects may have been converted to bytearray by the
         # pickle roundtrip that is done by _core.py when buffers are too small
         self,
-        data: list[tuple[int, list[PickleBuffer | bytes | bytearray]]],
+        data: Iterable[list[PickleBuffer | bytes | bytearray]],
     ) -> None:
         self.raise_if_closed()
 
