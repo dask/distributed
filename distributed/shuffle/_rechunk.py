@@ -99,7 +99,6 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from collections.abc import Callable, Generator, Hashable, Iterable, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import product
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -576,8 +575,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         The local address this Shuffle can be contacted by using `rpc`.
     directory:
         The scratch directory to buffer data in.
-    executor:
-        Thread pool to use for offloading compute.
     rpc:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.
@@ -602,7 +599,6 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         span_id: str | None,
         local_address: str,
         directory: str,
-        executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         digest_metric: Callable[[Hashable, float], None],
         scheduler: PooledRPCCall,
@@ -737,7 +733,6 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
                 plugin.worker.local_directory,
                 f"shuffle-{self.id}-{run_id}",
             ),
-            executor=plugin._executor,
             local_address=plugin.worker.address,
             rpc=plugin.worker.rpc,
             digest_metric=plugin.worker.digest_metric,

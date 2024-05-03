@@ -12,7 +12,6 @@ from collections.abc import (
     Iterator,
     Sequence,
 )
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pickle import PickleBuffer
 from typing import TYPE_CHECKING, Any
@@ -371,8 +370,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         The local address this Shuffle can be contacted by using `rpc`.
     directory:
         The scratch directory to buffer data in.
-    executor:
-        Thread pool to use for offloading compute.
     rpc:
         A callable returning a PooledRPCCall to contact other Shuffle instances.
         Typically a ConnectionPool.
@@ -403,7 +400,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         span_id: str | None,
         local_address: str,
         directory: str,
-        executor: ThreadPoolExecutor,
         rpc: Callable[[str], PooledRPCCall],
         digest_metric: Callable[[Hashable, float], None],
         scheduler: PooledRPCCall,
@@ -419,7 +415,6 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             span_id=span_id,
             local_address=local_address,
             directory=directory,
-            executor=executor,
             rpc=rpc,
             digest_metric=digest_metric,
             scheduler=scheduler,
@@ -561,7 +556,6 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
                 plugin.worker.local_directory,
                 f"shuffle-{self.id}-{run_id}",
             ),
-            executor=plugin._executor,
             local_address=plugin.worker.address,
             rpc=plugin.worker.rpc,
             digest_metric=plugin.worker.digest_metric,
