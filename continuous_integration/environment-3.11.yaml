@@ -45,8 +45,8 @@ dependencies:
   - zict  # overridden by git tip below
   - zstandard
   - pip:
-      - git+https://github.com/dask/dask
-      - git+https://github.com/dask-contrib/dask-expr
+      - git+https://github.com/hendrikmakait/dask@p2p-pandas
+      - git+https://github.com/hendrikmakait/dask-expr@p2p-pandas
       - git+https://github.com/dask/zict
       # Revert after https://github.com/dask/distributed/issues/8614 is fixed
       # - git+https://github.com/dask/s3fs

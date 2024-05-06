@@ -52,7 +52,7 @@ dependencies:
   - zict
   - zstandard
   - pip:
-      - git+https://github.com/dask/dask
-      - git+https://github.com/dask-contrib/dask-expr
+      - git+https://github.com/hendrikmakait/dask@p2p-pandas
+      - git+https://github.com/hendrikmakait/dask-expr@p2p-pandas
       - git+https://github.com/dask/crick  # Only tested here
       - keras
