@@ -332,9 +332,14 @@ def split_by_worker(
     """
     out: defaultdict[str, list[tuple[int, list[PickleBuffer]]]] = defaultdict(list)
 
+    base = df[column].values.base
     for output_part_id, part in df.groupby(column, observed=False):
         assert isinstance(output_part_id, int)
-        if drop_column:
+        if part[column].values.base is base and len(part) != len(base):
+            if drop_column:
+                del part[column]
+            part = part.copy()
+        elif drop_column:
             del part[column]
         frames = pickle_dataframe_shard(input_part_id, part)
         out[worker_for[output_part_id]].append((output_part_id, frames))

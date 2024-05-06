@@ -113,17 +113,27 @@ def restore_dataframe_shard(
     import pandas as pd
     from pandas.core.internals import BlockManager, make_block
 
-    blocks = [
-        blk
-        if not (
-            isinstance(blk.dtype, pd.StringDtype) and blk.dtype.storage == "pyarrow"
-        )
-        else make_block(
-            pd.arrays.ArrowStringArray(blk.values._pa_array.combine_chunks()),
-            blk.mgr_locs,
-        )
-        for blk in blocks
-    ]
+    from dask.dataframe._compat import PANDAS_GE_150
+
+    def _ensure_arrow_dtypes_copied(blk):
+        if isinstance(blk.dtype, pd.StringDtype) and blk.dtype.storage in (
+            "pyarrow",
+            "pyarrow_numpy",
+        ):
+            arr = blk.values._pa_array.combine_chunks()
+            if blk.dtype.storage == "pyarrow":
+                arr = pd.arrays.ArrowStringArray(arr)
+            else:
+                arr = pd.array(arr, dtype=blk.dtype)
+            return make_block(arr, blk.mgr_locs)
+        elif PANDAS_GE_150 and isinstance(blk.dtype, pd.ArrowDtype):
+            return make_block(
+                pd.arrays.ArrowExtensionArray(blk.values._pa_array.combine_chunks()),
+                blk.mgr_locs,
+            )
+        return blk
+
+    blocks = [_ensure_arrow_dtypes_copied(blk) for blk in blocks]
     axes = [meta.columns, index]
     return pd.DataFrame._from_mgr(  # type: ignore[attr-defined]
         BlockManager(blocks, axes, verify_integrity=False), axes
