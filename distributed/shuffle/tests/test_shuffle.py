@@ -2282,7 +2282,12 @@ async def test_handle_null_partitions_2(c, s, a, b):
     result, expected = c.compute([ddf, out])
     del out
     result = await result
-    expected = await expected
+
+    with pytest.warns(
+        FutureWarning,
+        match="DataFrame concatenation with empty or all-NA entries is deprecated",
+    ):
+        expected = await expected
     dd.assert_eq(result, expected)
 
     await check_worker_cleanup(a)

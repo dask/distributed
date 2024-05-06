@@ -115,7 +115,7 @@ def restore_dataframe_shard(
 
     from dask.dataframe._compat import PANDAS_GE_150
 
-    def _ensure_arrow_dtypes_copied(blk):
+    def _ensure_arrow_dtypes_copied(blk: Block) -> Block:
         if isinstance(blk.dtype, pd.StringDtype) and blk.dtype.storage in (
             "pyarrow",
             "pyarrow_numpy",
