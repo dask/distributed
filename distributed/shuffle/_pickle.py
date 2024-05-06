@@ -93,7 +93,7 @@ def unpickle_and_concat_dataframe_shards(
     >>> blob = bytearray(b"".join(concat(frames)))  # Simulate disk roundtrip
     >>> df2 = unpickle_and_concat_dataframe_shards(blob, meta)
     """
-    import pandas as pd
+    import dask.dataframe as dd
 
     parts = list(unpickle_bytestream(b))
     # [(input_part_id, index, *blocks), ...]
@@ -104,7 +104,7 @@ def unpickle_and_concat_dataframe_shards(
 
     # Actually load memory-mapped buffers into memory and close the file
     # descriptors
-    return pd.concat(shards, copy=True)
+    return dd.methods.concat(shards, copy=True)
 
 
 def restore_dataframe_shard(
