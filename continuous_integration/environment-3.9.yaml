@@ -29,7 +29,7 @@ dependencies:
   - paramiko
   - pre-commit
   - prometheus_client
-  - psutil < 5.9.8
+  - psutil
   - pyarrow
   - pynvml  # Only tested here
   - pytest

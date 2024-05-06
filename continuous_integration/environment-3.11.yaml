@@ -26,7 +26,7 @@ dependencies:
   - paramiko
   - pre-commit
   - prometheus_client
-  - psutil < 5.9.8
+  - psutil
   - pyarrow=14
   - pytest
   - pytest-cov
