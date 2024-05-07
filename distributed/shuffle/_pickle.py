@@ -116,19 +116,19 @@ def restore_dataframe_shard(
     from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_210
 
     def _ensure_arrow_dtypes_copied(blk: Block) -> Block:
-        if isinstance(blk.dtype, pd.StringDtype) and blk.dtype.storage in (
+        if isinstance(blk.dtype, pd.StringDtype) and blk.dtype.storage in (  # type: ignore[attr-defined]
             "pyarrow",
             "pyarrow_numpy",
         ):
             arr = blk.values._pa_array.combine_chunks()
-            if blk.dtype.storage == "pyarrow":
-                arr = pd.arrays.ArrowStringArray(arr)
+            if blk.dtype.storage == "pyarrow":  # type: ignore[attr-defined]
+                arr = pd.arrays.ArrowStringArray(arr)  # type: ignore[attr-defined]
             else:
                 arr = pd.array(arr, dtype=blk.dtype)
             return make_block(arr, blk.mgr_locs)
         elif PANDAS_GE_150 and isinstance(blk.dtype, pd.ArrowDtype):
             return make_block(
-                pd.arrays.ArrowExtensionArray(blk.values._pa_array.combine_chunks()),
+                pd.arrays.ArrowExtensionArray(blk.values._pa_array.combine_chunks()),  # type: ignore[attr-defined]
                 blk.mgr_locs,
             )
         return blk
@@ -137,6 +137,6 @@ def restore_dataframe_shard(
     axes = [meta.columns, index]
     manager = BlockManager(blocks, axes, verify_integrity=False)
     if PANDAS_GE_210:
-        return pd.DataFrame._from_mgr(manager, axes)
+        return pd.DataFrame._from_mgr(manager, axes)  # type: ignore[attr-defined]
     else:
         return pd.DataFrame(manager)

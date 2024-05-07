@@ -298,8 +298,8 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     def _deduplicate_inputs(
         self,
         data: Iterable[tuple[_T_partition_id, Iterable[tuple[_T_partition_id, _T]]]],
-    ) -> list[_T]:
-        deduplicated = []
+    ) -> list[tuple[_T_partition_id, _T]]:
+        deduplicated: list[tuple[_T_partition_id, _T]] = []
         for input_partition_id, batch in data:
             if input_partition_id in self.received:
                 continue
@@ -324,7 +324,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         """Get the address of the worker assigned to the output partition"""
 
     @abc.abstractmethod
-    async def _receive(self, data: Iterable[Any]) -> None:
+    async def _receive(self, data: Iterable[tuple[_T_partition_id, Any]]) -> None:
         """Receive shards belonging to output partitions of this shuffle run"""
 
     def add_partition(

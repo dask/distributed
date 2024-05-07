@@ -332,12 +332,12 @@ def split_by_worker(
     """
     out: defaultdict[str, list[tuple[int, list[PickleBuffer]]]] = defaultdict(list)
 
-    base = df[column].values.base
+    base = df[column].values.base  # type: ignore[union-attr]
     for output_part_id, part in df.groupby(column, observed=True):
         assert isinstance(output_part_id, int)
         if output_part_id not in worker_for:
             continue
-        if part[column].values.base is base and len(part) != len(base):
+        if part[column].values.base is base and len(part) != len(base):  # type: ignore[union-attr, arg-type]
             if drop_column:
                 del part[column]
             part = part.copy(deep=True)
@@ -444,7 +444,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         # PickleBuffer objects may have been converted to bytearray by the
         # pickle roundtrip that is done by _core.py when buffers are too small
         self,
-        data: Iterable[list[PickleBuffer | bytes | bytearray]],
+        data: Iterable[tuple[int, list[PickleBuffer | bytes | bytearray]]],
     ) -> None:
         self.raise_if_closed()
 
