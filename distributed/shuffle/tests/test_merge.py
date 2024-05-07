@@ -141,7 +141,15 @@ async def test_merge_p2p_shuffle_reused_dataframe_with_same_parameters(c, s, a, 
 
 
 @pytest.mark.parametrize("how", ["inner", "outer", "left", "right"])
-@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize(
+    "disk",
+    [
+        pytest.param(True, id="disk"),
+        pytest.param(
+            False, id="memory", marks=pytest.mark.skip(reason="Not supported")
+        ),
+    ],
+)
 @gen_cluster(client=True)
 async def test_merge(c, s, a, b, how, disk):
     A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
