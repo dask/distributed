@@ -22,10 +22,9 @@ from dask.utils import key_split
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.worker import Status
 
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
 dd = pytest.importorskip("dask.dataframe")
-
-import numpy as np
-import pandas as pd
 
 from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_200
 from dask.typing import Key

@@ -7,8 +7,8 @@ import dask.datasets
 from distributed import Scheduler
 from distributed.utils_test import gen_cluster
 
-da = pytest.importorskip("dask.array")
-dd = pytest.importorskip("dask.dataframe")
+da = pytest.importorskip("dask.array", exc_type=ImportError)
+dd = pytest.importorskip("dask.dataframe", exc_type=ImportError)
 from distributed.shuffle.tests.utils import UNPACK_PREFIX
 
 
