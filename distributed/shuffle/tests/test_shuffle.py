@@ -1686,7 +1686,7 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
     "disk",
     [
         pytest.param(True, id="disk"),
-        pytest.param(False, id="memory", marks=pytest.mark.skip(reason="TODO: FIX")),
+        pytest.param(False, id="memory", marks=pytest.mark.skip(reason="Not supported")),
     ],
 )
 @pytest.mark.parametrize("drop_column", [True, False])
@@ -2689,7 +2689,7 @@ async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
     await check_scheduler_cleanup(s)
 
 
-@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("disk", [True, pytest.param(False, marks=pytest.mark.skip(reason="Not supported"))])
 @pytest.mark.parametrize("keep", ["first", "last"])
 @gen_cluster(client=True)
 async def test_drop_duplicates_stable_ordering(c, s, a, b, keep, disk):
