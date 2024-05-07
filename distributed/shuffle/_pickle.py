@@ -113,7 +113,7 @@ def restore_dataframe_shard(
     import pandas as pd
     from pandas.core.internals import BlockManager, make_block
 
-    from dask.dataframe._compat import PANDAS_GE_150
+    from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_210
 
     def _ensure_arrow_dtypes_copied(blk: Block) -> Block:
         if isinstance(blk.dtype, pd.StringDtype) and blk.dtype.storage in (
@@ -135,6 +135,8 @@ def restore_dataframe_shard(
 
     blocks = [_ensure_arrow_dtypes_copied(blk) for blk in blocks]
     axes = [meta.columns, index]
-    return pd.DataFrame._from_mgr(  # type: ignore[attr-defined]
-        BlockManager(blocks, axes, verify_integrity=False), axes
-    )
+    manager = BlockManager(blocks, axes, verify_integrity=False)
+    if PANDAS_GE_210:
+        return pd.DataFrame._from_mgr(manager, axes)
+    else:
+        return pd.DataFrame(manager)
