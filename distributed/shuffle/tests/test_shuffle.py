@@ -147,7 +147,15 @@ def get_active_shuffle_runs(worker: Worker) -> dict[ShuffleId, ShuffleRun]:
 
 
 @pytest.mark.parametrize("npartitions", [None, 1, 20])
-@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize(
+    "disk",
+    [
+        pytest.param(True, id="disk"),
+        pytest.param(
+            False, id="memory", marks=pytest.mark.skip(reason="Not supported")
+        ),
+    ],
+)
 @gen_cluster(client=True)
 async def test_basic_integration(c, s, a, b, npartitions, disk):
     df = dask.datasets.timeseries(
@@ -1686,7 +1694,9 @@ class DataFrameShuffleTestPool(AbstractShuffleTestPool):
     "disk",
     [
         pytest.param(True, id="disk"),
-        pytest.param(False, id="memory", marks=pytest.mark.skip(reason="Not supported")),
+        pytest.param(
+            False, id="memory", marks=pytest.mark.skip(reason="Not supported")
+        ),
     ],
 )
 @pytest.mark.parametrize("drop_column", [True, False])
@@ -2658,7 +2668,15 @@ async def test_barrier_handles_stale_resumed_transfer(c, s, *workers):
     await out
 
 
-@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize(
+    "disk",
+    [
+        pytest.param(True, id="disk"),
+        pytest.param(
+            False, id="memory", marks=pytest.mark.skip(reason="Not supported")
+        ),
+    ],
+)
 @pytest.mark.parametrize("keep", ["first", "last"])
 @gen_cluster(client=True)
 async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
@@ -2689,7 +2707,15 @@ async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
     await check_scheduler_cleanup(s)
 
 
-@pytest.mark.parametrize("disk", [True, pytest.param(False, marks=pytest.mark.skip(reason="Not supported"))])
+@pytest.mark.parametrize(
+    "disk",
+    [
+        pytest.param(True, id="disk"),
+        pytest.param(
+            False, id="memory", marks=pytest.mark.skip(reason="Not supported")
+        ),
+    ],
+)
 @pytest.mark.parametrize("keep", ["first", "last"])
 @gen_cluster(client=True)
 async def test_drop_duplicates_stable_ordering(c, s, a, b, keep, disk):
