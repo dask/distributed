@@ -3599,6 +3599,38 @@ async def test_bad_tasks_fail(c, s, a, b):
     await asyncio.gather(a.close(), b.close())
 
 
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    clean_kwargs={"threads": False, "processes": False},
+)
+async def test_suspicious_workers(c, s, a, b):
+    """
+    c: Client
+    s: Scheduler
+    a: Worker # name: 0
+    b: Worker # name: 1
+    """
+    # Create a future on a worker that will fail, on worker a
+    f = c.submit(sys.exit, 0)  # f: Future
+    # logger is a context manager that captures logs i.e. the errors that we will inspect.
+    with captured_logger("distributed.scheduler") as logger:
+        # when we await the future, it will fail and raise a KilledWorker error
+        with pytest.raises(KilledWorker) as info:
+            await f  # wait for the result of the future, which will fail.
+
+    logger_text = logger.getvalue()  # get the logs from the logger
+    assert f.key in logger_text  # check that the key of the future is in the logs
+
+    # look at the client events
+    # look at the suspicious-tasks events
+    # look at the last event
+    # look at the second element of the tuple which is a dictionary
+    # look at the count of the last event and check it is 4 as we expect
+
+    assert c.get_events()["suspicious-tasks"][-1][1]["count"] == 4
+
+
 def test_get_processing_sync(c, s, a, b):
     processing = c.processing()
     assert not any(v for v in processing.values())
