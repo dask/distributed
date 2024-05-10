@@ -3595,31 +3595,13 @@ async def test_bad_tasks_fail(c, s, a, b):
     text = logger.getvalue()
     assert f.key in text
 
+    events = await c.get_events()
+
+    time_stamp, msg = events["suspicious-tasks"][-1]  # get last worker failure event
+    assert msg["count"] == s.allowed_failures + 1
+
     assert info.value.last_worker.nanny in {a.address, b.address}
     await asyncio.gather(a.close(), b.close())
-
-
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    clean_kwargs={"threads": False, "processes": False},
-)
-async def test_suspicious_workers(c, s, a, b):
-    """
-    c: Client
-    s: Scheduler
-    a: Worker # name: 0
-    b: Worker # name: 1
-    """
-    f = c.submit(sys.exit, 0)  # f: Future
-    with captured_logger("distributed.scheduler") as logger:
-        with pytest.raises(KilledWorker) as info:
-            await f
-
-    events = await c.get_events()
-    # get the last event from the list of suspicious tasks
-    time_stamp, msg = events["suspicious-tasks"][-1]
-    assert msg["count"] == s.allowed_failures + 1
 
 
 def test_get_processing_sync(c, s, a, b):
