@@ -5238,16 +5238,7 @@ class Scheduler(SchedulerState, ServerNode):
             if not safe:
                 ts.suspicious += 1
                 ts.prefix.suspicious += 1
-                log_msg = {
-                    "key": k,
-                    "worker": address,
-                    "count": ts.suspicious,
-                    "event": "suspicious",
-                }
-                self.log_event(["suspicious-tasks", address], log_msg.copy())
                 if ts.suspicious > self.allowed_failures:
-                    log_msg["event"] = "killed-worker"
-                    self.log_event(["killed-worker", address], log_msg)
                     del recommendations[k]
                     e = pickle.dumps(
                         KilledWorker(
@@ -5303,6 +5294,7 @@ class Scheduler(SchedulerState, ServerNode):
             "lost-computed-tasks": recompute_keys,
             "lost-scattered-tasks": lost_keys,
             "stimulus_id": stimulus_id,
+            "safe": safe,  # TODO change this to expected to be clearer
         }
         self.log_event(address, event_msg.copy())
         event_msg["worker"] = address
