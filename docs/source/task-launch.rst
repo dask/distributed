@@ -204,7 +204,7 @@ worker.
 
 .. code-block:: python
 
-    from dask.distributed import worker_client
+    from dask.distributed import Client, worker_client
 
 
     def fib(n):
