@@ -21,9 +21,12 @@ from distributed.protocol.pickle import dumps
 
 if TYPE_CHECKING:
     # circular imports
+    # Needed to avoid Sphinx WARNING: more than one target found for cross-reference
+    # 'WorkerState'"
+    # https://github.com/agronholm/sphinx-autodoc-typehints#dealing-with-circular-imports
+    from distributed import scheduler as scheduler_module
     from distributed.scheduler import Scheduler
     from distributed.scheduler import TaskStateState as SchedulerTaskStateState
-    from distributed.scheduler import WorkerState
     from distributed.worker import Worker
     from distributed.worker_state_machine import TaskStateState as WorkerTaskStateState
 
@@ -207,8 +210,8 @@ class SchedulerPlugin:
         """Run when a client disconnects"""
 
     def valid_workers_downscaling(
-        self, scheduler: Scheduler, workers: list[WorkerState]
-    ) -> list[WorkerState]:
+        self, scheduler: Scheduler, workers: list[scheduler_module.WorkerState]
+    ) -> list[scheduler_module.WorkerState]:
         """Determine which workers can be removed from the cluster
 
         This method is called when the scheduler is about to downscale the cluster
