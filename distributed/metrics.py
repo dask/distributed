@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import sys
 import threading
 import time as timemod
 from collections.abc import Callable, Hashable, Iterator
@@ -93,7 +94,7 @@ class _WindowsTime:
 
 
 # A high-resolution wall clock timer measuring the seconds since Unix epoch
-if WINDOWS:
+if WINDOWS and sys.version_info < (3, 13):
     time = _WindowsTime(timemod.time, is_monotonic=False).time
     monotonic = _WindowsTime(timemod.monotonic, is_monotonic=True).time
 else:
