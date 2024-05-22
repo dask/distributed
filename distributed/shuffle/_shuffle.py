@@ -339,10 +339,10 @@ def split_by_worker(
             continue
         if part[column].values.base is base and len(part) != len(base):  # type: ignore[union-attr, arg-type]
             if drop_column:
-                del part[column]
+                part.drop(columns=column, inplace=True)
             part = part.copy(deep=True)
         elif drop_column:
-            del part[column]
+            part.drop(columns=column, inplace=True)
         frames = pickle_dataframe_shard(input_part_id, part)
         out[worker_for[output_part_id]].append((output_part_id, frames))
 
