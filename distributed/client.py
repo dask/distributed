@@ -1958,7 +1958,7 @@ class Client(SyncMethodMixin):
             retries=retries,
             fifo_timeout=fifo_timeout,
             actors=actor,
-            span_metadata={"collections": [{"type": "Future"}]},
+            span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
         )
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
@@ -2165,7 +2165,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actor,
-            span_metadata={"collections": [{"type": "Future"}]},
+            span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
         )
         logger.debug("map(%s, ...)", funcname(func))
 
@@ -3270,7 +3270,7 @@ class Client(SyncMethodMixin):
             retries=retries,
             user_priority=priority,
             actors=actors,
-            span_metadata={"collections": [{"type": "low-level-graph"}]},
+            span_metadata=SpanMetadata(collections=[{"type": "low-level-graph"}]),
         )
         packed = pack_data(keys, futures)
         if sync:
@@ -3454,7 +3454,7 @@ class Client(SyncMethodMixin):
 
         variables = [a for a in collections if dask.is_dask_collection(a)]
         metadata = SpanMetadata(
-            {"collections": [get_collections_metadata(v) for v in variables]}
+            collections=[get_collections_metadata(v) for v in variables]
         )
 
         dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
@@ -3582,7 +3582,7 @@ class Client(SyncMethodMixin):
 
         assert all(map(dask.is_dask_collection, collections))
         metadata = SpanMetadata(
-            {"collections": [get_collections_metadata(v) for v in collections]}
+            collections=[get_collections_metadata(v) for v in collections]
         )
         dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
 
