@@ -393,7 +393,7 @@ def partial_rechunk(
     _barrier_key = barrier_key(ShuffleId(partial_token))
     slice_name = f"rechunk-slice-{partial_token}"
     transfer_name = f"rechunk-transfer-{partial_token}"
-    disk: bool = dask.config.get("distributed.p2p.disk")
+    disk: bool = dask.config.get("distributed.p2p.storage.disk")
 
     ndim = len(x.shape)
 
