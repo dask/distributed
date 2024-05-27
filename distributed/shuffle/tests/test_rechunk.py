@@ -12,6 +12,7 @@ np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
 
 from concurrent.futures import ThreadPoolExecutor
+from itertools import product
 
 from tornado.ioloop import IOLoop
 
@@ -33,7 +34,7 @@ from distributed.shuffle._rechunk import (
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
-from distributed.utils_test import gen_cluster, gen_test
+from distributed.utils_test import async_poll_for, gen_cluster, gen_test
 
 NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 
@@ -83,9 +84,6 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
         )
         self.shuffles[name] = s
         return s
-
-
-from itertools import product
 
 
 @pytest.mark.parametrize("n_workers", [1, 10])
@@ -1259,8 +1257,6 @@ def test_pick_worker_homogeneous_distribution(nworkers):
     config={"distributed.scheduler.active-memory-manager.start": False},
 )
 async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
-    da = pytest.importorskip("dask.array")
-
     # This rechunk operation can be split into 10 independent shuffles with 4 output
     # chunks each. This is less than the number of workers, so we are at risk of
     # choosing the same 4 output workers in each separate shuffle.
@@ -1275,3 +1271,43 @@ async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
     nchunks = [len(w.data.keys() & out_keys) for w in workers]
     # There are 40 output chunks and 5 workers. Expect exactly 8 chunks per worker.
     assert nchunks == [8, 8, 8, 8, 8]
+
+
+@gen_cluster(client=True, nthreads=[], config={"optimization.fuse.active": False})
+async def test_partial_rechunk_taskgroups(c, s):
+    arr = da.random.random((40, 40), chunks=(4, 4))
+    arr = arr.rechunk((1, -1), method="p2p")
+
+    _ = c.compute(arr)
+    await async_poll_for(
+        lambda: any(
+            isinstance(task, str) and task.startswith("shuffle-barrier")
+            for task in s.tasks
+        ),
+        timeout=5,
+    )
+    # Ensure that independent partial rechunks do not blow up the number of task groups
+    assert (
+        sum(
+            1
+            for task in s.task_groups
+            if isinstance(task, str) and task.startswith("rechunk-transfer")
+        )
+        == 1
+    )
+    assert (
+        sum(
+            1
+            for task in s.task_groups
+            if isinstance(task, str) and task.startswith("shuffle-barrier")
+        )
+        == 1
+    )
+    assert (
+        sum(
+            1
+            for task in s.task_groups
+            if isinstance(task, str) and task.startswith("rechunk-p2p")
+        )
+        == 1
+    )
