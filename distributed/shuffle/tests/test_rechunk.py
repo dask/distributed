@@ -1275,8 +1275,34 @@ async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[], config={"optimization.fuse.active": False})
 async def test_partial_rechunk_taskgroups(c, s):
-    arr = da.random.random((40, 40), chunks=(4, 4))
-    arr = arr.rechunk((1, -1), method="p2p")
+    """Regression test for https://github.com/dask/distributed/issues/8656"""
+    arr = da.random.random(
+        (10, 10, 10),
+        chunks=(
+            (
+                2,
+                2,
+                2,
+                2,
+                2,
+            ),
+        )
+        * 3,
+    )
+    arr = arr.rechunk(
+        (
+            (
+                1,
+                2,
+                2,
+                2,
+                2,
+                1,
+            ),
+        )
+        * 3,
+        method="p2p",
+    )
 
     _ = c.compute(arr)
     await async_poll_for(
@@ -1286,28 +1312,4 @@ async def test_partial_rechunk_taskgroups(c, s):
         ),
         timeout=5,
     )
-    # Ensure that independent partial rechunks do not blow up the number of task groups
-    assert (
-        sum(
-            1
-            for task in s.task_groups
-            if isinstance(task, str) and task.startswith("rechunk-transfer")
-        )
-        == 1
-    )
-    assert (
-        sum(
-            1
-            for task in s.task_groups
-            if isinstance(task, str) and task.startswith("shuffle-barrier")
-        )
-        == 1
-    )
-    assert (
-        sum(
-            1
-            for task in s.task_groups
-            if isinstance(task, str) and task.startswith("rechunk-p2p")
-        )
-        == 1
-    )
+    assert len(s.task_groups) < 7
