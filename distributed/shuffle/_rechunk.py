@@ -199,6 +199,14 @@ class _NDPartial(NamedTuple):
     #: to exclude from this partial.
     #: This corresponds to `left_start` of the subsequent partial.
     right_stops: NDIndex
+    #: Index of the partial among all partials.
+    #: This corresponds to the position of the partial in the n-dimensional grid of
+    #: partials representing the full rechunk.
+    ix: NDIndex
+
+
+def rechunk_name(token: str) -> str:
+    return f"rechunk-p2p-{token}"
 
 
 def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
@@ -210,14 +218,14 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
 
     dsk = {}
     token = tokenize(x, chunks)
-    name = f"rechunk-p2p-{token}"
     for ndpartial in _split_partials(x, chunks):
         if all(slc.stop == slc.start + 1 for slc in ndpartial.new):
             # Single output chunk
-            dsk.update(partial_concatenate(x, chunks, ndpartial, name))
+            dsk.update(partial_concatenate(x, chunks, ndpartial, token))
         else:
-            dsk.update(partial_rechunk(x, chunks, ndpartial, name))
+            dsk.update(partial_rechunk(x, chunks, ndpartial, token))
     layer = MaterializedLayer(dsk)
+    name = rechunk_name(token)
     graph = HighLevelGraph.from_collections(name, layer, dependencies=[x])
     arr = da.Array(graph, name, chunks, meta=x)
     return arr
@@ -228,9 +236,12 @@ def _split_partials(
 ) -> Generator[_NDPartial, None, None]:
     """Split the rechunking into partials that can be performed separately"""
     partials_per_axis = _split_partials_per_axis(x, chunks)
-    for partial_per_axis in product(*partials_per_axis):
+    indices_per_axis = (range(len(partials)) for partials in partials_per_axis)
+    for nindex, partial_per_axis in zip(
+        product(*indices_per_axis), product(*partials_per_axis)
+    ):
         old, new, left_starts, right_stops = zip(*partial_per_axis)
-        yield _NDPartial(old, new, left_starts, right_stops)
+        yield _NDPartial(old, new, left_starts, right_stops, nindex)
 
 
 def _split_partials_per_axis(
@@ -311,7 +322,7 @@ def partial_concatenate(
     x: da.Array,
     chunks: ChunkedAxes,
     ndpartial: _NDPartial,
-    name: str,
+    token: str,
 ) -> dict[Key, Any]:
     import numpy as np
 
@@ -320,8 +331,7 @@ def partial_concatenate(
 
     dsk: dict[Key, Any] = {}
 
-    partial_token = tokenize(x, chunks, ndpartial.new)
-    slice_name = f"rechunk-slice-{partial_token}"
+    slice_group = f"rechunk-slice-{token}"
     old_offset = tuple(slice_.start for slice_ in ndpartial.old)
 
     shape = tuple(slice_.stop - slice_.start for slice_ in ndpartial.old)
@@ -340,8 +350,9 @@ def partial_concatenate(
             axis[index] for index, axis in zip(old_global_index, x.chunks)
         )
         if _slicing_is_necessary(ndslice, original_shape):
-            rec_cat_arg[old_partial_index] = (slice_name,) + old_global_index
-            dsk[(slice_name,) + old_global_index] = (
+            key = (slice_group,) + ndpartial.ix + old_global_index
+            rec_cat_arg[old_partial_index] = key
+            dsk[key] = (
                 getitem,
                 (x.name,) + old_global_index,
                 ndslice,
@@ -349,7 +360,7 @@ def partial_concatenate(
         else:
             rec_cat_arg[old_partial_index] = (x.name,) + old_global_index
     global_index = tuple(int(slice_.start) for slice_ in ndpartial.new)
-    dsk[(name,) + global_index] = (
+    dsk[(rechunk_name(token),) + global_index] = (
         concatenate3,
         rec_cat_arg.tolist(),
     )
@@ -381,7 +392,7 @@ def partial_rechunk(
     x: da.Array,
     chunks: ChunkedAxes,
     ndpartial: _NDPartial,
-    name: str,
+    token: str,
 ) -> dict[Key, Any]:
     from dask.array.chunk import getitem
 
@@ -389,10 +400,15 @@ def partial_rechunk(
 
     old_partial_offset = tuple(slice_.start for slice_ in ndpartial.old)
 
-    partial_token = tokenize(x, chunks, ndpartial.new)
+    partial_token = tokenize(token, ndpartial.ix)
+    # Use `token` to generate a canonical group for the entire rechunk
+    slice_group = f"rechunk-slice-{token}"
+    transfer_group = f"rechunk-transfer-{token}"
+    unpack_group = rechunk_name(token)
+    # We can use `partial_token` here because the barrier task share their
+    # group across all P2P shuffle-like operations
+    # FIXME: Make this group unique per individual P2P shuffle-like operation
     _barrier_key = barrier_key(ShuffleId(partial_token))
-    slice_name = f"rechunk-slice-{partial_token}"
-    transfer_name = f"rechunk-transfer-{partial_token}"
     disk: bool = dask.config.get("distributed.p2p.disk")
 
     ndim = len(x.shape)
@@ -414,19 +430,20 @@ def partial_rechunk(
             axis[index] for index, axis in zip(global_index, x.chunks)
         )
         if _slicing_is_necessary(ndslice, original_shape):
-            input_task = (slice_name,) + global_index
-            dsk[(slice_name,) + global_index] = (
+            input_key = (slice_group,) + ndpartial.ix + global_index
+            dsk[input_key] = (
                 getitem,
                 (x.name,) + global_index,
                 ndslice,
             )
         else:
-            input_task = (x.name,) + global_index
+            input_key = (x.name,) + global_index
 
-        transfer_keys.append((transfer_name,) + global_index)
-        dsk[(transfer_name,) + global_index] = (
+        key = (transfer_group,) + ndpartial.ix + global_index
+        transfer_keys.append(key)
+        dsk[key] = (
             rechunk_transfer,
-            input_task,
+            input_key,
             partial_token,
             partial_index,
             partial_new,
@@ -439,7 +456,7 @@ def partial_rechunk(
     new_partial_offset = tuple(axis.start for axis in ndpartial.new)
     for partial_index in _partial_ndindex(ndpartial.new):
         global_index = _global_index(partial_index, new_partial_offset)
-        dsk[(name,) + global_index] = (
+        dsk[(unpack_group,) + global_index] = (
             rechunk_unpack,
             partial_token,
             partial_index,
