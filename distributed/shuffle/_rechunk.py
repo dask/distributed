@@ -331,7 +331,7 @@ def partial_concatenate(
 
     dsk: dict[Key, Any] = {}
 
-    slice_name = f"rechunk-slice-{token}"
+    slice_group = f"rechunk-slice-{token}"
     old_offset = tuple(slice_.start for slice_ in ndpartial.old)
 
     shape = tuple(slice_.stop - slice_.start for slice_ in ndpartial.old)
@@ -350,7 +350,7 @@ def partial_concatenate(
             axis[index] for index, axis in zip(old_global_index, x.chunks)
         )
         if _slicing_is_necessary(ndslice, original_shape):
-            key = (slice_name,) + ndpartial.ix + old_global_index
+            key = (slice_group,) + ndpartial.ix + old_global_index
             rec_cat_arg[old_partial_index] = key
             dsk[key] = (
                 getitem,
