@@ -401,10 +401,14 @@ def partial_rechunk(
     old_partial_offset = tuple(slice_.start for slice_ in ndpartial.old)
 
     partial_token = tokenize(token, ndpartial.ix)
-    _barrier_key = barrier_key(ShuffleId(partial_token))
+    # Use `token` to generate a canonical group for the entire rechunk
     slice_group = f"rechunk-slice-{token}"
     transfer_group = f"rechunk-transfer-{token}"
     unpack_group = rechunk_name(token)
+    # We can use `partial_token` here because the barrier task share their
+    # group across all P2P shuffle-like operations
+    # TODO: Make this group unique per individual P2P shuffle-like operation
+    _barrier_key = barrier_key(ShuffleId(partial_token))
     disk: bool = dask.config.get("distributed.p2p.disk")
 
     ndim = len(x.shape)
