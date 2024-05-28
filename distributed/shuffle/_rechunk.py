@@ -402,8 +402,9 @@ def partial_rechunk(
 
     partial_token = tokenize(token, ndpartial.ix)
     _barrier_key = barrier_key(ShuffleId(partial_token))
-    slice_name = f"rechunk-slice-{token}"
-    transfer_name = f"rechunk-transfer-{token}"
+    slice_group = f"rechunk-slice-{token}"
+    transfer_group = f"rechunk-transfer-{token}"
+    unpack_group = rechunk_name(token)
     disk: bool = dask.config.get("distributed.p2p.disk")
 
     ndim = len(x.shape)
@@ -425,9 +426,8 @@ def partial_rechunk(
             axis[index] for index, axis in zip(global_index, x.chunks)
         )
         if _slicing_is_necessary(ndslice, original_shape):
-            key = (slice_name,) + ndpartial.ix + global_index
-            input_key = (slice_name,) + ndpartial.ix + global_index
-            dsk[key] = (
+            input_key = (slice_group,) + ndpartial.ix + global_index
+            dsk[input_key] = (
                 getitem,
                 (x.name,) + global_index,
                 ndslice,
@@ -435,7 +435,7 @@ def partial_rechunk(
         else:
             input_key = (x.name,) + global_index
 
-        key = (transfer_name,) + ndpartial.ix + global_index
+        key = (transfer_group,) + ndpartial.ix + global_index
         transfer_keys.append(key)
         dsk[key] = (
             rechunk_transfer,
@@ -452,7 +452,7 @@ def partial_rechunk(
     new_partial_offset = tuple(axis.start for axis in ndpartial.new)
     for partial_index in _partial_ndindex(ndpartial.new):
         global_index = _global_index(partial_index, new_partial_offset)
-        dsk[(rechunk_name(token),) + global_index] = (
+        dsk[(unpack_group,) + global_index] = (
             rechunk_unpack,
             partial_token,
             partial_index,
