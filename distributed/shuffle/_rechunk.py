@@ -407,7 +407,7 @@ def partial_rechunk(
     unpack_group = rechunk_name(token)
     # We can use `partial_token` here because the barrier task share their
     # group across all P2P shuffle-like operations
-    # TODO: Make this group unique per individual P2P shuffle-like operation
+    # FIXME: Make this group unique per individual P2P shuffle-like operation
     _barrier_key = barrier_key(ShuffleId(partial_token))
     disk: bool = dask.config.get("distributed.p2p.disk")
 
