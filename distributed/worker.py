@@ -2340,19 +2340,20 @@ class Worker(BaseWorker, ServerNode):
                     key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
                 )
 
-            logger.warning(
-                "Compute Failed\n"
-                "Key:       %s\n"
-                "Function:  %s\n"
-                "args:      %s\n"
-                "kwargs:    %s\n"
-                "Exception: %r\n",
-                key,
-                str(funcname(function))[:1000],
-                convert_args_to_str(args2, max_len=1000),
-                convert_kwargs_to_str(kwargs2, max_len=1000),
-                result["exception_text"],
-            )
+            if ts.state in ("executing", "long-running", "resumed"):
+                logger.warning(
+                    "Compute Failed\n"
+                    "Key:       %s\n"
+                    "Function:  %s\n"
+                    "args:      %s\n"
+                    "kwargs:    %s\n"
+                    "Exception: %r\n",
+                    key,
+                    str(funcname(function))[:1000],
+                    convert_args_to_str(args2, max_len=1000),
+                    convert_kwargs_to_str(kwargs2, max_len=1000),
+                    result["exception_text"],
+                )
             return ExecuteFailureEvent.from_exception(
                 result,
                 key=key,
@@ -2370,7 +2371,7 @@ class Worker(BaseWorker, ServerNode):
             #   _prepare_args_for_execution() to raise KeyError;
             # - A dependency was unspilled but failed to deserialize due to a bug in
             #   user-defined or third party classes.
-            if ts.state == "executing":
+            if ts.state in ("executing", "long-running", "resumed"):
                 logger.error(
                     f"Exception during execution of task {key!r}",
                     exc_info=True,
