@@ -2371,7 +2371,7 @@ class Worker(BaseWorker, ServerNode):
             #   _prepare_args_for_execution() to raise KeyError;
             # - A dependency was unspilled but failed to deserialize due to a bug in
             #   user-defined or third party classes.
-            if ts.state in ("executing", "long-running", "resumed"):
+            if ts.state in ("executing", "long-running"):
                 logger.error(
                     f"Exception during execution of task {key!r}",
                     exc_info=True,
