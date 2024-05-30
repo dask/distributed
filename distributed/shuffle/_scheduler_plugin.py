@@ -390,8 +390,12 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             ts = self.scheduler.tasks[key]
             for active_shuffle in self.active_shuffles.values():
                 barrier = self.scheduler.tasks[barrier_key(active_shuffle.id)]
-                if ts == barrier or ts in barrier.dependents:
-                    self.log_event(
+                if (
+                    ts == barrier
+                    or ts in barrier.dependents
+                    or ts in barrier.dependencies
+                ):
+                    self.scheduler.log_event(
                         "p2p",
                         {
                             "action": "p2p-failed",
