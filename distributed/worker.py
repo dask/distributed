@@ -2354,6 +2354,7 @@ class Worker(BaseWorker, ServerNode):
                     convert_kwargs_to_str(kwargs2, max_len=1000),
                     result["exception_text"],
                 )
+
             return ExecuteFailureEvent.from_exception(
                 result,
                 key=key,
