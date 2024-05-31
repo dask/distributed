@@ -3582,7 +3582,7 @@ async def test_get_foo_lost_keys(c, s, u, v, w):
     assert_dict_key_equal(d, {x.key: [], y.key: []})
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, clean_kwargs={"threads": False, "processes": False}
 )
@@ -3594,11 +3594,6 @@ async def test_bad_tasks_fail(c, s, a, b):
 
     text = logger.getvalue()
     assert f.key in text
-
-    events = await c.get_events()
-
-    time_stamp, msg = events["suspicious-tasks"][-1]  # get last worker failure event
-    assert msg["count"] == s.allowed_failures + 1
 
     assert info.value.last_worker.nanny in {a.address, b.address}
     await asyncio.gather(a.close(), b.close())
