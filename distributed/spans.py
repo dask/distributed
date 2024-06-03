@@ -4,7 +4,7 @@ import copy
 import uuid
 import weakref
 from collections import defaultdict
-from collections.abc import Hashable, Iterable, Iterator
+from collections.abc import Hashable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from itertools import islice
 from typing import TYPE_CHECKING, Any, TypedDict
@@ -655,18 +655,15 @@ class SpansWorkerExtension:
         self.worker = worker
         self.digests_total_since_heartbeat = {}
 
-    def collect_digests(self) -> None:
-        """Make a local copy of Worker.digests_total_since_heartbeat. We can't just
-        parse it directly in heartbeat() as the event loop may be yielded between its
-        call and `self.worker.digests_total_since_heartbeat.clear()`, causing the
-        scheduler to become misaligned with the workers.
-        """
+    def collect_digests(
+        self, digests_total_since_heartbeat: Mapping[Hashable, float]
+    ) -> None:
         # Note: this method may be called spuriously by Worker._register_with_scheduler,
         # but when it does it's guaranteed not to find any metrics
         assert not self.digests_total_since_heartbeat
         self.digests_total_since_heartbeat = {
             k: v
-            for k, v in self.worker.digests_total_since_heartbeat.items()
+            for k, v in digests_total_since_heartbeat.items()
             if isinstance(k, tuple) and k[0] in CONTEXTS_WITH_SPAN_ID
         }
 
