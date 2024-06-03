@@ -41,7 +41,7 @@ from distributed import (
     Scheduler,
     Worker,
 )
-from distributed.core import ConnectionPool
+from distributed.core import ConnectionPool, ErrorMessage, OKMessage
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
     buffers_to_table,
@@ -49,6 +49,7 @@ from distributed.shuffle._arrow import (
     read_from_disk,
     serialize_table,
 )
+from distributed.shuffle._exceptions import P2PConsistencyError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
@@ -1911,7 +1912,7 @@ async def test_error_send(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
 
     class ErrorSend(DataFrameShuffleRun):
-        async def send(self, *args: Any, **kwargs: Any) -> None:
+        async def send(self, *args: Any, **kwargs: Any) -> OKMessage | ErrorMessage:
             raise RuntimeError("Error during send")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
@@ -1943,8 +1944,9 @@ async def test_error_send(tmp_path, loop_in_thread):
 
 
 @pytest.mark.skipif(not pa, reason="Requires PyArrow")
+@pytest.mark.parametrize("Error", [P2PConsistencyError, ValueError])
 @gen_test()
-async def test_error_receive(tmp_path, loop_in_thread):
+async def test_error_receive(tmp_path, loop_in_thread, Error):
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -1968,7 +1970,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
 
     class ErrorReceive(DataFrameShuffleRun):
         async def _receive(self, data: list[tuple[int, bytes]]) -> None:
-            raise RuntimeError("Error during receive")
+            raise Error("Error during receive")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
@@ -1992,7 +1994,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         )
         try:
             sB.add_partition(dfs[0], 0)
-            with pytest.raises(RuntimeError, match="Error during receive"):
+            with pytest.raises(Error, match="Error during receive"):
                 await sB.barrier(run_ids=[sB.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
@@ -2004,7 +2006,9 @@ class BlockedShuffleReceiveShuffleWorkerPlugin(ShuffleWorkerPlugin):
         self.in_shuffle_receive = asyncio.Event()
         self.block_shuffle_receive = asyncio.Event()
 
-    async def shuffle_receive(self, *args: Any, **kwargs: Any) -> None:
+    async def shuffle_receive(
+        self, *args: Any, **kwargs: Any
+    ) -> OKMessage | ErrorMessage:
         self.in_shuffle_receive.set()
         await self.block_shuffle_receive.wait()
         return await super().shuffle_receive(*args, **kwargs)
@@ -2136,7 +2140,7 @@ async def test_shuffle_run_consistency(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
 
     # Shuffle run manager can fetch the current run
     assert await run_manager.get_with_run_id(shuffle_id, spec.run_id)
@@ -2162,7 +2166,7 @@ async def test_shuffle_run_consistency(c, s, a):
     new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id == new_shuffle_id
 
-    new_spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    new_spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
 
     # Check invariant that the new run ID is larger than the previous
     assert spec.run_id < new_spec.run_id
@@ -2188,7 +2192,9 @@ async def test_shuffle_run_consistency(c, s, a):
     independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id != independent_shuffle_id
 
-    independent_spec = scheduler_ext.get(independent_shuffle_id, a.worker_address).data
+    independent_spec = scheduler_ext.get(independent_shuffle_id, a.worker_address)[
+        "run_spec"
+    ].data
 
     # Check invariant that the new run ID is larger than the previous
     # for independent shuffles
@@ -2228,7 +2234,7 @@ async def test_fail_fetch_race(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
     await worker_plugin.in_barrier.wait()
     # Pretend that the fail from the scheduler arrives first
     run_manager.fail(shuffle_id, spec.run_id, "error")
