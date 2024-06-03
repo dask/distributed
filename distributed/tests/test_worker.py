@@ -3777,3 +3777,25 @@ async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
             await async_poll_for(lambda: not b.state.tasks, timeout=5)
 
     assert not log.getvalue()
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_suppress_compute_failure_for_cancelled_tasks(c, s, a):
+    with captured_logger("distributed.worker", level=logging.WARNING) as log:
+        in_event = Event()
+        block_event = Event()
+
+        def block_and_raise(in_event, block_event):
+            in_event.set()
+            block_event.wait()
+            return 1 / 0
+
+        x = c.submit(block_and_raise, in_event, block_event, key="x")
+        await in_event.wait()
+        del x
+
+        await wait_for_state("x", "cancelled", a)
+        await block_event.set()
+        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+
+    assert not log.getvalue()
