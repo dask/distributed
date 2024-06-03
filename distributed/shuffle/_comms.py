@@ -9,7 +9,6 @@ from distributed.core import ErrorMessage, OKMessage, clean_exception
 from distributed.metrics import context_meter
 from distributed.shuffle._disk import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.utils import log_errors
 
 
 class CommShardsBuffer(ShardsBuffer):
@@ -67,7 +66,6 @@ class CommShardsBuffer(ShardsBuffer):
         )
         self.send = send
 
-    @log_errors
     async def _process(self, address: str, shards: list[tuple[Any, Any]]) -> None:
         """Send one message off to a neighboring worker"""
         # Consider boosting total_size a bit here to account for duplication
