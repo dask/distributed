@@ -1029,23 +1029,22 @@ class Worker(BaseWorker, ServerNode):
             spilled_memory, spilled_disk = 0, 0
 
         # Send Fine Performance Metrics
-        # Make sure we do not yield the event loop between the moment we parse
-        # self.digests_total_since_heartbeat to send it to the scheduler and the moment
-        # we clear it!
+        # Swap the dictionary to avoid updates while we iterate over it
+        digests_total_since_heartbeat = self.digests_total_since_heartbeat
+        self.digests_total_since_heartbeat = defaultdict(int)
+
         spans_ext: SpansWorkerExtension | None = self.extensions.get("spans")
         if spans_ext:
             # Send metrics with disaggregated span_id
-            spans_ext.collect_digests()
+            spans_ext.collect_digests(digests_total_since_heartbeat)
 
         # Send metrics with squashed span_id
         # Don't cast int metrics to float
         digests: defaultdict[Hashable, float] = defaultdict(int)
-        for k, v in self.digests_total_since_heartbeat.items():
+        for k, v in digests_total_since_heartbeat.items():
             if isinstance(k, tuple) and k[0] in CONTEXTS_WITH_SPAN_ID:
                 k = k[:1] + k[2:]
             digests[k] += v
-
-        self.digests_total_since_heartbeat.clear()
 
         out: dict = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
