@@ -171,14 +171,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def get_or_create(
         self,
-        # FIXME: This should never be ToPickle[ShuffleSpec]
-        spec: ShuffleSpec | ToPickle[ShuffleSpec],
+        spec: ShuffleSpec,
         key: Key,
         worker: str,
     ) -> RunSpecMessage | ErrorMessage:
-        # FIXME: Sometimes, this doesn't actually get pickled
-        if isinstance(spec, ToPickle):
-            spec = spec.data
         try:
             run_spec = self._get(spec.id, worker)
         except P2PConsistencyError as e:

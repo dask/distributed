@@ -186,7 +186,6 @@ class _ShuffleRunManager:
         spec: ShuffleSpec | None = None,
         key: Key | None = None,
     ) -> ShuffleRunSpec:
-        # FIXME: This should never be ToPickle[ShuffleRunSpec]
         if spec is None:
             response = await self._plugin.worker.scheduler.shuffle_get(
                 id=shuffle_id,
@@ -205,10 +204,7 @@ class _ShuffleRunManager:
             assert exc
             raise exc.with_traceback(tb)
         assert status == "OK"
-        run_spec = response["run_spec"]
-        if isinstance(run_spec, ToPickle):
-            run_spec = run_spec.data
-        return run_spec
+        return response["run_spec"]
 
     @overload
     async def _refresh(
