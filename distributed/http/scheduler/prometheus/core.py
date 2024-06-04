@@ -102,6 +102,12 @@ class SchedulerMetricCollector(PrometheusCollector):
                 tasks.add_metric([state], task_counter.get(state, 0.0))
         yield tasks
 
+        yield GaugeMetricFamily(
+            self.build_name("task_groups"),
+            "Number of task groups known by scheduler",
+            value=len(self.server.task_groups),
+        )
+
         time_spent_compute_tasks = CounterMetricFamily(
             self.build_name("tasks_compute"),
             "Total amount of compute time spent in each prefix",
