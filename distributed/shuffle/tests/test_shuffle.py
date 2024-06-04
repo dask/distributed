@@ -535,18 +535,21 @@ async def test_crashed_worker_during_transfer(c, s, a):
 async def test_restarting_does_not_deadlock(c, s):
     """Regression test for https://github.com/dask/distributed/issues/8088"""
     async with Worker(s.address) as a:
+        # Ensure that a holds the input tasks to the shuffle
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-03-01",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        df = await c.persist(df)
+        expected = await c.compute(df)
+
         async with Nanny(s.address) as b:
-            # Ensure that a holds the input tasks to the shuffle
-            with dask.annotate(workers=[a.address]):
-                df = dask.datasets.timeseries(
-                    start="2000-01-01",
-                    end="2000-03-01",
-                    dtypes={"x": float, "y": float},
-                    freq="10 s",
-                )
             with dask.config.set({"dataframe.shuffle.method": "p2p"}):
                 out = df.shuffle("x")
-            fut = c.compute(out.x.size)
+            assert not s.workers[b.worker_address].has_what
+            result = c.compute(out)
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", b.worker_address, 1, s
             )
@@ -560,7 +563,8 @@ async def test_restarting_does_not_deadlock(c, s):
             a.status = Status.running
 
             await async_poll_for(lambda: s.running, timeout=5)
-            await fut
+            result = await result
+            assert dd.assert_eq(result, expected)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -631,19 +635,23 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             await check_scheduler_cleanup(s)
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
-    with dask.annotate(workers=[w1.address, w2.address], allow_other_workers=False):
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-02-01",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            shuffled = df.shuffle("x")
-        fut = c.compute([shuffled, df], sync=True)
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        shuffled = df.shuffle("x")
+    fut = c.compute(
+        [shuffled, df],
+        sync=True,
+        workers=[w1.address, w2.address],
+        allow_other_workers=False,
+    )
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w1)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w2)
     await w3.close()
