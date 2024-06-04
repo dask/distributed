@@ -322,7 +322,7 @@ def split_by_worker(
 
     # (cudf support) Avoid pd.Series
     constructor = df._constructor_sliced
-    worker_for = constructor(worker_for)
+    worker_for = constructor(worker_for)  # type: ignore
     df = df.merge(
         right=worker_for.cat.codes.rename("_worker"),
         left_on=column,
