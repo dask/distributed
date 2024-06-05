@@ -130,6 +130,7 @@ from distributed.shuffle._pickle import unpickle_bytestream
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
+from distributed.utils_comm import DoNotUnpack
 
 if TYPE_CHECKING:
     import numpy as np
@@ -445,9 +446,9 @@ def partial_rechunk(
             rechunk_transfer,
             input_key,
             partial_token,
-            partial_index,
-            partial_new,
-            partial_old,
+            DoNotUnpack(partial_index),
+            DoNotUnpack(partial_new),
+            DoNotUnpack(partial_old),
             disk,
         )
 
