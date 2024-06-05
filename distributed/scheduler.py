@@ -5299,6 +5299,7 @@ class Scheduler(SchedulerState, ServerNode):
             "lost-computed-tasks": recompute_keys,
             "lost-scattered-tasks": lost_keys,
             "stimulus_id": stimulus_id,
+            "safe": safe,  # TODO change this to expected to be clearer
         }
         self.log_event(address, event_msg.copy())
         event_msg["worker"] = address
