@@ -472,6 +472,7 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
     run_spec: ShuffleRunSpec
     participating_workers: set[str]
     _archived_by: str | None = field(default=None, init=False)
+    _failed: bool = False
 
     @property
     def id(self) -> ShuffleId:
