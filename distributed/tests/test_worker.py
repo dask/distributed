@@ -2973,6 +2973,7 @@ async def test_worker_status_sync(s, a):
             "lost-computed-tasks": set(),
             "lost-scattered-tasks": set(),
             "processing-tasks": set(),
+            "safe": True,
             "stimulus_id": "retire-workers",
         },
         {"action": "retired", "stimulus_id": "retire-workers"},
