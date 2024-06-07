@@ -2825,6 +2825,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
+    assert tg.types == tp.types
 
     # It should map down to individual tasks
     tg = s.task_groups[y.name]
@@ -2844,6 +2845,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
+    assert tg.types == tp.types
 
     assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
 
@@ -2872,6 +2874,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
+    assert tg.types == tp.types
 
     del z
     while s.tasks:
@@ -2887,6 +2890,8 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert "compute" in tg.all_durations
 
     assert tg.prefix is tp
+    # all_durations is cumulative
+    assert tg.all_durations == tp.all_durations
     # these must be zero because we remove fully-forgotten task groups
     # from the prefixes
     assert tp.groups == set()
@@ -2896,8 +2901,8 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     with pytest.warns(FutureWarning, match="active_states"):
         assert tp.states == tp.active_states
     assert tp.duration == 0
-    assert tg.all_durations == tp.all_durations
     assert tp.nbytes_total == 0
+    assert tp.types == set()
 
 
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)

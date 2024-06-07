@@ -939,8 +939,9 @@ class TaskCollection:
     #: like ``{"memory": 10, "processing": 3, "released": 4, ...}``
     states: dict[TaskStateState, int]
 
-    #: The result types of this collection
-    types: set[str]
+    _types: defaultdict[str, int]
+
+    __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
         self.name = name
@@ -948,19 +949,27 @@ class TaskCollection:
         self.duration = 0
         self.nbytes_total = 0
         self.states = dict.fromkeys(ALL_TASK_STATES, 0)
-        self.types = set()
+        self._types = defaultdict(int)
+
+    def add(self, other: TaskState) -> None:
+        self.states[other.state] += 1
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         duration = stop - start
         self.duration += duration
         self.all_durations[action] += duration
 
-    def add(self, other: TaskState) -> None:
-        self.states[other.state] += 1
+    def add_type(self, typename: str) -> None:
+        self._types[typename] += 1
 
     def transition(self, old: TaskStateState, new: TaskStateState) -> None:
         self.states[old] -= 1
         self.states[new] += 1
+
+    @property
+    def types(self) -> Set[str]:
+        """The result types of this collection"""
+        return self._types.keys()
 
     def update_nbytes(self, diff: int) -> None:
         self.nbytes_total += diff
@@ -1026,10 +1035,6 @@ class TaskPrefix(TaskCollection):
         super().transition(old, new)
         self.state_counts[new] += 1
 
-    def add(self, other: TaskState) -> None:
-        super().add(other)
-        other.prefix = self
-
     def add_group(self, tg: TaskGroup) -> None:
         self._groups[tg] = None
 
@@ -1038,6 +1043,12 @@ class TaskPrefix(TaskCollection):
         self._groups.pop(tg)
         for state, count in tg.states.items():
             self.states[state] -= count
+        self.duration -= tg.duration
+        self.nbytes_total -= tg.nbytes_total
+        for typename, count in tg._types.items():
+            self._types[typename] -= count
+            if self._types[typename] == 0:
+                del self._types[typename]
 
     @property
     @_deprecated(use_instead="groups")  # type: ignore[misc]
@@ -1088,7 +1099,7 @@ class TaskGroup(TaskCollection):
     #: subsequent tasks until a new worker is chosen.
     last_worker_tasks_left: int
 
-    prefix: TaskPrefix | None
+    prefix: TaskPrefix
 
     #: Earliest time when a task belonging to this group started computing;
     #: 0 if no task has *finished* computing yet
@@ -1112,15 +1123,16 @@ class TaskGroup(TaskCollection):
 
     __slots__ = tuple(__annotations__)
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, prefix: TaskPrefix):
         super().__init__(name)
-        self.prefix = None
         self.dependencies = set()
         self.start = 0.0
         self.stop = 0.0
         self.last_worker = None
         self.last_worker_tasks_left = 0
         self.span_id = None
+        self.prefix = prefix
+        prefix.add_group(self)
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         super().add_duration(action, start, stop)
@@ -1134,9 +1146,15 @@ class TaskGroup(TaskCollection):
 
     def add(self, other: TaskState) -> None:
         super().add(other)
-        assert self.prefix
-        self.prefix.add(other)
         other.group = self
+
+    def add_type(self, typename: str) -> None:
+        super().add_type(typename)
+        self.prefix.add_type(typename)
+
+    def update_nbytes(self, diff: int) -> None:
+        super().update_nbytes(diff)
+        self.prefix.update_nbytes(diff)
 
     def __repr__(self) -> str:
         return (
@@ -1192,9 +1210,6 @@ class TaskState:
     #: function, followed by a hash of the function and arguments, like
     #: ``'inc-ab31c010444977004d656610d2d421ec'``.
     key: Key
-
-    #: The broad class of tasks to which this task belongs like "inc" or "read_csv"
-    prefix: TaskPrefix
 
     #: A specification of how to run the task.  The type and meaning of this value is
     #: opaque to the scheduler, as it is only interpreted by the worker to which the
@@ -1370,9 +1385,6 @@ class TaskState:
     #: The group of tasks to which this one belongs
     group: TaskGroup
 
-    #: Same as of group.name
-    group_key: str
-
     #: Metadata related to task
     metadata: dict[str, Any] | None
 
@@ -1414,6 +1426,7 @@ class TaskState:
         key: Key,
         run_spec: T_runspec | None,
         state: TaskStateState,
+        group: TaskGroup,
     ):
         # Most of the attributes below are not initialized since there are not
         # always required for every tasks. Particularly for large graphs, these
@@ -1446,15 +1459,15 @@ class TaskState:
         self.resource_restrictions = None
         self.loose_restrictions = False
         self.actor = False
-        self.prefix = None  # type: ignore
         self.type = None  # type: ignore
-        self.group_key = key_split_group(key)
-        self.group = None  # type: ignore
         self.metadata = None
         self.annotations = None
         self.erred_on = None
         self._rootish = None
         self.run_id = None
+        self.group = group
+        group.add(self)
+        group.prefix.add(self)
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -1493,9 +1506,6 @@ class TaskState:
         if old_nbytes >= 0:
             diff -= old_nbytes
         self.group.update_nbytes(diff)
-        self.prefix.update_nbytes(diff)
-        # self.group.nbytes_total += diff
-        # self.prefix.nbytes_total += diff
         for ws in self.who_has or ():
             ws.nbytes += diff
         self.nbytes = nbytes
@@ -1551,6 +1561,15 @@ class TaskState:
         chain of ~200+ tasks.
         """
         return recursive_to_dict(self, exclude=exclude, members=True)
+
+    @property
+    def prefix(self) -> TaskPrefix:
+        """The broad class of tasks to which this task belongs like "inc" or "read_csv" """
+        return self.group.prefix
+
+    @property
+    def group_key(self) -> str:
+        return self.group.name
 
 
 class Transition(NamedTuple):
@@ -1839,23 +1858,21 @@ class SchedulerState:
         computation: Computation | None = None,
     ) -> TaskState:
         """Create a new task, and associated states"""
-        ts = TaskState(key, spec, state)
-
         prefix_key = key_split(key)
-        tp = self.task_prefixes.get(prefix_key)
-        if tp is None:
-            self.task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
-        ts.prefix = tp
+        group_key = key_split_group(key)
 
-        group_key = ts.group_key
         tg = self.task_groups.get(group_key)
         if tg is None:
-            self.task_groups[group_key] = tg = TaskGroup(group_key)
+            tp = self.task_prefixes.get(prefix_key)
+            if tp is None:
+                self.task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
+
+            self.task_groups[group_key] = tg = TaskGroup(group_key, tp)
+
             if computation:
                 computation.groups.add(tg)
-            tg.prefix = tp
-            tp.add_group(tg)
-        tg.add(ts)
+
+        ts = TaskState(key, spec, state, tg)
 
         self.tasks[key] = ts
 
@@ -3337,7 +3354,7 @@ class SchedulerState:
 
         ts.state = "memory"
         ts.type = typename  # type: ignore
-        ts.group.types.add(typename)  # type: ignore
+        ts.group.add_type(typename)  # type: ignore
 
         cs = self.clients["fire-and-forget"]
         if ts in cs.wants_what:
