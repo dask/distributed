@@ -1024,11 +1024,12 @@ class Server:
                 try:
                     msgs = await comm.read()
                 # If another coroutine has closed the comm, stop handling the stream.
-                except CommClosedError:
+                except CommClosedError as e:
                     closed = True
                     logger.info(
-                        "Connection to %s has been closed.",
+                        "Connection to %s has been closed due to %r.",
                         comm.peer_address,
+                        e,
                     )
                     break
                 if not isinstance(msgs, (tuple, list)):
