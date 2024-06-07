@@ -1146,11 +1146,16 @@ class TaskGroup(TaskCollection):
 
     def add(self, other: TaskState) -> None:
         super().add(other)
+        self.prefix.add(other)
         other.group = self
 
     def add_type(self, typename: str) -> None:
         super().add_type(typename)
         self.prefix.add_type(typename)
+
+    def transition(self, old: TaskStateState, new: TaskStateState) -> None:
+        super().transition(old, new)
+        self.prefix.transition(old, new)
 
     def update_nbytes(self, diff: int) -> None:
         super().update_nbytes(diff)
@@ -1467,7 +1472,6 @@ class TaskState:
         self.run_id = None
         self.group = group
         group.add(self)
-        group.prefix.add(self)
         TaskState._instances.add(self)
 
     def __hash__(self) -> int:
@@ -1488,7 +1492,6 @@ class TaskState:
     @state.setter
     def state(self, value: TaskStateState) -> None:
         self.group.transition(self._state, value)
-        self.prefix.transition(self._state, value)
         self._state = value
 
     def add_dependency(self, other: TaskState) -> None:
