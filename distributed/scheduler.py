@@ -7843,7 +7843,7 @@ class Scheduler(SchedulerState, ServerNode):
         state = {}
 
         for tp in self.task_prefixes.values():
-            active_states = tp.active_states
+            states = tp.states
             ss: list[TaskStateState] = [
                 "memory",
                 "erred",
@@ -7851,13 +7851,13 @@ class Scheduler(SchedulerState, ServerNode):
                 "processing",
                 "waiting",
             ]
-            if any(active_states.get(s) for s in ss):
+            if any(states.get(s) for s in ss):
                 state[tp.name] = {
-                    "memory": active_states["memory"],
-                    "erred": active_states["erred"],
-                    "released": active_states["released"],
-                    "processing": active_states["processing"],
-                    "waiting": active_states["waiting"],
+                    "memory": states["memory"],
+                    "erred": states["erred"],
+                    "released": states["released"],
+                    "processing": states["processing"],
+                    "waiting": states["waiting"],
                 }
 
         return state
