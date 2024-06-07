@@ -926,12 +926,6 @@ class TaskCollection:
     #: The name of a collection of tasks.
     name: str
 
-    #: The total amount of time spent on all tasks belonging to this collection
-    duration: float
-
-    #: Cumulative duration of all completed actions of tasks belonging to this collection, by action
-    all_durations: defaultdict[str, float]
-
     #: The total number of bytes that tasks belonging to this collection have produced
     nbytes_total: int
 
@@ -939,14 +933,18 @@ class TaskCollection:
     #: like ``{"memory": 10, "processing": 3, "released": 4, ...}``
     states: dict[TaskStateState, int]
 
+    _all_durations_us: defaultdict[str, int]
+
+    _duration_us: int
+
     _types: defaultdict[str, int]
 
     __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
         self.name = name
-        self.all_durations = defaultdict(float)
-        self.duration = 0
+        self._all_durations_us = defaultdict(int)
+        self._duration_us = 0
         self.nbytes_total = 0
         self.states = dict.fromkeys(ALL_TASK_STATES, 0)
         self._types = defaultdict(int)
@@ -955,12 +953,25 @@ class TaskCollection:
         self.states[other.state] += 1
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
-        duration = stop - start
-        self.duration += duration
-        self.all_durations[action] += duration
+        duration_us = self._calculate_duration_us(start, stop)
+        self._duration_us += duration_us
+        self._all_durations_us[action] += duration_us
 
     def add_type(self, typename: str) -> None:
         self._types[typename] += 1
+
+    @property
+    def all_durations(self) -> dict[str, float]:
+        """Cumulative duration of all completed actions of tasks belonging to this collection, by action"""
+        return {
+            action: duration_us / 1e6
+            for action, duration_us in self._all_durations_us.items()
+        }
+
+    @property
+    def duration(self) -> float:
+        """The total amount of time spent on all tasks belonging to this collection"""
+        return self._duration_us / 1e6
 
     def transition(self, old: TaskStateState, new: TaskStateState) -> None:
         self.states[old] -= 1
@@ -973,6 +984,10 @@ class TaskCollection:
 
     def update_nbytes(self, diff: int) -> None:
         self.nbytes_total += diff
+
+    @staticmethod
+    def _calculate_duration_us(start: float, stop: float) -> int:
+        return max(round((stop - start) * 1e6), 0)
 
 
 class TaskPrefix(TaskCollection):
@@ -1023,13 +1038,13 @@ class TaskPrefix(TaskCollection):
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
         super().add_duration(action, start, stop)
-        duration = stop - start
+        duration_s = self._calculate_duration_us(start, stop) / 1e6
         if action == "compute":
             old = self.duration_average
             if old < 0:
-                self.duration_average = duration
+                self.duration_average = duration_s
             else:
-                self.duration_average = 0.5 * duration + 0.5 * old
+                self.duration_average = 0.5 * duration_s + 0.5 * old
 
     def transition(self, old: TaskStateState, new: TaskStateState) -> None:
         super().transition(old, new)
@@ -1043,7 +1058,7 @@ class TaskPrefix(TaskCollection):
         self._groups.pop(tg)
         for state, count in tg.states.items():
             self.states[state] -= count
-        self.duration -= tg.duration
+        self._duration_us -= tg._duration_us
         self.nbytes_total -= tg.nbytes_total
         for typename, count in tg._types.items():
             self._types[typename] -= count
@@ -1141,7 +1156,6 @@ class TaskGroup(TaskCollection):
                 self.stop = stop
             if self.start == 0.0 or self.start > start:
                 self.start = start
-        assert self.prefix is not None
         self.prefix.add_duration(action, start, stop)
 
     def add(self, other: TaskState) -> None:
