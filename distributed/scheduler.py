@@ -961,12 +961,15 @@ class TaskCollection:
         self._types[typename] += 1
 
     @property
-    def all_durations(self) -> dict[str, float]:
+    def all_durations(self) -> defaultdict[str, float]:
         """Cumulative duration of all completed actions of tasks belonging to this collection, by action"""
-        return {
-            action: duration_us / 1e6
-            for action, duration_us in self._all_durations_us.items()
-        }
+        return defaultdict(
+            float,
+            {
+                action: duration_us / 1e6
+                for action, duration_us in self._all_durations_us.items()
+            },
+        )
 
     @property
     def duration(self) -> float:
