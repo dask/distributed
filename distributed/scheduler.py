@@ -57,6 +57,7 @@ from dask.base import TokenizationError, normalize_token, tokenize
 from dask.core import get_deps, iskey, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
+    _deprecated,
     ensure_dict,
     format_bytes,
     format_time,
@@ -921,9 +922,54 @@ class Computation:
         )
 
 
-class TaskPrefix:
-    """Collection tracking all tasks within a group
+class TaskCollection:
+    #: The name of a collection of tasks.
+    name: str
 
+    #: The total amount of time spent on all tasks belonging to this collection
+    duration: float
+
+    #: Cumulative duration of all completed actions of tasks belonging to this collection, by action
+    all_durations: defaultdict[str, float]
+
+    #: The total number of bytes that tasks belonging to this collection have produced
+    nbytes_total: int
+
+    #: The number of tasks belonging to this collection in each state,
+    #: like ``{"memory": 10, "processing": 3, "released": 4, ...}``
+    states: dict[TaskStateState, int]
+
+    #: The result types of this collection
+    types: set[str]
+
+    def __init__(self, name: str):
+        self.name = name
+        self.all_durations = defaultdict(float)
+        self.duration = 0
+        self.nbytes_total = 0
+        self.states = dict.fromkeys(ALL_TASK_STATES, 0)
+        self.types = set()
+
+    def add_duration(self, action: str, start: float, stop: float) -> None:
+        duration = stop - start
+        self.duration += duration
+        self.all_durations[action] += duration
+
+    def add(self, other: TaskState) -> None:
+        self.states[other.state] += 1
+
+    def transition(self, old: TaskStateState, new: TaskStateState) -> None:
+        self.states[old] -= 1
+        self.states[new] += 1
+
+    def update_nbytes(self, diff: int) -> None:
+        self.nbytes_total += diff
+
+
+class TaskPrefix(TaskCollection):
+    """Collection tracking all tasks within a prefix
+
+    # FIXME: This comment belongs to the TaskGroup
     Keys often have a structure like ``("x-123", 0)``
     A group takes the first section, like ``"x"``
 
@@ -932,35 +978,25 @@ class TaskPrefix:
     TaskGroup
     """
 
-    #: The name of a group of tasks.
-    #: For a task like ``("x-123", 0)`` this is the text ``"x"``
-    name: str
-
     #: An exponentially weighted moving average duration of all tasks with this prefix
     duration_average: float
 
     #: Numbers of times a task was marked as suspicious with this prefix
     suspicious: int
 
-    #: Store timings for each prefix-action
-    all_durations: defaultdict[str, float]
-
     #: This measures the maximum recorded live execution time and can be used to
     #: detect outliers
     max_exec_time: float
 
-    #: Task groups associated to this prefix
-    groups: list[TaskGroup]
-
     #: Accumulate count of number of tasks in each state
     state_counts: defaultdict[TaskStateState, int]
+
+    _groups: dict[TaskGroup, None]
 
     __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
-        self.name = name
-        self.groups = []
-        self.all_durations = defaultdict(float)
+        super().__init__(name)
         self.state_counts = defaultdict(int)
         task_durations = dask.config.get("distributed.scheduler.default-task-durations")
         if self.name in task_durations:
@@ -969,6 +1005,7 @@ class TaskPrefix:
             self.duration_average = -1
         self.max_exec_time = -1
         self.suspicious = 0
+        self._groups = {}
 
     def add_exec_time(self, duration: float) -> None:
         self.max_exec_time = max(duration, self.max_exec_time)
@@ -976,8 +1013,8 @@ class TaskPrefix:
             self.duration_average = -1
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
+        super().add_duration(action, start, stop)
         duration = stop - start
-        self.all_durations[action] += duration
         if action == "compute":
             old = self.duration_average
             if old < 0:
@@ -985,24 +1022,37 @@ class TaskPrefix:
             else:
                 self.duration_average = 0.5 * duration + 0.5 * old
 
-    @property
-    def states(self) -> dict[TaskStateState, int]:
-        """The number of tasks in each state,
-        like ``{"memory": 10, "processing": 3, "released": 4, ...}``
-        """
-        return merge_with(sum, [tg.states for tg in self.groups])
+    def transition(self, old: TaskStateState, new: TaskStateState) -> None:
+        super().transition(old, new)
+        self.state_counts[new] += 1
+
+    def add(self, other: TaskState) -> None:
+        super().add(other)
+        other.prefix = self
+
+    def add_group(self, tg: TaskGroup) -> None:
+        self._groups[tg] = None
+
+    def remove_group(self, tg: TaskGroup) -> None:
+        # This is important, we need to adjust the stats
+        self._groups.pop(tg)
+        for state, count in tg.states.items():
+            self.states[state] -= count
 
     @property
-    def active(self) -> list[TaskGroup]:
-        return [
-            tg
-            for tg in self.groups
-            if any(k != "forgotten" and v != 0 for k, v in tg.states.items())
-        ]
+    @_deprecated(use_instead="groups")  # type: ignore[misc]
+    def active(self) -> Set[TaskGroup]:
+        return self.groups
 
     @property
+    def groups(self) -> Set[TaskGroup]:
+        """Insertion-sorted set-like of groups associated to this prefix"""
+        return self._groups.keys()
+
+    @property
+    @_deprecated(use_instead="states")  # type: ignore[misc]
     def active_states(self) -> dict[TaskStateState, int]:
-        return merge_with(sum, [tg.states for tg in self.active])
+        return self.states
 
     def __repr__(self) -> str:
         return (
@@ -1015,23 +1065,8 @@ class TaskPrefix:
             + ">"
         )
 
-    @property
-    def nbytes_total(self) -> int:
-        return sum(tg.nbytes_total for tg in self.groups)
 
-    def __len__(self) -> int:
-        return sum(map(len, self.groups))
-
-    @property
-    def duration(self) -> float:
-        return sum(tg.duration for tg in self.groups)
-
-    @property
-    def types(self) -> set[str]:
-        return {typ for tg in self.groups for typ in tg.types}
-
-
-class TaskGroup:
+class TaskGroup(TaskCollection):
     """Collection tracking all tasks within a group
 
     Keys often have a structure like ``("x-123", 0)``
@@ -1042,25 +1077,8 @@ class TaskGroup:
     TaskPrefix
     """
 
-    #: The name of a group of tasks.
-    #: For a task like ``("x-123", 0)`` this is the text ``"x-123"``
-    name: str
-
-    #: The number of tasks in each state,
-    #: like ``{"memory": 10, "processing": 3, "released": 4, ...}``
-    states: dict[TaskStateState, int]
-
     #: The other TaskGroups on which this one depends
     dependencies: set[TaskGroup]
-
-    #: The total number of bytes that this task group has produced
-    nbytes_total: int
-
-    #: The total amount of time spent on all tasks in this TaskGroup
-    duration: float
-
-    #: The result types of this TaskGroup
-    types: set[str]
 
     #: The worker most recently assigned a task from this group, or None when the group
     #: is not identified to be root-like by `SchedulerState.decide_worker`.
@@ -1085,9 +1103,6 @@ class TaskGroup:
     #: 0 if no task has finished computing yet
     stop: float
 
-    #: Cumulative duration of all completed actions, by action
-    all_durations: defaultdict[str, float]
-
     #: Span ID (see ``distributed.spans``).
     #: Matches ``distributed.worker_state_machine.TaskState.span_id``.
     #: It is possible to end up in situation where different tasks of the same TaskGroup
@@ -1098,24 +1113,17 @@ class TaskGroup:
     __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
-        self.name = name
+        super().__init__(name)
         self.prefix = None
-        self.states = dict.fromkeys(ALL_TASK_STATES, 0)
         self.dependencies = set()
-        self.nbytes_total = 0
-        self.duration = 0
-        self.types = set()
         self.start = 0.0
         self.stop = 0.0
-        self.all_durations = defaultdict(float)
         self.last_worker = None
         self.last_worker_tasks_left = 0
         self.span_id = None
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
-        duration = stop - start
-        self.duration += duration
-        self.all_durations[action] += duration
+        super().add_duration(action, start, stop)
         if action == "compute":
             if self.stop < stop:
                 self.stop = stop
@@ -1125,7 +1133,9 @@ class TaskGroup:
         self.prefix.add_duration(action, start, stop)
 
     def add(self, other: TaskState) -> None:
-        self.states[other.state] += 1
+        super().add(other)
+        assert self.prefix
+        self.prefix.add(other)
         other.group = self
 
     def __repr__(self) -> str:
@@ -1464,10 +1474,9 @@ class TaskState:
 
     @state.setter
     def state(self, value: TaskStateState) -> None:
-        self.group.states[self._state] -= 1
-        self.group.states[value] += 1
+        self.group.transition(self._state, value)
+        self.prefix.transition(self._state, value)
         self._state = value
-        self.prefix.state_counts[value] += 1
 
     def add_dependency(self, other: TaskState) -> None:
         """Add another task as a dependency of this task"""
@@ -1483,7 +1492,10 @@ class TaskState:
         old_nbytes = self.nbytes
         if old_nbytes >= 0:
             diff -= old_nbytes
-        self.group.nbytes_total += diff
+        self.group.update_nbytes(diff)
+        self.prefix.update_nbytes(diff)
+        # self.group.nbytes_total += diff
+        # self.prefix.nbytes_total += diff
         for ws in self.who_has or ():
             ws.nbytes += diff
         self.nbytes = nbytes
@@ -1842,7 +1854,7 @@ class SchedulerState:
             if computation:
                 computation.groups.add(tg)
             tg.prefix = tp
-            tp.groups.append(tg)
+            tp.add_group(tg)
         tg.add(ts)
 
         self.tasks[key] = ts
@@ -2031,7 +2043,7 @@ class SchedulerState:
             if ts.state == "forgotten" and tg.name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 if all(v == 0 or k == "forgotten" for k, v in tg.states.items()):
-                    ts.prefix.groups.remove(tg)
+                    ts.prefix.remove_group(tg)
                     del self.task_groups[tg.name]
 
             return recommendations, client_msgs, worker_msgs
