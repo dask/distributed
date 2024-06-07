@@ -923,6 +923,14 @@ class Computation:
 
 
 class TaskCollection:
+    """Abstract collection tracking all tasks
+
+    See Also
+    --------
+    TaskGroup
+    TaskPrefix
+    """
+
     #: The name of a collection of tasks.
     name: str
 
@@ -995,10 +1003,6 @@ class TaskCollection:
 
 class TaskPrefix(TaskCollection):
     """Collection tracking all tasks within a prefix
-
-    # FIXME: This comment belongs to the TaskGroup
-    Keys often have a structure like ``("x-123", 0)``
-    A group takes the first section, like ``"x"``
 
     See Also
     --------
@@ -1097,9 +1101,6 @@ class TaskPrefix(TaskCollection):
 
 class TaskGroup(TaskCollection):
     """Collection tracking all tasks within a group
-
-    Keys often have a structure like ``("x-123", 0)``
-    A group takes the first section, like ``"x-123"``
 
     See also
     --------
