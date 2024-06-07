@@ -2815,6 +2815,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
 
     assert tg.prefix is tp
     assert tp.groups == [tg]
+    assert tp.groups == tp.active
     # these must be true since in this simple case there is a 1to1 mapping
     # between prefix and group
     assert tg.states == tp.states
@@ -2831,6 +2832,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     tp = s.task_prefixes["add"]
     assert tg.prefix is tp
     assert tp.groups == [tg]
+    assert tp.groups == tp.active
     # these must be true since in this simple case there is a 1to1 mapping
     # between prefix and group
     assert tg.states == tp.states
@@ -2878,6 +2880,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     # these must be zero because we remove fully-forgotten task groups
     # from the prefixes
     assert tp.groups == []
+    assert tp.groups == tp.active
     assert all(count == 0 for count in tp.states.values())
     assert tp.states == tp.active_states
     assert tp.duration == 0
