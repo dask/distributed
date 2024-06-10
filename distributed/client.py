@@ -3152,10 +3152,9 @@ class Client(SyncMethodMixin):
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
             # Circular import
-            from distributed.protocol import serialize
-            from distributed.protocol.serialize import ToPickle
+            from distributed.protocol.serialize import ToPickle, serialize_and_split
 
-            header, frames = serialize(ToPickle(dsk), on_error="raise")
+            header, frames = serialize_and_split(ToPickle(dsk), on_error="raise")
 
             pickled_size = sum(map(nbytes, [header] + frames))
             if pickled_size > parse_bytes(
