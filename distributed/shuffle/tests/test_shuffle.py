@@ -435,7 +435,34 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.events["p2p"]) == 1
 
+    await c.close()
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b, closed=True)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 1},
+)
+async def test_restarting_does_not_log_p2p_failed(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = df.shuffle("x")
+    out = c.compute(out.x.size)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
+    await b.close()
+
+    await out
+    assert not s.events["p2p"]
     await c.close()
     await check_worker_cleanup(a)
     await check_worker_cleanup(b, closed=True)
@@ -806,6 +833,7 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.events["p2p"]) == 1
 
     alive_shuffle.block_inputs_done.set()
 
@@ -968,6 +996,7 @@ async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.events["p2p"]) == 1
 
     await c.close()
     await check_worker_cleanup(a)

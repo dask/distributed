@@ -410,8 +410,31 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         **kwargs: Any,
     ) -> None:
         """Clean up scheduler and worker state once a shuffle becomes inactive."""
-        if finish not in ("released", "forgotten"):
+        if finish not in ("released", "erred", "forgotten"):
             return
+
+        if finish == "erred":
+            ts = self.scheduler.tasks[key]
+            for active_shuffle in self.active_shuffles.values():
+                if active_shuffle._failed:
+                    continue
+                barrier = self.scheduler.tasks[barrier_key(active_shuffle.id)]
+                if (
+                    ts == barrier
+                    or ts in barrier.dependents
+                    or ts in barrier.dependencies
+                ):
+                    active_shuffle._failed = True
+                    self.scheduler.log_event(
+                        "p2p",
+                        {
+                            "action": "p2p-failed",
+                            "shuffle": active_shuffle.id,
+                            "stimulus": stimulus_id,
+                        },
+                    )
+                    return
+
         shuffle_id = id_from_key(key)
         if not shuffle_id:
             return
