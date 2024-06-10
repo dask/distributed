@@ -2794,7 +2794,7 @@ async def test_no_dangling_asyncio_tasks():
 
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
-async def test_task_groups(c, s, a, b, no_time_resync):
+async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     start = time()
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
@@ -2808,20 +2808,44 @@ async def test_task_groups(c, s, a, b, no_time_resync):
     repr(tp)
     assert tg.states["memory"] == 0
     assert tg.states["released"] == 5
-    assert tp.states["memory"] == 0
-    assert tp.states["released"] == 5
-    assert tp.groups == [tg]
-    assert tg.prefix is tp
-    # these must be true since in this simple case there is a 1to1 mapping
-    # between prefix and group
-    assert tg.duration == tp.duration
-    assert tg.nbytes_total == tp.nbytes_total
-    # It should map down to individual tasks
+    assert sum(tg.states.values()) == 5
     assert tg.nbytes_total == sum(
         ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg
     )
+
+    assert tg.prefix is tp
+    assert tp.groups == {tg}
+    with pytest.warns(FutureWarning, match="active"):
+        assert tp.groups == tp.active
+    # these must be true since in this simple case there is a 1to1 mapping
+    # between prefix and group
+    assert tg.states == tp.states
+    with pytest.warns(FutureWarning, match="active_states"):
+        assert tp.states == tp.active_states
+    assert tg.duration == tp.duration
+    assert tg.all_durations == tp.all_durations
+    assert tg.nbytes_total == tp.nbytes_total
+    assert tg.types == tp.types
+
+    # It should map down to individual tasks
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
+    assert sum(tg.states.values()) == 5
+
+    tp = s.task_prefixes["add"]
+    assert tg.prefix is tp
+    assert tp.groups == {tg}
+    with pytest.warns(FutureWarning, match="active"):
+        assert tp.groups == tp.active
+    # these must be true since in this simple case there is a 1to1 mapping
+    # between prefix and group
+    assert tg.states == tp.states
+    with pytest.warns(FutureWarning, match="active_states"):
+        assert tp.states == tp.active_states
+    assert tg.duration == tp.duration
+    assert tg.all_durations == tp.all_durations
+    assert tg.nbytes_total == tp.nbytes_total
+    assert tg.types == tp.types
 
     assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
 
@@ -2830,16 +2854,55 @@ async def test_task_groups(c, s, a, b, no_time_resync):
     assert "array" in str(tg.types)
     assert "array" in str(tp.types)
 
+    z = y[:20].persist(optimize_graph=False)
+    z = await z
     del y
 
+    while len(s.tasks) > 3:
+        await asyncio.sleep(0.01)
+
+    assert tg.prefix is tp
+    assert tp.groups == {tg}
+    with pytest.warns(FutureWarning, match="active"):
+        assert tp.groups == tp.active
+    assert tg.states["forgotten"] == 4
+    assert tg.states["released"] == 1
+    assert sum(tg.states.values()) == 5
+    assert tg.states == tp.states
+    with pytest.warns(FutureWarning, match="active_states"):
+        assert tp.states == tp.active_states
+    assert tg.duration == tp.duration
+    assert tg.all_durations == tp.all_durations
+    assert tg.nbytes_total == tp.nbytes_total
+    assert tg.types == tp.types
+
+    del z
     while s.tasks:
         await asyncio.sleep(0.01)
+
+    assert tg.states["forgotten"] == 5
+    assert sum(tg.states.values()) == 5
 
     assert tg.states["forgotten"] == 5
     assert tg.name not in s.task_groups
     assert tg.start > start
     assert tg.stop < stop
     assert "compute" in tg.all_durations
+
+    assert tg.prefix is tp
+    # all_durations is cumulative
+    assert tg.all_durations == tp.all_durations
+    # these must be zero because we remove fully-forgotten task groups
+    # from the prefixes
+    assert tp.groups == set()
+    with pytest.warns(FutureWarning, match="active"):
+        assert tp.groups == tp.active
+    assert all(count == 0 for count in tp.states.values())
+    with pytest.warns(FutureWarning, match="active_states"):
+        assert tp.states == tp.active_states
+    assert tp.duration == 0
+    assert tp.nbytes_total == 0
+    assert tp.types == set()
 
 
 @gen_cluster(client=True, nthreads=[("", 2)], Worker=NoSchedulerDelayWorker)
