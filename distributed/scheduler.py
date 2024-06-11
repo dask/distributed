@@ -2501,7 +2501,7 @@ class SchedulerState:
             assert not ts.waiting_on
             assert not ts.processing_on
             if safe:
-                assert not ts.waiters
+                raise RuntimeError()
 
         if ts.actor:
             for ws in ts.who_has or ():
