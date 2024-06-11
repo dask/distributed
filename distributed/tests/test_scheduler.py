@@ -845,6 +845,13 @@ async def test_remove_worker_from_scheduler(c, s, a, b):
     await c.gather(futs)
 
 
+@gen_cluster(client=True)
+async def test_remove_worker_from_scheduler_warns_on_safe(c, s, a, b):
+    with pytest.warns(FutureWarning, match="expected"):
+        await s.remove_worker(address=a.address, safe=True, stimulus_id="test")
+    assert a.address not in s.workers
+
+
 @gen_cluster()
 async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert a.address in s.stream_comms
