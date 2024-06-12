@@ -58,6 +58,7 @@ from dask.core import get_deps, iskey, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
+    _deprecated_kwarg,
     ensure_dict,
     format_bytes,
     format_time,
@@ -2492,16 +2493,12 @@ class SchedulerState:
 
         return recommendations, client_msgs, {}
 
-    def _transition_memory_released(
-        self, key: Key, stimulus_id: str, *, safe: bool = False
-    ) -> RecsMsgs:
+    def _transition_memory_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
         if self.validate:
             assert not ts.waiting_on
             assert not ts.processing_on
-            if safe:
-                assert not ts.waiters
 
         if ts.actor:
             for ws in ts.who_has or ():
@@ -5230,9 +5227,15 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event(worker, {"action": "close-worker"})
         self.worker_send(worker, {"op": "close", "reason": "scheduler-close-worker"})
 
+    @_deprecated_kwarg("safe", "expected")
     @log_errors
     async def remove_worker(
-        self, address: str, *, stimulus_id: str, safe: bool = False, close: bool = True
+        self,
+        address: str,
+        *,
+        stimulus_id: str,
+        expected: bool = False,
+        close: bool = True,
     ) -> Literal["OK", "already-removed"]:
         """Remove worker from cluster.
 
@@ -5290,7 +5293,7 @@ class Scheduler(SchedulerState, ServerNode):
         for ts in list(ws.processing):
             k = ts.key
             recommendations[k] = "released"
-            if not safe:
+            if not expected:
                 ts.suspicious += 1
                 ts.prefix.suspicious += 1
                 if ts.suspicious > self.allowed_failures:
@@ -5349,7 +5352,7 @@ class Scheduler(SchedulerState, ServerNode):
             "lost-computed-tasks": recompute_keys,
             "lost-scattered-tasks": lost_keys,
             "stimulus_id": stimulus_id,
-            "safe": safe,  # TODO change this to expected to be clearer
+            "expected": expected,
         }
         self.log_event(address, event_msg.copy())
         event_msg["worker"] = address
@@ -7501,7 +7504,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         if remove:
             await self.remove_worker(
-                ws.address, safe=True, close=close, stimulus_id=stimulus_id
+                ws.address, expected=True, close=close, stimulus_id=stimulus_id
             )
         elif close:
             self.close_worker(ws.address)
