@@ -12,6 +12,7 @@ np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
 
 from concurrent.futures import ThreadPoolExecutor
+from itertools import product
 
 from tornado.ioloop import IOLoop
 
@@ -19,6 +20,8 @@ import dask
 from dask.array.core import concatenate3
 from dask.array.rechunk import normalize_chunks, rechunk
 from dask.array.utils import assert_eq
+from dask.base import flatten
+from dask.utils import key_split
 
 from distributed import Event
 from distributed.protocol.utils_test import get_host_array
@@ -31,7 +34,7 @@ from distributed.shuffle._rechunk import (
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
-from distributed.utils_test import gen_cluster, gen_test, raises_with_cause
+from distributed.utils_test import async_poll_for, gen_cluster, gen_test
 
 NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 
@@ -68,9 +71,11 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
             directory=directory / name,
             id=ShuffleId(name),
             run_id=next(AbstractShuffleTestPool._shuffle_run_id_iterator),
+            span_id=None,
             local_address=name,
             executor=self._executor,
             rpc=self,
+            digest_metric=lambda name, value: None,
             scheduler=self,
             memory_limiter_disk=ResourceLimiter(10000000),
             memory_limiter_comms=ResourceLimiter(10000000),
@@ -79,9 +84,6 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
         )
         self.shuffles[name] = s
         return s
-
-
-from itertools import product
 
 
 @pytest.mark.parametrize("n_workers", [1, 10])
@@ -202,6 +204,62 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     assert np.all(await c.compute(x2) == a)
 
 
+@gen_cluster(client=True)
+async def test_cull_p2p_rechunk_independent_partitions(c, s, *ws):
+    a = np.random.default_rng().uniform(0, 1, 1000).reshape((10, 10, 10))
+    x = da.from_array(a, chunks=(1, 5, 1))
+    new = (5, 1, -1)
+    rechunked = rechunk(x, chunks=new, method="p2p")
+    (dsk,) = dask.optimize(rechunked)
+    culled = rechunked[:5, :2]
+    (dsk_culled,) = dask.optimize(culled)
+
+    # The culled graph requires only 1/2 of the input tasks
+    n_inputs = len(
+        [1 for key in dsk.dask.get_all_dependencies() if key[0].startswith("array-")]
+    )
+    n_culled_inputs = len(
+        [
+            1
+            for key in dsk_culled.dask.get_all_dependencies()
+            if key[0].startswith("array-")
+        ]
+    )
+    assert n_culled_inputs == n_inputs / 4
+    # The culled graph should also have less than 1/4 the tasks
+    assert len(dsk_culled.dask) < len(dsk.dask) / 4
+
+    assert np.all(await c.compute(culled) == a[:5, :2])
+
+
+@gen_cluster(client=True)
+async def test_cull_p2p_rechunk_overlapping_partitions(c, s, *ws):
+    a = np.random.default_rng().uniform(0, 1, 500).reshape((10, 10, 5))
+    x = da.from_array(a, chunks=(1, 5, 1))
+    new = (5, 3, -1)
+    rechunked = rechunk(x, chunks=new, method="p2p")
+    (dsk,) = dask.optimize(rechunked)
+    culled = rechunked[:5, :2]
+    (dsk_culled,) = dask.optimize(culled)
+
+    # The culled graph requires only 1/4 of the input tasks
+    n_inputs = len(
+        [1 for key in dsk.dask.get_all_dependencies() if key[0].startswith("array-")]
+    )
+    n_culled_inputs = len(
+        [
+            1
+            for key in dsk_culled.dask.get_all_dependencies()
+            if key[0].startswith("array-")
+        ]
+    )
+    assert n_culled_inputs == n_inputs / 4
+    # The culled graph should also have less than 1/4 the tasks
+    assert len(dsk_culled.dask) < len(dsk.dask) / 4
+
+    assert np.all(await c.compute(culled) == a[:5, :2])
+
+
 @pytest.mark.parametrize("disk", [True, False])
 @gen_cluster(client=True)
 async def test_rechunk_2d(c, s, *ws, disk):
@@ -232,38 +290,12 @@ async def test_rechunk_4d(c, s, *ws, disk):
     old = ((5, 5),) * 4
     a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
-    new = (
-        (10,),
-        (10,),
-        (10,),
-        (8, 2),
-    )  # This has been altered to return >1 output partition
+    new = ((10,),) * 4
     with dask.config.set({"distributed.p2p.disk": disk}):
         x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     await c.compute(x2)
     assert np.all(await c.compute(x2) == a)
-
-
-@gen_cluster(client=True)
-async def test_rechunk_with_single_output_chunk_raises(c, s, *ws):
-    """See distributed#7816
-
-    See Also
-    --------
-    dask.array.tests.test_rechunk.test_rechunk_4d
-    """
-    old = ((5, 5),) * 4
-    a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
-    x = da.from_array(a, chunks=old)
-    new = ((10,),) * 4
-    x2 = rechunk(x, chunks=new, method="p2p")
-    assert x2.chunks == new
-    # FIXME: distributed#7816
-    with raises_with_cause(
-        RuntimeError, "failed during transfer", RuntimeError, "Barrier task"
-    ):
-        await c.compute(x2)
 
 
 @gen_cluster(client=True)
@@ -772,7 +804,6 @@ async def test_rechunk_empty_chunks(c, s, *ws):
     assert_eq(await c.compute(x), await c.compute(y))
 
 
-@pytest.mark.skip(reason="FIXME: We should avoid P2P in this case")
 @gen_cluster(client=True)
 async def test_rechunk_avoid_needless_chunking(c, s, *ws):
     x = da.ones(16, chunks=2)
@@ -1204,7 +1235,7 @@ async def test_rechunk_in_memory_shards_dont_share_buffer(c, s, a, b):
 
 
 @pytest.mark.parametrize("nworkers", [1, 2, 41, 50])
-def test_worker_for_homogeneous_distribution(nworkers):
+def test_pick_worker_homogeneous_distribution(nworkers):
     old = ((1, 2, 3, 4), (5,) * 6)
     new = ((5, 5), (12, 18))
     workers = [str(i) for i in range(nworkers)]
@@ -1216,3 +1247,69 @@ def test_worker_for_homogeneous_distribution(nworkers):
     assert sum(count.values()) > 0
     assert sum(count.values()) == len(list(spec.output_partitions))
     assert abs(max(count.values()) - min(count.values())) <= 1
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 5,
+    # Future-proof: disable auto-rebalancing
+    config={"distributed.scheduler.active-memory-manager.start": False},
+)
+async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
+    # This rechunk operation can be split into 10 independent shuffles with 4 output
+    # chunks each. This is less than the number of workers, so we are at risk of
+    # choosing the same 4 output workers in each separate shuffle.
+    arr = da.random.random((40, 40), chunks=(4, 4))
+    arr = arr.rechunk((1, -1), method="p2p")
+    # Test that we are, in fact, triggering partial rechunks
+    assert sum(key_split(k) == "shuffle-barrier" for k in arr.__dask_graph__()) == 10
+
+    arr = await c.persist(arr)
+    # Don't count input and intermediate keys that have not been released yet
+    out_keys = set(flatten(arr.__dask_keys__()))
+    nchunks = [len(w.data.keys() & out_keys) for w in workers]
+    # There are 40 output chunks and 5 workers. Expect exactly 8 chunks per worker.
+    assert nchunks == [8, 8, 8, 8, 8]
+
+
+@gen_cluster(client=True, nthreads=[], config={"optimization.fuse.active": False})
+async def test_partial_rechunk_taskgroups(c, s):
+    """Regression test for https://github.com/dask/distributed/issues/8656"""
+    arr = da.random.random(
+        (10, 10, 10),
+        chunks=(
+            (
+                2,
+                2,
+                2,
+                2,
+                2,
+            ),
+        )
+        * 3,
+    )
+    arr = arr.rechunk(
+        (
+            (
+                1,
+                2,
+                2,
+                2,
+                2,
+                1,
+            ),
+        )
+        * 3,
+        method="p2p",
+    )
+
+    _ = c.compute(arr)
+    await async_poll_for(
+        lambda: any(
+            isinstance(task, str) and task.startswith("shuffle-barrier")
+            for task in s.tasks
+        ),
+        timeout=5,
+    )
+    assert len(s.task_groups) < 7

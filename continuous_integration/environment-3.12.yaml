@@ -15,9 +15,11 @@ dependencies:
   - filesystem-spec  # overridden by git tip below
   - gilknocker
   - h5py
-  - ipykernel <6.22.0  # https://github.com/dask/distributed/issues/7688
-  - ipywidgets <8.0.5  # https://github.com/dask/distributed/issues/7688
+  - ipykernel
+  - ipywidgets
   - jinja2
+  - jupyter-server-proxy
+  - jupyterlab
   - locket
   - msgpack-python
   - netcdf4
@@ -44,7 +46,9 @@ dependencies:
   - zstandard
   - pip:
       - git+https://github.com/dask/dask
-      - git+https://github.com/dask/s3fs
+      - git+https://github.com/dask-contrib/dask-expr
       - git+https://github.com/dask/zict
-      - git+https://github.com/fsspec/filesystem_spec
+      # Revert after https://github.com/dask/distributed/issues/8614 is fixed
+      # - git+https://github.com/dask/s3fs
+      # - git+https://github.com/fsspec/filesystem_spec
       - keras

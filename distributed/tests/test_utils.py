@@ -879,7 +879,10 @@ async def test_log_errors():
         pass
 
     # Use the logger of the caller module
-    with captured_logger("test_utils") as caplog:
+    with (
+        captured_logger("test_utils") as caplog,
+        captured_logger("distributed.utils") as caplog2,
+    ):
         # Context manager
         with log_errors():
             pass
@@ -906,6 +909,8 @@ async def test_log_errors():
             return 123
 
         assert _() == 123
+        with pytest.raises(TypeError):
+            _(bad=1)
 
         @log_errors
         def _():
@@ -1001,6 +1006,7 @@ async def test_log_errors():
         "err7",
         "err8",
     ]
+    assert "got an unexpected keyword argument 'bad'" in caplog2.getvalue()
 
 
 @pytest.mark.parametrize("unroll_stack,logger_name", [(0, "test_utils"), (1, "a.b.c")])

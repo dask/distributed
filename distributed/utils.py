@@ -801,7 +801,7 @@ def _getmodulename_with_path(fname: str) -> str:
     except KeyError:
         pass
 
-    for modname, mod in sys.modules.items():
+    for modname, mod in sys.modules.copy().items():
         fname2 = getattr(mod, "__file__", None)
         if fname2:
             _getmodulename_with_path_map[fname2] = modname
@@ -849,7 +849,7 @@ class _LogErrors:
             return
 
         stack = traceback.extract_tb(tb)
-        frame = stack[self.unroll_stack]
+        frame = stack[min(self.unroll_stack, len(stack) - 1)]
         modname = _getmodulename_with_path(frame.filename)
 
         try:
@@ -1841,52 +1841,73 @@ def is_python_shutting_down() -> bool:
 class Deadline:
     """Utility class tracking a deadline and the progress toward it"""
 
-    #: Expiry time of the deadline in seconds since the epoch
+    #: Expiry time of the deadline in seconds since the start of the monotonic timer
     #: or None if the deadline never expires
-    expires_at: float | None
+    expires_at_mono: float | None
     #: Seconds since the epoch when the deadline was created
+    started_at_mono: float
+    #: Seconds since the start of the monotonic timer when the deadline was created
     started_at: float
 
+    __slots__ = tuple(__annotations__)
+
     def __init__(self, expires_at: float | None = None):
-        self.expires_at = expires_at
         self.started_at = time()
+        self.started_at_mono = monotonic()
+        if expires_at is not None:
+            self.expires_at_mono = expires_at - self.started_at + self.started_at_mono
+        else:
+            self.expires_at_mono = None
 
     @classmethod
     def after(cls, duration: float | None = None) -> Deadline:
         """Create a new ``Deadline`` that expires in ``duration`` seconds
-        or never if ``duration`` is None"""
-        started_at = time()
-        expires_at = duration + started_at if duration is not None else duration
-        deadline = cls(expires_at)
-        deadline.started_at = started_at
-        return deadline
+        or never if ``duration`` is None
+        """
+        inst = cls()
+        if duration is not None:
+            inst.expires_at_mono = inst.started_at_mono + duration
+        return inst
+
+    @property
+    def expires_at(self) -> float | None:
+        """Expiry time of the deadline in seconds since the unix epoch
+        or None if the deadline never expires.
+
+        Note that this can change over time if the wall clock is adjusted by the OS.
+        """
+        if (exp := self.expires_at_mono) is None:
+            return None
+        return exp - monotonic() + time()
 
     @property
     def duration(self) -> float | None:
         """Seconds between the creation and expiration time of the deadline
-        if the deadline expires, None otherwise"""
-        if self.expires_at is None:
+        if the deadline expires, None otherwise
+        """
+        if (exp := self.expires_at_mono) is None:
             return None
-        return self.expires_at - self.started_at
+        return exp - self.started_at_mono
 
     @property
     def expires(self) -> bool:
         """Whether the deadline ever expires"""
-        return self.expires_at is not None
+        return self.expires_at_mono is not None
 
     @property
     def elapsed(self) -> float:
         """Seconds that elapsed since the deadline was created"""
-        return time() - self.started_at
+        return monotonic() - self.started_at_mono
 
     @property
     def remaining(self) -> float | None:
         """Seconds remaining until the deadline expires if an expiry time is set,
-        None otherwise"""
-        if self.expires_at is None:
+        None otherwise
+        """
+        if (exp := self.expires_at_mono) is None:
             return None
         else:
-            return max(0, self.expires_at - time())
+            return max(0, exp - monotonic())
 
     @property
     def expired(self) -> bool:

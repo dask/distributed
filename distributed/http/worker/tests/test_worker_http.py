@@ -15,7 +15,13 @@ from distributed.utils_test import (
 )
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)],
+    config={
+        "distributed.admin.system-monitor.gil.enabled": True,
+    },
+)
 async def test_prometheus(c, s, a):
     pytest.importorskip("prometheus_client")
 
@@ -53,7 +59,7 @@ async def test_prometheus(c, s, a):
     except ImportError:
         pass  # pragma: nocover
     else:
-        expected_metrics.add("dask_worker_gil_contention_total")
+        expected_metrics.add("dask_worker_gil_contention_seconds_total")
 
     try:
         import crick  # noqa: F401

@@ -76,7 +76,20 @@ properties:
             description: |
               Shut down the scheduler after this duration if no activity has occurred
 
-              This can be helpful to reduce costs and stop zombie processes from roaming the earth.
+          no-workers-timeout:
+            type:
+            - string
+            - "null"
+            description: |
+              Shut down the scheduler after this duration if there are pending tasks,
+              but no workers that can process them. This can either mean that there are
+              no workers running at all, or that there are idle workers but they've been
+              excluded through worker or resource restrictions.
+
+              In adaptive clusters, this timeout must be set to be safely higher than
+              the time it takes for workers to spin up.
+
+              Works in conjunction with idle-timeout.
 
           work-stealing:
             type: boolean
@@ -1090,6 +1103,12 @@ properties:
         description: |
           Options for logs, event loops, and so on
         properties:
+          large-graph-warning-threshold:
+            type: string
+            description: |
+              Threshold in bytes for when a warning is raised about a large
+              submitted task graph.
+              Default is 10MB.
           tick:
             type: object
             description: |

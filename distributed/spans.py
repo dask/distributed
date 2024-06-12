@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import copy
 import uuid
 import weakref
 from collections import defaultdict
-from collections.abc import Hashable, Iterable, Iterator
+from collections.abc import Hashable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from itertools import islice
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import dask.config
 from dask.typing import Key
@@ -23,6 +24,13 @@ if TYPE_CHECKING:
     from distributed import scheduler as scheduler_module
     from distributed.client import SourceCode
     from distributed.scheduler import TaskGroup, TaskStateState
+
+
+CONTEXTS_WITH_SPAN_ID = ("execute", "p2p")
+
+
+class SpanMetadata(TypedDict):
+    collections: list[dict]
 
 
 @contextmanager
@@ -113,6 +121,7 @@ class Span:
     #: Source code snippets, if it was sent by the client.
     #: We're using a dict without values as an insertion-sorted set.
     _code: dict[tuple[SourceCode, ...], None]
+    _metadata: SpanMetadata | None
 
     _cumulative_worker_metrics: defaultdict[tuple[Hashable, ...], float]
 
@@ -125,6 +134,7 @@ class Span:
     __weakref__: Any
 
     __slots__ = tuple(__annotations__)
+    _metadata_seen: set[int] = set()
 
     def __init__(
         self,
@@ -140,6 +150,7 @@ class Span:
         self.children = []
         self.groups = set()
         self._code = {}
+        self._metadata = None
 
         # Don't cast int metrics to float
         self._cumulative_worker_metrics = defaultdict(int)
@@ -158,6 +169,17 @@ class Span:
             assert out
             return out
         return None
+
+    def add_metadata(self, metadata: SpanMetadata) -> None:
+        """Add metadata to the span, e.g. code snippets"""
+        id_ = id(metadata)
+        if id_ in self._metadata_seen:
+            return
+        self._metadata_seen.add(id_)
+        if self._metadata is None:
+            self._metadata = copy.deepcopy(metadata)
+        else:
+            self._metadata["collections"].extend(metadata["collections"])
 
     @property
     def annotation(self) -> dict[str, tuple[str, ...]] | None:
@@ -239,6 +261,10 @@ class Span:
         return max(out, self.enqueued)
 
     @property
+    def metadata(self) -> SpanMetadata | None:
+        return self._metadata
+
+    @property
     def states(self) -> dict[TaskStateState, int]:
         """The number of tasks currently in each state in this span tree;
         e.g. ``{"memory": 10, "processing": 3, "released": 4, ...}``.
@@ -316,8 +342,10 @@ class Span:
 
         At the moment of writing, all keys are
         ``("execute", <task prefix>, <activity>, <unit>)``
-        but more may be added in the future with a different format; please test for
-        ``k[0] == "execute"``.
+        or
+        ``("p2p", <where>, <activity>, <unit>)``
+        but more may be added in the future with a different format; please test e.g.
+        for ``k[0] == "execute"``.
         """
         out = sum_mappings(
             child._cumulative_worker_metrics for child in self.traverse_spans()
@@ -476,7 +504,10 @@ class SpansSchedulerExtension:
         self.spans_search_by_tag = defaultdict(list)
 
     def observe_tasks(
-        self, tss: Iterable[scheduler_module.TaskState], code: tuple[SourceCode, ...]
+        self,
+        tss: Iterable[scheduler_module.TaskState],
+        code: tuple[SourceCode, ...],
+        span_metadata: SpanMetadata,
     ) -> dict[Key, dict]:
         """Acknowledge the existence of runnable tasks on the scheduler. These may
         either be new tasks, tasks that were previously unrunnable, or tasks that were
@@ -515,6 +546,8 @@ class SpansSchedulerExtension:
 
             if code:
                 span._code[code] = None
+            if span_metadata:
+                span.add_metadata(span_metadata)
 
             # The span may be completely different from the one referenced by the
             # annotation, due to the TaskGroup collision issue explained above.
@@ -622,19 +655,16 @@ class SpansWorkerExtension:
         self.worker = worker
         self.digests_total_since_heartbeat = {}
 
-    def collect_digests(self) -> None:
-        """Make a local copy of Worker.digests_total_since_heartbeat. We can't just
-        parse it directly in heartbeat() as the event loop may be yielded between its
-        call and `self.worker.digests_total_since_heartbeat.clear()`, causing the
-        scheduler to become misaligned with the workers.
-        """
+    def collect_digests(
+        self, digests_total_since_heartbeat: Mapping[Hashable, float]
+    ) -> None:
         # Note: this method may be called spuriously by Worker._register_with_scheduler,
         # but when it does it's guaranteed not to find any metrics
         assert not self.digests_total_since_heartbeat
         self.digests_total_since_heartbeat = {
             k: v
-            for k, v in self.worker.digests_total_since_heartbeat.items()
-            if isinstance(k, tuple) and k[0] == "execute"
+            for k, v in digests_total_since_heartbeat.items()
+            if isinstance(k, tuple) and k[0] in CONTEXTS_WITH_SPAN_ID
         }
 
     def heartbeat(self) -> dict[tuple[Hashable, ...], float]:

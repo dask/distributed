@@ -4,6 +4,7 @@ import asyncio
 import atexit
 import copy
 import inspect
+import itertools
 import json
 import logging
 import os
@@ -31,23 +32,24 @@ from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 
 import dask
-from dask.base import collections_to_dsk, normalize_token, tokenize
+from dask.base import collections_to_dsk, tokenize
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
-from dask.typing import no_default
+from dask.typing import NoDefault, no_default
 from dask.utils import (
     apply,
     ensure_dict,
     format_bytes,
     funcname,
+    parse_bytes,
     parse_timedelta,
     shorten_traceback,
     typename,
 )
 from dask.widgets import get_template
 
-from distributed.core import ErrorMessage, OKMessage
+from distributed.core import OKMessage
 from distributed.protocol.serialize import _is_dumpable
 from distributed.utils import Deadline, wait_for
 
@@ -90,6 +92,7 @@ from distributed.publish import Datasets
 from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
 from distributed.sizeof import sizeof
+from distributed.spans import SpanMetadata
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
     CancelledError,
@@ -209,11 +212,15 @@ class Future(WrappedKey):
 
     _cb_executor = None
     _cb_executor_pid = None
+    _counter = itertools.count()
+    # Make sure this stays unique even across multiple processes or hosts
+    _uid = uuid.uuid4().hex
 
-    def __init__(self, key, client=None, inform=True, state=None):
+    def __init__(self, key, client=None, inform=True, state=None, _id=None):
         self.key = key
         self._cleared = False
         self._client = client
+        self._id = _id or (Future._uid, next(Future._counter))
         self._input_state = state
         self._inform = inform
         self._state = None
@@ -373,7 +380,7 @@ class Future(WrappedKey):
         return self.client.sync(self._exception, callback_timeout=timeout, **kwargs)
 
     def add_done_callback(self, fn):
-        """Call callback on future when callback has finished
+        """Call callback on future when future has finished
 
         The callback ``fn`` should take the future as its only argument.  This
         will be called regardless of if the future completes successfully,
@@ -498,8 +505,16 @@ class Future(WrappedKey):
             except TypeError:  # pragma: no cover
                 pass  # Shutting down, add_callback may be None
 
+    @staticmethod
+    def make_future(key, id):
+        # Can't use kwargs in pickle __reduce__ methods
+        return Future(key=key, _id=id)
+
     def __reduce__(self) -> str | tuple[Any, ...]:
-        return Future, (self.key,)
+        return Future.make_future, (self.key, self._id)
+
+    def __dask_tokenize__(self):
+        return (type(self).__name__, self.key, self._id)
 
     def __del__(self):
         try:
@@ -507,7 +522,7 @@ class Future(WrappedKey):
         except AttributeError:
             # Occasionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
-            if not sys.is_finalizing():
+            if not is_python_shutting_down():
                 raise
         except RuntimeError:  # closed event loop
             pass
@@ -640,18 +655,6 @@ async def done_callback(future, callback):
     while future.status == "pending":
         await future._state.wait()
     callback(future)
-
-
-@partial(normalize_token.register, Future)
-def normalize_future(f):
-    """Returns the key and the type as a list
-
-    Parameters
-    ----------
-    list
-        The key and the type
-    """
-    return [f.key, type(f)]
 
 
 class AllExit(Exception):
@@ -857,8 +860,9 @@ class Client(SyncMethodMixin):
     ):
         if timeout is no_default:
             timeout = dask.config.get("distributed.comm.timeouts.connect")
-        if timeout is not None:
-            timeout = parse_timedelta(timeout, "s")
+        timeout = parse_timedelta(timeout, "s")
+        if timeout is None:
+            raise ValueError("None is an invalid value for global client timeout")
         self._timeout = timeout
 
         self.futures = dict()
@@ -1251,8 +1255,7 @@ class Client(SyncMethodMixin):
 
         if timeout is no_default:
             timeout = self._timeout
-        if timeout is not None:
-            timeout = parse_timedelta(timeout, "s")
+        timeout = parse_timedelta(timeout, "s")
 
         address = self._start_arg
         if self.cluster is not None:
@@ -1454,10 +1457,10 @@ class Client(SyncMethodMixin):
                 f"`n_workers` must be a positive integer. Instead got {n_workers}."
             )
 
-        if self.cluster is None:
-            return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+        if self.cluster and hasattr(self.cluster, "wait_for_workers"):
+            return self.cluster.wait_for_workers(n_workers, timeout)
 
-        return self.cluster.wait_for_workers(n_workers, timeout)
+        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
         # Don't send heartbeat if scheduler comm or cluster are already closed
@@ -1496,8 +1499,7 @@ class Client(SyncMethodMixin):
         await self._close(
             # if we're handling an exception, we assume that it's more
             # important to deliver that exception than shutdown gracefully.
-            fast=exc_type
-            is not None
+            fast=(exc_type is not None)
         )
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -1576,7 +1578,7 @@ class Client(SyncMethodMixin):
 
                 breakout = False
                 for msg in msgs:
-                    logger.debug("Client receives message %s", msg)
+                    logger.debug("Client %s receives message %s", self.id, msg)
 
                     if "status" in msg and "error" in msg["status"]:
                         typ, exc, tb = clean_exception(**msg)
@@ -1668,16 +1670,15 @@ class Client(SyncMethodMixin):
                 await wait_for(handle_report_task, 0 if fast else 2)
 
     @log_errors
-    async def _close(self, fast=False):
-        """
-        Send close signal and wait until scheduler completes
+    async def _close(self, fast: bool = False) -> None:
+        """Send close signal and wait until scheduler completes
 
         If fast is True, the client will close forcefully, by cancelling tasks
         the background _handle_report_task.
         """
-        # TODO: aclose more forcefully by aborting the RPC and cancelling all
+        # TODO: close more forcefully by aborting the RPC and cancelling all
         # background tasks.
-        # see https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
+        # See https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
         if self.status == "closed":
             return
 
@@ -1772,21 +1773,10 @@ class Client(SyncMethodMixin):
                 coro = wait_for(coro, timeout)
             return coro
 
-        if self._start_arg is None:
-            with suppress(AttributeError):
-                f = self.cluster.close()
-                if asyncio.iscoroutine(f):
-
-                    async def _():
-                        await f
-
-                    self.sync(_)
-
         sync(self.loop, self._close, fast=True, callback_timeout=timeout)
-
         assert self.status == "closed"
 
-        if not sys.is_finalizing():
+        if not is_python_shutting_down():
             self._loop_runner.stop()
 
     async def _shutdown(self):
@@ -1957,7 +1947,6 @@ class Client(SyncMethodMixin):
             dsk = {key: (apply, func, list(args), kwargs)}
         else:
             dsk = {key: (func,) + tuple(args)}
-
         futures = self._graph_to_futures(
             dsk,
             [key],
@@ -1969,6 +1958,7 @@ class Client(SyncMethodMixin):
             retries=retries,
             fifo_timeout=fifo_timeout,
             actors=actor,
+            span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
         )
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
@@ -2175,6 +2165,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actor,
+            span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
         )
         logger.debug("map(%s, ...)", funcname(func))
 
@@ -2188,7 +2179,7 @@ class Client(SyncMethodMixin):
                 "Cannot gather Futures created by another client. "
                 f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
                 f"mismatched Futures and their client IDs (this client is {self.id}): "
-                f"{ {f: f.client.id for f in mismatched_futures} }"
+                f"{ {f: f.client.id for f in mismatched_futures} }"  # noqa: E201, E202
             )
         keys = [future.key for future in future_set]
         bad_data = dict()
@@ -2461,10 +2452,9 @@ class Client(SyncMethodMixin):
                     nthreads = await self.scheduler.ncores_running(workers=workers)
                 if not nthreads:  # pragma: no cover
                     raise ValueError("No valid workers found")
+                workers = list(nthreads.keys())
 
-                _, who_has, nbytes = await scatter_to_workers(
-                    nthreads, data2, rpc=self.rpc
-                )
+                _, who_has, nbytes = await scatter_to_workers(workers, data2, self.rpc)
 
                 await self.scheduler.update_data(
                     who_has=who_has, nbytes=nbytes, client=self.id
@@ -2662,18 +2652,23 @@ class Client(SyncMethodMixin):
     @log_errors
     async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
         coroutines = []
+        uid = uuid.uuid4().hex
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
 
         def add_coro(name, data):
             keys = [f.key for f in futures_of(data)]
-            coroutines.append(
-                self.scheduler.publish_put(
+
+            async def _():
+                await self.scheduler.publish_wait_flush(uid=uid)
+                await self.scheduler.publish_put(
                     keys=keys,
                     name=name,
                     data=to_serialize(data),
                     override=override,
                     client=self.id,
                 )
-            )
+
+            coroutines.append(_())
 
         if name:
             if len(args) == 0:
@@ -3095,8 +3090,12 @@ class Client(SyncMethodMixin):
                 module_name = fr.f_back.f_globals["__name__"]  # type: ignore
                 if module_name == "__channelexec__":
                     break  # execnet; pytest-xdist  # pragma: nocover
+                try:
+                    module_name = sys.modules[module_name].__name__
+                except KeyError:
+                    # Ignore pathological cases where the module name isn't in `sys.modules`
+                    break
                 # Ignore IPython related wrapping functions to user code
-                module_name = sys.modules[module_name].__name__
                 if module_name.endswith("interactiveshell"):
                     break
 
@@ -3106,6 +3105,7 @@ class Client(SyncMethodMixin):
         self,
         dsk,
         keys,
+        span_metadata,
         workers=None,
         allow_other_workers=None,
         internal_priority=None,
@@ -3158,7 +3158,9 @@ class Client(SyncMethodMixin):
             header, frames = serialize(ToPickle(dsk), on_error="raise")
 
             pickled_size = sum(map(nbytes, [header] + frames))
-            if pickled_size > 10_000_000:
+            if pickled_size > parse_bytes(
+                dask.config.get("distributed.admin.large-graph-warning-threshold")
+            ):
                 warnings.warn(
                     f"Sending large graph of size {format_bytes(pickled_size)}.\n"
                     "This may cause some slowdown.\n"
@@ -3180,6 +3182,7 @@ class Client(SyncMethodMixin):
                     "actors": actors,
                     "code": ToPickle(computations),
                     "annotations": ToPickle(annotations),
+                    "span_metadata": ToPickle(span_metadata),
                 }
             )
             return futures
@@ -3267,6 +3270,7 @@ class Client(SyncMethodMixin):
             retries=retries,
             user_priority=priority,
             actors=actors,
+            span_metadata=SpanMetadata(collections=[{"type": "low-level-graph"}]),
         )
         packed = pack_data(keys, futures)
         if sync:
@@ -3440,13 +3444,18 @@ class Client(SyncMethodMixin):
 
         if traverse:
             collections = tuple(
-                dask.delayed(a)
-                if isinstance(a, (list, set, tuple, dict, Iterator))
-                else a
+                (
+                    dask.delayed(a)
+                    if isinstance(a, (list, set, tuple, dict, Iterator))
+                    else a
+                )
                 for a in collections
             )
 
         variables = [a for a in collections if dask.is_dask_collection(a)]
+        metadata = SpanMetadata(
+            collections=[get_collections_metadata(v) for v in variables]
+        )
 
         dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
         names = ["finalize-%s" % tokenize(v) for v in variables]
@@ -3480,6 +3489,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actors,
+            span_metadata=metadata,
         )
 
         i = 0
@@ -3571,7 +3581,9 @@ class Client(SyncMethodMixin):
             collections = [collections]
 
         assert all(map(dask.is_dask_collection, collections))
-
+        metadata = SpanMetadata(
+            collections=[get_collections_metadata(v) for v in collections]
+        )
         dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
@@ -3586,6 +3598,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actors,
+            span_metadata=metadata,
         )
 
         postpersists = [c.__dask_postpersist__() for c in collections]
@@ -3599,16 +3612,24 @@ class Client(SyncMethodMixin):
         else:
             return result
 
-    async def _restart(self, timeout=no_default, wait_for_workers=True):
+    async def _restart(
+        self, timeout: str | int | float | NoDefault, wait_for_workers: bool
+    ) -> None:
         if timeout is no_default:
             timeout = self._timeout * 4
-        if timeout is not None:
-            timeout = parse_timedelta(timeout, "s")
+        timeout = parse_timedelta(cast("str|int|float", timeout), "s")
 
-        await self.scheduler.restart(timeout=timeout, wait_for_workers=wait_for_workers)
-        return self
+        await self.scheduler.restart(
+            timeout=timeout,
+            wait_for_workers=wait_for_workers,
+            stimulus_id=f"client-restart-{time()}",
+        )
 
-    def restart(self, timeout=no_default, wait_for_workers=True):
+    def restart(
+        self,
+        timeout: str | int | float | NoDefault = no_default,
+        wait_for_workers: bool = True,
+    ):
         """
         Restart all workers. Reset local state. Optionally wait for workers to return.
 
@@ -3645,46 +3666,43 @@ class Client(SyncMethodMixin):
     async def _restart_workers(
         self,
         workers: list[str],
-        timeout: int | float | None = None,
-        raise_for_error: bool = True,
-    ) -> dict[str, str | ErrorMessage]:
+        timeout: str | int | float | NoDefault,
+        raise_for_error: bool,
+    ) -> dict[str, Literal["OK", "removed", "timed out"]]:
+        if timeout is no_default:
+            timeout = self._timeout * 4
+        timeout = parse_timedelta(cast("str|int|float", timeout), "s")
+
         info = self.scheduler_info()
         name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
         worker_addrs = [name_to_addr.get(w, w) for w in workers]
 
-        restart_out: dict[str, str | ErrorMessage] = await self.scheduler.broadcast(
-            msg={"op": "restart", "timeout": timeout},
+        out: dict[
+            str, Literal["OK", "removed", "timed out"]
+        ] = await self.scheduler.restart_workers(
             workers=worker_addrs,
-            nanny=True,
+            timeout=timeout,
+            on_error="raise" if raise_for_error else "return",
+            stimulus_id=f"client-restart-workers-{time()}",
         )
-
         # Map keys back to original `workers` input names/addresses
-        results = {w: restart_out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
-
-        timeout_workers = [w for w, status in results.items() if status == "timed out"]
-        if timeout_workers and raise_for_error:
-            raise TimeoutError(
-                f"The following workers failed to restart with {timeout} seconds: {timeout_workers}"
-            )
-
-        errored: list[ErrorMessage] = [m for m in results.values() if "exception" in m]  # type: ignore
-        if errored and raise_for_error:
-            raise pickle.loads(errored[0]["exception"])  # type: ignore
-        return results
+        out = {w: out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
+        if raise_for_error:
+            assert all(v == "OK" for v in out.values()), out
+        return out
 
     def restart_workers(
         self,
         workers: list[str],
-        timeout: int | float | None = None,
+        timeout: str | int | float | NoDefault = no_default,
         raise_for_error: bool = True,
-    ) -> dict[str, str]:
+    ):
         """Restart a specified set of workers
 
         .. note::
 
             Only workers being monitored by a :class:`distributed.Nanny` can be restarted.
-
-        See ``Nanny.restart`` for more details.
+            See ``Nanny.restart`` for more details.
 
         Parameters
         ----------
@@ -3699,7 +3717,7 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        dict[str, str]
+        dict[str, "OK" | "removed" | "timed out"]
             Mapping of worker and restart status, the keys will match the original
             values passed in via ``workers``.
 
@@ -3733,7 +3751,8 @@ class Client(SyncMethodMixin):
         for worker, meta in info["workers"].items():
             if (worker in workers or meta["name"] in workers) and meta["nanny"] is None:
                 raise ValueError(
-                    f"Restarting workers requires a nanny to be used. Worker {worker} has type {info['workers'][worker]['type']}."
+                    f"Restarting workers requires a nanny to be used. Worker "
+                    f"{worker} has type {info['workers'][worker]['type']}."
                 )
         return self.sync(
             self._restart_workers,
@@ -4924,7 +4943,10 @@ class Client(SyncMethodMixin):
         )
 
     def register_scheduler_plugin(
-        self, plugin: SchedulerPlugin, name: str | None = None, idempotent: bool = False
+        self,
+        plugin: SchedulerPlugin,
+        name: str | None = None,
+        idempotent: bool | None = None,
     ):
         """
         Register a scheduler plugin.
@@ -6142,6 +6164,12 @@ def _close_global_client():
                 c.loop.add_callback(c.close, timeout=3)
             else:
                 c.close(timeout=3)
+
+
+def get_collections_metadata(collection):
+    return {
+        "type": type(collection).__name__,
+    }
 
 
 atexit.register(_close_global_client)

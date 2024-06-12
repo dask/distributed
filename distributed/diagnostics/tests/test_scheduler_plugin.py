@@ -442,8 +442,8 @@ async def test_log_event_plugin(c, s, a, b):
             self.scheduler = scheduler
             self.scheduler._recorded_events = list()  # type: ignore
 
-        def log_event(self, name, msg):
-            self.scheduler._recorded_events.append((name, msg))
+        def log_event(self, topic, msg):
+            self.scheduler._recorded_events.append((topic, msg))
 
     await c.register_plugin(EventPlugin())
 
@@ -453,6 +453,27 @@ async def test_log_event_plugin(c, s, a, b):
     await c.submit(f)
 
     assert ("foo", 123) in s._recorded_events
+
+
+@gen_cluster(client=True)
+async def test_log_event_plugin_multiple_topics(c, s, a, b):
+    class EventPlugin(SchedulerPlugin):
+        async def start(self, scheduler: Scheduler) -> None:
+            self.scheduler = scheduler
+            self.scheduler._recorded_events = list()  # type: ignore
+
+        def log_event(self, topic, msg):
+            self.scheduler._recorded_events.append((topic, msg))
+
+    await c.register_plugin(EventPlugin())
+
+    def f():
+        get_worker().log_event(["foo", "bar"], 123)
+
+    await c.submit(f)
+
+    assert ("foo", 123) in s._recorded_events
+    assert ("bar", 123) in s._recorded_events
 
 
 @gen_cluster(client=True)
@@ -603,7 +624,10 @@ async def test_scheduler_plugin_in_register_worker_plugin_overrides(c, s, a):
 
     n_existing_plugins = len(s.plugins)
     assert not hasattr(s, "foo")
-    with pytest.warns(UserWarning, match="`SchedulerPlugin` as a worker plugin"):
+    with (
+        pytest.warns(UserWarning, match="`SchedulerPlugin` as a worker plugin"),
+        pytest.warns(DeprecationWarning, match="use `Client.register_plugin` instead"),
+    ):
         await c.register_worker_plugin(DuckPlugin(), nanny=False)
     assert len(s.plugins) == n_existing_plugins + 1
     assert s.foo == 123
@@ -620,7 +644,10 @@ async def test_scheduler_plugin_in_register_worker_plugin_overrides_nanny(c, s, 
 
     n_existing_plugins = len(s.plugins)
     assert not hasattr(s, "foo")
-    with pytest.warns(UserWarning, match="`SchedulerPlugin` as a nanny plugin"):
+    with (
+        pytest.warns(UserWarning, match="`SchedulerPlugin` as a nanny plugin"),
+        pytest.warns(DeprecationWarning, match="use `Client.register_plugin` instead"),
+    ):
         await c.register_worker_plugin(DuckPlugin(), nanny=True)
     assert len(s.plugins) == n_existing_plugins + 1
     assert s.foo == 123

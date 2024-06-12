@@ -51,7 +51,7 @@ from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
 from jinja2 import Environment, FileSystemLoader
-from tlz import curry, pipe, valmap
+from tlz import curry, pipe, second, valmap
 from tlz.curried import concat, groupby, map
 from tornado import escape
 
@@ -1523,42 +1523,44 @@ class ComputePerKey(DashboardComponent):
     def update(self):
         compute_times = defaultdict(float)
 
-        for key, ts in self.scheduler.task_prefixes.items():
-            name = key_split(key)
-            for action, t in ts.all_durations.items():
+        for name, tp in self.scheduler.task_prefixes.items():
+            for action, t in tp.all_durations.items():
                 if action == "compute":
                     compute_times[name] += t
 
+        if not compute_times:
+            return
+
         # order by largest time first
-        compute_times = sorted(compute_times.items(), key=lambda x: x[1], reverse=True)
+        compute_times = sorted(compute_times.items(), key=second, reverse=True)
 
-        # keep only time which are 2% of max or greater
-        if compute_times:
-            max_time = compute_times[0][1] * 0.02
-            compute_times = [(n, t) for n, t in compute_times if t > max_time]
-            compute_colors = list()
-            compute_names = list()
-            compute_time = list()
-            total_time = 0
-            for name, t in compute_times:
-                compute_names.append(name)
-                compute_colors.append(ts_color_of(name))
-                compute_time.append(t)
-                total_time += t
+        # Keep only times which are 2% of max or greater
+        max_time = compute_times[0][1] * 0.02
+        compute_colors = []
+        compute_names = []
+        compute_time = []
+        total_time = 0
+        for name, t in compute_times:
+            if t < max_time:
+                break
+            compute_names.append(name)
+            compute_colors.append(ts_color_of(name))
+            compute_time.append(t)
+            total_time += t
 
-            angles = [t / total_time * 2 * math.pi for t in compute_time]
+        angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            self.fig.x_range.factors = compute_names
+        self.fig.x_range.factors = compute_names
 
-            compute_result = dict(
-                angles=angles,
-                times=compute_time,
-                color=compute_colors,
-                names=compute_names,
-                formatted_time=[format_time(t) for t in compute_time],
-            )
+        compute_result = dict(
+            angles=angles,
+            times=compute_time,
+            color=compute_colors,
+            names=compute_names,
+            formatted_time=[format_time(t) for t in compute_time],
+        )
 
-            update(self.compute_source, compute_result)
+        update(self.compute_source, compute_result)
 
 
 class AggregateAction(DashboardComponent):
@@ -1920,7 +1922,7 @@ class StealingEvents(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="level",
@@ -2014,7 +2016,7 @@ class Events(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="y",
@@ -2300,7 +2302,7 @@ class TaskGraph(DashboardComponent):
             color="black",
             alpha=0.3,
         )
-        rect = self.root.square(
+        rect = self.root.scatter(
             x="x",
             y="y",
             size=10,
@@ -2308,6 +2310,7 @@ class TaskGraph(DashboardComponent):
             source=self.node_source,
             view=node_view,
             legend_field="state",
+            marker="square",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -2867,16 +2870,16 @@ class TaskGroupGraph(DashboardComponent):
                 f"{comp_tasks} ({comp_tasks / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_processing"].append(
-                f"{tasks_processing} ({tasks_processing/ tot_tasks * 100:.0f} %)"
+                f"{tasks_processing} ({tasks_processing / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_memory"].append(
-                f"{tasks_memory} ({tasks_memory/ tot_tasks * 100:.0f} %)"
+                f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased/ tot_tasks * 100:.0f} %)"
+                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
-                f"{ tasks_erred} ({tasks_erred/ tot_tasks * 100:.0f} %)"
+                f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
             )
 
         self.nodes_source.data.update(nodes_data)
@@ -3339,15 +3342,15 @@ class TaskProgress(DashboardComponent):
         }
 
         for tp in self.scheduler.task_prefixes.values():
-            active_states = tp.active_states
-            if any(active_states.get(s) for s in state.keys()):
-                state["memory"][tp.name] = active_states["memory"]
-                state["erred"][tp.name] = active_states["erred"]
-                state["released"][tp.name] = active_states["released"]
-                state["processing"][tp.name] = active_states["processing"]
-                state["waiting"][tp.name] = active_states["waiting"]
-                state["queued"][tp.name] = active_states["queued"]
-                state["no_worker"][tp.name] = active_states["no-worker"]
+            states = tp.states
+            if any(states.get(s) for s in state.keys()):
+                state["memory"][tp.name] = states["memory"]
+                state["erred"][tp.name] = states["erred"]
+                state["released"][tp.name] = states["released"]
+                state["processing"][tp.name] = states["processing"]
+                state["waiting"][tp.name] = states["waiting"]
+                state["queued"][tp.name] = states["queued"]
+                state["no_worker"][tp.name] = states["no-worker"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3614,21 +3617,23 @@ class FinePerformanceMetrics(DashboardComponent):
         )
         if spans_ext and self.span_tag_selector.value:
             span = spans_ext.merge_by_tags(*self.span_tag_selector.value)
-            execute_metrics = span.cumulative_worker_metrics
+            metrics = span.cumulative_worker_metrics
         elif spans_ext and spans_ext.spans:
             # Calculate idle time
             span = spans_ext.merge_all()
-            execute_metrics = span.cumulative_worker_metrics
+            metrics = span.cumulative_worker_metrics
         else:
             # Spans extension is not loaded
-            execute_metrics = {
+            metrics = {
                 k: v
                 for k, v in self.scheduler.cumulative_worker_metrics.items()
-                if isinstance(k, tuple) and k[0] == "execute"
+                if isinstance(k, tuple)
+                and len(k) == 4  # Skip get-data, gather-deps, and memory-monitor
             }
 
-        for (context, function, activity, unit), v in execute_metrics.items():
-            assert context == "execute"
+        for (context, function, activity, unit), v in metrics.items():
+            if context != "execute":
+                continue  # TODO visualize 'shuffle' metrics
             assert isinstance(function, str)
             assert isinstance(unit, str)
             assert self.unit_selector.value
@@ -3907,7 +3912,6 @@ class Contention(DashboardComponent):
     @log_errors
     def update(self):
         s = self.scheduler
-        monitor_gil = s.monitor.monitor_gil_contention
 
         self.data["values"] = [
             s._tick_interval_observed,
@@ -3915,11 +3919,13 @@ class Contention(DashboardComponent):
             sum(w.metrics["event_loop_interval"] for w in s.workers.values())
             / (len(s.workers) or 1),
             self.gil_contention_workers,
-        ][:: 1 if monitor_gil else 2]
+        ][:: 1 if s.monitor.monitor_gil_contention else 2]
 
         # Format event loop as time and GIL (if configured) as %
         self.data["text"] = [
-            f"{x * 100:.1f}%" if i % 2 and monitor_gil else format_time(x)
+            f"{x * 100:.1f}%"
+            if i % 2 and s.monitor.monitor_gil_contention
+            else format_time(x)
             for i, x in enumerate(self.data["values"])
         ]
         update(self.source, self.data)
@@ -4193,7 +4199,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        mem_plot.circle(
+        mem_plot.scatter(
             source=self.source, x="memory_percent", y=0, size=10, fill_alpha=0.5
         )
         mem_plot.ygrid.visible = False
@@ -4223,7 +4229,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        cpu_plot.circle(
+        cpu_plot.scatter(
             source=self.source, x="cpu_fraction", y=0, size=10, fill_alpha=0.5
         )
         cpu_plot.ygrid.visible = False
@@ -4469,12 +4475,8 @@ class Shuffling(DashboardComponent):
                 data[f"{prefix}_memory"].append(d[prefix]["memory"])
                 data[f"{prefix}_memory_limit"].append(memory_limit)
                 data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
-                data[f"{prefix}_avg_duration"].append(
-                    d[prefix]["diagnostics"].get("avg_duration", 0)
-                )
-                data[f"{prefix}_avg_size"].append(
-                    d[prefix]["diagnostics"].get("avg_size", 0)
-                )
+                data[f"{prefix}_avg_duration"].append(d[prefix]["avg_duration"])
+                data[f"{prefix}_avg_size"].append(d[prefix]["avg_size"])
                 data[f"{prefix}_read"].append(d[prefix]["read"])
                 data[f"{prefix}_written"].append(d[prefix]["written"])
                 if self.scheduler.workers[worker].last_seen < now - 5:

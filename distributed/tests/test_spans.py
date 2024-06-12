@@ -841,3 +841,44 @@ async def test_spans_are_visible_from_tasks(c, s, a, b):
 
     # No annotation is created for the default span
     assert await c.submit(dask.get_annotations) == {}
+
+
+@gen_cluster(client=True)
+async def test_span_on_persist(c, s, a, b):
+    """As a workaround to lack of annotations support in dask-expr and loss of
+    annotations due to low level optimization in dask.array, you can use span() to wrap
+    calls to persist() and compute()
+    """
+    x = delayed(inc)(1, dask_key_name="x")
+    with span("x") as x_id:
+        x = c.persist(x)
+    y = delayed(inc)(x, dask_key_name="y")
+    with span("y") as y_id:
+        y = c.compute(y)
+    assert await y == 3
+
+    assert s.tasks["x"].group.span_id == x_id
+    assert s.tasks["y"].group.span_id == y_id
+
+
+@pytest.mark.filterwarnings("ignore:Dask annotations")
+@gen_cluster(client=True)
+async def test_collections_metadata(c, s, a, b):
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+    np = pytest.importorskip("numpy")
+    df = pd.DataFrame(
+        {"x": np.random.random(1000), "y": np.random.random(1000)},
+        index=np.arange(1000),
+    )
+    ldf = dd.from_pandas(df, npartitions=10)
+
+    with span("foo") as span_id:
+        await c.compute(ldf)
+
+    ext = s.extensions["spans"]
+    span_ = ext.spans[span_id]
+    collections_meta = span_.metadata["collections"]
+    assert isinstance(collections_meta, list)
+    assert len(collections_meta) == 1
+    assert collections_meta[0]["type"] == type(ldf).__name__

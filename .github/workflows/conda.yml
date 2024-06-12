@@ -26,11 +26,11 @@ jobs:
     name: Build (and upload)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.1.1
+      - uses: actions/checkout@v4.1.3
         with:
           fetch-depth: 0
       - name: Set up Python
-        uses: conda-incubator/setup-miniconda@v3.0.1
+        uses: conda-incubator/setup-miniconda@v3.0.3
         with:
           miniforge-variant: Mambaforge
           use-mamba: true
@@ -49,10 +49,12 @@ jobs:
           export VERSION_SUFFIX=a`date +%y%m%d`
 
           # conda search for the latest dask-core pre-release
-          arr=($(conda search --override-channels -c dask/label/dev dask-core | tail -n 1))
+          dask_core_arr=($(conda search --override-channels -c dask/label/dev dask-core | tail -n 1))
+          dask_expr_arr=($(conda search --override-channels -c dask/label/dev dask-expr | tail -n 1))
 
-          # extract dask-core pre-release version / build
-          export DASK_CORE_VERSION=${arr[1]}
+          # extract dask-core & dask-expr pre-release versions
+          export DASK_CORE_VERSION=${dask_core_arr[1]}
+          export DASK_EXPR_VERSION=${dask_expr_arr[1]}
 
           # distributed pre-release build
           conda mambabuild continuous_integration/recipes/distributed \
