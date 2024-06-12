@@ -7001,7 +7001,7 @@ async def test_register_worker_plugin_instance_required(c, s, a, b):
     class MyPlugin(WorkerPlugin):
         ...
 
-    with pytest.raises(ValueError, match="instance"):
+    with pytest.raises(TypeError, match="instance"):
         await c.register_plugin(MyPlugin)
 
 
