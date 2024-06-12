@@ -6997,6 +6997,15 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_register_worker_plugin_instance_required(c, s, a, b):
+    class MyPlugin(WorkerPlugin):
+        ...
+
+    with pytest.raises(ValueError, match="instance"):
+        await c.register_plugin(MyPlugin)
+
+
+@gen_cluster(client=True)
 async def test_register_worker_plugin_exception(c, s, a, b):
     class MyPlugin(WorkerPlugin):
         def setup(self, worker=None):

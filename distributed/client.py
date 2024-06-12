@@ -4899,6 +4899,8 @@ class Client(SyncMethodMixin):
         name: str,
         idempotent: bool,
     ):
+        if isinstance(plugin, type):
+            raise TypeError("Please provide an instance of a plugin, not a type.")
         raise TypeError(
             "Registering duck-typed plugins is not allowed. Please inherit from "
             "NannyPlugin, WorkerPlugin, or SchedulerPlugin to create a plugin."
