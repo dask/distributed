@@ -8413,19 +8413,16 @@ class Scheduler(SchedulerState, ServerNode):
         Client.log_event
         """
         event = (time(), msg)
-        if not isinstance(topic, str):
-            for t in topic:
-                self.events[t].append(event)
-                self.event_counts[t] += 1
-                self._report_event(t, event)
-        else:
-            self.events[topic].append(event)
-            self.event_counts[topic] += 1
-            self._report_event(topic, event)
+        if isinstance(topic, str):
+            topic = [topic]
+        for t in topic:
+            self.events[t].append(event)
+            self.event_counts[t] += 1
+            self._report_event(t, event)
 
             for plugin in list(self.plugins.values()):
                 try:
-                    plugin.log_event(topic, msg)
+                    plugin.log_event(t, msg)
                 except Exception:
                     logger.info("Plugin failed with exception", exc_info=True)
 
