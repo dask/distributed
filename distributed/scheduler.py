@@ -4624,7 +4624,7 @@ class Scheduler(SchedulerState, ServerNode):
                 {
                     "action": "update_graph",
                     "count": len(dsk),
-                    "key_collisions": len(colliding_tasks),
+                    "key-collisions": len(colliding_tasks),
                 },
             )
 
