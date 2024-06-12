@@ -4792,7 +4792,7 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
                 topic == "all"
                 and isinstance(msg, dict)
                 and msg.get("action", None) == "update_graph"
-                and msg["key_collisions"] > 0
+                and msg["key-collisions"] > 0
             ):
                 self.seen = True
 
