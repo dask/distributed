@@ -4789,6 +4789,23 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
     For a real world example where this can trigger, see
     https://github.com/dask/dask/issues/9888
     """
+    seen = False
+
+    def _match(event):
+        _, msg = event
+        return (
+            isinstance(msg, dict)
+            and msg.get("action", None) == "update_graph"
+            and msg["key-collisions"] > 0
+        )
+
+    def handler(ev):
+        if _match(ev):
+            nonlocal seen
+            seen = True
+
+    c.subscribe_topic("all", handler)
+
     x1 = c.submit(inc, 1, key="x1")
     y_old = c.submit(inc, x1, key="y")
 
@@ -4802,6 +4819,8 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
         await wait_for_state("z", "waiting", s)
 
     assert "Detected different `run_spec` for key 'y'" in log.getvalue()
+
+    await async_poll_for(lambda: seen, timeout=5)
 
     async with Worker(s.address):
         # Used old run_spec

@@ -4590,11 +4590,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         lost_keys = self._match_graph_with_tasks(dsk, dependencies, keys)
 
-        if len(dsk) > 1:
-            self.log_event(
-                ["all", client], {"action": "update_graph", "count": len(dsk)}
-            )
-
         if lost_keys:
             self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
             self.client_releases_keys(
@@ -4616,12 +4611,27 @@ class Scheduler(SchedulerState, ServerNode):
             computation.annotations.update(global_annotations)
         del global_annotations
 
-        runnable, touched_tasks, new_tasks = self._generate_taskstates(
+        (
+            runnable,
+            touched_tasks,
+            new_tasks,
+            colliding_task_count,
+        ) = self._generate_taskstates(
             keys=keys,
             dsk=dsk,
             dependencies=dependencies,
             computation=computation,
         )
+
+        if len(dsk) > 1 or colliding_task_count:
+            self.log_event(
+                ["all", client],
+                {
+                    "action": "update_graph",
+                    "count": len(dsk),
+                    "key-collisions": colliding_task_count,
+                },
+            )
 
         keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
@@ -4815,6 +4825,7 @@ class Scheduler(SchedulerState, ServerNode):
         touched_keys = set()
         touched_tasks = []
         tgs_with_bad_run_spec = set()
+        colliding_task_count = 0
         while stack:
             k = stack.pop()
             if k in touched_keys:
@@ -4860,6 +4871,7 @@ class Scheduler(SchedulerState, ServerNode):
                     # dask/dask#9888.
                     dependencies[k] = deps_lhs
 
+                    colliding_task_count += 1
                     if ts.group not in tgs_with_bad_run_spec:
                         tgs_with_bad_run_spec.add(ts.group)
                         logger.warning(
@@ -4912,7 +4924,7 @@ class Scheduler(SchedulerState, ServerNode):
                 len(touched_tasks),
                 len(keys),
             )
-        return runnable, touched_tasks, new_tasks
+        return runnable, touched_tasks, new_tasks, colliding_task_count
 
     def _apply_annotations(
         self,
