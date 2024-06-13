@@ -4820,7 +4820,7 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
 
     assert "Detected different `run_spec` for key 'y'" in log.getvalue()
 
-    assert seen
+    await async_poll_for(lambda: seen, timeout=5)
 
     async with Worker(s.address):
         # Used old run_spec
