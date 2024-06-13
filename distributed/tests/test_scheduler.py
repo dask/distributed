@@ -4789,21 +4789,22 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
     For a real world example where this can trigger, see
     https://github.com/dask/dask/issues/9888
     """
+    seen = False
 
-    class LogEventVerifier(SchedulerPlugin):
-        def start(self, scheduler):
-            self.seen = False
+    def _match(event):
+        _, msg = event
+        return (
+            isinstance(msg, dict)
+            and msg.get("action", None) == "update_graph"
+            and msg["key-collisions"] > 0
+        )
 
-        def log_event(self, topic, msg):
-            if (
-                topic == "all"
-                and isinstance(msg, dict)
-                and msg.get("action", None) == "update_graph"
-                and msg["key-collisions"] > 0
-            ):
-                self.seen = True
+    def handler(ev):
+        if _match(ev):
+            nonlocal seen
+            seen = True
 
-    await c.register_plugin(LogEventVerifier(), name="verifier")
+    c.subscribe_topic("all", handler)
 
     x1 = c.submit(inc, 1, key="x1")
     y_old = c.submit(inc, x1, key="y")
@@ -4819,7 +4820,7 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
 
     assert "Detected different `run_spec` for key 'y'" in log.getvalue()
 
-    assert s.plugins["verifier"].seen
+    assert seen
 
     async with Worker(s.address):
         # Used old run_spec
