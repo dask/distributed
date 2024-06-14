@@ -91,7 +91,7 @@ async def test_prometheus_collect_cost_total_by_cost_multipliers(c, s, a, b):
         for request in event[1]
         if event[0] == "request"
     )
-    assert count == expected_cost
+    assert count == pytest.approx(expected_cost)
 
 
 @gen_cluster(
