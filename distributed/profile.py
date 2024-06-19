@@ -90,7 +90,8 @@ def _f_lineno(frame: FrameType) -> int:
         for start, next_line in dis.findlinestarts(code):
             if f_lasti < start:
                 return prev_line
-            prev_line = next_line
+            if next_line:
+                prev_line = next_line
 
         return prev_line
     except Exception:
