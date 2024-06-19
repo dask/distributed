@@ -560,7 +560,9 @@ class FutureState:
 
     def __init__(self):
         self._event = None
+        self.exception = None
         self.status = "pending"
+        self.traceback = None
         self.type = None
 
     def _get_event(self):
@@ -2227,19 +2229,15 @@ class Client(SyncMethodMixin):
 
             exceptions = set()
             bad_keys = set()
-            for key in keys:
-                if key not in self.futures or self.futures[key].status in failed:
+            for future in future_set:
+                key = future.key
+                if key not in self.futures or future.status in failed:
                     exceptions.add(key)
                     if errors == "raise":
-                        try:
-                            st = self.futures[key]
-                            exception = st.exception
-                            traceback = st.traceback
-                        except (KeyError, AttributeError):
-                            exc = CancelledError(key)
-                        else:
-                            raise exception.with_traceback(traceback)
-                        raise exc
+                        st = future._state
+                        exception = st.exception
+                        traceback = st.traceback
+                        raise exception.with_traceback(traceback)
                     if errors == "skip":
                         bad_keys.add(key)
                         bad_data[key] = None
