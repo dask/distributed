@@ -338,11 +338,9 @@ class Future(WrappedKey):
             else:
                 return exc
         elif self.cancelled():
-            if self._state:
-                exception = self._state.exception
-                assert isinstance(exception, CancelledError)
-            else:
-                exception = CancelledError(self.key)
+            assert self._state
+            exception = self._state.exception
+            assert isinstance(exception, CancelledError)
             if raiseit:
                 raise exception
             else:
