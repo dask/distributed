@@ -8580,3 +8580,11 @@ async def test_client_disconnect_exception_on_cancelled_futures(c, s, a, b):
 
     with pytest.raises(CancelledError, match="connection to the scheduler"):
         await fut
+
+    with pytest.raises(CancelledError, match="connection to the scheduler"):
+        futures_of(fut, client=c)
+
+    # with pytest.raises(CancelledError, match="connection to the scheduler"):
+    async for fut, res in as_completed([fut], with_results=True):
+        assert isinstance(res, CancelledError)
+        assert "connection to the scheduler" in res.args[0]

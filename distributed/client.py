@@ -337,7 +337,7 @@ class Future(WrappedKey):
                 raise exc.with_traceback(tb)
             else:
                 return exc
-        elif self.status == "cancelled":
+        elif self.cancelled():
             if self._state:
                 exception = self._state.exception
                 assert isinstance(exception, CancelledError)
@@ -5456,7 +5456,7 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         {fu for fu in fs if fu.status != "pending"},
         {fu for fu in fs if fu.status == "pending"},
     )
-    cancelled = {f.key: f._state.exception for f in done if f.status == "cancelled"}
+    cancelled = {f.key: f._state.exception for f in done if f.cancelled()}
     if cancelled:
         raise CancelledError(cancelled)
 
@@ -5689,8 +5689,6 @@ class as_completed:
             if self.raise_errors and future.status == "error":
                 typ, exc, tb = result
                 raise exc.with_traceback(tb)
-            elif future.status == "cancelled":
-                res = (res[0], CancelledError(future.key))
         return res
 
     def __next__(self):
@@ -5902,9 +5900,9 @@ def futures_of(o, client=None):
             stack.extend(x.__dask_graph__().values())
 
     if client is not None:
-        bad = {f for f in futures if f.cancelled()}
-        if bad:
-            raise CancelledError(bad)
+        cancelled = {f.key: f._state.exception for f in futures if f.cancelled()}
+        if cancelled:
+            raise CancelledError(cancelled)
 
     return futures[::-1]
 
