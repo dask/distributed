@@ -338,7 +338,11 @@ class Future(WrappedKey):
             else:
                 return exc
         elif self.status == "cancelled":
-            exception = CancelledError(self.key)
+            if self._state:
+                exception = self._state.exception
+                assert isinstance(exception, CancelledError)
+            else:
+                exception = CancelledError(self.key)
             if raiseit:
                 raise exception
             else:
@@ -414,7 +418,7 @@ class Future(WrappedKey):
             done_callback, self, partial(cls._cb_executor.submit, execute_callback)
         )
 
-    def cancel(self, **kwargs):
+    def cancel(self, msg=None, **kwargs):
         """Cancel the request to run this future
 
         See Also
@@ -422,7 +426,7 @@ class Future(WrappedKey):
         Client.cancel
         """
         self._verify_initialized()
-        return self.client.cancel([self], **kwargs)
+        return self.client.cancel([self], msg=msg, **kwargs)
 
     def retry(self, **kwargs):
         """Retry this future if it has failed
@@ -568,10 +572,10 @@ class FutureState:
             event = self._event = asyncio.Event()
         return event
 
-    def cancel(self):
+    def cancel(self, msg=None):
         """Cancels the operation"""
         self.status = "cancelled"
-        self.exception = CancelledError()
+        self.exception = CancelledError(msg) if msg else CancelledError()
         self._get_event().set()
 
     def finish(self, type=None):
@@ -1321,7 +1325,10 @@ class Client(SyncMethodMixin):
         self.scheduler_comm = None
 
         for st in self.futures.values():
-            st.cancel()
+            st.cancel(
+                "Cancelled because the client lost the connection to the scheduler. "
+                "Please check your connection and re-run your work."
+            )
         self.futures.clear()
 
         timeout = self._timeout
@@ -2602,16 +2609,16 @@ class Client(SyncMethodMixin):
             hash=hash,
         )
 
-    async def _cancel(self, futures, force=False):
+    async def _cancel(self, futures, msg=None, force=False):
         # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
         keys = list({f.key for f in futures_of(futures)})
         self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
-                st.cancel()
+                st.cancel(msg=msg)
 
-    def cancel(self, futures, asynchronous=None, force=False):
+    def cancel(self, futures, asynchronous=None, force=False, msg=None):
         """
         Cancel running futures
         This stops future tasks from being scheduled if they have not yet run
@@ -2626,8 +2633,12 @@ class Client(SyncMethodMixin):
             If True the client is in asynchronous mode
         force : boolean (False)
             Cancel this future even if other clients desire it
+        msg : str
+            Message that will be attached to the cancelled future
         """
-        return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
+        return self.sync(
+            self._cancel, futures, asynchronous=asynchronous, force=force, msg=msg
+        )
 
     async def _retry(self, futures):
         keys = list({f.key for f in futures_of(futures)})
@@ -5445,7 +5456,7 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         {fu for fu in fs if fu.status != "pending"},
         {fu for fu in fs if fu.status == "pending"},
     )
-    cancelled = [f.key for f in done if f.status == "cancelled"]
+    cancelled = {f.key: f._state.exception for f in done if f.status == "cancelled"}
     if cancelled:
         raise CancelledError(cancelled)
 

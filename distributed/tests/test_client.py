@@ -8566,3 +8566,17 @@ async def test_gather_race_vs_AMM(c, s, a, direct):
         b.block_get_data.set()
 
     assert await fut == 3  # It's from a; it would be 2 if it were from b
+
+
+@gen_cluster(client=True)
+async def test_client_disconnect_exception_on_cancelled_futures(c, s, a, b):
+    fut = c.submit(inc, 1)
+    await wait(fut)
+
+    await s.close()
+
+    with pytest.raises(CancelledError, match="connection to the scheduler"):
+        await wait(fut)
+
+    with pytest.raises(CancelledError, match="connection to the scheduler"):
+        await fut
