@@ -4650,6 +4650,43 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
     await c.gather(fut3)
 
 
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_deadlock_dependency_of_queued_released(c, s, a):
+    @delayed
+    def inc(input):
+        return input + 1
+
+    @delayed
+    def block_on_event(input, block, executing):
+        executing.set()
+        block.wait()
+        return input
+
+    block = Event()
+    executing = Event()
+
+    dep = inc(0)
+    futs = [
+        block_on_event(dep, block, executing, dask_key_name=("rootish", i))
+        for i in range(s.total_nthreads * 2 + 1)
+    ]
+    del dep
+    futs = c.compute(futs)
+    await executing.wait()
+    assert s.queued
+    await s.remove_worker(address=a.address, stimulus_id="test")
+
+    s.validate_state()
+
+    await block.set()
+    await executing.clear()
+
+    async with Worker(s.address) as b:
+        s.validate_state()
+        await c.gather(*futs)
+        s.validate_state()
+
+
 @gen_cluster(client=True)
 async def test_submit_dependency_of_erred_task(c, s, a, b):
     x = c.submit(lambda: 1 / 0, key="x")

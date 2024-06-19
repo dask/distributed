@@ -2540,7 +2540,7 @@ class SchedulerState:
             recommendations[key] = "waiting"
 
         for dts in ts.waiters or ():
-            if dts.state in ("no-worker", "processing"):
+            if dts.state in ("no-worker", "processing", "queued"):
                 recommendations[dts.key] = "waiting"
             elif dts.state == "waiting":
                 if not dts.waiting_on:
