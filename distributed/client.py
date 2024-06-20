@@ -146,7 +146,7 @@ class FutureCancelledError(CancelledError):
         self.msg = msg
 
     def __str__(self) -> str:
-        result = f"{self.key} was cancelled for reason: {self.reason}."
+        result = f"{self.key} cancelled for reason: {self.reason}."
         if self.msg:
             result = "\n".join([result, self.msg])
         return result
@@ -156,11 +156,13 @@ class FuturesCancelledError(CancelledError):
     error_groups: list[CancelledFuturesGroup]
 
     def __init__(self, error_groups: list[CancelledFuturesGroup]):
-        self.error_groups = error_groups
+        self.error_groups = sorted(
+            error_groups, key=lambda group: len(group.errors), reverse=True
+        )
 
     def __str__(self):
         count = sum(map(lambda group: len(group.errors), self.error_groups))
-        result = f"{count} future{'s' if count > 1 else ''} cancelled:"
+        result = f"{count} Future{'s' if count > 1 else ''} cancelled:"
         return "\n".join(
             [result, "Reasons:"] + [str(group) for group in self.error_groups]
         )
@@ -189,8 +191,9 @@ class CancelledFuturesGroup:
                 break
 
         return (
-            f"{len(keys)} future{'s' if len(keys) > 1 else ''} cancelled for reason: "
-            f"{self.reason}. Message: {example_message}"
+            f"{len(keys)} Future{'s' if len(keys) > 1 else ''} cancelled for reason: "
+            f"{self.reason}.\nMessage: {example_message}\n"
+            f"Future{'s' if len(keys) > 1 else ''}: {keys}"
         )
 
 
