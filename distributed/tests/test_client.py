@@ -63,6 +63,8 @@ from distributed import (
 from distributed.client import (
     Client,
     Future,
+    FutureCancelledError,
+    FuturesCancelledError,
     _get_global_client,
     _global_clients,
     as_completed,
@@ -8575,24 +8577,24 @@ async def test_client_disconnect_exception_on_cancelled_futures(c, s, a, b):
 
     await s.close()
 
-    with pytest.raises(CancelledError, match="connection to the scheduler"):
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
         await fut.result()
 
-    with pytest.raises(CancelledError, match="connection to the scheduler"):
+    with pytest.raises(FuturesCancelledError, match="connection to the scheduler"):
         await wait(fut)
 
-    with pytest.raises(CancelledError, match="connection to the scheduler"):
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
         await fut
 
-    with pytest.raises(CancelledError, match="connection to the scheduler"):
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
         await c.gather([fut])
 
-    with pytest.raises(CancelledError, match="connection to the scheduler"):
+    with pytest.raises(FuturesCancelledError, match="connection to the scheduler"):
         futures_of(fut, client=c)
 
     async for fut, res in as_completed([fut], with_results=True):
-        assert isinstance(res, CancelledError)
-        assert "connection to the scheduler" in res.args[0]
+        assert isinstance(res, FutureCancelledError)
+        assert "connection to the scheduler" in res.msg
 
 
 @pytest.mark.slow
