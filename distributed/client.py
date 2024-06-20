@@ -1713,7 +1713,10 @@ class Client(SyncMethodMixin):
     def _handle_restart(self):
         logger.info("Receive restart signal from scheduler")
         for state in self.futures.values():
-            state.cancel()
+            state.cancel(
+                reason="scheduler-restart",
+                msg="Scheduler has restarted. Please re-run your work.",
+            )
         self.futures.clear()
         self.generation += 1
         with self._refcount_lock:

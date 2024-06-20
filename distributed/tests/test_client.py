@@ -8593,3 +8593,15 @@ async def test_client_disconnect_exception_on_cancelled_futures(c, s, a, b):
     async for fut, res in as_completed([fut], with_results=True):
         assert isinstance(res, CancelledError)
         assert "connection to the scheduler" in res.args[0]
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_scheduler_restart_exception_on_cancelled_futures(c, s, a, b):
+    fut = c.submit(inc, 1)
+    await wait(fut)
+
+    await s.restart(timeout=1, stimulus_id="test")
+
+    with pytest.raises(CancelledError, match="Scheduler has restarted"):
+        await fut.result()
