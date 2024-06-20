@@ -170,12 +170,20 @@ def get_fileno_limit():
 
 @toolz.memoize
 def _get_ip(host, port, family):
+    def hostname_fallback():
+        addr_info = socket.getaddrinfo(
+            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
+        )[0]
+        return addr_info[4][0]
+
     # By using a UDP socket, we don't actually try to connect but
     # simply select the local address through which *host* is reachable.
     sock = socket.socket(family, socket.SOCK_DGRAM)
     try:
         sock.connect((host, port))
         ip = sock.getsockname()[0]
+        if ip == "0.0.0.0":
+            return hostname_fallback()
         return ip
     except OSError as e:
         warnings.warn(
@@ -183,10 +191,7 @@ def _get_ip(host, port, family):
             "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        addr_info = socket.getaddrinfo(
-            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
-        )[0]
-        return addr_info[4][0]
+        return hostname_fallback()
     finally:
         sock.close()
 
