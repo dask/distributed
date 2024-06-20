@@ -478,7 +478,7 @@ class Future(WrappedKey):
             done_callback, self, partial(cls._cb_executor.submit, execute_callback)
         )
 
-    def cancel(self, msg=None, **kwargs):
+    def cancel(self, reason=None, msg=None, **kwargs):
         """Cancel the request to run this future
 
         See Also
@@ -486,7 +486,7 @@ class Future(WrappedKey):
         Client.cancel
         """
         self._verify_initialized()
-        return self.client.cancel([self], msg=msg, **kwargs)
+        return self.client.cancel([self], reason=reason, msg=msg, **kwargs)
 
     def retry(self, **kwargs):
         """Retry this future if it has failed
@@ -2671,16 +2671,16 @@ class Client(SyncMethodMixin):
             hash=hash,
         )
 
-    async def _cancel(self, futures, msg=None, force=False):
+    async def _cancel(self, futures, reason=None, msg=None, force=False):
         # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
         keys = list({f.key for f in futures_of(futures)})
         self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
-                st.cancel(msg=msg)
+                st.cancel(reason=reason, msg=msg)
 
-    def cancel(self, futures, asynchronous=None, force=False, msg=None):
+    def cancel(self, futures, asynchronous=None, force=False, reason=None, msg=None):
         """
         Cancel running futures
         This stops future tasks from being scheduled if they have not yet run
@@ -2695,6 +2695,8 @@ class Client(SyncMethodMixin):
             If True the client is in asynchronous mode
         force : boolean (False)
             Cancel this future even if other clients desire it
+        reason: str
+            Reason for cancelling the futures
         msg : str
             Message that will be attached to the cancelled future
         """
