@@ -49,7 +49,7 @@ from distributed.diagnostics.plugin import ForwardOutput
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
-from distributed.utils import wait_for
+from distributed.utils import get_mp_context, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -2199,7 +2199,7 @@ async def test_bad_executor_annotation(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_process_executor(c, s, a, b):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         b.executors["processes"] = e
 
@@ -2231,7 +2231,7 @@ def kill_process():
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_process_executor_kills_process(c, s, a):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
             future = c.submit(kill_process)
@@ -2254,7 +2254,7 @@ def raise_exc():
 
 @gen_cluster(client=True)
 async def test_process_executor_raise_exception(c, s, a, b):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         b.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
