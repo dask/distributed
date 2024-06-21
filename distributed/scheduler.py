@@ -7867,7 +7867,9 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise
 
-    def set_restrictions(self, worker: dict[Key, Collection[str] | str | None]) -> None:
+    def set_restrictions(
+        self, worker: Mapping[Key, Collection[str] | str | None]
+    ) -> None:
         for key, restrictions in worker.items():
             ts = self.tasks[key]
             if isinstance(restrictions, str):
