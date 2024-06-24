@@ -5223,7 +5223,7 @@ def test_quiet_client_close(loop):
             futures = c.map(slowinc, range(1000), delay=0.01)
             # Stop part-way
             s = c.cluster.scheduler
-            while sum(ts.state == "memory" for ts in s.tasks.values()) < 20:
+            while sum(ts.state == "memory" for ts in list(s.tasks.values())) < 20:
                 sleep(0.01)
         sleep(0.1)  # let things settle
 
