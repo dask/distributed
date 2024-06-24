@@ -1998,8 +1998,8 @@ class TupleComparable:
 
 
 @functools.lru_cache
-def url_escape(url):
+def url_escape(url, *args, **kwargs):
     """
     Escape a URL path segment.
     """
-    return escape.url_escape(url)
+    return escape.url_escape(url, *args, **kwargs)
