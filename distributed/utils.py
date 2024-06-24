@@ -52,6 +52,7 @@ from typing import ClassVar, TypeVar, overload
 import click
 import psutil
 import tblib.pickling_support
+from tornado import escape
 
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
@@ -1994,3 +1995,11 @@ class TupleComparable:
 
     def __lt__(self, other):
         return self.obj < other.obj
+
+
+@functools.lru_cache
+def url_escape(url):
+    """
+    Escape a URL path segment.
+    """
+    return escape.url_escape(url)

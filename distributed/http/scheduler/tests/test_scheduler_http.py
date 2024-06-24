@@ -7,7 +7,6 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
 import dask.config
@@ -16,7 +15,7 @@ from dask.sizeof import sizeof
 from distributed import Event, Lock, Scheduler
 from distributed.client import wait
 from distributed.core import Status
-from distributed.utils import is_valid_xml
+from distributed.utils import is_valid_xml, url_escape
 from distributed.utils_test import (
     async_poll_for,
     div,

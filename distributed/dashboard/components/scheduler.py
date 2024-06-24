@@ -53,7 +53,6 @@ from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
 from jinja2 import Environment, FileSystemLoader
 from tlz import curry, pipe, second, valmap
 from tlz.curried import concat, groupby, map
-from tornado import escape
 
 import dask
 from dask import config
@@ -91,7 +90,7 @@ from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
 from distributed.spans import SpansSchedulerExtension
-from distributed.utils import Log, log_errors
+from distributed.utils import Log, log_errors, url_escape
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -199,7 +198,7 @@ class Occupancy(DashboardComponent):
                 "worker": [ws.address for ws in workers],
                 "ms": ms,
                 "color": color,
-                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                "escaped_worker": [url_escape(ws.address) for ws in workers],
                 "x": x,
                 "y": y,
             }
@@ -581,7 +580,7 @@ class WorkersMemory(DashboardComponent, MemoryColor):
             "color": color,
             "alpha": [1, 0.7, 0.4, 1] * len(workers),
             "worker": quadlist(ws.address for ws in workers),
-            "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
+            "escaped_worker": quadlist(url_escape(ws.address) for ws in workers),
             "y": quadlist(range(len(workers))),
             "proc_memory": quadlist(procmemory),
             "managed": quadlist(managed),
@@ -732,7 +731,7 @@ class WorkersTransferBytes(DashboardComponent):
             ws.metrics["transfer"]["outgoing_bytes"] for ws in wss
         ]
         workers = [ws.address for ws in wss]
-        escaped_workers = [escape.url_escape(worker) for worker in workers]
+        escaped_workers = [url_escape(worker) for worker in workers]
 
         if wss:
             x_limit = max(
@@ -1840,7 +1839,7 @@ class CurrentLoad(DashboardComponent):
             "nprocessing-half": [np / 2 for np in nprocessing],
             "nprocessing-color": nprocessing_color,
             "worker": [ws.address for ws in workers],
-            "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+            "escaped_worker": [url_escape(ws.address) for ws in workers],
             "y": list(range(len(workers))),
         }
 
@@ -2381,7 +2380,7 @@ class TaskGraph(DashboardComponent):
                     continue
                 xx = x[key]
                 yy = y[key]
-                node_key.append(escape.url_escape(str(key)))
+                node_key.append(url_escape(str(key)))
                 node_x.append(xx)
                 node_y.append(yy)
                 node_state.append(task.state)
