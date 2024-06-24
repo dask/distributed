@@ -162,17 +162,18 @@ def test_sizeof_serialize(Wrapper, Wrapped):
 def test_deeply_nested_structures():
     # These kind of deeply nested structures are generated in our profiling code
     def gen_deeply_nested(depth, msg=None):
-        msg = msg or {}
-        d = msg
+        d = msg or {}
         while depth:
             depth -= 1
-            d["children"] = d = {}
-        return msg
+            d = {"children": d}
+        return d
 
     msg = {}
-    for _ in range(10):
+    for _ in range(4):
         msg = gen_deeply_nested(sys.getrecursionlimit() // 2, msg=msg)
+
     with pytest.raises(TypeError, match="Could not serialize object"):
+        # Python3.12 this is very slow
         serialize(msg, on_error="raise")
 
     msg = gen_deeply_nested(sys.getrecursionlimit() // 2)
