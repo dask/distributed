@@ -4650,6 +4650,10 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
     await c.gather(fut3)
 
 
+@pytest.mark.skipif(
+    not QUEUING_ON_BY_DEFAULT,
+    reason="The situation handled in this test requires queueing.",
+)
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_deadlock_dependency_of_queued_released(c, s, a):
     @delayed
