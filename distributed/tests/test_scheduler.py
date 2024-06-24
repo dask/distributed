@@ -198,8 +198,8 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         generally, only one worker holds each row of the array, that the `random-` tasks
         are never transferred, and that there are few transfers overall.
         """
-        da = pytest.importorskip("dask.array")
         np = pytest.importorskip("numpy")
+        da = pytest.importorskip("dask.array")
 
         if ndeps == 0:
             x = da.random.random((100, 100), chunks=(10, 10))
@@ -1647,7 +1647,7 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 @gen_cluster(client=True, nthreads=[], timeout=120)
 async def test_file_descriptors(c, s):
     await asyncio.sleep(0.1)
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     proc = psutil.Process()
     num_fds_1 = proc.num_fds()
 
@@ -2803,7 +2803,7 @@ async def test_no_dangling_asyncio_tasks():
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
 async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     start = time()
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(100, chunks=(20,))
     y = (x + 1).persist(optimize_graph=False)
     y = await y
@@ -3033,7 +3033,7 @@ async def test_task_group_not_done_processing(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_task_prefix(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(100, chunks=(20,))
     y = (x + 1).sum().persist()
     y = await y
@@ -3063,8 +3063,8 @@ async def test_failing_task_increments_suspicious(client, s, a, b):
 
 @gen_cluster(client=True)
 async def test_task_group_non_tuple_key(c, s, a, b):
-    da = pytest.importorskip("dask.array")
     np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
     y = (x + 1).sum().persist()
     y = await y
@@ -4474,9 +4474,8 @@ async def test_scheduler_close_fast_deprecated(s, w):
 
 def test_runspec_regression_sync(loop):
     # https://github.com/dask/distributed/issues/6624
-
-    da = pytest.importorskip("dask.array")
     np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
     with Client(loop=loop):
         v = da.random.random((20, 20), chunks=(5, 5))
 
