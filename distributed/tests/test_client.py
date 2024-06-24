@@ -2213,7 +2213,7 @@ async def test_forget_errors(c, s, a, b):
     x = c.submit(div, 1, 0)
     y = c.submit(inc, x)
     z = c.submit(inc, y)
-    await wait([y])
+    await wait([z])
 
     assert s.tasks[x.key].exception
     assert s.tasks[x.key].exception_blame
