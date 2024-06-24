@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
+np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
-import numpy as np
 
 import dask
 import dask.dataframe as dd
