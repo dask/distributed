@@ -9,7 +9,7 @@ from distributed.utils_test import async_poll_for, gen_cluster, inc, wait_for_st
 
 @gen_cluster(client=True)
 async def test_computations(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     x = da.ones(100, chunks=(10,))
     y = (x + 1).persist()

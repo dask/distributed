@@ -403,7 +403,7 @@ async def test_set_resources(c, s, a):
     ],
 )
 async def test_persist_collections(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(10, chunks=(5,))
     with dask.annotate(resources={"A": 1}):
         y = x.map_blocks(lambda x: x + 1)
@@ -426,7 +426,7 @@ async def test_persist_collections(c, s, a, b):
     ],
 )
 async def test_dont_optimize_out(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(10, chunks=(5,))
     y = x.map_blocks(lambda x: x + 1)
     z = y.map_blocks(lambda x: 2 * x)
@@ -447,7 +447,7 @@ async def test_dont_optimize_out(c, s, a, b):
     ],
 )
 async def test_full_collections(c, s, a, b):
-    dd = pytest.importorskip("dask.dataframe")
+    dd = pytest.importorskip("dask.dataframe", exc_type=ImportError)
     df = dd.demo.make_timeseries(
         freq="60s", partition_freq="1d", start="2000-01-01", end="2000-01-31"
     )
@@ -471,7 +471,7 @@ async def test_full_collections(c, s, a, b):
     ],
 )
 def test_collections_get(client, optimize_graph, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     async def f(dask_worker):
         await dask_worker.set_resources(**{"A": 1})

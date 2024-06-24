@@ -214,7 +214,7 @@ async def test_no_extension(c, s, a, b):
     config={"optimization.fuse.active": False},
 )
 async def test_task_groups(c, s, a, b, release, no_time_resync):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     t0 = await padded_time(before=0)
 
     with span("wf"):
@@ -864,9 +864,9 @@ async def test_span_on_persist(c, s, a, b):
 @pytest.mark.filterwarnings("ignore:Dask annotations")
 @gen_cluster(client=True)
 async def test_collections_metadata(c, s, a, b):
+    np = pytest.importorskip("numpy")
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
-    np = pytest.importorskip("numpy")
     df = pd.DataFrame(
         {"x": np.random.random(1000), "y": np.random.random(1000)},
         index=np.arange(1000),

@@ -121,7 +121,7 @@ async def test_roundtrip(c, s, a, b):
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
 async def test_collections(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.random.random((1000, 1000), chunks=(100, 100))
     x = x + x.T
     await x.persist()
