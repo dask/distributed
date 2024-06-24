@@ -2000,6 +2000,6 @@ class TupleComparable:
 @functools.lru_cache
 def url_escape(url, *args, **kwargs):
     """
-    Escape a URL path segment. Cache results for better performance. 
+    Escape a URL path segment. Cache results for better performance.
     """
     return escape.url_escape(url, *args, **kwargs)
