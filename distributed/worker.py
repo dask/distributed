@@ -2731,7 +2731,9 @@ def get_worker() -> Worker:
         raise ValueError("No worker found") from None
 
 
-def get_client(address=None, timeout=None, resolve_address=True) -> Client:
+def get_client(
+    address=None, timeout=None, resolve_address=True, asynchronous=None
+) -> Client:
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
@@ -2746,6 +2748,9 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
         ``distributed.comm.timeouts.connect`` configuration value.
     resolve_address : bool, default True
         Whether to resolve `address` to its canonical form.
+    asynchronous : bool or None, optional
+        Explicitly set the Client(..., asynchronous=...) flag, otherwise ``None``
+        will use the default in ``Client``.
 
     Returns
     -------
@@ -2769,6 +2774,9 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
     worker_client
     secede
     """
+    from distributed.client import Client
+
+    client: None | Client
 
     if timeout is None:
         timeout = dask.config.get("distributed.comm.timeouts.connect")
@@ -2783,18 +2791,37 @@ def get_client(address=None, timeout=None, resolve_address=True) -> Client:
         pass
     else:
         if not address or worker.scheduler.address == address:
-            return worker._get_client(timeout=timeout)
-
-    from distributed.client import Client
+            client = worker._get_client(timeout=timeout)
+            if asynchronous is None or client._asynchronous == asynchronous:
+                return client
+            return Client(
+                worker.scheduler.address,
+                timeout=timeout,
+                asynchronous=asynchronous,
+                loop=client.loop,
+                set_as_default=False,
+            )
 
     try:
         client = Client.current()  # TODO: assumes the same scheduler
     except ValueError:
         client = None
+
     if client and (not address or client.scheduler.address == address):
-        return client
+        if asynchronous is None or client._asynchronous == asynchronous:
+            return client
+        return Client(
+            client.scheduler.address,
+            timeout=timeout,
+            asynchronous=asynchronous,
+            loop=client.loop,
+            set_as_default=False,
+        )
     elif address:
-        return Client(address, timeout=timeout)
+        kwargs = dict(address=address, timeout=timeout)
+        if asynchronous is not None:
+            kwargs["asynchronous"] = asynchronous
+        return Client(**kwargs)
     else:
         raise ValueError("No global client found and no address provided")
 

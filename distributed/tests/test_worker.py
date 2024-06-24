@@ -49,7 +49,7 @@ from distributed.diagnostics.plugin import ForwardOutput
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
-from distributed.utils import wait_for
+from distributed.utils import sync, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -60,6 +60,7 @@ from distributed.utils_test import (
     assert_story,
     async_poll_for,
     captured_logger,
+    cluster,
     dec,
     div,
     freeze_batched_send,
@@ -1044,11 +1045,22 @@ async def test_pid(s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_get_client(c, s, a, b):
+@pytest.mark.parametrize("asynchronous", (True, False))
+async def test_get_client(c, s, a, b, asynchronous):
     def f(x):
-        cc = get_client()
-        future = cc.submit(inc, x)
-        return future.result()
+        cc = get_client(asynchronous=asynchronous)
+        assert cc._asynchronous == asynchronous
+
+        if asynchronous:
+
+            async def _():
+                future = cc.submit(inc, x)
+                return await future.result()
+
+            return sync(cc.loop, _)
+        else:
+            future = cc.submit(inc, x)
+            return future.result()
 
     assert default_client() is c
 
@@ -1068,6 +1080,25 @@ async def test_get_client(c, s, a, b):
         await wait(c.submit(f, i))
 
     assert a._client is a_client
+
+
+@gen_cluster(client=True)
+async def test_init_new_client_if_sync_doesnt_match_async(c, s, a, b):
+    assert c is get_client()
+    assert c is get_client(asynchronous=True)
+    assert c is not get_client(asynchronous=False)
+
+
+def test_init_new_client_if_async_doesnt_match_sync():
+    with cluster() as (s, [a, b]):
+        c = Client(s["address"], set_as_default=False, asynchronous=False)
+
+        with c.as_current():
+            assert c is get_client()
+            assert c is get_client(asynchronous=False)
+            c_async = get_client(asynchronous=True)
+            assert c is not c_async
+            c_async.close()
 
 
 def test_get_client_sync(client):
