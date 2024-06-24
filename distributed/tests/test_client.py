@@ -369,7 +369,7 @@ async def test_persist_retries_annotations(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_retries_dask_array(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.ones((10, 10), chunks=(3, 3))
     future = c.compute(x.sum(), retries=2)
     y = await future
@@ -396,7 +396,7 @@ async def test_future_repr(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_future_tuple_repr(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     y = da.arange(10, chunks=(5,)).persist()
     f = futures_of(y)[0]
     for func in [repr, lambda x: x._repr_html_()]:
@@ -2536,8 +2536,8 @@ async def test_async_persist(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test__persist(c, s, a, b):
-    pytest.importorskip("dask.array")
+async def test_persist_async(c, s, a, b):
+    pytest.importorskip("dask.array", exc_type=ImportError)
     import dask.array as da
 
     x = da.ones((10, 10), chunks=(5, 10))
@@ -2557,7 +2557,7 @@ async def test__persist(c, s, a, b):
 
 
 def test_persist(c):
-    pytest.importorskip("dask.array")
+    pytest.importorskip("dask.array", exc_type=ImportError)
     import dask.array as da
 
     x = da.ones((10, 10), chunks=(5, 10))
@@ -2621,7 +2621,7 @@ async def test_futures_of_get(c, s, a, b):
 
 
 def test_futures_of_class():
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     assert futures_of([da.Array]) == []
 
 
@@ -3355,7 +3355,7 @@ async def test_scheduler_saturates_cores_random(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
 async def test_cancel_clears_processing(c, s, *workers):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = c.submit(slowinc, 1, delay=0.2)
     while not s.tasks:
         await asyncio.sleep(0.01)
@@ -4404,8 +4404,8 @@ async def test_compute_workers(e, s, a, b, c):
 
 @gen_cluster(client=True)
 async def test_compute_nested_containers(c, s, a, b):
-    da = pytest.importorskip("dask.array")
     np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
     x = da.ones(10, chunks=(5,)) + 1
 
     future = c.compute({"x": [x], "y": 123})
@@ -4560,7 +4560,7 @@ async def test_normalize_collection(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_normalize_collection_dask_array(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     x = da.ones(10, chunks=(5,))
     y = x + 1
@@ -4584,7 +4584,7 @@ async def test_normalize_collection_dask_array(c, s, a, b):
 
 @pytest.mark.slow
 def test_normalize_collection_with_released_futures(c):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     x = da.arange(2**20, chunks=2**10)
     y = x.persist()
@@ -4822,7 +4822,7 @@ async def test_recreate_error_collection(c, s, a, b):
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
-    dd = pytest.importorskip("dask.dataframe")
+    dd = pytest.importorskip("dask.dataframe", exc_type=ImportError)
     import pandas as pd
 
     df = dd.from_pandas(pd.DataFrame({"a": [0, 1, 2, 3, 4]}), chunksize=2)
@@ -4850,7 +4850,7 @@ async def test_recreate_error_collection(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_recreate_error_array(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     pytest.importorskip("scipy")
     z = (da.linalg.inv(da.zeros((10, 10), chunks=10)) + 1).sum()
     zz = z.persist()
@@ -4936,7 +4936,7 @@ async def test_recreate_task_collection(c, s, a, b):
         362880,
     ]
 
-    dd = pytest.importorskip("dask.dataframe")
+    dd = pytest.importorskip("dask.dataframe", exc_type=ImportError)
     import pandas as pd
 
     df = dd.from_pandas(pd.DataFrame({"a": [0, 1, 2, 3, 4]}), chunksize=2)
@@ -4961,7 +4961,7 @@ async def test_recreate_task_collection(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_recreate_task_array(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     z = (da.zeros((10, 10), chunks=10) + 1).sum()
     f = c.compute(z)
     function, args, kwargs = await c._get_components_from_future(f)
@@ -5004,7 +5004,7 @@ async def test_restart_workers(c, s, a, b):
     assert set(s.workers) == {a.worker_address, b.worker_address}
 
     # Persist futures and perform a computation
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     size = 100
     x = da.ones(size, chunks=10)
     x = x.persist()
@@ -5287,7 +5287,7 @@ def test_threadsafe(c):
 
 @pytest.mark.slow
 def test_threadsafe_get(c):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(100, chunks=(10,))
 
     def f(_):
@@ -5306,7 +5306,7 @@ def test_threadsafe_get(c):
 
 @pytest.mark.slow
 def test_threadsafe_compute(c):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(100, chunks=(10,))
 
     def f(_):
@@ -5370,7 +5370,7 @@ def test_get_client_no_cluster():
 
 @gen_cluster(client=True)
 async def test_serialize_collections(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(10, chunks=(5,)).persist()
 
     def f(x):
@@ -5710,7 +5710,7 @@ async def test_call_stack_all(c, s, a, b):
 
 @gen_cluster([("127.0.0.1", 4)] * 2, client=True)
 async def test_call_stack_collections(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
     while not a.state.executing_count and not b.state.executing_count:
         await asyncio.sleep(0.001)
@@ -5720,7 +5720,7 @@ async def test_call_stack_collections(c, s, a, b):
 
 @gen_cluster([("127.0.0.1", 4)] * 2, client=True)
 async def test_call_stack_collections_all(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
     while not a.state.executing_count and not b.state.executing_count:
         await asyncio.sleep(0.001)
@@ -6421,7 +6421,7 @@ async def test_get_mix_futures_and_SubgraphCallable(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
-    dd = pytest.importorskip("dask.dataframe")
+    dd = pytest.importorskip("dask.dataframe", exc_type=ImportError)
     import pandas as pd
 
     df = pd.DataFrame({"x": range(1, 11)})
@@ -6809,7 +6809,7 @@ async def test_run_on_scheduler_async_def_wait(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b, local):
     pytest.importorskip("bokeh")
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     async def f(stacklevel, mode=None):
         """
@@ -6900,7 +6900,7 @@ def test_client_connectionpool_semaphore_loop(s, a, b, loop):
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 async def test_mixed_compression(c, s):
     pytest.importorskip("lz4")
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     async with Nanny(
         s.address,
@@ -6926,9 +6926,8 @@ async def test_mixed_compression(c, s):
 
 def test_futures_in_subgraphs(loop_in_thread):
     """Regression test of <https://github.com/dask/distributed/issues/4145>"""
-
-    dd = pytest.importorskip("dask.dataframe")
     pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
     with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
         ddf = dd.from_pandas(
             pd.DataFrame(
@@ -7066,7 +7065,7 @@ async def test_log_event_multiple_clients(c, s):
 
 @gen_cluster(client=True)
 async def test_annotations_task_state(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     with dask.annotate(qux="bar", priority=100):
         x = da.ones(10, chunks=(5,))
@@ -7082,7 +7081,7 @@ async def test_annotations_task_state(c, s, a, b):
 @pytest.mark.parametrize("fn", ["compute", "persist"])
 @gen_cluster(client=True)
 async def test_annotations_compute_time(c, s, a, b, fn):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.ones(10, chunks=(5,))
 
     with dask.annotate(foo="bar"):
@@ -7099,7 +7098,7 @@ async def test_annotations_compute_time(c, s, a, b, fn):
 @pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
 @gen_cluster(client=True)
 async def test_annotations_survive_optimization(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     with dask.annotate(foo="bar"):
         x = da.ones(10, chunks=(5,))
@@ -7117,7 +7116,7 @@ async def test_annotations_survive_optimization(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_annotations_priorities(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     with dask.annotate(priority=15):
         x = da.ones(10, chunks=(5,))
@@ -7132,7 +7131,7 @@ async def test_annotations_priorities(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_annotations_workers(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     with dask.annotate(workers=[a.address]):
         x = da.ones(10, chunks=(5,))
@@ -7150,7 +7149,7 @@ async def test_annotations_workers(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_annotations_retries(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     with dask.annotate(retries=2):
         x = da.ones(10, chunks=(5,))
@@ -7165,8 +7164,8 @@ async def test_annotations_retries(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_annotations_blockwise_unpack(c, s, a, b):
-    da = pytest.importorskip("dask.array")
     np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
     from dask.array.utils import assert_eq
 
     # A flaky doubling function -- need extra args because it is called before
@@ -7202,7 +7201,7 @@ async def test_annotations_blockwise_unpack(c, s, a, b):
     ],
 )
 async def test_annotations_resources(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     with dask.annotate(resources={"GPU": 1}):
         x = da.ones(10, chunks=(5,))
@@ -7223,7 +7222,7 @@ async def test_annotations_resources(c, s, a, b):
     ],
 )
 async def test_annotations_resources_culled(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     x = da.ones((2, 2, 2), chunks=1)
     with dask.annotate(resources={"GPU": 1}):
@@ -7238,7 +7237,7 @@ async def test_annotations_resources_culled(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_annotations_loose_restrictions(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     # Eventually fails if allow_other_workers=False
     with dask.annotate(workers=["fake"], allow_other_workers=True):
@@ -7291,7 +7290,7 @@ async def test_annotations_global_vs_local(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_workers_collection_restriction(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     future = c.compute(da.arange(10), workers=a.address)
     await future
@@ -7460,7 +7459,7 @@ async def test_computation_store_annotations(c, s, a):
 
 
 def test_computation_object_code_dask_compute(client):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     with dask.config.set({"distributed.diagnostics.computations.nframes": 2}):
         x = da.ones((10, 10), chunks=(3, 3))
         x.sum().compute()
@@ -7480,7 +7479,7 @@ def test_computation_object_code_dask_compute(client):
 
 
 def test_computation_object_code_dask_compute_no_frames_default(client):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.ones((10, 10), chunks=(3, 3))
     x.sum().compute()
 
@@ -7516,7 +7515,7 @@ def test_computation_object_code_not_available(client):
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_dask_persist(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.ones((10, 10), chunks=(3, 3))
     future = x.sum().persist()
     await future
@@ -7623,7 +7622,7 @@ async def test_computation_object_code_client_map(c, s, a, b):
 
 @gen_cluster(client=True, config={"distributed.diagnostics.computations.nframes": 2})
 async def test_computation_object_code_client_compute(c, s, a, b):
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.ones((10, 10), chunks=(3, 3))
     future = c.compute(x.sum(), retries=2)
     y = await future
