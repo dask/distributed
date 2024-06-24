@@ -159,7 +159,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CONDA }}/envs
-          key: conda-${{ matrix.os }}--${{ matrix.environment }}-${{ matrix.label }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
+          key: conda-${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
         env:
           # Increase this value to reset cache if
           # continuous_integration/environment-${{ matrix.environment }}.yaml has not
