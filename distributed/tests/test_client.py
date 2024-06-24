@@ -63,6 +63,8 @@ from distributed import (
 from distributed.client import (
     Client,
     Future,
+    FutureCancelledError,
+    FuturesCancelledError,
     _get_global_client,
     _global_clients,
     as_completed,
@@ -8566,3 +8568,42 @@ async def test_gather_race_vs_AMM(c, s, a, direct):
         b.block_get_data.set()
 
     assert await fut == 3  # It's from a; it would be 2 if it were from b
+
+
+@gen_cluster(client=True)
+async def test_client_disconnect_exception_on_cancelled_futures(c, s, a, b):
+    fut = c.submit(inc, 1)
+    await wait(fut)
+
+    await s.close()
+
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
+        await fut.result()
+
+    with pytest.raises(FuturesCancelledError, match="connection to the scheduler"):
+        await wait(fut)
+
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
+        await fut
+
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
+        await c.gather([fut])
+
+    with pytest.raises(FuturesCancelledError, match="connection to the scheduler"):
+        futures_of(fut, client=c)
+
+    async for fut, res in as_completed([fut], with_results=True):
+        assert isinstance(res, FutureCancelledError)
+        assert "connection to the scheduler" in res.msg
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
+async def test_scheduler_restart_exception_on_cancelled_futures(c, s, a, b):
+    fut = c.submit(inc, 1)
+    await wait(fut)
+
+    await s.restart(stimulus_id="test")
+
+    with pytest.raises(CancelledError, match="Scheduler has restarted"):
+        await fut.result()
