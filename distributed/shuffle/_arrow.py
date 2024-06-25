@@ -62,7 +62,9 @@ def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
         raise
 
 
-def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
+def convert_shards(
+    shards: list[pa.Table], meta: pd.DataFrame, partition_column: str, drop_column: bool
+) -> pd.DataFrame:
     import pandas as pd
     from pandas.core.dtypes.cast import find_common_type  # type: ignore[attr-defined]
 
@@ -72,6 +74,8 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
     table = table.sort_by(_INPUT_PARTITION_ID_COLUMN)
     table = table.drop([_INPUT_PARTITION_ID_COLUMN])
 
+    if drop_column:
+        meta = meta.drop(columns=partition_column)
     df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
     reconciled_dtypes = {}
     for column, dtype in meta.dtypes.items():
@@ -89,7 +93,11 @@ def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
         ):
             continue
         reconciled_dtypes[column] = find_common_type([actual, dtype])
-    return df.astype(reconciled_dtypes, copy=False)
+
+    from dask.dataframe._compat import PANDAS_GE_300
+
+    kwargs = {} if PANDAS_GE_300 else {"copy": False}
+    return df.astype(reconciled_dtypes, **kwargs)
 
 
 def buffers_to_table(data: list[tuple[int, bytes]]) -> pa.Table:

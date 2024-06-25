@@ -2,6 +2,7 @@
 {% set new_patch = major_minor_patch[2] | int + 1 %}
 {% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
 {% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
+{% set dask_expr_version = environ.get('DASK_EXPR_VERSION', '0.0.0.dev') %}
 
 
 package:
@@ -20,10 +21,12 @@ requirements:
   host:
     - python >=3.9
     - dask-core {{ dask_version }}
+    - dask-expr {{ dask_expr_version }}
     - distributed {{ version }}
   run:
     - python >=3.9
     - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
+    - {{ pin_compatible('dask-expr', max_pin='x.x.x.x') }}
     - {{ pin_compatible('distributed', exact=True) }}
     - cytoolz >=0.8.2
     - lz4 >=4.3.2

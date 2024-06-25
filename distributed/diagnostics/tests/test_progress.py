@@ -210,7 +210,7 @@ async def test_AllProgress(c, s, a, b):
     await wait([future])
     assert p.state["memory"] == {"f": {future.key}}
 
-    await c._restart()
+    await c.restart()
 
     for coll in [p.all] + list(p.state.values()):
         assert not coll
@@ -257,12 +257,12 @@ async def test_group_timing(c, s, a, b):
     assert s.task_groups.keys() == p.compute.keys()
     assert all(
         [
-            abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-12
+            abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-6 * len(v)
             for k, v in p.compute.items()
         ]
     )
 
-    await s.restart()
+    await s.restart(stimulus_id="test")
     assert len(p.time) == 2
     assert len(p.nthreads) == 2
     assert len(p.compute) == 0

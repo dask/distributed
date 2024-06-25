@@ -442,8 +442,8 @@ async def test_log_event_plugin(c, s, a, b):
             self.scheduler = scheduler
             self.scheduler._recorded_events = list()  # type: ignore
 
-        def log_event(self, name, msg):
-            self.scheduler._recorded_events.append((name, msg))
+        def log_event(self, topic, msg):
+            self.scheduler._recorded_events.append((topic, msg))
 
     await c.register_plugin(EventPlugin())
 
@@ -453,6 +453,27 @@ async def test_log_event_plugin(c, s, a, b):
     await c.submit(f)
 
     assert ("foo", 123) in s._recorded_events
+
+
+@gen_cluster(client=True)
+async def test_log_event_plugin_multiple_topics(c, s, a, b):
+    class EventPlugin(SchedulerPlugin):
+        async def start(self, scheduler: Scheduler) -> None:
+            self.scheduler = scheduler
+            self.scheduler._recorded_events = list()  # type: ignore
+
+        def log_event(self, topic, msg):
+            self.scheduler._recorded_events.append((topic, msg))
+
+    await c.register_plugin(EventPlugin())
+
+    def f():
+        get_worker().log_event(["foo", "bar"], 123)
+
+    await c.submit(f)
+
+    assert ("foo", 123) in s._recorded_events
+    assert ("bar", 123) in s._recorded_events
 
 
 @gen_cluster(client=True)

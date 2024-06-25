@@ -141,7 +141,7 @@ async def test_custom_executor(c, s, a):
     """Don't try to acquire in-thread metrics when the executor is a ProcessPoolExecutor
     or a custom, arbitrary executor.
     """
-    with ProcessPoolExecutor(1) as e:
+    with ProcessPoolExecutor(1, mp_context=distributed.utils.get_mp_context()) as e:
         # Warm up executor - this can take up to 2s in Windows and MacOSX
         e.submit(inc, 1).result()
 

@@ -53,7 +53,6 @@ from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
 from jinja2 import Environment, FileSystemLoader
 from tlz import curry, pipe, second, valmap
 from tlz.curried import concat, groupby, map
-from tornado import escape
 
 import dask
 from dask import config
@@ -91,7 +90,7 @@ from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
 from distributed.spans import SpansSchedulerExtension
-from distributed.utils import Log, log_errors
+from distributed.utils import Log, log_errors, url_escape
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -199,7 +198,7 @@ class Occupancy(DashboardComponent):
                 "worker": [ws.address for ws in workers],
                 "ms": ms,
                 "color": color,
-                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                "escaped_worker": [url_escape(ws.address) for ws in workers],
                 "x": x,
                 "y": y,
             }
@@ -581,7 +580,7 @@ class WorkersMemory(DashboardComponent, MemoryColor):
             "color": color,
             "alpha": [1, 0.7, 0.4, 1] * len(workers),
             "worker": quadlist(ws.address for ws in workers),
-            "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
+            "escaped_worker": quadlist(url_escape(ws.address) for ws in workers),
             "y": quadlist(range(len(workers))),
             "proc_memory": quadlist(procmemory),
             "managed": quadlist(managed),
@@ -732,7 +731,7 @@ class WorkersTransferBytes(DashboardComponent):
             ws.metrics["transfer"]["outgoing_bytes"] for ws in wss
         ]
         workers = [ws.address for ws in wss]
-        escaped_workers = [escape.url_escape(worker) for worker in workers]
+        escaped_workers = [url_escape(worker) for worker in workers]
 
         if wss:
             x_limit = max(
@@ -1840,7 +1839,7 @@ class CurrentLoad(DashboardComponent):
             "nprocessing-half": [np / 2 for np in nprocessing],
             "nprocessing-color": nprocessing_color,
             "worker": [ws.address for ws in workers],
-            "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+            "escaped_worker": [url_escape(ws.address) for ws in workers],
             "y": list(range(len(workers))),
         }
 
@@ -1922,7 +1921,7 @@ class StealingEvents(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="level",
@@ -2016,7 +2015,7 @@ class Events(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="y",
@@ -2302,7 +2301,7 @@ class TaskGraph(DashboardComponent):
             color="black",
             alpha=0.3,
         )
-        rect = self.root.square(
+        rect = self.root.scatter(
             x="x",
             y="y",
             size=10,
@@ -2310,6 +2309,7 @@ class TaskGraph(DashboardComponent):
             source=self.node_source,
             view=node_view,
             legend_field="state",
+            marker="square",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -2380,7 +2380,7 @@ class TaskGraph(DashboardComponent):
                     continue
                 xx = x[key]
                 yy = y[key]
-                node_key.append(escape.url_escape(str(key)))
+                node_key.append(url_escape(str(key)))
                 node_x.append(xx)
                 node_y.append(yy)
                 node_state.append(task.state)
@@ -3341,15 +3341,15 @@ class TaskProgress(DashboardComponent):
         }
 
         for tp in self.scheduler.task_prefixes.values():
-            active_states = tp.active_states
-            if any(active_states.get(s) for s in state.keys()):
-                state["memory"][tp.name] = active_states["memory"]
-                state["erred"][tp.name] = active_states["erred"]
-                state["released"][tp.name] = active_states["released"]
-                state["processing"][tp.name] = active_states["processing"]
-                state["waiting"][tp.name] = active_states["waiting"]
-                state["queued"][tp.name] = active_states["queued"]
-                state["no_worker"][tp.name] = active_states["no-worker"]
+            states = tp.states
+            if any(states.get(s) for s in state.keys()):
+                state["memory"][tp.name] = states["memory"]
+                state["erred"][tp.name] = states["erred"]
+                state["released"][tp.name] = states["released"]
+                state["processing"][tp.name] = states["processing"]
+                state["waiting"][tp.name] = states["waiting"]
+                state["queued"][tp.name] = states["queued"]
+                state["no_worker"][tp.name] = states["no-worker"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3911,7 +3911,6 @@ class Contention(DashboardComponent):
     @log_errors
     def update(self):
         s = self.scheduler
-        monitor_gil = s.monitor.monitor_gil_contention
 
         self.data["values"] = [
             s._tick_interval_observed,
@@ -3919,11 +3918,13 @@ class Contention(DashboardComponent):
             sum(w.metrics["event_loop_interval"] for w in s.workers.values())
             / (len(s.workers) or 1),
             self.gil_contention_workers,
-        ][:: 1 if monitor_gil else 2]
+        ][:: 1 if s.monitor.monitor_gil_contention else 2]
 
         # Format event loop as time and GIL (if configured) as %
         self.data["text"] = [
-            f"{x * 100:.1f}%" if i % 2 and monitor_gil else format_time(x)
+            f"{x * 100:.1f}%"
+            if i % 2 and s.monitor.monitor_gil_contention
+            else format_time(x)
             for i, x in enumerate(self.data["values"])
         ]
         update(self.source, self.data)
@@ -4197,7 +4198,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        mem_plot.circle(
+        mem_plot.scatter(
             source=self.source, x="memory_percent", y=0, size=10, fill_alpha=0.5
         )
         mem_plot.ygrid.visible = False
@@ -4227,7 +4228,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        cpu_plot.circle(
+        cpu_plot.scatter(
             source=self.source, x="cpu_fraction", y=0, size=10, fill_alpha=0.5
         )
         cpu_plot.ygrid.visible = False

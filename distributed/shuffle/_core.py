@@ -6,7 +6,15 @@ import contextlib
 import itertools
 import pickle
 import time
-from collections.abc import Callable, Generator, Hashable, Iterable, Iterator, Sequence
+from collections.abc import (
+    Callable,
+    Coroutine,
+    Generator,
+    Hashable,
+    Iterable,
+    Iterator,
+    Sequence,
+)
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,13 +29,14 @@ from dask.core import flatten
 from dask.typing import Key
 from dask.utils import parse_timedelta
 
-from distributed.core import PooledRPCCall
+from distributed.core import ErrorMessage, OKMessage, PooledRPCCall, error_message
 from distributed.exceptions import Reschedule
 from distributed.metrics import context_meter, thread_time
 from distributed.protocol import to_serialize
+from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
-from distributed.shuffle._exceptions import ShuffleClosedError
+from distributed.shuffle._exceptions import P2PConsistencyError, ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
 from distributed.utils import run_in_executor_with_context, sync
@@ -49,6 +58,10 @@ NDIndex: TypeAlias = tuple[int, ...]
 _T_partition_id = TypeVar("_T_partition_id")
 _T_partition_type = TypeVar("_T_partition_type")
 _T = TypeVar("_T")
+
+
+class RunSpecMessage(OKMessage):
+    run_spec: ShuffleRunSpec | ToPickle[ShuffleRunSpec]
 
 
 class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
@@ -191,7 +204,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
     async def _send(
         self, address: str, shards: list[tuple[_T_partition_id, Any]] | bytes
-    ) -> None:
+    ) -> OKMessage | ErrorMessage:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
             data=to_serialize(shards),
@@ -201,7 +214,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
 
     async def send(
         self, address: str, shards: list[tuple[_T_partition_id, Any]]
-    ) -> None:
+    ) -> OKMessage | ErrorMessage:
         if _mean_shard_size(shards) < 65536:
             # Don't send buffers individually over the tcp comms.
             # Instead, merge everything into an opaque bytes blob, send it all at once,
@@ -212,8 +225,11 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         else:
             shards_or_bytes = shards
 
+        def _send() -> Coroutine[Any, Any, OKMessage | ErrorMessage]:
+            return self._send(address, shards_or_bytes)
+
         return await retry(
-            partial(self._send, address, shards_or_bytes),
+            _send,
             count=self.RETRY_COUNT,
             delay_min=self.RETRY_DELAY_MIN,
             delay_max=self.RETRY_DELAY_MAX,
@@ -291,11 +307,17 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self.raise_if_closed()
         return self._disk_buffer.read("_".join(str(i) for i in id))
 
-    async def receive(self, data: list[tuple[_T_partition_id, Any]] | bytes) -> None:
-        if isinstance(data, bytes):
-            # Unpack opaque blob. See send()
-            data = cast(list[tuple[_T_partition_id, Any]], pickle.loads(data))
-        await self._receive(data)
+    async def receive(
+        self, data: list[tuple[_T_partition_id, Any]] | bytes
+    ) -> OKMessage | ErrorMessage:
+        try:
+            if isinstance(data, bytes):
+                # Unpack opaque blob. See send()
+                data = cast(list[tuple[_T_partition_id, Any]], pickle.loads(data))
+            await self._receive(data)
+            return {"status": "OK"}
+        except P2PConsistencyError as e:
+            return error_message(e)
 
     async def _ensure_output_worker(self, i: _T_partition_id, key: Key) -> None:
         assigned_worker = self._get_assigned_worker(i)
@@ -461,6 +483,7 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
     run_spec: ShuffleRunSpec
     participating_workers: set[str]
     _archived_by: str | None = field(default=None, init=False)
+    _failed: bool = False
 
     @property
     def id(self) -> ShuffleId:

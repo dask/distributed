@@ -27,7 +27,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         environment: [mindeps, "3.9", "3.10", "3.11", "3.12"]
-        label: [queue]
+        label: [default]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
@@ -55,6 +55,16 @@ jobs:
           - os: ubuntu-latest
             environment: "3.9"
             label: no_queue
+            partition: "not ci1"
+
+          # Set dataframe.query-planning: false
+          - os: ubuntu-latest
+            environment: "3.9"
+            label: no_expr
+            partition: "ci1"
+          - os: ubuntu-latest
+            environment: "3.9"
+            label: no_expr
             partition: "not ci1"
 
           # dask.array P2P shuffle
@@ -110,12 +120,12 @@ jobs:
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v4.1.1
+        uses: actions/checkout@v4.1.3
         with:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v3.0.1
+        uses: conda-incubator/setup-miniconda@v3.0.3
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
@@ -154,7 +164,7 @@ jobs:
           # Increase this value to reset cache if
           # continuous_integration/environment-${{ matrix.environment }}.yaml has not
           # changed. See also same variable in .pre-commit-config.yaml
-          CACHE_NUMBER: 1
+          CACHE_NUMBER: 2
         id: cache
 
       - name: Update environment
@@ -207,10 +217,15 @@ jobs:
         if: ${{ matrix.os  != 'windows-latest' }}
         run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
 
-      - name: Set up dask env for job queuing
+      - name: Set up dask env to disable job queuing
         shell: bash -l {0}
         if: ${{ matrix.label == 'no_queue' }}
         run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
+
+      - name: Set up dask env to disable dask-expr
+        shell: bash -l {0}
+        if: ${{ matrix.label == 'no_expr' }}
+        run: echo "DASK_DATAFRAME__QUERY_PLANNING=False" >> $GITHUB_ENV
 
       - name: Print host info
         # host_info.py imports numpy, which isn't a direct dependency of distributed
