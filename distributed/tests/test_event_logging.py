@@ -107,7 +107,7 @@ async def test_log_event_multiple_clients(c, s):
 @gen_cluster(client=True, config={"distributed.admin.low-level-log-length": 3})
 async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 1")
-    assert len(s._broker._topics["test"].events) == 1
+    assert len(s.get_events("test")) == 1
     # assert s.event_counts["test"] == 1
     s.log_event("test", "dummy message 2")
     s.log_event("test", "dummy message 3")
@@ -117,10 +117,9 @@ async def test_configurable_events_log_length(c, s, a, b):
     # adding a fourth message will drop the first one and length stays at 3
     s.log_event("test", "dummy message 4")
     assert len(s.get_events("test")) == 3
-    assert s.event_counts["test"] == 4
-    assert s.events["test"][0][1] == "dummy message 2"
-    assert s.events["test"][1][1] == "dummy message 3"
-    assert s.events["test"][2][1] == "dummy message 4"
+    assert s._broker._topics["test"].count == 4
+    events = [event for _, event in s.get_events("test").items()]
+    assert events == ["dummy message 2", "dummy message 3", "dummy message 4"]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
