@@ -112,7 +112,7 @@ async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 2")
     s.log_event("test", "dummy message 3")
     assert len(s.get_events("test")) == 3
-    assert s.event_counts["test"] == 3
+    assert s._broker._topics["test"].count == 3
 
     # adding a fourth message will drop the first one and length stays at 3
     s.log_event("test", "dummy message 4")
@@ -150,7 +150,7 @@ async def test_events_subscribe_topic(c, s, a):
 
     a.log_event("test-topic", {"forget": "me"})
 
-    while len(s.events["test-topic"]) == 1:
+    while len(s.get_events("test-topic")) == 1:
         await asyncio.sleep(0.01)
 
     assert len(log) == 1
