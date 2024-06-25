@@ -712,7 +712,7 @@ def test_invalid_transitions(capsys):
             with pytest.raises(InvalidTransition):
                 a.handle_stimulus(ev)
 
-        while not s.events["invalid-worker-transition"]:
+        while not s.get_events("invalid-worker-transition"):
             await asyncio.sleep(0.01)
 
     with pytest.raises(Exception) as info:
@@ -737,7 +737,7 @@ def test_invalid_worker_state(capsys):
         with pytest.raises(InvalidTaskState):
             a.validate_state()
 
-        while not s.events["invalid-worker-task-state"]:
+        while not s.get_events("invalid-worker-task-state"):
             await asyncio.sleep(0.01)
 
     with pytest.raises(Exception) as info:

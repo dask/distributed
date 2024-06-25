@@ -34,7 +34,7 @@ class Topic:
         self.events.append(event)
         self.count += 1
 
-    def clear(self) -> None:
+    def truncate(self) -> None:
         self.events.clear()
 
 
@@ -67,9 +67,12 @@ class Broker:
                 except Exception:
                     logger.info("Plugin failed with exception", exc_info=True)
 
-    def clear(self, topic: str) -> None:
-        if topic in self._topics:
-            self._topics[topic].clear()
+    def truncate(self, topic: str | None = None) -> None:
+        if topic is None:
+            for _topic in self._topics.values():
+                _topic.truncate()
+        elif topic in self._topics:
+            self._topics[topic].truncate()
 
     def _send_to_subscribers(self, topic: str, event: Any) -> None:
         msg = {

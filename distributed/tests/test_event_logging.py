@@ -108,7 +108,6 @@ async def test_log_event_multiple_clients(c, s):
 async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 1")
     assert len(s.get_events("test")) == 1
-    # assert s.event_counts["test"] == 1
     s.log_event("test", "dummy message 2")
     s.log_event("test", "dummy message 3")
     assert len(s.get_events("test")) == 3

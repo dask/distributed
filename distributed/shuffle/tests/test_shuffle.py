@@ -435,7 +435,7 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
-    assert sum(event["action"] == "p2p-failed" for _, event in s.events["p2p"]) == 1
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
     await c.close()
     await check_worker_cleanup(a)
@@ -462,7 +462,7 @@ async def test_restarting_does_not_log_p2p_failed(c, s, a, b):
     await b.close()
 
     await out
-    assert not s.events["p2p"]
+    assert not s.get_events("p2p")
     await c.close()
     await check_worker_cleanup(a)
     await check_worker_cleanup(b, closed=True)
@@ -833,7 +833,7 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
-    assert sum(event["action"] == "p2p-failed" for _, event in s.events["p2p"]) == 1
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
     alive_shuffle.block_inputs_done.set()
 
@@ -996,7 +996,7 @@ async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
-    assert sum(event["action"] == "p2p-failed" for _, event in s.events["p2p"]) == 1
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
     await c.close()
     await check_worker_cleanup(a)

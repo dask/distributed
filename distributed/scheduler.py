@@ -5407,7 +5407,7 @@ class Scheduler(SchedulerState, ServerNode):
         async def remove_worker_from_events() -> None:
             # If the worker isn't registered anymore after the delay, remove from events
             if address not in self.workers:
-                self._broker.clear(address)
+                self._broker.truncate(address)
 
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
@@ -5821,7 +5821,7 @@ class Scheduler(SchedulerState, ServerNode):
         async def remove_client_from_events() -> None:
             # If the client isn't registered anymore after the delay, remove from events
             if client not in self.clients:
-                self._broker.clear(client)
+                self._broker.truncate(client)
 
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
