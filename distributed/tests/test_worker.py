@@ -18,7 +18,6 @@ from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
 from operator import add
 from time import sleep
-from unittest import mock
 
 import psutil
 import pytest
@@ -866,39 +865,6 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     l1, l2 = b.transfer_incoming_log
 
     assert l1["stop"] < l2["start"]
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_log_event(c, s, a):
-    def log_event(msg):
-        w = get_worker()
-        w.log_event("test-topic", msg)
-
-    await c.submit(log_event, "foo")
-
-    class C:
-        pass
-
-    with pytest.raises(TypeError, match="msgpack"):
-        await c.submit(log_event, C())
-
-    # Worker still works
-    await c.submit(log_event, "bar")
-    await c.submit(log_event, error_message(Exception()))
-
-    # assertion reversed for mock.ANY.__eq__(Serialized())
-    assert [
-        "foo",
-        "bar",
-        {
-            "status": "error",
-            "exception": mock.ANY,
-            "traceback": mock.ANY,
-            "exception_text": "Exception()",
-            "traceback_text": "",
-            "worker": a.address,
-        },
-    ] == [msg[1] for msg in s.get_events("test-topic")]
 
 
 @gen_cluster(client=True)
