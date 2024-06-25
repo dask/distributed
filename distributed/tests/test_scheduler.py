@@ -865,39 +865,39 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
 
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "500 ms"})
 async def test_clear_events_worker_removal(s, a, b):
-    assert a.address in s.events
+    assert a.address in s._broker._topics
     assert a.address in s.workers
-    assert b.address in s.events
+    assert b.address in s._broker._topics
     assert b.address in s.workers
 
     await s.remove_worker(address=a.address, stimulus_id="test")
     # Shortly after removal, the events should still be there
-    assert a.address in s.events
+    assert a.address in s._broker._topics
     assert a.address not in s.workers
     s.validate_state()
 
     start = time()
-    while a.address in s.events:
+    while a.address in s._broker._topics:
         await asyncio.sleep(0.01)
         assert time() < start + 2
-    assert b.address in s.events
+    assert b.address in s._broker._topics
 
 
 @gen_cluster(
     config={"distributed.scheduler.events-cleanup-delay": "10 ms"}, client=True
 )
 async def test_clear_events_client_removal(c, s, a, b):
-    assert c.id in s.events
+    assert c.id in s._broker._topics
     s.remove_client(c.id)
 
-    assert c.id in s.events
+    assert c.id in s._broker._topics
     assert c.id not in s.clients
     assert c not in s.clients
 
     s.remove_client(c.id)
     # If it doesn't reconnect after a given time, the events log should be cleared
     start = time()
-    while c.id in s.events:
+    while c.id in s._broker._topics:
         await asyncio.sleep(0.01)
         assert time() < start + 2
 
@@ -2106,14 +2106,16 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     await ev2.set()
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, clean_kwargs={"processes": False, "threads": False}
 )
 async def test_log_tasks_during_restart(c, s, a, b):
     future = c.submit(sys.exit, 0)
     await wait(future)
-    assert "exit" in str(s.events)
+    assert "exit" in str(
+        {name: topic.events for name, topic in s._broker._topics.items()}
+    )
 
 
 @gen_cluster(client=True)
@@ -4431,7 +4433,7 @@ async def test_ensure_events_dont_include_taskstate_objects(c, s, a, b):
     await event.set()
     await c.gather(futs)
 
-    assert "TaskState" not in str(s.events)
+    assert not any("TaskState" in str(event) for event in s.get_events())
 
 
 @gen_cluster(nthreads=[("", 1)])

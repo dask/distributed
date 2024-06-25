@@ -75,6 +75,7 @@ from distributed._asyncio import RLock
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
+from distributed.broker import Broker
 from distributed.client import SourceCode
 from distributed.collections import HeapSet
 from distributed.comm import (
@@ -3805,9 +3806,7 @@ class Scheduler(SchedulerState, ServerNode):
         ]
 
         maxlen = dask.config.get("distributed.admin.low-level-log-length")
-        self.events = defaultdict(partial(deque, maxlen=maxlen))
-        self.event_counts = defaultdict(int)
-        self.event_subscriber = defaultdict(set)
+        self._broker = Broker(maxlen, self)
         self.worker_plugins = {}
         self.nanny_plugins = {}
         self._starting_nannies = set()
@@ -4003,7 +4002,7 @@ class Scheduler(SchedulerState, ServerNode):
             "workers": self.workers,
             "clients": self.clients,
             "memory": self.memory,
-            "events": self.events,
+            "events": self._broker._topics,
             "extensions": self.extensions,
         }
         extra = {k: v for k, v in extra.items() if k not in exclude}
@@ -5407,8 +5406,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         async def remove_worker_from_events() -> None:
             # If the worker isn't registered anymore after the delay, remove from events
-            if address not in self.workers and address in self.events:
-                del self.events[address]
+            if address not in self.workers:
+                self._broker.clear(address)
 
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
@@ -5821,8 +5820,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         async def remove_client_from_events() -> None:
             # If the client isn't registered anymore after the delay, remove from events
-            if client not in self.clients and client in self.events:
-                del self.events[client]
+            if client not in self.clients:
+                self._broker.clear(client)
 
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
@@ -8424,40 +8423,16 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Client.log_event
         """
-        event = (time(), msg)
-        if isinstance(topic, str):
-            topic = [topic]
-        for t in topic:
-            self.events[t].append(event)
-            self.event_counts[t] += 1
-            self._report_event(t, event)
-
-            for plugin in list(self.plugins.values()):
-                try:
-                    plugin.log_event(t, msg)
-                except Exception:
-                    logger.info("Plugin failed with exception", exc_info=True)
-
-    def _report_event(self, name, event):
-        msg = {
-            "op": "event",
-            "topic": name,
-            "event": event,
-        }
-        client_msgs = {client: [msg] for client in self.event_subscriber[name]}
-        self.send_all(client_msgs, worker_msgs={})
+        self._broker.publish(topic, msg)
 
     def subscribe_topic(self, topic, client):
-        self.event_subscriber[topic].add(client)
+        self._broker.subscribe(topic, client)
 
     def unsubscribe_topic(self, topic, client):
-        self.event_subscriber[topic].discard(client)
+        self._broker.unsubscribe(topic, client)
 
     def get_events(self, topic=None):
-        if topic is not None:
-            return tuple(self.events[topic])
-        else:
-            return valmap(tuple, self.events)
+        return self._broker.get_events(topic)
 
     async def get_worker_monitor_info(self, recent=False, starts=None):
         if starts is None:
