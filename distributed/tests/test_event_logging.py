@@ -291,7 +291,7 @@ async def test_events_unsubscribe_raises_if_unknown(c, s):
 
 
 @gen_cluster(client=True)
-async def test_log_event_warn(c, s, a, b):
+async def test_log_event_to_warn(c, s, a, b):
     def foo():
         get_worker().log_event(["foo", "warn"], "Hello!")
 
@@ -338,42 +338,6 @@ async def test_log_event_msgpack(c, s, a, b):
             "traceback_text": "",
         },
     ] == [msg[1] for msg in s.get_events("test-topic")]
-
-
-# FIXME: move this back to client. This is functionality built on top of log_event
-@gen_cluster(client=True)
-async def test_log_event_warn_dask_warns(c, s, a, b):
-    from dask.distributed import warn
-
-    def warn_simple():
-        warn("Hello!")
-
-    with pytest.warns(UserWarning, match="Hello!"):
-        await c.submit(warn_simple)
-
-    def warn_deprecation_1():
-        # one way to do it...
-        warn("You have been deprecated by AI", DeprecationWarning)
-
-    with pytest.warns(DeprecationWarning, match="You have been deprecated by AI"):
-        await c.submit(warn_deprecation_1)
-
-    def warn_deprecation_2():
-        # another way to do it...
-        warn(DeprecationWarning("Your profession has been deprecated"))
-
-    with pytest.warns(DeprecationWarning, match="Your profession has been deprecated"):
-        await c.submit(warn_deprecation_2)
-
-    # user-defined warning subclass
-    class MyPrescientWarning(UserWarning):
-        pass
-
-    def warn_cassandra():
-        warn(MyPrescientWarning("Cassandra says..."))
-
-    with pytest.warns(MyPrescientWarning, match="Cassandra says..."):
-        await c.submit(warn_cassandra)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

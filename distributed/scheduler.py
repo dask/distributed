@@ -8425,23 +8425,23 @@ class Scheduler(SchedulerState, ServerNode):
         """
         self._broker.publish(topic, msg)
 
-    def subscribe_topic(self, topic, client):
+    def subscribe_topic(self, topic: str, client: str) -> None:
         self._broker.subscribe(topic, client)
 
-    def unsubscribe_topic(self, topic, client):
+    def unsubscribe_topic(self, topic: str, client: str) -> None:
         self._broker.unsubscribe(topic, client)
 
     @overload
-    def get_events(self, topic: str) -> tuple[tuple[float, Any]]:
+    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]:
         ...
 
     @overload
-    def get_events(self) -> dict[str, tuple[tuple[float, Any]]]:
+    def get_events(self) -> dict[str, tuple[tuple[float, Any], ...]]:
         ...
 
     def get_events(
         self, topic: str | None = None
-    ) -> tuple[tuple[float, Any]] | dict[str, tuple[tuple[float, Any]]]:
+    ) -> tuple[tuple[float, Any], ...] | dict[str, tuple[tuple[float, Any], ...]]:
         return self._broker.get_events(topic)
 
     async def get_worker_monitor_info(self, recent=False, starts=None):
