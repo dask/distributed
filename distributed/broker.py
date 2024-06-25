@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict, deque
 from collections.abc import Collection
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 from distributed.metrics import time
 
@@ -63,7 +63,7 @@ class Broker:
 
             for plugin in list(self._scheduler.plugins.values()):
                 try:
-                    plugin.log_event(name, event)
+                    plugin.log_event(name, msg)
                 except Exception:
                     logger.info("Plugin failed with exception", exc_info=True)
 
@@ -80,7 +80,17 @@ class Broker:
         client_msgs = {client: [msg] for client in self._topics[topic].subscribers}
         self._scheduler.send_all(client_msgs, worker_msgs={})
 
-    def get_events(self, topic=None):
+    @overload
+    def get_events(self, topic: str) -> tuple[tuple[float, Any]]:
+        ...
+
+    @overload
+    def get_events(self, topic: None = None) -> dict[str, tuple[tuple[float, Any]]]:
+        ...
+
+    def get_events(
+        self, topic: str | None = None
+    ) -> tuple[tuple[float, Any]] | dict[str, tuple[tuple[float, Any]]]:
         if topic is not None:
             return tuple(self._topics[topic].events)
         else:
