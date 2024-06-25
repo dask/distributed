@@ -7682,6 +7682,30 @@ async def test_async_task_with_partial(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_warn_manual(c, s, a, b):
+    def foo():
+        get_worker().log_event(["foo", "warn"], "Hello!")
+
+    with pytest.warns(UserWarning, match="Hello!"):
+        await c.submit(foo)
+
+    def no_message():
+        # missing "message" key should log TypeError
+        get_worker().log_event("warn", {})
+
+    with captured_logger("distributed.client") as log:
+        await c.submit(no_message)
+        assert "TypeError" in log.getvalue()
+
+    def no_category():
+        # missing "category" defaults to `UserWarning`
+        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
+
+    with pytest.warns(UserWarning, match="asdf"):
+        await c.submit(no_category)
+
+
+@gen_cluster(client=True)
 async def test_warn_remote(c, s, a, b):
     from dask.distributed import warn
 

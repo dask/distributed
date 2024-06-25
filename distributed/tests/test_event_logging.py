@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import pickle
 from unittest import mock
 
 import pytest
@@ -178,30 +177,6 @@ async def test_events_all_servers_use_same_channel(c, s, a):
 async def test_events_unsubscribe_raises_if_unknown(c, s):
     with pytest.raises(ValueError, match="No event handler known for topic unknown"):
         c.unsubscribe_topic("unknown")
-
-
-@gen_cluster(client=True)
-async def test_log_event_warn(c, s, a, b):
-    def foo():
-        get_worker().log_event(["foo", "warn"], "Hello!")
-
-    with pytest.warns(UserWarning, match="Hello!"):
-        await c.submit(foo)
-
-    def no_message():
-        # missing "message" key should log TypeError
-        get_worker().log_event("warn", {})
-
-    with captured_logger("distributed.client") as log:
-        await c.submit(no_message)
-        assert "TypeError" in log.getvalue()
-
-    def no_category():
-        # missing "category" defaults to `UserWarning`
-        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
-
-    with pytest.warns(UserWarning, match="asdf"):
-        await c.submit(no_category)
 
 
 @gen_cluster(client=True, nthreads=[])
