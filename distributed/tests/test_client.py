@@ -7670,6 +7670,41 @@ async def test_async_task_with_partial(c, s, a, b):
     assert result == 12
 
 
+@gen_cluster(client=True)
+async def test_warn_dask_warns(c, s, a, b):
+    from dask.distributed import warn
+
+    def warn_simple():
+        warn("Hello!")
+
+    with pytest.warns(UserWarning, match="Hello!"):
+        await c.submit(warn_simple)
+
+    def warn_deprecation_1():
+        # one way to do it...
+        warn("You have been deprecated by AI", DeprecationWarning)
+
+    with pytest.warns(DeprecationWarning, match="You have been deprecated by AI"):
+        await c.submit(warn_deprecation_1)
+
+    def warn_deprecation_2():
+        # another way to do it...
+        warn(DeprecationWarning("Your profession has been deprecated"))
+
+    with pytest.warns(DeprecationWarning, match="Your profession has been deprecated"):
+        await c.submit(warn_deprecation_2)
+
+    # user-defined warning subclass
+    class MyPrescientWarning(UserWarning):
+        pass
+
+    def warn_cassandra():
+        warn(MyPrescientWarning("Cassandra says..."))
+
+    with pytest.warns(MyPrescientWarning, match="Cassandra says..."):
+        await c.submit(warn_cassandra)
+
+
 @gen_cluster(client=True, Worker=Nanny)
 async def test_print_remote(c, s, a, b, capsys):
     from dask.distributed import print
