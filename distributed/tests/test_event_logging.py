@@ -347,3 +347,66 @@ async def test_log_event_warn_dask_warns(c, s, a, b):
 
     with pytest.warns(MyPrescientWarning, match="Cassandra says..."):
         await c.submit(warn_cassandra)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_log_event_worker(c, s, a):
+    def log_event(msg):
+        w = get_worker()
+        w.log_event("test-topic", msg)
+
+    await c.submit(log_event, "foo")
+
+    class C:
+        pass
+
+    with pytest.raises(TypeError, match="msgpack"):
+        await c.submit(log_event, C())
+
+    # Worker still works
+    await c.submit(log_event, "bar")
+    await c.submit(log_event, error_message(Exception()))
+
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        "foo",
+        "bar",
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+            "worker": a.address,
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic")]
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event_nanny(c, s):
+    async with Nanny(s.address) as n:
+        n.log_event("test-topic1", "foo")
+
+        class C:
+            pass
+
+        with pytest.raises(TypeError, match="msgpack"):
+            n.log_event("test-topic2", C())
+        n.log_event("test-topic3", "bar")
+        n.log_event("test-topic4", error_message(Exception()))
+
+        # Worker unaffected
+        assert await c.submit(lambda x: x + 1, 1) == 2
+
+    assert [msg[1] for msg in s.get_events("test-topic1")] == ["foo"]
+    assert [msg[1] for msg in s.get_events("test-topic3")] == ["bar"]
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic4")]
