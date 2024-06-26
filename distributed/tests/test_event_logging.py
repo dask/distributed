@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import pickle
 from functools import partial
 from unittest import mock
 
@@ -102,23 +101,6 @@ async def test_log_event_multiple_clients(c, s):
         assert len(received_events) == 2
         assert {handler_id for handler_id, _ in received_events} == {1, 2}
         assert "ValueError" not in logger.getvalue()
-
-
-@gen_cluster(client=True, config={"distributed.admin.low-level-log-length": 3})
-async def test_configurable_events_log_length(c, s, a, b):
-    s.log_event("test", "dummy message 1")
-    assert len(s.get_events("test")) == 1
-    s.log_event("test", "dummy message 2")
-    s.log_event("test", "dummy message 3")
-    assert len(s.get_events("test")) == 3
-    assert s._broker._topics["test"].count == 3
-
-    # adding a fourth message will drop the first one and length stays at 3
-    s.log_event("test", "dummy message 4")
-    assert len(s.get_events("test")) == 3
-    assert s._broker._topics["test"].count == 4
-    events = [event for _, event in s.get_events("test")]
-    assert events == ["dummy message 2", "dummy message 3", "dummy message 4"]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -288,30 +270,6 @@ async def test_events_unsubscribe_raises_if_unknown(c, s):
         c.unsubscribe_topic("unknown")
 
 
-@gen_cluster(client=True)
-async def test_log_event_to_warn(c, s, a, b):
-    def foo():
-        get_worker().log_event(["foo", "warn"], "Hello!")
-
-    with pytest.warns(UserWarning, match="Hello!"):
-        await c.submit(foo)
-
-    def no_message():
-        # missing "message" key should log TypeError
-        get_worker().log_event("warn", {})
-
-    with captured_logger("distributed.client") as log:
-        await c.submit(no_message)
-        assert "TypeError" in log.getvalue()
-
-    def no_category():
-        # missing "category" defaults to `UserWarning`
-        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
-
-    with pytest.warns(UserWarning, match="asdf"):
-        await c.submit(no_category)
-
-
 @gen_cluster(client=True, nthreads=[])
 async def test_log_event_msgpack(c, s, a, b):
     await c.log_event("test-topic", "foo")
@@ -338,8 +296,55 @@ async def test_log_event_msgpack(c, s, a, b):
     ] == [msg[1] for msg in s.get_events("test-topic")]
 
 
+@gen_cluster(client=True, config={"distributed.admin.low-level-log-length": 3})
+async def test_configurable_events_log_length(c, s, a, b):
+    s.log_event("test", "dummy message 1")
+    assert len(s.get_events("test")) == 1
+    s.log_event("test", "dummy message 2")
+    s.log_event("test", "dummy message 3")
+    assert len(s.get_events("test")) == 3
+    assert s._broker._topics["test"].count == 3
+
+    # adding a fourth message will drop the first one and length stays at 3
+    s.log_event("test", "dummy message 4")
+    assert len(s.get_events("test")) == 3
+    assert s._broker._topics["test"].count == 4
+    events = [event for _, event in s.get_events("test")]
+    assert events == ["dummy message 2", "dummy message 3", "dummy message 4"]
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_log_event_on_nanny(c, s):
+    async with Nanny(s.address) as n:
+        n.log_event("test-topic1", "foo")
+
+        class C:
+            pass
+
+        with pytest.raises(TypeError, match="msgpack"):
+            n.log_event("test-topic2", C())
+        n.log_event("test-topic3", "bar")
+        n.log_event("test-topic4", error_message(Exception()))
+
+        # Worker unaffected
+        assert await c.submit(lambda x: x + 1, 1) == 2
+
+    assert [msg[1] for msg in s.get_events("test-topic1")] == ["foo"]
+    assert [msg[1] for msg in s.get_events("test-topic3")] == ["bar"]
+    # assertion reversed for mock.ANY.__eq__(Serialized())
+    assert [
+        {
+            "status": "error",
+            "exception": mock.ANY,
+            "traceback": mock.ANY,
+            "exception_text": "Exception()",
+            "traceback_text": "",
+        },
+    ] == [msg[1] for msg in s.get_events("test-topic4")]
+
+
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_log_event_worker(c, s, a):
+async def test_log_event_on_worker(c, s, a):
     def log_event(msg):
         w = get_worker()
         w.log_event("test-topic", msg)
@@ -369,36 +374,6 @@ async def test_log_event_worker(c, s, a):
             "worker": a.address,
         },
     ] == [msg[1] for msg in s.get_events("test-topic")]
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_log_event_nanny(c, s):
-    async with Nanny(s.address) as n:
-        n.log_event("test-topic1", "foo")
-
-        class C:
-            pass
-
-        with pytest.raises(TypeError, match="msgpack"):
-            n.log_event("test-topic2", C())
-        n.log_event("test-topic3", "bar")
-        n.log_event("test-topic4", error_message(Exception()))
-
-        # Worker unaffected
-        assert await c.submit(lambda x: x + 1, 1) == 2
-
-    assert [msg[1] for msg in s.get_events("test-topic1")] == ["foo"]
-    assert [msg[1] for msg in s.get_events("test-topic3")] == ["bar"]
-    # assertion reversed for mock.ANY.__eq__(Serialized())
-    assert [
-        {
-            "status": "error",
-            "exception": mock.ANY,
-            "traceback": mock.ANY,
-            "exception_text": "Exception()",
-            "traceback_text": "",
-        },
-    ] == [msg[1] for msg in s.get_events("test-topic4")]
 
 
 @gen_cluster(client=True)
