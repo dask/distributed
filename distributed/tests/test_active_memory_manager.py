@@ -1278,6 +1278,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
 
 
 async def tensordot_stress(c, s):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
     rng = da.random.RandomState(0)

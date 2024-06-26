@@ -14,10 +14,9 @@ from distributed.shuffle._core import ShuffleId, ShuffleSpec, id_from_key
 from distributed.shuffle._worker_plugin import ShuffleRun, _ShuffleRunManager
 from distributed.utils_test import gen_cluster
 
-dd = pytest.importorskip("dask.dataframe")
-import pandas as pd
-
+pd = pytest.importorskip("pandas")
 import dask
+import dask.dataframe as dd
 from dask.dataframe._compat import PANDAS_GE_200, tm
 from dask.dataframe.utils import assert_eq
 

@@ -531,6 +531,7 @@ async def test_rechunk_same_fully_unknown(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_same_fully_unknown
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 10))
     y = dd.from_array(x).values
@@ -549,6 +550,8 @@ async def test_rechunk_same_fully_unknown_floats(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_same_fully_unknown_floats
     """
+
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 10))
     y = dd.from_array(x).values
@@ -564,6 +567,7 @@ async def test_rechunk_same_partially_unknown(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_same_partially_unknown
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 10))
     y = dd.from_array(x).values
@@ -621,8 +625,8 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_unknown_from_pandas
     """
-    dd = pytest.importorskip("dask.dataframe")
     pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
 
     arr = np.random.default_rng().standard_normal((50, 10))
     x = dd.from_pandas(pd.DataFrame(arr), 2).values
@@ -643,6 +647,7 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_unknown_from_array
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = dd.from_array(da.ones(shape=(4, 4), chunks=(2, 2))).values
     result = x.rechunk((None, 4), method="p2p")
@@ -676,6 +681,7 @@ async def test_rechunk_with_fully_unknown_dimension(c, s, *ws, x, chunks):
     --------
     dask.array.tests.test_rechunk.test_rechunk_with_fully_unknown_dimension
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     y = dd.from_array(x).values
     result = y.rechunk(chunks, method="p2p")
@@ -718,6 +724,7 @@ async def test_rechunk_with_partially_unknown_dimension(c, s, *ws, x, chunks):
     --------
     dask.array.tests.test_rechunk.test_rechunk_with_partially_unknown_dimension
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     y = dd.from_array(x).values
     z = da.concatenate([x, y])
@@ -743,6 +750,7 @@ async def test_rechunk_with_fully_unknown_dimension_explicit(c, s, *ws, new_chun
     --------
     dask.array.tests.test_rechunk.test_rechunk_with_fully_unknown_dimension_explicit
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 2))
     y = dd.from_array(x).values
@@ -764,6 +772,7 @@ async def test_rechunk_unknown_raises(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_unknown_raises
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
 
     x = da.ones(shape=(10, 10), chunks=(5, 5))
@@ -786,8 +795,6 @@ async def test_rechunk_zero_dim(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_zero_dim
     """
-    da = pytest.importorskip("dask.array")
-
     x = da.ones((0, 10, 100), chunks=(0, 10, 10)).rechunk((0, 10, 50), method="p2p")
     assert len(await c.compute(x)) == 0
 

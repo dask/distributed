@@ -1183,7 +1183,9 @@ async def test_statistical_profiling(c, s, a, b):
     },
 )
 async def test_statistical_profiling_2(c, s, a, b):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     while True:
         x = da.random.random(1000000, chunks=(10000,))
         y = (x + x * 2) - x.sum().persist()
@@ -3421,7 +3423,8 @@ class BreakingWorker(Worker):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=BreakingWorker)
 async def test_broken_comm(c, s, a, b):
-    pytest.importorskip("dask.dataframe")
+    pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
