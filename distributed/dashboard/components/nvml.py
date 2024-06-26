@@ -12,14 +12,13 @@ from bokeh.models import (
     TapTool,
 )
 from bokeh.plotting import figure
-from tornado import escape
 
 from dask.utils import format_bytes
 
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
 from distributed.dashboard.utils import update
-from distributed.utils import log_errors
+from distributed.utils import log_errors, url_escape
 
 
 class GPUCurrentLoad(DashboardComponent):
@@ -149,7 +148,7 @@ class GPUCurrentLoad(DashboardComponent):
             "worker": worker,
             "gpu-index": gpu_index,
             "y": y,
-            "escaped_worker": [escape.url_escape(w) for w in worker],
+            "escaped_worker": [url_escape(w) for w in worker],
         }
 
         self.memory_figure.title.text = "GPU Memory: {} / {}".format(

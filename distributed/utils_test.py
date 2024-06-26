@@ -1629,12 +1629,11 @@ def save_sys_modules():
     try:
         yield
     finally:
-        for i, elem in enumerate(sys.path):
+        for i, elem in reversed(list(enumerate(sys.path))):
             if elem not in old_path:
                 del sys.path[i]
-        for elem in sys.modules.keys():
-            if elem not in old_modules:
-                del sys.modules[elem]
+        for elem in sys.modules.keys() - old_modules.keys():
+            del sys.modules[elem]
 
 
 @contextmanager

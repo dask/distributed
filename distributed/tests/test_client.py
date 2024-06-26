@@ -63,6 +63,8 @@ from distributed import (
 from distributed.client import (
     Client,
     Future,
+    FutureCancelledError,
+    FuturesCancelledError,
     _get_global_client,
     _global_clients,
     as_completed,
@@ -2213,7 +2215,7 @@ async def test_forget_errors(c, s, a, b):
     x = c.submit(div, 1, 0)
     y = c.submit(inc, x)
     z = c.submit(inc, y)
-    await wait([y])
+    await wait([z])
 
     assert s.tasks[x.key].exception
     assert s.tasks[x.key].exception_blame
@@ -5223,7 +5225,7 @@ def test_quiet_client_close(loop):
             futures = c.map(slowinc, range(1000), delay=0.01)
             # Stop part-way
             s = c.cluster.scheduler
-            while sum(ts.state == "memory" for ts in s.tasks.values()) < 20:
+            while sum(ts.state == "memory" for ts in list(s.tasks.values())) < 20:
                 sleep(0.01)
         sleep(0.1)  # let things settle
 
@@ -6999,6 +7001,15 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_register_worker_plugin_instance_required(c, s, a, b):
+    class MyPlugin(WorkerPlugin):
+        ...
+
+    with pytest.raises(TypeError, match="instance"):
+        await c.register_plugin(MyPlugin)
+
+
+@gen_cluster(client=True)
 async def test_register_worker_plugin_exception(c, s, a, b):
     class MyPlugin(WorkerPlugin):
         def setup(self, worker=None):
@@ -7673,7 +7684,31 @@ async def test_async_task_with_partial(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_warn_dask_warns(c, s, a, b):
+async def test_warn_manual(c, s, a, b):
+    def foo():
+        get_worker().log_event(["foo", "warn"], "Hello!")
+
+    with pytest.warns(UserWarning, match="Hello!"):
+        await c.submit(foo)
+
+    def no_message():
+        # missing "message" key should log TypeError
+        get_worker().log_event("warn", {})
+
+    with captured_logger("distributed.client") as log:
+        await c.submit(no_message)
+        assert "TypeError" in log.getvalue()
+
+    def no_category():
+        # missing "category" defaults to `UserWarning`
+        get_worker().log_event("warn", {"message": pickle.dumps("asdf")})
+
+    with pytest.warns(UserWarning, match="asdf"):
+        await c.submit(no_category)
+
+
+@gen_cluster(client=True)
+async def test_warn_remote(c, s, a, b):
     from dask.distributed import warn
 
     def warn_simple():
@@ -8349,3 +8384,42 @@ async def test_gather_race_vs_AMM(c, s, a, direct):
         b.block_get_data.set()
 
     assert await fut == 3  # It's from a; it would be 2 if it were from b
+
+
+@gen_cluster(client=True)
+async def test_client_disconnect_exception_on_cancelled_futures(c, s, a, b):
+    fut = c.submit(inc, 1)
+    await wait(fut)
+
+    await s.close()
+
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
+        await fut.result()
+
+    with pytest.raises(FuturesCancelledError, match="connection to the scheduler"):
+        await wait(fut)
+
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
+        await fut
+
+    with pytest.raises(FutureCancelledError, match="connection to the scheduler"):
+        await c.gather([fut])
+
+    with pytest.raises(FuturesCancelledError, match="connection to the scheduler"):
+        futures_of(fut, client=c)
+
+    async for fut, res in as_completed([fut], with_results=True):
+        assert isinstance(res, FutureCancelledError)
+        assert "connection to the scheduler" in res.msg
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
+async def test_scheduler_restart_exception_on_cancelled_futures(c, s, a, b):
+    fut = c.submit(inc, 1)
+    await wait(fut)
+
+    await s.restart(stimulus_id="test")
+
+    with pytest.raises(CancelledError, match="Scheduler has restarted"):
+        await fut.result()

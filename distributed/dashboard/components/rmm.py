@@ -14,7 +14,6 @@ from bokeh.models import (
     TapTool,
 )
 from bokeh.plotting import figure
-from tornado import escape
 
 from dask.utils import format_bytes
 
@@ -26,7 +25,7 @@ from distributed.dashboard.components.scheduler import (
     MemoryColor,
 )
 from distributed.dashboard.utils import update
-from distributed.utils import log_errors
+from distributed.utils import log_errors, url_escape
 
 T = TypeVar("T")
 
@@ -191,7 +190,7 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
             "color": color,
             "alpha": [1, 0.7, 0.4, 1] * len(workers),
             "worker": quadlist(ws.address for ws in workers),
-            "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
+            "escaped_worker": quadlist(url_escape(ws.address) for ws in workers),
             "rmm_used": quadlist(rmm_used),
             "rmm_total": quadlist(rmm_total),
             "gpu_used": quadlist(gpu_used),
