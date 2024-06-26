@@ -658,20 +658,22 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
 
     async def _receive(
         self,
-        data: list[tuple[NDIndex, list[tuple[NDIndex, tuple[NDIndex, np.ndarray]]]]],
+        input_partitions: list[NDIndex],
+        output_partitions: list[NDIndex],
+        data: list[tuple[NDIndex, np.ndarray]],
     ) -> None:
         self.raise_if_closed()
 
         # Repartition shards and filter out already received ones
         shards = defaultdict(list)
-        for d in data:
-            id1, payload = d
-            if id1 in self.received:
+        for ipid, opid, dat in zip(input_partitions, output_partitions, data):
+            if ipid in self.received:
                 continue
-            self.received.add(id1)
-            for id2, shard in payload:
-                shards[id2].append(shard)
-            self.total_recvd += sizeof(d)
+            shards[opid].append(dat)
+            self.total_recvd += sizeof(dat)
+        self.received.update(input_partitions)
+        del input_partitions
+        del output_partitions
         del data
         if not shards:
             return
