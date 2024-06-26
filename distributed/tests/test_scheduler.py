@@ -872,12 +872,12 @@ async def test_clear_events_worker_removal(s, a, b):
 
     await s.remove_worker(address=a.address, stimulus_id="test")
     # Shortly after removal, the events should still be there
-    assert a.address in s._broker._topics
+    assert s.get_events(a.address)
     assert a.address not in s.workers
     s.validate_state()
 
     start = time()
-    while a.address in s._broker._topics:
+    while s.get_events(a.address):
         await asyncio.sleep(0.01)
         assert time() < start + 2
     assert b.address in s._broker._topics
@@ -887,17 +887,17 @@ async def test_clear_events_worker_removal(s, a, b):
     config={"distributed.scheduler.events-cleanup-delay": "10 ms"}, client=True
 )
 async def test_clear_events_client_removal(c, s, a, b):
-    assert c.id in s._broker._topics
+    assert s.get_events(c.id)
     s.remove_client(c.id)
 
-    assert c.id in s._broker._topics
+    assert s.get_events(c.id)
     assert c.id not in s.clients
     assert c not in s.clients
 
     s.remove_client(c.id)
     # If it doesn't reconnect after a given time, the events log should be cleared
     start = time()
-    while c.id in s._broker._topics:
+    while s.get_events(c.id):
         await asyncio.sleep(0.01)
         assert time() < start + 2
 
