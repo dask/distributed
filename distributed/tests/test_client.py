@@ -2541,7 +2541,6 @@ async def test_async_persist(c, s, a, b):
 async def test_persist_async(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
-    import dask.array as da
 
     x = da.ones((10, 10), chunks=(5, 10))
     y = 2 * (x + 1)
@@ -2562,7 +2561,6 @@ async def test_persist_async(c, s, a, b):
 def test_persist(c):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
-    import dask.array as da
 
     x = da.ones((10, 10), chunks=(5, 10))
     y = 2 * (x + 1)
@@ -2627,6 +2625,7 @@ async def test_futures_of_get(c, s, a, b):
 def test_futures_of_class():
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     assert futures_of([da.Array]) == []
 
 
