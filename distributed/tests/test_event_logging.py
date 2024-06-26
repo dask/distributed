@@ -117,7 +117,7 @@ async def test_configurable_events_log_length(c, s, a, b):
     s.log_event("test", "dummy message 4")
     assert len(s.get_events("test")) == 3
     assert s._broker._topics["test"].count == 4
-    events = [event for _, event in s.get_events("test").items()]
+    events = [event for _, event in s.get_events("test")]
     assert events == ["dummy message 2", "dummy message 3", "dummy message 4"]
 
 

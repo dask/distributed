@@ -6438,7 +6438,9 @@ def test_direct_to_workers(s, loop):
     with Client(s["address"], loop=loop, direct_to_workers=True) as client:
         future = client.scatter(1)
         future.result()
-        resp = client.run_on_scheduler(lambda dask_scheduler: dask_scheduler.events)
+        resp = client.run_on_scheduler(
+            lambda dask_scheduler: dask_scheduler.get_events()
+        )
         assert "gather" not in str(resp)
 
 
