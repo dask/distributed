@@ -99,4 +99,8 @@ class Broker:
         if topic is not None:
             return tuple(self._topics[topic].events)
         else:
-            return {name: tuple(topic.events) for name, topic in self._topics.items()}
+            return {
+                name: tuple(topic.events)
+                for name, topic in self._topics.items()
+                if topic.events
+            }
