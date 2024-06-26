@@ -1647,7 +1647,9 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 @gen_cluster(client=True, nthreads=[], timeout=120)
 async def test_file_descriptors(c, s):
     await asyncio.sleep(0.1)
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
     proc = psutil.Process()
     num_fds_1 = proc.num_fds()
 
@@ -2802,8 +2804,10 @@ async def test_no_dangling_asyncio_tasks():
 
 @gen_cluster(client=True, Worker=NoSchedulerDelayWorker, config=NO_AMM)
 async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
     start = time()
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(100, chunks=(20,))
     y = (x + 1).persist(optimize_graph=False)
     y = await y
@@ -3033,7 +3037,8 @@ async def test_task_group_not_done_processing(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_task_prefix(c, s, a, b):
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
     y = (x + 1).sum().persist()
     y = await y

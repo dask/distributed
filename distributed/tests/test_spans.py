@@ -214,7 +214,9 @@ async def test_no_extension(c, s, a, b):
     config={"optimization.fuse.active": False},
 )
 async def test_task_groups(c, s, a, b, release, no_time_resync):
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
     t0 = await padded_time(before=0)
 
     with span("wf"):

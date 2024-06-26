@@ -63,7 +63,9 @@ def test_stress_gc(loop, func, n):
 @pytest.mark.skipif(WINDOWS, reason="test can leave dangling RPC objects")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 8)
 async def test_cancel_stress(c, s, *workers):
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
     x = da.random.random((50, 50), chunks=(2, 2))
     x = c.persist(x)
     await wait([x])
@@ -80,7 +82,9 @@ async def test_cancel_stress(c, s, *workers):
 
 
 def test_cancel_stress_sync(loop):
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
     x = da.random.random((50, 50), chunks=(2, 2))
     with cluster(active_rpc_timeout=10) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -101,7 +105,8 @@ def test_cancel_stress_sync(loop):
 )
 async def test_stress_creation_and_deletion(c, s):
     # Assertions are handled by the validate mechanism in the scheduler
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
 
     rng = da.random.RandomState(0)
     x = rng.random(size=(2000, 2000), chunks=(100, 100))
@@ -182,7 +187,9 @@ def vsum(*args):
     },
 )
 async def test_stress_communication(c, s, *workers):
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip("resource")
     bump_rlimit(resource.RLIMIT_NOFILE, 8192)
@@ -234,7 +241,9 @@ async def test_stress_steal(c, s, *workers):
 async def test_close_connections(c, s, *workers):
     # Schedule 600 slowinc's interleaved by worker-to-worker data transfers
     # The minimum time to compute this is (600 * 0.1 / 10 threads) = 6s
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
     x = da.random.random(size=(100, 100), chunks=(-1, 1))
     for _ in range(3):
         x = x.rechunk((1, -1))
@@ -306,13 +315,14 @@ async def test_no_delay_during_large_transfer(c, s, w):
     worker_kwargs={"transition_counter_max": 500_000},
 )
 async def test_chaos_rechunk(c, s, *workers):
+    pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
     s.allowed_failures = 10000
 
     plugin = KillWorker(delay="4 s", mode="sys.exit")
 
     await c.register_plugin(plugin, name="kill")
-
-    da = pytest.importorskip("dask.array", exc_type=ImportError)
 
     x = da.random.random((10000, 10000))
     y = x.rechunk((10000, 20)).rechunk((20, 10000)).sum()
