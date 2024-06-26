@@ -922,7 +922,7 @@ async def test_task_state_instance_are_garbage_collected(c, s, a, b):
     f2 = c.submit(inc, red, pure=False)
 
     async def check(dask_worker):
-        while dask_worker.tasks:
+        while dask_worker.state.tasks:
             await asyncio.sleep(0.01)
         with profile.lock:
             gc.collect()
