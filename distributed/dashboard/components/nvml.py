@@ -132,7 +132,7 @@ class GPUCurrentLoad(DashboardComponent):
                 continue
             memory_max = max(memory_max, mem_total)
             memory_total += mem_total
-            utilization.append(int(u))
+            utilization.append(int(u) if u else 0)
             memory.append(mem_used)
             worker.append(ws.address)
             gpu_index.append(idx)
