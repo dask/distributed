@@ -660,16 +660,17 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         self,
         input_partitions: list[NDIndex],
         output_partitions: list[NDIndex],
-        data: list[tuple[NDIndex, np.ndarray]],
+        locs: list[NDIndex],
+        data: list[np.ndarray],
     ) -> None:
         self.raise_if_closed()
 
         # Repartition shards and filter out already received ones
         shards = defaultdict(list)
-        for ipid, opid, dat in zip(input_partitions, output_partitions, data):
+        for ipid, opid, loc, dat in zip(input_partitions, output_partitions, locs, data):
             if ipid in self.received:
                 continue
-            shards[opid].append(dat)
+            shards[opid].append((loc, dat))
             self.total_recvd += sizeof(dat)
         self.received.update(input_partitions)
         del input_partitions

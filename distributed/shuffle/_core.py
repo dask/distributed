@@ -207,12 +207,14 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         address: str,
         input_partitions: list[_T_partition_id],
         output_partitions: list[_T_partition_id],
+        locs: list[_T_partition_id],
         shards: list[Any] | bytes,
     ) -> OKMessage | ErrorMessage:
         self.raise_if_closed()
         return await self.rpc(address).shuffle_receive(
             input_partitions=input_partitions,
             output_partitions=output_partitions,
+            locs=locs,
             data=to_serialize(shards),
             shuffle_id=self.id,
             run_id=self.run_id,
@@ -223,12 +225,15 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     ) -> OKMessage | ErrorMessage:
         ipids = []
         opids = []
+        locs = []
         shards = []
         for input_partition, inshards in sharded:
             for output_partition, shard in inshards:
+                loc, data = shard
                 ipids.append(input_partition)
                 opids.append(output_partition)
-                shards.append(shard)
+                locs.append(loc)
+                shards.append(data)
         if _mean_shard_size(shards) < 65536:
             # Don't send buffers individually over the tcp comms.
             # Instead, merge everything into an opaque bytes blob, send it all at once,
@@ -240,7 +245,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
             shards_or_bytes = shards
 
         def _send() -> Coroutine[Any, Any, OKMessage | ErrorMessage]:
-            return self._send(address, ipids, opids, shards_or_bytes)
+            return self._send(address, ipids, opids, locs, shards_or_bytes)
 
         return await retry(
             _send,
@@ -325,13 +330,14 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self,
         input_partitions: list[_T_partition_id],
         output_partitions: list[_T_partition_type],
+        locs: list[_T_partition_id],
         data: list[Any] | bytes,
     ) -> OKMessage | ErrorMessage:
         try:
             if isinstance(data, bytes):
                 # Unpack opaque blob. See send()
                 data = cast(list[Any], pickle.loads(data))
-            await self._receive(input_partitions, output_partitions, data)
+            await self._receive(input_partitions, output_partitions, locs, data)
             return {"status": "OK"}
         except P2PConsistencyError as e:
             return error_message(e)
