@@ -179,7 +179,7 @@ class InProc(Comm):
         self._write_q = write_q
         self._write_loop = write_loop
         self._closed = False
-
+        self._sys_is_finalizing = staticmethod(sys.is_finalizing)
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._initialized = True
@@ -191,7 +191,7 @@ class InProc(Comm):
             read_q=self._read_q,
             write_q=self._write_q,
             write_loop=self._write_loop,
-            is_finalizing=sys.is_finalizing,
+            is_finalizing=self._sys_is_finalizing,
             r=r,
         ):
             if read_q.peek(None) is _EOF or is_finalizing():
