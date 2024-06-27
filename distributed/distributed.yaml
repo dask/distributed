@@ -29,6 +29,8 @@ distributed:
     default-task-durations: # How long we expect function names to run ("1h", "1s") (helps for long tasks)
       rechunk-split: 1us
       split-shuffle: 1us
+      split-taskshuffle: 1us
+      split-stage: 1us
     validate: False         # Check scheduler state at every step for debugging
     dashboard:
       status:
@@ -272,6 +274,7 @@ distributed:
       ignore-modules:
         - asyncio
         - functools
+        - threading
         - datashader
         - dask
         - debugpy
@@ -323,6 +326,7 @@ distributed:
   ##################
 
   admin:
+    large-graph-warning-threshold: 10MB  # Threshold for warning on large graph
     tick:
       interval: 20ms  # time between event loop health checks
       limit: 3s       # time allowed before triggering a warning

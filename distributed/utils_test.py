@@ -1628,12 +1628,11 @@ def save_sys_modules():
     try:
         yield
     finally:
-        for i, elem in enumerate(sys.path):
+        for i, elem in reversed(list(enumerate(sys.path))):
             if elem not in old_path:
                 del sys.path[i]
-        for elem in sys.modules.keys():
-            if elem not in old_modules:
-                del sys.modules[elem]
+        for elem in sys.modules.keys() - old_modules.keys():
+            del sys.modules[elem]
 
 
 @contextmanager
@@ -2394,6 +2393,30 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
     finally:
         write_event.set()
         bcomm.comm = orig_comm
+
+
+class BlockedInstantiateNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = asyncio.Event()
+        self.wait_instantiate = asyncio.Event()
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        await self.wait_instantiate.wait()
+        return await super().instantiate()
+
+
+class BlockedKillNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_kill = asyncio.Event()
+        self.wait_kill = asyncio.Event()
+
+    async def kill(self, **kwargs):
+        self.in_kill.set()
+        await self.wait_kill.wait()
+        return await super().kill(**kwargs)
 
 
 async def wait_for_state(

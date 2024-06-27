@@ -6,7 +6,7 @@ import threading
 import weakref
 from collections import defaultdict, deque
 
-from dask.utils import parse_timedelta
+from dask.utils import _deprecated, parse_timedelta
 
 from distributed.core import CommClosedError
 from distributed.metrics import time
@@ -198,6 +198,7 @@ class PubSubClientExtension:
                 self.client.scheduler_comm.send(msg)
 
 
+@_deprecated(use_instead="Client.log_event() or Worker.log_event()")
 class Pub:
     """Publish data with Publish-Subscribe pattern
 
@@ -354,6 +355,7 @@ class Pub:
     __str__ = __repr__
 
 
+@_deprecated(use_instead="Client.subscribe_topic()")
 class Sub:
     """Subscribe to a Publish/Subscribe topic
 

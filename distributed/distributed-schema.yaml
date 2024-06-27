@@ -1103,6 +1103,12 @@ properties:
         description: |
           Options for logs, event loops, and so on
         properties:
+          large-graph-warning-threshold:
+            type: string
+            description: |
+              Threshold in bytes for when a warning is raised about a large
+              submitted task graph.
+              Default is 10MB.
           tick:
             type: object
             description: |

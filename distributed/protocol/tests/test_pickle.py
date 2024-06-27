@@ -297,3 +297,21 @@ if __name__ == "__main__":
         out, _ = proc.communicate(timeout=60)
 
     assert "script successful" in out.decode("utf-8")
+
+
+@pytest.mark.parametrize("serializer", ["dask", "pickle"])
+def test_pickle_zero_copy_read_only_flag(serializer):
+    np = pytest.importorskip("numpy")
+    a = np.arange(10)
+    a.flags.writeable = False
+    header, frames = serialize(a, serializers=[serializer])
+    frames = [bytearray(f) for f in frames]  # Simulate network transfer
+    b = deserialize(header, frames)
+    c = deserialize(header, frames)
+    assert not b.flags.writeable
+    assert not c.flags.writeable
+    ptr_a = a.__array_interface__["data"][0]
+    ptr_b = b.__array_interface__["data"][0]
+    ptr_c = c.__array_interface__["data"][0]
+    assert ptr_b != ptr_a
+    assert ptr_b == ptr_c

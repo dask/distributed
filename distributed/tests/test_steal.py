@@ -381,14 +381,12 @@ async def test_new_worker_steals(c, s, a):
 
 
 @gen_cluster(client=True)
-async def test_work_steal_no_kwargs(c, s, a, b):
-    await wait(c.submit(slowinc, 1, delay=0.05))
-
+async def test_work_steal_allow_other_workers(c, s, a, b):
+    # Note: this test also verifies the baseline for all other tests below
     futures = c.map(
         slowinc, range(100), workers=a.address, allow_other_workers=True, delay=0.05
     )
-
-    await wait(futures)
+    await c.gather(futures)
 
     assert 20 < len(a.data) < 80
     assert 20 < len(b.data) < 80
@@ -401,10 +399,7 @@ async def test_work_steal_no_kwargs(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)])
 async def test_dont_steal_worker_restrictions(c, s, a, b):
-    future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
-    await future
-
-    futures = c.map(slowinc, range(100), delay=0.1, workers=a.address)
+    futures = c.map(slowinc, range(100), delay=0.05, workers=a.address)
 
     while len(a.state.tasks) + len(b.state.tasks) < 100:
         await asyncio.sleep(0.01)
@@ -413,54 +408,43 @@ async def test_dont_steal_worker_restrictions(c, s, a, b):
     assert len(b.state.tasks) == 0
 
     s.extensions["stealing"].balance()
-
     await asyncio.sleep(0.1)
 
     assert len(a.state.tasks) == 100
     assert len(b.state.tasks) == 0
 
 
-@gen_cluster(
-    client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2), ("127.0.0.1", 2)]
-)
+@gen_cluster(client=True, nthreads=[("", 1), ("", 2), ("", 2)])
 async def test_steal_worker_restrictions(c, s, wa, wb, wc):
-    future = c.submit(slowinc, 1, delay=0.1, workers={wa.address, wb.address})
-    await future
-
-    ntasks = 100
-    futures = c.map(slowinc, range(ntasks), delay=0.1, workers={wa.address, wb.address})
-
-    while sum(len(w.state.tasks) for w in [wa, wb, wc]) < ntasks:
+    futures = c.map(slowinc, range(100), delay=0.05, workers={wa.address, wb.address})
+    while sum(len(w.state.tasks) for w in [wa, wb, wc]) < 100:
         await asyncio.sleep(0.01)
 
-    assert 0 < len(wa.state.tasks) < ntasks
-    assert 0 < len(wb.state.tasks) < ntasks
+    assert 20 < len(wa.state.tasks) < 80
+    assert 20 < len(wb.state.tasks) < 80
     assert len(wc.state.tasks) == 0
 
     s.extensions["stealing"].balance()
-
     await asyncio.sleep(0.1)
 
-    assert 0 < len(wa.state.tasks) < ntasks
-    assert 0 < len(wb.state.tasks) < ntasks
+    assert 20 < len(wa.state.tasks) < 80
+    assert 20 < len(wb.state.tasks) < 80
     assert len(wc.state.tasks) == 0
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.2", 1)])
 async def test_dont_steal_host_restrictions(c, s, a, b):
-    future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
-    await future
-
-    futures = c.map(slowinc, range(100), delay=0.1, workers="127.0.0.1")
+    futures = c.map(slowinc, range(100), delay=0.05, workers="127.0.0.1")
     while len(a.state.tasks) + len(b.state.tasks) < 100:
         await asyncio.sleep(0.01)
+
     assert len(a.state.tasks) == 100
     assert len(b.state.tasks) == 0
 
-    result = s.extensions["stealing"].balance()
-
+    s.extensions["stealing"].balance()
     await asyncio.sleep(0.1)
+
     assert len(a.state.tasks) == 100
     assert len(b.state.tasks) == 0
 
@@ -468,70 +452,62 @@ async def test_dont_steal_host_restrictions(c, s, a, b):
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.2", 2)])
 async def test_steal_host_restrictions(c, s, wa, wb):
-    future = c.submit(slowinc, 1, delay=0.10, workers=wa.address)
-    await future
-
-    ntasks = 100
-    futures = c.map(slowinc, range(ntasks), delay=0.1, workers="127.0.0.1")
-    while len(wa.state.tasks) < ntasks:
+    futures = c.map(slowinc, range(100), delay=0.05, workers="127.0.0.1")
+    while len(wa.state.tasks) + len(wb.state.tasks) < 100:
         await asyncio.sleep(0.01)
-    assert len(wa.state.tasks) == ntasks
+
+    assert len(wa.state.tasks) == 100
     assert len(wb.state.tasks) == 0
 
     async with Worker(s.address, nthreads=1) as wc:
-        start = time()
-        while not wc.state.tasks or len(wa.state.tasks) == ntasks:
+        while s.workers[wc.address].status != Status.running:
             await asyncio.sleep(0.01)
-            assert time() < start + 3
 
+        s.extensions["stealing"].balance()
         await asyncio.sleep(0.1)
-        assert 0 < len(wa.state.tasks) < ntasks
+
+        assert 20 < len(wa.state.tasks) < 95
         assert len(wb.state.tasks) == 0
-        assert 0 < len(wc.state.tasks) < ntasks
+        assert 5 < len(wc.state.tasks) < 80
 
 
-@gen_cluster(
-    client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}}), ("127.0.0.1", 1)]
-)
+@gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 2}}), ("", 1)])
 async def test_dont_steal_resource_restrictions(c, s, a, b):
-    future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
-    await future
-
-    futures = c.map(slowinc, range(100), delay=0.1, resources={"A": 1})
+    futures = c.map(slowinc, range(100), delay=0.05, resources={"A": 1})
     while len(a.state.tasks) + len(b.state.tasks) < 100:
         await asyncio.sleep(0.01)
+
     assert len(a.state.tasks) == 100
     assert len(b.state.tasks) == 0
 
-    result = s.extensions["stealing"].balance()
-
+    s.extensions["stealing"].balance()
     await asyncio.sleep(0.1)
+
     assert len(a.state.tasks) == 100
     assert len(b.state.tasks) == 0
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}})])
+@gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 2}})])
 async def test_steal_resource_restrictions(c, s, a):
-    future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
-    await future
-
-    futures = c.map(slowinc, range(100), delay=0.2, resources={"A": 1})
-    while len(a.state.tasks) < 101:
+    futures = c.map(slowinc, range(100), delay=0.05, resources={"A": 1})
+    while len(a.state.tasks) < 100:
         await asyncio.sleep(0.01)
-    assert len(a.state.tasks) == 101
 
     async with Worker(s.address, nthreads=1, resources={"A": 4}) as b:
-        while not b.state.tasks or len(a.state.tasks) == 101:
+        while s.workers[b.address].status != Status.running:
             await asyncio.sleep(0.01)
 
-        assert len(b.state.tasks) > 0
-        assert len(a.state.tasks) < 101
+        s.extensions["stealing"].balance()
+        await asyncio.sleep(0.1)
+
+        assert 20 < len(b.state.tasks) < 80
+        assert 20 < len(a.state.tasks) < 80
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2, "C": 1}})])
+@gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 2, "C": 1}})])
 async def test_steal_resource_restrictions_asym_diff(c, s, a):
     # See https://github.com/dask/distributed/issues/5565
-    future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
+    future = c.submit(slowinc, 1, delay=0.1, workers=a.address)
     await future
 
     futures = c.map(slowinc, range(100), delay=0.2, resources={"A": 1})
@@ -1051,10 +1027,10 @@ async def test_blocklist_shuffle_split(c, s, a, b):
 
     while not s.tasks:
         await asyncio.sleep(0.005)
-    prefixes = set(s.task_prefixes.keys())
+
     from distributed.stealing import fast_tasks
 
-    blocked = fast_tasks & prefixes
+    blocked = fast_tasks & s.task_prefixes.keys()
     assert blocked
     assert any(["split" in prefix for prefix in blocked])
 

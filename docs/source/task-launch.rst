@@ -204,17 +204,17 @@ worker.
 
 .. code-block:: python
 
-    from dask.distributed import worker_client
+    from dask.distributed import Client, worker_client
 
 
     def fib(n):
         if n < 2:
             return n
-         with worker_client() as client:
-             a_future = client.submit(fib, n - 1)
-             b_future = client.submit(fib, n - 2)
-             a, b = client.gather([a_future, b_future])
-         return a + b
+        with worker_client() as client:
+            a_future = client.submit(fib, n - 1)
+            b_future = client.submit(fib, n - 2)
+            a, b = client.gather([a_future, b_future])
+        return a + b
 
     if __name__ == "__main__":
         client = Client()

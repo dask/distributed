@@ -5,9 +5,8 @@ import pytest
 import dask.datasets
 
 from distributed import Scheduler
+from distributed.shuffle.tests.utils import UNPACK_PREFIX
 from distributed.utils_test import gen_cluster
-
-da = pytest.importorskip("dask.array")
 
 
 def assert_metrics(s: Scheduler, *keys: tuple[str, ...]) -> None:
@@ -30,6 +29,9 @@ def assert_metrics(s: Scheduler, *keys: tuple[str, ...]) -> None:
 
 @gen_cluster(client=True, config={"optimization.fuse.active": False})
 async def test_rechunk(c, s, a, b):
+    pytest.importorskip("numpy")
+    import dask.array as da
+
     x = da.random.random((10, 10), chunks=(-1, 1))
     x = x.rechunk((1, -1), method="p2p")
     await c.compute(x)
@@ -70,7 +72,7 @@ async def test_dataframe(c, s, a, b):
     """Metrics are *almost* agnostic in dataframe shuffle vs. array rechunk.
     The only exception is the 'p2p-shards' metric, which is implemented separately.
     """
-    dd = pytest.importorskip("dask.dataframe")
+    pytest.importorskip("pandas")
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -79,7 +81,7 @@ async def test_dataframe(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        shuffled = dd.shuffle.shuffle(df, "x", npartitions=20)
+        shuffled = df.shuffle("x", npartitions=20)
     await c.compute(shuffled)
     await a.heartbeat()
     await b.heartbeat()
@@ -91,10 +93,10 @@ async def test_dataframe(c, s, a, b):
         ("execute", "shuffle-transfer", "p2p-shards", "bytes"),
         ("execute", "shuffle-transfer", "p2p-shards", "count"),
         ("execute", "shuffle-transfer", "p2p-comms-limiter", "count"),
-        ("execute", "shuffle_p2p", "p2p-disk-read", "bytes"),
-        ("execute", "shuffle_p2p", "p2p-disk-read", "count"),
-        ("execute", "shuffle_p2p", "p2p-get-output-cpu", "seconds"),
-        ("execute", "shuffle_p2p", "p2p-get-output-noncpu", "seconds"),
+        ("execute", UNPACK_PREFIX, "p2p-disk-read", "bytes"),
+        ("execute", UNPACK_PREFIX, "p2p-disk-read", "count"),
+        ("execute", UNPACK_PREFIX, "p2p-get-output-cpu", "seconds"),
+        ("execute", UNPACK_PREFIX, "p2p-get-output-noncpu", "seconds"),
         ("p2p", "background-comms", "compress", "seconds"),
         ("p2p", "background-comms", "idle", "seconds"),
         ("p2p", "background-comms", "process", "bytes"),

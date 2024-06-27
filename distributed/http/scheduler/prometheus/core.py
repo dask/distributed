@@ -56,7 +56,8 @@ class SchedulerMetricCollector(PrometheusCollector):
             yield CounterMetricFamily(
                 self.build_name("gil_contention"),
                 "GIL contention metric",
-                value=self.server.monitor._cumulative_gil_contention,
+                value=self.server.monitor.cumulative_gil_contention,
+                unit="seconds",
             )
 
         yield CounterMetricFamily(
@@ -100,6 +101,12 @@ class SchedulerMetricCollector(PrometheusCollector):
             if state != "forgotten":
                 tasks.add_metric([state], task_counter.get(state, 0.0))
         yield tasks
+
+        yield GaugeMetricFamily(
+            self.build_name("task_groups"),
+            "Number of task groups known by scheduler",
+            value=len(self.server.task_groups),
+        )
 
         time_spent_compute_tasks = CounterMetricFamily(
             self.build_name("tasks_compute"),
