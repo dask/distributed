@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from time import sleep
 
+import pytest
+
 from distributed.metrics import monotonic
 from distributed.utils import Deadline
 from distributed.utils_test import gen_test
@@ -11,10 +13,10 @@ from distributed.utils_test import gen_test
 def test_deadline():
     deadline = Deadline.after(5)
 
-    assert deadline.duration == 5
+    assert deadline.duration == pytest.approx(5)
     assert deadline.expired is False
     assert deadline.expires is True
-    assert deadline.expires_at_mono - deadline.started_at_mono == 5
+    assert deadline.expires_at_mono - deadline.started_at_mono == pytest.approx(5)
     assert 4 < deadline.expires_at - deadline.started_at < 6
     assert 0 <= deadline.elapsed <= 1
     assert 4 <= deadline.remaining <= 5
