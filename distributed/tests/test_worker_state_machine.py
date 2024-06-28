@@ -935,9 +935,14 @@ async def test_task_state_instance_are_garbage_collected(c, s, a, b):
     async def check(dask_scheduler):
         while dask_scheduler.tasks:
             await asyncio.sleep(0.01)
-        with profile.lock:
-            gc.collect()
-        assert not SchedulerTaskState._instances
+
+        gc.collect()
+        # Gargabe collection might already be running in which case gc.collect()'s behavior is undefined.
+        # Try again and hope for the best.
+        while SchedulerTaskState._instances:
+            await asyncio.sleep(0.01)
+            with profile.lock:
+                gc.collect()
 
     await c.run_on_scheduler(check)
 
