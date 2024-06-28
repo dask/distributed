@@ -831,7 +831,7 @@ class MapLayer(Layer):
         self,
         func: Callable,
         iterables: Iterable,
-        key=None,
+        key,
         workers=None,
         retries=None,
         resources=None,
@@ -843,6 +843,7 @@ class MapLayer(Layer):
         pure: bool = True,
         batch_size=None,
         parts_out=None,  # TODO check this
+        annotations=None,
         **kwargs,
     ):
         self.func = func
@@ -860,6 +861,7 @@ class MapLayer(Layer):
         self.batch_size = batch_size
         self.kwargs = kwargs
         self.parts_out = parts_out
+        super().__init__(annotations=annotations)
 
     # TODO add repr
     def __repr__(self) -> str:
@@ -876,6 +878,16 @@ class MapLayer(Layer):
             dsk = self._construct_graph()
             self._cached_dict = dsk
         return self._cached_dict
+
+    def get_output_keys(self) -> set[Key]:
+        return set(self.keys())
+        # return {(self.name, part) for part in self.parts_out}
+
+    def get_ordered_keys(self):
+        return list(self.keys())
+
+    def is_materialized(self) -> bool:
+        return hasattr(self, "_cached_dict")
 
     def __getitem__(self, key: Key) -> tuple:
         return self._dict[key]
@@ -911,7 +923,7 @@ class MapLayer(Layer):
         # token = tokenize(self.name, self.func, self.kwargs)
 
         keys = [
-            self.key + "-" + tokenize(self.name, self.func, self.kwargs)
+            self.key + "-" + tokenize(self.func, self.kwargs, args)
             for args in zip(*self.iterables)
         ]
         dsk: _T_LowLevelGraph = {}
@@ -2321,12 +2333,12 @@ class Client(SyncMethodMixin):
         # TODO add extra args
         dsk = MapLayer(
             func,
-            key,
-            *iterables,
+            iterables,
+            key=key,
             pure=pure,
             **kwargs,
         )
-        keys = dsk.get_output_keys()
+        keys = dsk.get_ordered_keys()
         if isinstance(workers, (str, Number)):
             workers = [workers]
         if workers is not None and not isinstance(workers, (list, set)):
