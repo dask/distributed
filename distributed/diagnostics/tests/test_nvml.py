@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+from unittest import mock
 
 import pytest
 
@@ -95,10 +96,10 @@ def test_1_visible_devices():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    output = nvml.one_time()
-    h = nvml._pynvml_handles()
-    assert output["memory-total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
+    with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0"}):
+        output = nvml.one_time()
+        h = nvml._pynvml_handles()
+        assert output["memory-total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
 
 
 @pytest.mark.parametrize("CVD", ["1,0", "0,1"])
@@ -106,16 +107,65 @@ def test_2_visible_devices(CVD):
     if nvml.device_get_count() < 2:
         pytest.skip("Less than two GPUs available")
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = CVD
-    idx = int(CVD.split(",")[0])
+    with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": CVD}):
+        idx = int(CVD.split(",")[0])
 
-    h = nvml._pynvml_handles()
-    h2 = pynvml.nvmlDeviceGetHandleByIndex(idx)
+        h = nvml._pynvml_handles()
+        h2 = pynvml.nvmlDeviceGetHandleByIndex(idx)
 
-    s = pynvml.nvmlDeviceGetSerial(h)
-    s2 = pynvml.nvmlDeviceGetSerial(h2)
+        s = pynvml.nvmlDeviceGetSerial(h)
+        s2 = pynvml.nvmlDeviceGetSerial(h2)
 
-    assert s == s2
+        assert s == s2
+
+
+def test_visible_devices_uuid():
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
+    info = nvml.get_device_index_and_uuid(0)
+    assert info.uuid
+
+    with mock.patch.dict(
+        os.environ, {"CUDA_VISIBLE_DEVICES": info.uuid.decode("utf-8")}
+    ):
+        h = nvml._pynvml_handles()
+        h_expected = pynvml.nvmlDeviceGetHandleByIndex(0)
+
+        s = pynvml.nvmlDeviceGetSerial(h)
+        s_expected = pynvml.nvmlDeviceGetSerial(h_expected)
+
+        assert s == s_expected
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_visible_devices_uuid_2(index):
+    if nvml.device_get_count() < 2:
+        pytest.skip("Less than two GPUs available")
+
+    info = nvml.get_device_index_and_uuid(index)
+    assert info.uuid
+
+    with mock.patch.dict(
+        os.environ, {"CUDA_VISIBLE_DEVICES": info.uuid.decode("utf-8")}
+    ):
+        h = nvml._pynvml_handles()
+        h_expected = pynvml.nvmlDeviceGetHandleByIndex(index)
+
+        s = pynvml.nvmlDeviceGetSerial(h)
+        s_expected = pynvml.nvmlDeviceGetSerial(h_expected)
+
+    assert s == s_expected
+
+
+def test_visible_devices_bad_uuid():
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
+    with mock.patch.dict(
+        os.environ, {"CUDA_VISIBLE_DEVICES": "NOT-A-GPU-UUID"}
+    ), pytest.raises(ValueError, match="Devices in CUDA_VISIBLE_DEVICES"):
+        nvml._pynvml_handles()
 
 
 @gen_cluster()
