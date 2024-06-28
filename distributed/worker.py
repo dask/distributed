@@ -1633,7 +1633,9 @@ class Worker(BaseWorker, ServerNode):
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            if self._is_finalizing():
+
+            # Are we shutting down the process?
+            if self._is_finalizing() or not threading.main_thread().is_alive():
                 # If we're shutting down there is no need to wait for daemon
                 # threads to finish
                 _close(executor=executor, wait=False)
@@ -1642,7 +1644,7 @@ class Worker(BaseWorker, ServerNode):
                     await asyncio.to_thread(
                         _close, executor=executor, wait=executor_wait
                     )
-                except RuntimeError:  # Are we shutting down the process?
+                except RuntimeError:
                     logger.error(
                         "Could not close executor %r by dispatching to thread. Trying synchronously.",
                         executor,
