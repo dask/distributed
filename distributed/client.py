@@ -17,7 +17,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Coroutine, Iterator, Sequence
+from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -30,13 +30,15 @@ from typing import Any, Callable, ClassVar, Literal, NamedTuple, TypedDict, cast
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
+from typing_extensions import TypeAlias
 
 import dask
 from dask.base import collections_to_dsk, tokenize
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
+from dask.layers import Layer
 from dask.optimization import SubgraphCallable
-from dask.typing import NoDefault, no_default
+from dask.typing import Key, NoDefault, no_default
 from dask.utils import (
     apply,
     ensure_dict,
@@ -804,6 +806,138 @@ class VersionsDict(TypedDict):
     scheduler: dict[str, dict[str, Any]]
     workers: dict[str, dict[str, dict[str, Any]]]
     client: dict[str, dict[str, Any]]
+
+
+_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
+
+
+class MapLayer(Layer):
+    # func: Callable
+    # iterable: Iterable
+    # key=None
+    # workers=None
+    # retries=None
+    # resources=None
+    # priority: int = 0
+    # allow_other_workers: bool = False
+    # fifo_timeout: str = "100 ms"
+    # actor: bool = False
+    # actors: bool = False
+    # pure: bool = True
+    # batch_size=None
+    # # **kwargs
+
+    def __init__(
+        self,
+        func: Callable,
+        iterables: Iterable,
+        key=None,
+        workers=None,
+        retries=None,
+        resources=None,
+        priority: int = 0,
+        allow_other_workers: bool = False,
+        fifo_timeout: str = "100 ms",
+        actor: bool = False,
+        actors: bool = False,
+        pure: bool = True,
+        batch_size=None,
+        parts_out=None,  # TODO check this
+        **kwargs,
+    ):
+        self.func = func
+        self.iterables = iterables
+        self.key = key
+        self.workers = workers
+        self.retries = retries
+        self.resources = resources
+        self.priority = priority
+        self.allow_other_workers = allow_other_workers
+        self.fifo_timeout = fifo_timeout
+        self.actor = actor
+        self.actors = actors
+        self.pure = pure
+        self.batch_size = batch_size
+        self.kwargs = kwargs
+        self.parts_out = parts_out
+
+    # TODO add repr
+    def __repr__(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def _dict(self) -> _T_LowLevelGraph:
+        self._cached_dict: _T_LowLevelGraph
+        dsk: _T_LowLevelGraph
+
+        if hasattr(self, "_cached_dict"):
+            return self._cached_dict
+        else:
+            dsk = self._construct_graph()
+            self._cached_dict = dsk
+        return self._cached_dict
+
+    def __getitem__(self, key: Key) -> tuple:
+        return self._dict[key]
+
+    def __iter__(self) -> Iterator[Key]:
+        return iter(self._dict)
+
+    def __len__(self) -> int:
+        return len(self._dict)
+
+    # TODO work this part out
+    # def _cull(self, parts_out: Iterable[int]) -> MapLayer:
+    #     return self.__class__(
+    #         self.func,
+    #         self.iterables,
+    #         self.key,
+    #         self.workers,
+    #         self.retries,
+    #         self.resources,
+    #         self.priority,
+    #         self.allow_other_workers,
+    #         self.fifo_timeout,
+    #         self.actor,
+    #         self.actors,
+    #         self.pure,
+    #         self.batch_size,
+    #         parts_out,
+    #         **self.kwargs,
+    #     )
+    # TODO add cull method
+
+    def _construct_graph(self) -> _T_LowLevelGraph:
+        # token = tokenize(self.name, self.func, self.kwargs)
+
+        keys = [
+            self.key + "-" + tokenize(self.name, self.func, self.kwargs)
+            for args in zip(*self.iterables)
+        ]
+        dsk: _T_LowLevelGraph = {}
+
+        if not self.kwargs:
+            dsk = {
+                key: (self.func,) + args
+                for key, args in zip(keys, zip(*self.iterables))
+            }
+        else:
+            kwargs2 = {}
+            dsk = {}
+            for k, v in self.kwargs.items():
+                if sizeof(v) > 1e5:
+                    vv = dask.delayed(v)
+                    kwargs2[k] = vv._key
+                    dsk.update(vv.dask)
+                else:
+                    kwargs2[k] = v
+            dsk.update(
+                {
+                    key: (apply, self.func, (tuple, list(args)), kwargs2)
+                    for key, args in zip(keys, zip(*self.iterables))
+                }
+            )
+        return dsk
 
 
 class Client(SyncMethodMixin):
@@ -2043,18 +2177,18 @@ class Client(SyncMethodMixin):
 
     def map(
         self,
-        func,
-        *iterables,
+        func: Callable,
+        *iterables: Iterable,
         key=None,
         workers=None,
         retries=None,
         resources=None,
-        priority=0,
-        allow_other_workers=False,
-        fifo_timeout="100 ms",
-        actor=False,
-        actors=False,
-        pure=True,
+        priority: int = 0,
+        allow_other_workers: bool = False,
+        fifo_timeout: str = "100 ms",
+        actor: bool = False,
+        actors: bool = False,
+        pure: bool = True,
         batch_size=None,
         **kwargs,
     ):
@@ -2145,7 +2279,7 @@ class Client(SyncMethodMixin):
                 "Consider using a normal for loop and Client.submit"
             )
         total_length = sum(len(x) for x in iterables)
-
+        # TODO is this needed?
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
                 zip(*(partition_all(batch_size, iterable) for iterable in iterables))
@@ -2184,45 +2318,15 @@ class Client(SyncMethodMixin):
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
 
-        iterables = list(zip(*zip(*iterables)))
-        if isinstance(key, list):
-            keys = key
-        else:
-            if pure:
-                keys = [
-                    key + "-" + tokenize(func, kwargs, *args)
-                    for args in zip(*iterables)
-                ]
-            else:
-                uid = str(uuid.uuid4())
-                keys = (
-                    [
-                        key + "-" + uid + "-" + str(i)
-                        for i in range(min(map(len, iterables)))
-                    ]
-                    if iterables
-                    else []
-                )
-
-        if not kwargs:
-            dsk = {key: (func,) + args for key, args in zip(keys, zip(*iterables))}
-        else:
-            kwargs2 = {}
-            dsk = {}
-            for k, v in kwargs.items():
-                if sizeof(v) > 1e5:
-                    vv = dask.delayed(v)
-                    kwargs2[k] = vv._key
-                    dsk.update(vv.dask)
-                else:
-                    kwargs2[k] = v
-            dsk.update(
-                {
-                    key: (apply, func, (tuple, list(args)), kwargs2)
-                    for key, args in zip(keys, zip(*iterables))
-                }
-            )
-
+        # TODO add extra args
+        dsk = MapLayer(
+            func,
+            key,
+            *iterables,
+            pure=pure,
+            **kwargs,
+        )
+        keys = dsk.get_output_keys()
         if isinstance(workers, (str, Number)):
             workers = [workers]
         if workers is not None and not isinstance(workers, (list, set)):
@@ -3233,6 +3337,7 @@ class Client(SyncMethodMixin):
             from distributed.protocol import serialize
             from distributed.protocol.serialize import ToPickle
 
+            print(dsk.to_dict())
             header, frames = serialize(ToPickle(dsk), on_error="raise")
 
             pickled_size = sum(map(nbytes, [header] + frames))
