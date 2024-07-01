@@ -746,7 +746,9 @@ async def test_malloc_trim_threshold(c, s, a):
     This test may start failing in a future Python version if CPython switches to
     using mimalloc by default. If it does, a thorough benchmarking exercise is needed.
     """
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     arr = da.random.random(2**29 // 8, chunks="512 kiB")  # 0.5 GiB
     arr = arr.persist()
     await wait(arr)

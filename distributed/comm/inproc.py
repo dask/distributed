@@ -4,6 +4,7 @@ import asyncio
 import itertools
 import logging
 import os
+import sys
 import threading
 import weakref
 from collections import deque, namedtuple
@@ -14,7 +15,7 @@ from tornado.ioloop import IOLoop
 from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend, backends
 from distributed.protocol.serialize import _nested_deserialize
-from distributed.utils import get_ip, is_python_shutting_down
+from distributed.utils import get_ip
 
 logger = logging.getLogger(__name__)
 
@@ -187,9 +188,13 @@ class InProc(Comm):
         r = repr(self)
 
         def finalize(
-            read_q=self._read_q, write_q=self._write_q, write_loop=self._write_loop, r=r
+            read_q=self._read_q,
+            write_q=self._write_q,
+            write_loop=self._write_loop,
+            is_finalizing=sys.is_finalizing,
+            r=r,
         ):
-            if read_q.peek(None) is _EOF or is_python_shutting_down():
+            if read_q.peek(None) is _EOF or is_finalizing():
                 return
             logger.warning(f"Closing dangling queue in {r}")
             write_loop.add_callback(write_q.put_nowait, _EOF)
