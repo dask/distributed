@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict, deque
+from collections import defaultdict
 from collections.abc import Container
 from functools import partial
 from math import log2
@@ -106,8 +106,6 @@ class WorkStealing(SchedulerPlugin):
         )
         # `callback_time` is in milliseconds
         self.scheduler.add_plugin(self)
-        maxlen = dask.config.get("distributed.admin.low-level-log-length")
-        self.scheduler.events["stealing"] = deque(maxlen=maxlen)
         self.count = 0
         self.in_flight = {}
         self.in_flight_occupancy = defaultdict(int)

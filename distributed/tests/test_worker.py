@@ -2906,7 +2906,7 @@ async def test_worker_status_sync(s, a):
     while ws.status != Status.closed:
         await asyncio.sleep(0.01)
 
-    events = [ev for _, ev in s.events[ws.address] if ev["action"] != "heartbeat"]
+    events = [ev for _, ev in s.get_events(ws.address) if ev["action"] != "heartbeat"]
     for ev in events:
         if "stimulus_id" in ev:  # Strip timestamp
             ev["stimulus_id"] = ev["stimulus_id"].rsplit("-", 1)[0]
@@ -2963,7 +2963,7 @@ async def test_log_remove_worker(c, s, a, b):
     # Scattered task
     z = await c.scatter({"z": 3}, workers=a.address)
 
-    s.events.clear()
+    s._broker.truncate()
 
     with captured_logger("distributed.scheduler", level=logging.INFO) as log:
         # Successful graceful shutdown
@@ -2999,7 +2999,7 @@ async def test_log_remove_worker(c, s, a, b):
         "Lost all workers",
     ]
 
-    events = {topic: [ev for _, ev in evs] for topic, evs in s.events.items()}
+    events = {topic: [ev for _, ev in evs] for topic, evs in s.get_events().items()}
     for evs in events.values():
         for ev in evs:
             if ev["action"] == "retire-workers":
