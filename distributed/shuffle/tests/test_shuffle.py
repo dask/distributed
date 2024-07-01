@@ -28,7 +28,6 @@ np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 
 import dask.dataframe as dd
-from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_200
 from dask.typing import Key
 
 from distributed import (
@@ -1145,41 +1144,38 @@ def test_processing_chain(tmp_path, drop_column):
             }
         )
 
-    if PANDAS_GE_150:
-        columns.update(
-            {
-                # PyArrow dtypes
-                f"col{next(counter)}": pd.array(
-                    [True, False] * 50, dtype="bool[pyarrow]"
-                ),
-                f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
-                f"col{next(counter)}": pd.array(
-                    [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
-                    dtype=pd.ArrowDtype(pa.timestamp("ms")),
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype="string[pyarrow]",
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype=pd.StringDtype("pyarrow"),
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype="string[python]",
-                ),
-            }
-        )
+    columns.update(
+        {
+            # PyArrow dtypes
+            f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
+            f"col{next(counter)}": pd.array(
+                [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
+                dtype=pd.ArrowDtype(pa.timestamp("ms")),
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[pyarrow]",
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype=pd.StringDtype("pyarrow"),
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[python]",
+            ),
+        }
+    )
 
     df = pd.DataFrame(columns)
     df["_partitions"] = df.col4 % npartitions
@@ -2399,7 +2395,6 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
-@pytest.mark.skipif(not PANDAS_GE_200, reason="requires pandas >=2.0")
 @gen_cluster(client=True)
 async def test_handle_null_partitions(c, s, a, b):
     data = [
