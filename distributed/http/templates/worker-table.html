@@ -12,6 +12,7 @@
             <th> Services</th>
             <th> Logs </th>
             <th> Last seen </th>
+            <th>  </th>
         </tr>
     </thead>
     <tbody>
@@ -33,7 +34,37 @@
             {% end %}
             <td> <a href="../logs/{{ url_escape(ws.address) }}.html">logs</a></td>
             <td> {{ format_time(time() - ws.last_seen) }} </td>
+            <td>
+                <form action="" id="close-worker" method="post" name="asdf">
+                    <button class="button is-default" name="{{ws.address}}">Close</button>
+                </form>
+            </td>
         </tr>
         {% end %}
     </tbody>
 </table>
+
+<script>
+    const forms = document.querySelectorAll("#close-worker");
+    forms.forEach(p =>
+        p.addEventListener("submit", (event) => {
+        let submitter = event.submitter;
+        let handler = submitter.id;
+        event.preventDefault();
+        closeWorker(submitter.name);
+        })
+    );
+
+    async function closeWorker(address) {
+        try {
+            const response = await fetch("../../api/v1/retire_workers", {
+                method: "POST",
+                body: JSON.stringify({workers: [address]}),
+            });
+            console.log(await response.json());
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+</script>
