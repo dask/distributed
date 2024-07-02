@@ -12,7 +12,10 @@
             <th> Services</th>
             <th> Logs </th>
             <th> Last seen </th>
+            {% if api_enabled %}
             <th>  </th>
+            {% else %}
+            {% end %}
         </tr>
     </thead>
     <tbody>
@@ -34,11 +37,14 @@
             {% end %}
             <td> <a href="../logs/{{ url_escape(ws.address) }}.html">logs</a></td>
             <td> {{ format_time(time() - ws.last_seen) }} </td>
+            {% if api_enabled %}
             <td>
                 <form action="" id="close-worker" method="post" name="asdf">
                     <button class="button is-default" name="{{ws.address}}">Close</button>
                 </form>
             </td>
+            {% else %}
+            {% end %}
         </tr>
         {% end %}
     </tbody>

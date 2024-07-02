@@ -11,6 +11,7 @@ from tlz import first, merge
 from tornado import escape
 from tornado.websocket import WebSocketHandler
 
+import dask
 from dask.typing import Key
 from dask.utils import format_bytes, format_time
 
@@ -40,6 +41,8 @@ class Workers(RequestHandler):
             "workers.html",
             title="Workers",
             scheduler=self.server,
+            api_enabled="distributed.http.scheduler.api"
+            in dask.config.get("distributed.scheduler.http.routes"),
             **merge(
                 self.server.__dict__,
                 self.server.__pdict__,
