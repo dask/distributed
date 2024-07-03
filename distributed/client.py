@@ -822,11 +822,13 @@ class MapLayer(Layer):
         func: Callable,
         iterables: Iterable,
         key: str | Iterable[str] | None = None,
+        pure:bool = True,
         **kwargs,
     ):
         self.func = func
         self.iterables = list(zip(*zip(*iterables)))if is_nested(iterables) else [iterables]
         self.key = key
+        self.pure = pure
         self.kwargs = kwargs
         super().__init__(annotations=annotations)
 
@@ -871,11 +873,32 @@ class MapLayer(Layer):
         if isinstance(self.key, Iterable) and not isinstance(self.key, str):
             keys = self.key
         else:
-            
-            keys = [
-                self.key + "-" + tokenize(self.func, self.kwargs, args)
-                for args in zip(*self.iterables)
-            ]
+            # keys = [
+            #     self.key + "-" + tokenize(self.func, self.kwargs, args)
+            #     for args in zip(*self.iterables)
+            # ]
+            if self.pure:
+                keys = [
+                    self.key + "-" + tokenize(self.func, self.kwargs, args)
+                    for args in zip(*self.iterables)
+                ]
+            else:
+                uid = str(uuid.uuid4())
+                keys = [
+                    f"{self.key}-{uid}-{i}" # + "-" + uid + str(i)
+                    for i in range(min(map(len, self.iterables))) 
+                    #  for i, args in enumerate(zip(*self.iterables))
+                ] if self.iterables else []
+            # else:
+            #     uid = str(uuid.uuid4())
+            #     keys = (
+            #         [
+            #             self.key + "-" + uid + "-" + str(i)
+            #             for i in range(min(map(len, self.iterables)))
+            #         ]
+            #         if self.iterables
+            #         else []
+            #     )
             # if is_nested(self.iterables):
             #     keys = [
             #         self.key + "-" + tokenize(self.func, self.kwargs, args)
@@ -2334,9 +2357,10 @@ class Client(SyncMethodMixin):
             raise TypeError("Workers must be a list or set of workers or None")
 
         internal_priority = dict(zip(keys, range(len(keys))))
-
+        # hlg_dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=[])
+        
         futures = self._graph_to_futures(
-            dsk,
+            dsk._construct_graph(), #TODO bandaid fix 
             keys,
             workers=workers,
             allow_other_workers=allow_other_workers,
@@ -3338,7 +3362,7 @@ class Client(SyncMethodMixin):
             from distributed.protocol import serialize
             from distributed.protocol.serialize import ToPickle
 
-            print(dsk.to_dict())
+            # print(dsk.to_dict())
             header, frames = serialize(ToPickle(dsk), on_error="raise")
 
             pickled_size = sum(map(nbytes, [header] + frames))
