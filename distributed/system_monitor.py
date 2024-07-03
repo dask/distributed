@@ -19,6 +19,7 @@ class SystemMonitor:
     proc: psutil.Process
     maxlen: int | None
     count: int
+    first_time: float
     last_time: float
     quantities: dict[str, deque[float]]
 
@@ -54,7 +55,7 @@ class SystemMonitor:
             raise TypeError(f"maxlen must be int or None; got {maxlen!r}")
         self.maxlen = maxlen
 
-        self.last_time = monotonic()
+        self.first_time = self.last_time = monotonic()
 
         self.quantities = {
             "cpu": deque(maxlen=maxlen),
@@ -137,6 +138,10 @@ class SystemMonitor:
             self.gpu_memory_total = -1
 
         self.update()
+
+    @property
+    def elapsed_time(self) -> float:
+        return self.last_time - self.first_time
 
     def recent(self) -> dict[str, float]:
         return {k: v[-1] for k, v in self.quantities.items()}
