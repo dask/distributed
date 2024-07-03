@@ -144,7 +144,6 @@ dask_worker_system_monitor_elapsed_seconds_total
         Due to a mismatch in sampling timestamps between the system monitor and Prometheus,
         this metric should be used when calculating rates for metrics collected by 
         the system monitor.
-dask_scheduler_tasks
 dask_worker_gil_contention_seconds_total
     Value representing cumulative total of *potential* GIL contention,
     in the form of cumulative seconds during which any thread held the GIL locked.
