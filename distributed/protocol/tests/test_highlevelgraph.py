@@ -6,12 +6,12 @@ import pytest
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
+dd = pytest.importorskip("dask.dataframe")
+da = pytest.importorskip("dask.array")
 
 from numpy.testing import assert_array_equal
 
 import dask
-import dask.array as da
-import dask.dataframe as dd
 
 from distributed.diagnostics import SchedulerPlugin
 from distributed.utils_test import gen_cluster
