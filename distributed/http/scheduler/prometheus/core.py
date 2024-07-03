@@ -22,6 +22,8 @@ class SchedulerMetricCollector(PrometheusCollector):
         self.subsystem = "scheduler"
 
     def collect(self) -> Iterator[GaugeMetricFamily | CounterMetricFamily]:
+        self.server.monitor.update()
+
         yield GaugeMetricFamily(
             self.build_name("clients"),
             "Number of clients connected",
