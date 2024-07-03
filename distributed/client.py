@@ -123,9 +123,9 @@ from distributed.worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
-_global_clients: weakref.WeakValueDictionary[
-    int, Client
-] = weakref.WeakValueDictionary()
+_global_clients: weakref.WeakValueDictionary[int, Client] = (
+    weakref.WeakValueDictionary()
+)
 _global_client_index = [0]
 
 _current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
@@ -809,63 +809,32 @@ class VersionsDict(TypedDict):
 
 
 _T_LowLevelGraph: TypeAlias = dict[Key, tuple]
-
+def is_nested(iterable):
+    for item in iterable:
+        if isinstance(item, Iterable) and not isinstance(item, str):
+            return True
+    return False
 
 class MapLayer(Layer):
-    # func: Callable
-    # iterable: Iterable
-    # key=None
-    # workers=None
-    # retries=None
-    # resources=None
-    # priority: int = 0
-    # allow_other_workers: bool = False
-    # fifo_timeout: str = "100 ms"
-    # actor: bool = False
-    # actors: bool = False
-    # pure: bool = True
-    # batch_size=None
-    # # **kwargs
 
     def __init__(
         self,
         func: Callable,
         iterables: Iterable,
-        key,
-        workers=None,
-        retries=None,
-        resources=None,
-        priority: int = 0,
-        allow_other_workers: bool = False,
-        fifo_timeout: str = "100 ms",
-        actor: bool = False,
-        actors: bool = False,
-        pure: bool = True,
-        batch_size=None,
-        parts_out=None,  # TODO check this
-        annotations=None,
+        key: str | Iterable[str] | None = None,
         **kwargs,
     ):
         self.func = func
-        self.iterables = iterables
+        self.iterables = list(zip(*zip(*iterables)))if is_nested(iterables) else [iterables]
         self.key = key
-        self.workers = workers
-        self.retries = retries
-        self.resources = resources
-        self.priority = priority
-        self.allow_other_workers = allow_other_workers
-        self.fifo_timeout = fifo_timeout
-        self.actor = actor
-        self.actors = actors
-        self.pure = pure
-        self.batch_size = batch_size
         self.kwargs = kwargs
-        self.parts_out = parts_out
         super().__init__(annotations=annotations)
 
-    # TODO add repr
     def __repr__(self) -> str:
-        raise NotImplementedError
+        return (
+            f"{type(self).__name__} <func='{funcname(self.func)}'>"
+
+        )
 
     @property
     def _dict(self) -> _T_LowLevelGraph:
@@ -881,7 +850,6 @@ class MapLayer(Layer):
 
     def get_output_keys(self) -> set[Key]:
         return set(self.keys())
-        # return {(self.name, part) for part in self.parts_out}
 
     def get_ordered_keys(self):
         return list(self.keys())
@@ -898,41 +866,46 @@ class MapLayer(Layer):
     def __len__(self) -> int:
         return len(self._dict)
 
-    # TODO work this part out
-    # def _cull(self, parts_out: Iterable[int]) -> MapLayer:
-    #     return self.__class__(
-    #         self.func,
-    #         self.iterables,
-    #         self.key,
-    #         self.workers,
-    #         self.retries,
-    #         self.resources,
-    #         self.priority,
-    #         self.allow_other_workers,
-    #         self.fifo_timeout,
-    #         self.actor,
-    #         self.actors,
-    #         self.pure,
-    #         self.batch_size,
-    #         parts_out,
-    #         **self.kwargs,
-    #     )
-    # TODO add cull method
-
     def _construct_graph(self) -> _T_LowLevelGraph:
-        # token = tokenize(self.name, self.func, self.kwargs)
+        
+        if isinstance(self.key, Iterable) and not isinstance(self.key, str):
+            keys = self.key
+        else:
+            
+            keys = [
+                self.key + "-" + tokenize(self.func, self.kwargs, args)
+                for args in zip(*self.iterables)
+            ]
+            # if is_nested(self.iterables):
+            #     keys = [
+            #         self.key + "-" + tokenize(self.func, self.kwargs, args)
+            #         for args in zip(*self.iterables)
+            #     ]
+            # else:
+            #     keys = [
+            #         self.key + "-" + tokenize(self.func, self.kwargs, args)
+            #         for args in self.iterables
+            #     ]
 
-        keys = [
-            self.key + "-" + tokenize(self.func, self.kwargs, args)
-            for args in zip(*self.iterables)
-        ]
         dsk: _T_LowLevelGraph = {}
 
         if not self.kwargs:
+            
             dsk = {
-                key: (self.func,) + args
-                for key, args in zip(keys, zip(*self.iterables))
-            }
+                    key: (self.func,) + args
+                    for key, args in zip(keys, zip(*self.iterables))
+                }
+            # if is_nested(self.iterables):
+            #     dsk = {
+            #         key: (self.func,) + args
+            #         for key, args in zip(keys, zip(*self.iterables))
+            #     }
+            # else:
+            #     dsk = {
+            #         key: (self.func,) + args
+            #         for key, args in zip(keys, zip(self.iterables))
+            #     }
+
         else:
             kwargs2 = {}
             dsk = {}
@@ -943,12 +916,28 @@ class MapLayer(Layer):
                     dsk.update(vv.dask)
                 else:
                     kwargs2[k] = v
-            dsk.update(
-                {
-                    key: (apply, self.func, (tuple, list(args)), kwargs2)
-                    for key, args in zip(keys, zip(*self.iterables))
-                }
-            )
+
+                dsk.update(
+                    {
+                        key: (apply, self.func, (tuple, list(args)), kwargs2)
+                        for key, args in zip(keys, zip(*self.iterables))
+                    }
+                )       
+            # if is_nested(self.iterables):
+
+            #     dsk.update(
+            #         {
+            #             key: (apply, self.func, (tuple, list(args)), kwargs2)
+            #             for key, args in zip(keys, zip(*self.iterables))
+            #         }
+            #     )
+            # else:
+            #     dsk.update(
+            #     {
+            #         key: (apply, self.func, (tuple, list(args)), kwargs2)
+            #         for key, args in zip(keys, self.iterables)
+            #     }
+            # )
         return dsk
 
 
@@ -2291,7 +2280,7 @@ class Client(SyncMethodMixin):
                 "Consider using a normal for loop and Client.submit"
             )
         total_length = sum(len(x) for x in iterables)
-        # TODO is this needed?
+        # TODO are changes needed for HLG?
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
                 zip(*(partition_all(batch_size, iterable) for iterable in iterables))
