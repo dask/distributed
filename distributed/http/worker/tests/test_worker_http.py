@@ -41,6 +41,7 @@ async def test_prometheus(c, s, a):
         "dask_worker_spill_bytes_total",
         "dask_worker_spill_count_total",
         "dask_worker_spill_time_seconds_total",
+        "dask_worker_system_monitor_elapsed_seconds_total",
         "dask_worker_tasks",
         "dask_worker_threads",
         "dask_worker_tick_count_total",

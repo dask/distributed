@@ -114,7 +114,7 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_clients",
         "dask_scheduler_desired_workers",
         "dask_scheduler_workers",
-        "dask_scheduler_last_time",
+        "dask_scheduler_system_monitor_elapsed_seconds_total",
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
         "dask_scheduler_tasks_forgotten",
