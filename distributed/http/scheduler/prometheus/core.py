@@ -62,7 +62,7 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         yield CounterMetricFamily(
             self.build_name("system_monitor_elapsed"),
-            "Elapsed time according to the system monitor (required to calculate rates)",
+            "Total elapsed time according to the system monitor (required to calculate rates)",
             value=self.server.monitor.elapsed_time,
             unit="seconds",
         )

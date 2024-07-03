@@ -40,7 +40,7 @@ dask_scheduler_gil_contention_seconds_total
 dask_scheduler_workers
     Number of workers known by scheduler
 dask_scheduler_system_monitor_elapsed_seconds_total
-    Elapsed time according to the system monitor
+    Total elapsed time according to the system monitor
     
     ..note:: 
         Due to a mismatch in sampling timestamps between the system monitor and Prometheus,
@@ -138,7 +138,7 @@ dask_worker_tasks
 dask_worker_threads
     Number of worker threads
 dask_worker_system_monitor_elapsed_seconds_total
-    Elapsed time according to the system monitor
+    Total elapsed time according to the system monitor
     
     ..note:: 
         Due to a mismatch in sampling timestamps between the system monitor and Prometheus,
