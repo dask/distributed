@@ -39,8 +39,13 @@ dask_scheduler_gil_contention_seconds_total
 
 dask_scheduler_workers
     Number of workers known by scheduler
-dask_scheduler_last_time_total
-    Cumulative SystemMonitor time
+dask_scheduler_system_monitor_elapsed_seconds_total
+    Elapsed time according to the system monitor
+    
+    ..note:: 
+        Due to a mismatch in sampling timestamps between the system monitor and Prometheus,
+        this metric should be used when calculating rates for metrics collected by 
+        the system monitor.
 dask_scheduler_tasks
     Number of tasks known by scheduler
 dask_scheduler_tasks_suspicious_total
@@ -132,6 +137,14 @@ dask_worker_tasks
     Number of tasks at worker
 dask_worker_threads
     Number of worker threads
+dask_worker_system_monitor_elapsed_seconds_total
+    Elapsed time according to the system monitor
+    
+    ..note:: 
+        Due to a mismatch in sampling timestamps between the system monitor and Prometheus,
+        this metric should be used when calculating rates for metrics collected by 
+        the system monitor.
+dask_scheduler_tasks
 dask_worker_gil_contention_seconds_total
     Value representing cumulative total of *potential* GIL contention,
     in the form of cumulative seconds during which any thread held the GIL locked.
