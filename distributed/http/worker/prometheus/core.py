@@ -32,6 +32,7 @@ class WorkerMetricCollector(PrometheusCollector):
             )
 
     def collect(self) -> Iterator[Metric]:
+        self.server.monitor.update()
         ws = self.server.state
 
         tasks = GaugeMetricFamily(
