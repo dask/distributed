@@ -878,6 +878,7 @@ async def test_log_exception_on_failed_task(c, s, a, b):
     text = logger.getvalue()
     assert "ZeroDivisionError" in text
     assert "Exception" in text
+    assert "Traceback" in text
 
 
 @gen_cluster(client=True)
