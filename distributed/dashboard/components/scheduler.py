@@ -1971,12 +1971,12 @@ class StealingEvents(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        log = self.scheduler.get_events(topic="stealing")
-        current = len(self.scheduler.events["stealing"])
-        n = current - self.last
-
-        log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
-        self.last = current
+        topic = self.scheduler._broker._topics["stealing"]
+        log = log = topic.events
+        n = min(topic.count - self.last, len(log))
+        if log:
+            log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
+        self.last = topic.count
 
         if log:
             new = pipe(
@@ -2041,11 +2041,12 @@ class Events(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        log = self.scheduler.events[self.name]
-        n = self.scheduler.event_counts[self.name] - self.last
+        topic = self.scheduler._broker._topics[self.name]
+        log = topic.events
+        n = min(topic.count - self.last, len(log))
         if log:
             log = [log[-i] for i in range(1, n + 1)]
-        self.last = self.scheduler.event_counts[self.name]
+        self.last = topic.count
 
         if log:
             actions = []

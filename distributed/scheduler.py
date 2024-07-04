@@ -75,6 +75,7 @@ from distributed._asyncio import RLock
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
 from distributed.batched import BatchedSend
+from distributed.broker import Broker
 from distributed.client import SourceCode
 from distributed.collections import HeapSet
 from distributed.comm import (
@@ -123,7 +124,6 @@ from distributed.utils import (
     TimeoutError,
     format_dashboard_link,
     get_fileno_limit,
-    is_python_shutting_down,
     key_split_group,
     log_errors,
     offload,
@@ -3805,9 +3805,7 @@ class Scheduler(SchedulerState, ServerNode):
         ]
 
         maxlen = dask.config.get("distributed.admin.low-level-log-length")
-        self.events = defaultdict(partial(deque, maxlen=maxlen))
-        self.event_counts = defaultdict(int)
-        self.event_subscriber = defaultdict(set)
+        self._broker = Broker(maxlen, self)
         self.worker_plugins = {}
         self.nanny_plugins = {}
         self._starting_nannies = set()
@@ -4003,7 +4001,7 @@ class Scheduler(SchedulerState, ServerNode):
             "workers": self.workers,
             "clients": self.clients,
             "memory": self.memory,
-            "events": self.events,
+            "events": self._broker._topics,
             "extensions": self.extensions,
         }
         extra = {k: v for k, v in extra.items() if k not in exclude}
@@ -5407,8 +5405,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         async def remove_worker_from_events() -> None:
             # If the worker isn't registered anymore after the delay, remove from events
-            if address not in self.workers and address in self.events:
-                del self.events[address]
+            if address not in self.workers:
+                self._broker.truncate(address)
 
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
@@ -5786,7 +5784,7 @@ class Scheduler(SchedulerState, ServerNode):
             if not comm.closed():
                 self.client_comms[client].send({"op": "stream-closed"})
             try:
-                if not is_python_shutting_down():
+                if not self._is_finalizing():
                     await self.client_comms[client].close()
                     del self.client_comms[client]
                     if self.status == Status.running:
@@ -5821,8 +5819,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         async def remove_client_from_events() -> None:
             # If the client isn't registered anymore after the delay, remove from events
-            if client not in self.clients and client in self.events:
-                del self.events[client]
+            if client not in self.clients:
+                self._broker.truncate(client)
 
         cleanup_delay = parse_timedelta(
             dask.config.get("distributed.scheduler.events-cleanup-delay")
@@ -8424,40 +8422,26 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Client.log_event
         """
-        event = (time(), msg)
-        if isinstance(topic, str):
-            topic = [topic]
-        for t in topic:
-            self.events[t].append(event)
-            self.event_counts[t] += 1
-            self._report_event(t, event)
+        self._broker.publish(topic, msg)
 
-            for plugin in list(self.plugins.values()):
-                try:
-                    plugin.log_event(t, msg)
-                except Exception:
-                    logger.info("Plugin failed with exception", exc_info=True)
+    def subscribe_topic(self, topic: str, client: str) -> None:
+        self._broker.subscribe(topic, client)
 
-    def _report_event(self, name, event):
-        msg = {
-            "op": "event",
-            "topic": name,
-            "event": event,
-        }
-        client_msgs = {client: [msg] for client in self.event_subscriber[name]}
-        self.send_all(client_msgs, worker_msgs={})
+    def unsubscribe_topic(self, topic: str, client: str) -> None:
+        self._broker.unsubscribe(topic, client)
 
-    def subscribe_topic(self, topic, client):
-        self.event_subscriber[topic].add(client)
+    @overload
+    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]:
+        ...
 
-    def unsubscribe_topic(self, topic, client):
-        self.event_subscriber[topic].discard(client)
+    @overload
+    def get_events(self) -> dict[str, tuple[tuple[float, Any], ...]]:
+        ...
 
-    def get_events(self, topic=None):
-        if topic is not None:
-            return tuple(self.events[topic])
-        else:
-            return valmap(tuple, self.events)
+    def get_events(
+        self, topic: str | None = None
+    ) -> tuple[tuple[float, Any], ...] | dict[str, tuple[tuple[float, Any], ...]]:
+        return self._broker.get_events(topic)
 
     async def get_worker_monitor_info(self, recent=False, starts=None):
         if starts is None:

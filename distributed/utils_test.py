@@ -806,24 +806,25 @@ async def start_cluster(
 
 
 def check_invalid_worker_transitions(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-transition"):
+    if not s.get_events("invalid-worker-transition"):
         return
 
-    for _, msg in s.events["invalid-worker-transition"]:
+    for _, msg in s.get_events("invalid-worker-transition"):
         worker = msg.pop("worker")
         print("Worker:", worker)
         print(InvalidTransition(**msg))
 
     raise ValueError(
-        "Invalid worker transitions found", len(s.events["invalid-worker-transition"])
+        "Invalid worker transitions found",
+        len(s.get_events("invalid-worker-transition")),
     )
 
 
 def check_invalid_task_states(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-task-state"):
+    if not s.get_events("invalid-worker-task-state"):
         return
 
-    for _, msg in s.events["invalid-worker-task-state"]:
+    for _, msg in s.get_events("invalid-worker-task-state"):
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:
@@ -833,10 +834,10 @@ def check_invalid_task_states(s: Scheduler) -> None:
 
 
 def check_worker_fail_hard(s: Scheduler) -> None:
-    if not s.events.get("worker-fail-hard"):
+    if not s.get_events("worker-fail-hard"):
         return
 
-    for _, msg in s.events["worker-fail-hard"]:
+    for _, msg in s.get_events("worker-fail-hard"):
         msg = msg.copy()
         worker = msg.pop("worker")
         msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
