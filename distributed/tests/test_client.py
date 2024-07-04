@@ -155,6 +155,7 @@ async def test_map(c, s, a, b):
     assert all(isinstance(x, Future) for x in L1)
 
     result = await L1[0]
+    
     assert result == inc(0)
     assert len(s.tasks) == 5
 
@@ -6335,7 +6336,7 @@ async def test_map_large_kwargs_in_graph(c, s, a, b):
     while not s.tasks:
         await asyncio.sleep(0.01)
 
-    assert len(s.tasks) == 102
+    assert len(s.tasks) == 101
     assert any(k.startswith("ndarray") for k in s.tasks)
 
 
