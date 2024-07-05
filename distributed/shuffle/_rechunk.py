@@ -389,11 +389,16 @@ class P2PRechunkLayer(Layer):
             return culled_layer, frozen_deps
 
     def _construct_graph(self) -> _T_LowLevelGraph:
+        import numpy as np
+
         dsk: _T_LowLevelGraph = {}
 
         for ndpartial in _split_partials(self.chunks_input, self.chunks):
             # TODO: Figure put if tasks were culled and we only have a single output
-            if all(slc.stop == slc.start + 1 for slc in ndpartial.new):
+            output_count = np.sum(self.keepmap[ndpartial.new])
+            if output_count == 0:
+                continue
+            elif output_count == 1:
                 # Single output chunk
                 dsk.update(
                     partial_concatenate(
@@ -402,6 +407,7 @@ class P2PRechunkLayer(Layer):
                         output_chunks=self.chunks,
                         ndpartial=ndpartial,
                         token=self.token,
+                        keepmap=self.keepmap,
                     )
                 )
             else:
@@ -414,6 +420,7 @@ class P2PRechunkLayer(Layer):
                         ndpartial=ndpartial,
                         token=self.token,
                         disk=self.disk,
+                        keepmap=self.keepmap,
                     )
                 )
         return dsk
@@ -512,6 +519,7 @@ def partial_concatenate(
     output_chunks: ChunkedAxes,
     ndpartial: _NDPartial,
     token: str,
+    keepmap: np.ndarray,
 ) -> dict[Key, Any]:
     import numpy as np
 
@@ -584,6 +592,7 @@ def partial_rechunk(
     ndpartial: _NDPartial,
     token: str,
     disk: bool,
+    keepmap: np.ndarray,
 ) -> dict[Key, Any]:
     from dask.array.chunk import getitem
 
@@ -646,12 +655,13 @@ def partial_rechunk(
     new_partial_offset = tuple(axis.start for axis in ndpartial.new)
     for partial_index in _partial_ndindex(ndpartial.new):
         global_index = _global_index(partial_index, new_partial_offset)
-        dsk[(unpack_group,) + global_index] = (
-            rechunk_unpack,
-            partial_token,
-            partial_index,
-            _barrier_key,
-        )
+        if keepmap[global_index]:
+            dsk[(unpack_group,) + global_index] = (
+                rechunk_unpack,
+                partial_token,
+                partial_index,
+                _barrier_key,
+            )
     return dsk
 
 
