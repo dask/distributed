@@ -877,7 +877,7 @@ class MapLayer(Layer):
         else:
             if self.pure:
                 keys = [
-                    self.key + "-" + tokenize(self.func, self.kwargs, args) # type: ignore
+                    self.key + "-" + tokenize(self.func, self.kwargs, args)  # type: ignore
                     for args in zip(*self.iterables)
                 ]
             else:
@@ -2259,7 +2259,7 @@ class Client(SyncMethodMixin):
                 "Dask no longer supports mapping over Iterators or Queues."
                 "Consider using a normal for loop and Client.submit"
             )
-        total_length = sum(len(x) for x in iterables)
+        total_length = sum(len(x) for x in iterables)  # type: ignore
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
                 zip(*(partition_all(batch_size, iterable) for iterable in iterables))
