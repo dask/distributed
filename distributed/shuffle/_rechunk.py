@@ -99,19 +99,30 @@ from __future__ import annotations
 import mmap
 import os
 from collections import defaultdict
-from collections.abc import Callable, Generator, Hashable, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Generator,
+    Hashable,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import toolz
 from tornado.ioloop import IOLoop
 
 import dask
+import dask.config
 from dask.base import tokenize
-from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
+from dask.highlevelgraph import HighLevelGraph
+from dask.layers import Layer
 from dask.typing import Key
 
 from distributed.core import PooledRPCCall
@@ -138,6 +149,7 @@ if TYPE_CHECKING:
 
     import dask.array as da
 
+_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
 ChunkedAxis: TypeAlias = tuple[float, ...]  # chunks must either be an int or NaN
 ChunkedAxes: TypeAlias = tuple[ChunkedAxis, ...]
 NDSlice: TypeAlias = tuple[slice, ...]
@@ -216,27 +228,202 @@ def rechunk_p2p(x: da.Array, chunks: ChunkedAxes) -> da.Array:
     if x.size == 0:
         # Special case for empty array, as the algorithm below does not behave correctly
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
+    from dask.array.core import new_da_object
 
-    dsk = {}
     token = tokenize(x, chunks)
-    for ndpartial in _split_partials(x, chunks):
-        if all(slc.stop == slc.start + 1 for slc in ndpartial.new):
-            # Single output chunk
-            dsk.update(partial_concatenate(x, chunks, ndpartial, token))
-        else:
-            dsk.update(partial_rechunk(x, chunks, ndpartial, token))
-    layer = MaterializedLayer(dsk)
     name = rechunk_name(token)
-    graph = HighLevelGraph.from_collections(name, layer, dependencies=[x])
-    arr = da.Array(graph, name, chunks, meta=x)
-    return arr
+    disk: bool = dask.config.get("distributed.p2p.disk")
+
+    layer = P2PRechunkLayer(
+        name=name,
+        token=token,
+        chunks=chunks,
+        chunks_input=x.chunks,
+        name_input=x.name,
+        disk=disk,
+    )
+    return new_da_object(
+        HighLevelGraph.from_collections(name, layer, [x]),
+        name,
+        chunks,
+        meta=x._meta,
+        dtype=x.dtype,
+    )
+
+
+class P2PRechunkLayer(Layer):
+    name: str
+    token: str
+    chunks: ChunkedAxes
+    chunks_input: ChunkedAxes
+    name_input: str
+    disk: bool
+    keepmap: np.ndarray
+
+    _cached_dict: _T_LowLevelGraph | None
+
+    def __init__(
+        self,
+        name: str,
+        token: str,
+        chunks: ChunkedAxes,
+        chunks_input: ChunkedAxes,
+        name_input: str,
+        disk: bool,
+        keepmap: np.ndarray | None = None,
+        annotations: Mapping[str, Any] | None = None,
+    ):
+        import numpy as np
+
+        self.name = name
+        self.token = token
+        self.chunks = chunks
+        self.chunks_input = chunks_input
+        self.name_input = name_input
+        self.disk = disk
+        if keepmap is not None:
+            self.keepmap = keepmap
+        else:
+            shape = tuple(len(axis) for axis in chunks)
+            self.keepmap = np.ones(shape, dtype=bool)
+        self._cached_dict = None
+        super().__init__(annotations=annotations)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}<name='{self.name}', chunks={self.chunks}>"
+
+    def get_output_keys(self) -> set[Key]:
+        import numpy as np
+
+        return {
+            (self.name,) + nindex
+            for nindex in np.ndindex(tuple(len(axis) for axis in self.chunks))
+        }
+
+    def is_materialized(self) -> bool:
+        return self._cached_dict is not None
+
+    @property
+    def _dict(self) -> _T_LowLevelGraph:
+        """Materialize full dict representation"""
+        dsk: _T_LowLevelGraph
+        if self._cached_dict is not None:
+            return self._cached_dict
+        else:
+            dsk = self._construct_graph()
+            self._cached_dict = dsk
+        return self._cached_dict
+
+    def __getitem__(self, key: Key) -> tuple:
+        return self._dict[key]
+
+    def __iter__(self) -> Iterator[Key]:
+        return iter(self._dict)
+
+    def __len__(self) -> int:
+        return len(self._dict)
+
+    def _cull(self, keepmap: np.ndarray) -> P2PRechunkLayer:
+        return P2PRechunkLayer(
+            name=self.name,
+            token=self.token,
+            chunks=self.chunks,
+            chunks_input=self.chunks_input,
+            name_input=self.name_input,
+            disk=self.disk,
+            keepmap=keepmap,
+            annotations=self.annotations,
+        )
+
+    def _keys_to_indices(self, keys: Iterable[Key]) -> set[tuple[int, ...]]:
+        """Simple utility to convert keys to chunk indices."""
+        chunks = set()
+        for key in keys:
+            if not isinstance(key, tuple) or len(key) < 2 or key[0] != self.name:
+                continue
+            chunk = cast(tuple[int, ...], key[1:])
+            assert all(isinstance(index, int) for index in chunk)
+            chunks.add(chunk)
+        return chunks
+
+    def cull(
+        self, keys: set[Key], all_keys: Collection[Key]
+    ) -> tuple[P2PRechunkLayer, dict]:
+        """Cull a P2PRechunkLayer HighLevelGraph layer.
+
+        The underlying graph will only include the necessary
+        tasks to produce the keys (indices) included in `keepmap`.
+        Therefore, "culling" the layer only requires us to reset this
+        parameter.
+        """
+        import numpy as np
+
+        keepmap = np.zeros_like(self.keepmap)
+        indices_to_keep = self._keys_to_indices(keys)
+
+        from dask.array.rechunk import old_to_new
+
+        _old_to_new = old_to_new(self.chunks_input, self.chunks)
+
+        culled_deps: defaultdict[Key, set[Key]] = defaultdict(set)
+        for nindex in indices_to_keep:
+            old_indices_per_axis = []
+            for index, new_axis in zip(nindex, _old_to_new):
+                old_indices_per_axis.append(
+                    [old_chunk_index for old_chunk_index, _ in new_axis[index]]
+                )
+            for old_nindex in product(*old_indices_per_axis):
+                keepmap[old_nindex] = True
+                culled_deps[(self.name,) + nindex].add((self.name_input,) + old_nindex)
+
+        # Protect against mutations later on with frozenset
+        frozen_deps = {
+            output_task: frozenset(input_tasks)
+            for output_task, input_tasks in culled_deps.items()
+        }
+
+        if np.array_equal(keepmap, self.keepmap):
+            return self, frozen_deps
+        else:
+            culled_layer = self._cull(keepmap)
+            return culled_layer, frozen_deps
+
+    def _construct_graph(self) -> _T_LowLevelGraph:
+        dsk: _T_LowLevelGraph = {}
+
+        for ndpartial in _split_partials(self.chunks_input, self.chunks):
+            # TODO: Figure put if tasks were culled and we only have a single output
+            if all(slc.stop == slc.start + 1 for slc in ndpartial.new):
+                # Single output chunk
+                dsk.update(
+                    partial_concatenate(
+                        input_name=self.name_input,
+                        input_chunks=self.chunks_input,
+                        output_chunks=self.chunks,
+                        ndpartial=ndpartial,
+                        token=self.token,
+                    )
+                )
+            else:
+                # TODO: Do a partial rechunk only for non-culled tasks
+                dsk.update(
+                    partial_rechunk(
+                        input_name=self.name_input,
+                        input_chunks=self.chunks_input,
+                        chunks=self.chunks,
+                        ndpartial=ndpartial,
+                        token=self.token,
+                        disk=self.disk,
+                    )
+                )
+        return dsk
 
 
 def _split_partials(
-    x: da.Array, chunks: ChunkedAxes
+    input_chunks: ChunkedAxes, output_chunks: ChunkedAxes
 ) -> Generator[_NDPartial, None, None]:
     """Split the rechunking into partials that can be performed separately"""
-    partials_per_axis = _split_partials_per_axis(x, chunks)
+    partials_per_axis = _split_partials_per_axis(input_chunks, output_chunks)
     indices_per_axis = (range(len(partials)) for partials in partials_per_axis)
     for nindex, partial_per_axis in zip(
         product(*indices_per_axis), product(*partials_per_axis)
@@ -246,14 +433,14 @@ def _split_partials(
 
 
 def _split_partials_per_axis(
-    x: da.Array, chunks: ChunkedAxes
+    input_chunks: ChunkedAxes, output_chunks: ChunkedAxes
 ) -> tuple[tuple[_Partial, ...], ...]:
     """Split the rechunking into partials that can be performed separately
     on each axis"""
     from dask.array.rechunk import old_to_new
 
-    chunked_shape = tuple(len(axis) for axis in chunks)
-    _old_to_new = old_to_new(x.chunks, chunks)
+    chunked_shape = tuple(len(axis) for axis in output_chunks)
+    _old_to_new = old_to_new(input_chunks, output_chunks)
 
     sliced_axes = _partial_slices(_old_to_new, chunked_shape)
 
@@ -320,8 +507,9 @@ def _global_index(partial_index: NDIndex, partial_offset: NDIndex) -> NDIndex:
 
 
 def partial_concatenate(
-    x: da.Array,
-    chunks: ChunkedAxes,
+    input_name: str,
+    input_chunks: ChunkedAxes,
+    output_chunks: ChunkedAxes,
     ndpartial: _NDPartial,
     token: str,
 ) -> dict[Key, Any]:
@@ -338,7 +526,7 @@ def partial_concatenate(
     shape = tuple(slice_.stop - slice_.start for slice_ in ndpartial.old)
     rec_cat_arg = np.empty(shape, dtype="O")
 
-    partial_old = _compute_partial_old_chunks(ndpartial, x.chunks)
+    partial_old = _compute_partial_old_chunks(ndpartial, input_chunks)
 
     for old_partial_index in _partial_ndindex(ndpartial.old):
         old_global_index = _global_index(old_partial_index, old_offset)
@@ -348,18 +536,18 @@ def partial_concatenate(
         )
 
         original_shape = tuple(
-            axis[index] for index, axis in zip(old_global_index, x.chunks)
+            axis[index] for index, axis in zip(old_global_index, input_chunks)
         )
-        if _slicing_is_necessary(ndslice, original_shape):
+        if _slicing_is_necessary(ndslice, original_shape):  # type: ignore
             key = (slice_group,) + ndpartial.ix + old_global_index
             rec_cat_arg[old_partial_index] = key
             dsk[key] = (
                 getitem,
-                (x.name,) + old_global_index,
+                (input_name,) + old_global_index,
                 ndslice,
             )
         else:
-            rec_cat_arg[old_partial_index] = (x.name,) + old_global_index
+            rec_cat_arg[old_partial_index] = (input_name,) + old_global_index
     global_index = tuple(int(slice_.start) for slice_ in ndpartial.new)
     dsk[(rechunk_name(token),) + global_index] = (
         concatenate3,
@@ -390,10 +578,12 @@ def _slicing_is_necessary(slice: NDSlice, shape: tuple[int | None, ...]) -> bool
 
 
 def partial_rechunk(
-    x: da.Array,
+    input_name: str,
+    input_chunks: ChunkedAxes,
     chunks: ChunkedAxes,
     ndpartial: _NDPartial,
     token: str,
+    disk: bool,
 ) -> dict[Key, Any]:
     from dask.array.chunk import getitem
 
@@ -410,11 +600,10 @@ def partial_rechunk(
     # group across all P2P shuffle-like operations
     # FIXME: Make this group unique per individual P2P shuffle-like operation
     _barrier_key = barrier_key(ShuffleId(partial_token))
-    disk: bool = dask.config.get("distributed.p2p.disk")
 
-    ndim = len(x.shape)
+    ndim = len(input_chunks)
 
-    partial_old = _compute_partial_old_chunks(ndpartial, x.chunks)
+    partial_old = _compute_partial_old_chunks(ndpartial, input_chunks)
     partial_new: ChunkedAxes = tuple(
         chunks[axis_index][ndpartial.new[axis_index]] for axis_index in range(ndim)
     )
@@ -428,17 +617,17 @@ def partial_rechunk(
         global_index = _global_index(partial_index, old_partial_offset)
 
         original_shape = tuple(
-            axis[index] for index, axis in zip(global_index, x.chunks)
+            axis[index] for index, axis in zip(global_index, input_chunks)
         )
-        if _slicing_is_necessary(ndslice, original_shape):
+        if _slicing_is_necessary(ndslice, original_shape):  # type: ignore
             input_key = (slice_group,) + ndpartial.ix + global_index
             dsk[input_key] = (
                 getitem,
-                (x.name,) + global_index,
+                (input_name,) + global_index,
                 ndslice,
             )
         else:
-            input_key = (x.name,) + global_index
+            input_key = (input_name,) + global_index
 
         key = (transfer_group,) + ndpartial.ix + global_index
         transfer_keys.append(key)
