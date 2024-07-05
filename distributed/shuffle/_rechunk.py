@@ -394,12 +394,12 @@ class P2PRechunkLayer(Layer):
         dsk: _T_LowLevelGraph = {}
 
         for ndpartial in _split_partials(self.chunks_input, self.chunks):
-            # TODO: Figure put if tasks were culled and we only have a single output
             output_count = np.sum(self.keepmap[ndpartial.new])
             if output_count == 0:
                 continue
             elif output_count == 1:
                 # Single output chunk
+                # TODO: Create new partial that contains ONLY the relevant chunk
                 dsk.update(
                     partial_concatenate(
                         input_name=self.name_input,
@@ -411,7 +411,6 @@ class P2PRechunkLayer(Layer):
                     )
                 )
             else:
-                # TODO: Do a partial rechunk only for non-culled tasks
                 dsk.update(
                     partial_rechunk(
                         input_name=self.name_input,
@@ -619,6 +618,7 @@ def partial_rechunk(
 
     transfer_keys = []
     for partial_index in _partial_ndindex(ndpartial.old):
+        # FIXME: Do not shuffle data for output chunks that we culled
         ndslice = ndslice_for(
             partial_index, partial_old, ndpartial.left_starts, ndpartial.right_stops
         )
