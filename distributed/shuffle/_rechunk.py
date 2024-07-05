@@ -368,12 +368,12 @@ class P2PRechunkLayer(Layer):
         culled_deps: defaultdict[Key, set[Key]] = defaultdict(set)
         for nindex in indices_to_keep:
             old_indices_per_axis = []
+            keepmap[nindex] = True
             for index, new_axis in zip(nindex, _old_to_new):
                 old_indices_per_axis.append(
                     [old_chunk_index for old_chunk_index, _ in new_axis[index]]
                 )
             for old_nindex in product(*old_indices_per_axis):
-                keepmap[old_nindex] = True
                 culled_deps[(self.name,) + nindex].add((self.name_input,) + old_nindex)
 
         # Protect against mutations later on with frozenset
