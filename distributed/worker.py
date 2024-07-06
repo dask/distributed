@@ -1697,11 +1697,13 @@ class Worker(BaseWorker, ServerNode):
         if restart is None:
             restart = self.lifetime_restart
                 
+        # `drain` mode waits for all tasks to finish before closing
+        # otherwise, we close immediately and unfinished tasks will be rescheduled or cancelled
         if self.drain:
             logger.info(f"Draining worker, waiting on {len(self.state.all_running_tasks)=} threads. ")
             while len(self.state.all_running_tasks):
                 await asyncio.sleep(0.1)
-            logger.info(f"Draining has finished. ")
+            logger.info("Draining has finished.")
             
         await self.close(nanny=not restart, reason=reason)
 
