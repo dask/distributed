@@ -1680,9 +1680,8 @@ class Worker(BaseWorker, ServerNode):
         # `drain` mode waits for all tasks to finish before closing
         # otherwise, we close immediately and unfinished tasks will be rescheduled or cancelled
         if self.drain:
-            n_tasks = len(self.state.all_running_tasks)
             logger.warning(
-                f"Draining worker, waiting on {n_tasks=} threads."
+                f"Draining worker, waiting on {len(self.state.all_running_tasks)} tasks."
             )
             while len(self.state.all_running_tasks):
                 await asyncio.sleep(0.1)
