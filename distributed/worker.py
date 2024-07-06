@@ -1676,7 +1676,18 @@ class Worker(BaseWorker, ServerNode):
 
         This first informs the scheduler that we're shutting down, and asks it
         to move our data elsewhere. Afterwards, we close as normal
-        """         
+        """
+        # `drain` mode waits for all tasks to finish before closing
+        # otherwise, we close immediately and unfinished tasks will be rescheduled or cancelled
+        if self.drain:
+            n_tasks = len(self.state.all_running_tasks)
+            logger.warning(
+                f"Draining worker, waiting on {n_tasks=} threads."
+            )
+            while len(self.state.all_running_tasks):
+                await asyncio.sleep(0.1)
+            logger.warning("Draining has finished.")
+        
         if self.status in (Status.closing, Status.closing_gracefully):
             await self.finished()
 
@@ -1696,14 +1707,6 @@ class Worker(BaseWorker, ServerNode):
         )
         if restart is None:
             restart = self.lifetime_restart
-                
-        # `drain` mode waits for all tasks to finish before closing
-        # otherwise, we close immediately and unfinished tasks will be rescheduled or cancelled
-        if self.drain:
-            logger.info(f"Draining worker, waiting on {len(self.state.all_running_tasks)=} threads. ")
-            while len(self.state.all_running_tasks):
-                await asyncio.sleep(0.1)
-            logger.info("Draining has finished.")
             
         await self.close(nanny=not restart, reason=reason)
 
