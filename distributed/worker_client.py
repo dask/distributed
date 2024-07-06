@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import contextlib
 import warnings
-from contextlib import contextmanager
 
 import dask
 
@@ -11,7 +11,7 @@ from distributed.worker import get_client, get_worker, thread_state
 from distributed.worker_state_machine import SecedeEvent
 
 
-@contextmanager
+@contextlib.contextmanager
 def worker_client(timeout=None, separate_thread=True):
     """Get client for this thread
 
@@ -53,22 +53,26 @@ def worker_client(timeout=None, separate_thread=True):
 
     worker = get_worker()
     client = get_client(timeout=timeout)
-    if separate_thread:
-        duration = time() - thread_state.start_time
-        secede()  # have this thread secede from the thread pool
-        worker.loop.add_callback(
-            worker.handle_stimulus,
-            SecedeEvent(
-                key=thread_state.key,
-                compute_duration=duration,
-                stimulus_id=f"worker-client-secede-{time()}",
-            ),
-        )
+    with contextlib.ExitStack() as stack:
+        if separate_thread:
+            try:
+                thread_state.start_time
+            except AttributeError:  # not in a synchronous task, can't secede
+                pass
+            else:
+                duration = time() - thread_state.start_time
+                secede()  # have this thread secede from the thread pool
+                stack.callback(rejoin)
+                worker.loop.add_callback(
+                    worker.handle_stimulus,
+                    SecedeEvent(
+                        key=thread_state.key,
+                        compute_duration=duration,
+                        stimulus_id=f"worker-client-secede-{time()}",
+                    ),
+                )
 
-    yield client
-
-    if separate_thread:
-        rejoin()
+        yield client
 
 
 def local_client(*args, **kwargs):

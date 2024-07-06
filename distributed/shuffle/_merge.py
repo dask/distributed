@@ -1,20 +1,17 @@
 # mypy: ignore-errors
 from __future__ import annotations
 
-from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any
 
+import dask
 from dask.base import is_dask_collection, tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 
-from distributed.shuffle._shuffle import (
-    ShuffleId,
-    _get_worker_extension,
-    barrier_key,
-    shuffle_barrier,
-    shuffle_transfer,
-)
+from distributed.shuffle._arrow import check_minimal_arrow_version
+from distributed.shuffle._core import ShuffleId, barrier_key, get_worker_plugin
+from distributed.shuffle._shuffle import shuffle_barrier, shuffle_transfer
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -50,10 +47,14 @@ def _calculate_partitions(df: pd.DataFrame, index: IndexLabel, npartitions: int)
     index = _prepare_index_for_partitioning(df, index)
     from dask.dataframe.shuffle import partitioning_index
 
+    meta = df._meta._constructor_sliced([0])
+    # Ensure that we have the same index as before to avoid alignment
+    # when calculating meta dtypes later on
+    meta.index = df._meta_nonempty.index[:1]
     partitions = index.map_partitions(
         partitioning_index,
         npartitions=npartitions or df.npartitions,
-        meta=df._meta._constructor_sliced([0]),
+        meta=meta,
         transform_divisions=False,
     )
     df2 = df.assign(**{_HASH_COLUMN_NAME: partitions})
@@ -77,20 +78,22 @@ def hash_join_p2p(
         npartitions = max(lhs.npartitions, rhs.npartitions)
 
     if isinstance(left_on, Index):
-        left_on = None
+        _left_on = None
         left_index = True
     else:
         left_index = False
+        _left_on = left_on
 
     if isinstance(right_on, Index):
-        right_on = None
+        _right_on = None
         right_index = True
     else:
         right_index = False
+        _right_on = right_on
     merge_kwargs = dict(
         how=how,
-        left_on=left_on,
-        right_on=right_on,
+        left_on=_left_on,
+        right_on=_right_on,
         left_index=left_index,
         right_index=right_index,
         suffixes=suffixes,
@@ -104,13 +107,16 @@ def hash_join_p2p(
     lhs = _calculate_partitions(lhs, left_on, npartitions)
     rhs = _calculate_partitions(rhs, right_on, npartitions)
     merge_name = "hash-join-" + tokenize(lhs, rhs, **merge_kwargs)
+    disk: bool = dask.config.get("distributed.p2p.disk")
     join_layer = HashJoinP2PLayer(
         name=merge_name,
         name_input_left=lhs._name,
-        left_on=left_on,
+        meta_input_left=lhs._meta,
+        left_on=_left_on,
         n_partitions_left=lhs.npartitions,
         name_input_right=rhs._name,
-        right_on=right_on,
+        meta_input_right=rhs._meta,
+        right_on=_right_on,
         n_partitions_right=rhs.npartitions,
         meta_output=meta,
         how=how,
@@ -119,6 +125,7 @@ def hash_join_p2p(
         indicator=indicator,
         left_index=left_index,
         right_index=right_index,
+        disk=disk,
     )
     graph = HighLevelGraph.from_collections(
         merge_name, join_layer, dependencies=[lhs, rhs]
@@ -136,7 +143,9 @@ def merge_transfer(
     id: ShuffleId,
     input_partition: int,
     npartitions: int,
+    meta: pd.DataFrame,
     parts_out: set[int],
+    disk: bool,
 ):
     return shuffle_transfer(
         input=input,
@@ -144,7 +153,10 @@ def merge_transfer(
         input_partition=input_partition,
         npartitions=npartitions,
         column=_HASH_COLUMN_NAME,
+        meta=meta,
         parts_out=parts_out,
+        disk=disk,
+        drop_column=True,
     )
 
 
@@ -159,16 +171,16 @@ def merge_unpack(
     right_on: IndexLabel,
     result_meta: pd.DataFrame,
     suffixes: Suffixes,
+    left_index: bool,
+    right_index: bool,
+    indicator: bool = False,
 ):
     from dask.dataframe.multi import merge_chunk
 
-    ext = _get_worker_extension()
-    left = ext.get_output_partition(
-        shuffle_id_left, barrier_left, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME)
-    right = ext.get_output_partition(
-        shuffle_id_right, barrier_right, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME)
+    ext = get_worker_plugin()
+    # If the partition is empty, it doesn't contain the hash column name
+    left = ext.get_output_partition(shuffle_id_left, barrier_left, output_partition)
+    right = ext.get_output_partition(shuffle_id_right, barrier_right, output_partition)
     return merge_chunk(
         left,
         right,
@@ -177,33 +189,62 @@ def merge_unpack(
         left_on=left_on,
         right_on=right_on,
         suffixes=suffixes,
+        left_index=left_index,
+        right_index=right_index,
+        indicator=indicator,
     )
 
 
 class HashJoinP2PLayer(Layer):
+    name: str
+    npartitions: int
+    how: MergeHow
+    suffixes: Suffixes
+    indicator: bool
+    meta_output: pd.DataFrame
+    parts_out: Sequence[int]
+
+    name_input_left: str
+    meta_input_left: pd.DataFrame
+    n_partitions_left: int
+    left_on: IndexLabel | None
+    left_index: bool
+
+    name_input_right: str
+    meta_input_right: pd.DataFrame
+    n_partitions_right: int
+    right_on: IndexLabel | None
+    right_index: bool
+
     def __init__(
         self,
         name: str,
         name_input_left: str,
-        left_on,
+        meta_input_left: pd.DataFrame,
+        left_on: IndexLabel | None,
         n_partitions_left: int,
         n_partitions_right: int,
         name_input_right: str,
-        right_on,
+        meta_input_right: pd.DataFrame,
+        right_on: IndexLabel | None,
         meta_output: pd.DataFrame,
         left_index: bool,
         right_index: bool,
+        npartitions: int,
+        disk: bool,
         how: MergeHow = "inner",
-        npartitions: int | None = None,
         suffixes: Suffixes = ("_x", "_y"),
         indicator: bool = False,
         parts_out: Sequence | None = None,
         annotations: dict | None = None,
     ) -> None:
+        check_minimal_arrow_version()
         self.name = name
         self.name_input_left = name_input_left
+        self.meta_input_left = meta_input_left
         self.left_on = left_on
         self.name_input_right = name_input_right
+        self.meta_input_right = meta_input_right
         self.right_on = right_on
         self.how = how
         self.npartitions = npartitions
@@ -215,8 +256,7 @@ class HashJoinP2PLayer(Layer):
         self.n_partitions_right = n_partitions_right
         self.left_index = left_index
         self.right_index = right_index
-        annotations = annotations or {}
-        annotations.update({"shuffle": lambda key: key[-1]})
+        self.disk = disk
         super().__init__(annotations=annotations)
 
     def _cull_dependencies(
@@ -228,15 +268,14 @@ class HashJoinP2PLayer(Layer):
         all input partitions. This method does not require graph
         materialization.
         """
-        deps = defaultdict(set)
+        deps = {}
         parts_out = parts_out or self._keys_to_parts(keys)
+        keys = {(self.name_input_left, i) for i in range(self.n_partitions_left)}
+        keys |= {(self.name_input_right, i) for i in range(self.n_partitions_right)}
+        # Protect against mutations later on with frozenset
+        keys = frozenset(keys)
         for part in parts_out:
-            deps[(self.name, part)] |= {
-                (self.name_input_left, i) for i in range(self.npartitions)
-            }
-            deps[(self.name, part)] |= {
-                (self.name_input_right, i) for i in range(self.npartitions)
-            }
+            deps[(self.name, part)] = keys
         return deps
 
     def _keys_to_parts(self, keys: Iterable[str]) -> set[str]:
@@ -284,8 +323,10 @@ class HashJoinP2PLayer(Layer):
         return HashJoinP2PLayer(
             name=self.name,
             name_input_left=self.name_input_left,
+            meta_input_left=self.meta_input_left,
             left_on=self.left_on,
             name_input_right=self.name_input_right,
+            meta_input_right=self.meta_input_right,
             right_on=self.right_on,
             how=self.how,
             npartitions=self.npartitions,
@@ -295,6 +336,7 @@ class HashJoinP2PLayer(Layer):
             parts_out=parts_out,
             left_index=self.left_index,
             right_index=self.right_index,
+            disk=self.disk,
             annotations=self.annotations,
             n_partitions_left=self.n_partitions_left,
             n_partitions_right=self.n_partitions_right,
@@ -309,6 +351,7 @@ class HashJoinP2PLayer(Layer):
         parameter.
         """
         parts_out = self._keys_to_parts(keys)
+
         culled_deps = self._cull_dependencies(keys, parts_out=parts_out)
         if parts_out != set(self.parts_out):
             culled_layer = self._cull(parts_out)
@@ -317,18 +360,24 @@ class HashJoinP2PLayer(Layer):
             return self, culled_deps
 
     def _construct_graph(self) -> dict[tuple | str, tuple]:
-        args = (
+        token_left = tokenize(
+            # Include self.name to ensure that shuffle IDs are unique for individual
+            # merge operations. Reusing shuffles between merges is dangerous because of
+            # required coordination and complexity introduced through dynamic clusters.
+            self.name,
+            self.name_input_left,
             self.left_on,
-            self.how,
-            self.npartitions,
-            self.n_partitions_left,
-            self.n_partitions_right,
-            self.parts_out,
-            self.suffixes,
-            self.indicator,
+            self.left_index,
         )
-        token_left = tokenize(self.name_input_left, *args)
-        token_right = tokenize(self.name_input_right, *args)
+        token_right = tokenize(
+            # Include self.name to ensure that shuffle IDs are unique for individual
+            # merge operations. Reusing shuffles between merges is dangerous because of
+            # required coordination and complexity introduced through dynamic clusters.
+            self.name,
+            self.name_input_right,
+            self.right_on,
+            self.right_index,
+        )
         dsk: dict[tuple | str, tuple] = {}
         name_left = "hash-join-transfer-" + token_left
         name_right = "hash-join-transfer-" + token_right
@@ -342,7 +391,9 @@ class HashJoinP2PLayer(Layer):
                 token_left,
                 i,
                 self.npartitions,
+                self.meta_input_left,
                 self.parts_out,
+                self.disk,
             )
         for i in range(self.n_partitions_right):
             transfer_keys_right.append((name_right, i))
@@ -352,7 +403,9 @@ class HashJoinP2PLayer(Layer):
                 token_right,
                 i,
                 self.npartitions,
+                self.meta_input_right,
                 self.parts_out,
+                self.disk,
             )
 
         _barrier_key_left = barrier_key(ShuffleId(token_left))
@@ -374,5 +427,8 @@ class HashJoinP2PLayer(Layer):
                 self.right_on,
                 self.meta_output,
                 self.suffixes,
+                self.left_index,
+                self.right_index,
+                self.indicator,
             )
         return dsk

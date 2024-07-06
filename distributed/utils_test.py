@@ -6,14 +6,12 @@ import contextlib
 import copy
 import errno
 import functools
-import gc
 import inspect
 import io
 import logging
 import logging.config
 import multiprocessing
 import os
-import re
 import signal
 import socket
 import ssl
@@ -24,11 +22,11 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Generator, Hashable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import IO, Any, Generator, Iterator, Literal
+from typing import IO, Any, Literal
 
 import pytest
 import yaml
@@ -37,6 +35,7 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.typing import Key
 
 from distributed import Event, Scheduler, system
 from distributed import versions as version_module
@@ -44,8 +43,8 @@ from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
 from distributed.comm.tcp import TCP
-from distributed.compatibility import MACOS, WINDOWS
-from distributed.config import initialize_logging
+from distributed.compatibility import MACOS, WINDOWS, asyncio_run
+from distributed.config import get_loop_factory, initialize_logging
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
@@ -56,7 +55,7 @@ from distributed.core import (
 )
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
@@ -376,7 +375,7 @@ def _run_and_close_tornado(async_fn, /, *args, **kwargs):
         return await async_fn(*args, **kwargs)
 
     try:
-        return asyncio.run(inner_fn())
+        return asyncio_run(inner_fn(), loop_factory=get_loop_factory())
     finally:
         tornado_loop.close(all_fds=True)
 
@@ -399,7 +398,7 @@ def run_scheduler(q, nputs, config, port=0, **kwargs):
 
 
 def run_worker(q, scheduler_q, config, **kwargs):
-    with dask.config.set(config):
+    with config_for_cluster_tests(**config):
         from distributed import Worker
 
         reset_logger_locks()
@@ -423,7 +422,7 @@ def run_worker(q, scheduler_q, config, **kwargs):
 
 @log_errors
 def run_nanny(q, scheduler_q, config, **kwargs):
-    with dask.config.set(config):
+    with config_for_cluster_tests(**config):
         scheduler_addr = scheduler_q.get()
 
         async def _():
@@ -618,7 +617,7 @@ def cluster(
 
     enable_proctitle_on_children()
 
-    with check_process_leak(check=True), check_instances(), config_for_cluster_tests():
+    with check_process_leak(check=True), check_instances():
         if nanny:
             _run_worker = run_nanny
         else:
@@ -807,24 +806,25 @@ async def start_cluster(
 
 
 def check_invalid_worker_transitions(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-transition"):
+    if not s.get_events("invalid-worker-transition"):
         return
 
-    for _, msg in s.events["invalid-worker-transition"]:
+    for _, msg in s.get_events("invalid-worker-transition"):
         worker = msg.pop("worker")
         print("Worker:", worker)
         print(InvalidTransition(**msg))
 
     raise ValueError(
-        "Invalid worker transitions found", len(s.events["invalid-worker-transition"])
+        "Invalid worker transitions found",
+        len(s.get_events("invalid-worker-transition")),
     )
 
 
 def check_invalid_task_states(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-task-state"):
+    if not s.get_events("invalid-worker-task-state"):
         return
 
-    for _, msg in s.events["invalid-worker-task-state"]:
+    for _, msg in s.get_events("invalid-worker-task-state"):
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:
@@ -834,10 +834,10 @@ def check_invalid_task_states(s: Scheduler) -> None:
 
 
 def check_worker_fail_hard(s: Scheduler) -> None:
-    if not s.events.get("worker-fail-hard"):
+    if not s.get_events("worker-fail-hard"):
         return
 
-    for _, msg in s.events["worker-fail-hard"]:
+    for _, msg in s.get_events("worker-fail-hard"):
         msg = msg.copy()
         worker = msg.pop("worker")
         msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
@@ -876,7 +876,8 @@ def gen_cluster(
     active_rpc_timeout: float = 1,
     config: dict[str, Any] | None = None,
     clean_kwargs: dict[str, Any] | None = None,
-    allow_unclosed: bool = False,
+    # FIXME: distributed#8054
+    allow_unclosed: bool = True,
     cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
@@ -995,9 +996,10 @@ def gen_cluster(
             async def async_fn():
                 result = None
                 with dask.config.set(config):
-                    async with _cluster_factory() as (s, workers), _client_factory(
-                        s
-                    ) as c:
+                    async with (
+                        _cluster_factory() as (s, workers),
+                        _client_factory(s) as c,
+                    ):
                         args = [s] + workers
                         if c is not None:
                             args = [c] + args
@@ -1065,22 +1067,18 @@ def gen_cluster(
                     else:
                         await c._close(fast=True)
 
-                    def get_unclosed():
-                        return [c for c in Comm._instances if not c.closed()] + [
+                    try:
+                        unclosed = [c for c in Comm._instances if not c.closed()] + [
                             c for c in _global_clients.values() if c.status != "closed"
                         ]
-
-                    try:
-                        while deadline.remaining:
-                            gc.collect()
-                            if not get_unclosed():
-                                break
-                            await asyncio.sleep(0.05)
-                        else:
-                            if allow_unclosed:
-                                print(f"Unclosed Comms: {get_unclosed()}")
-                            else:
-                                raise RuntimeError("Unclosed Comms", get_unclosed())
+                        try:
+                            if unclosed:
+                                if allow_unclosed:
+                                    print(f"Unclosed Comms: {unclosed}")
+                                else:
+                                    raise RuntimeError("Unclosed Comms", unclosed)
+                        finally:
+                            del unclosed
                     finally:
                         Comm._instances.clear()
                         _global_clients.clear()
@@ -1468,6 +1466,20 @@ def captured_handler(handler):
 
 
 @contextmanager
+def captured_context_meter() -> Generator[defaultdict[tuple, float], None, None]:
+    """Capture distributed.metrics.context_meter metrics into a local defaultdict"""
+    # Don't cast int metrics to float
+    metrics: defaultdict[tuple, float] = defaultdict(int)
+
+    def cb(label: Hashable, value: float, unit: str) -> None:
+        label = label + (unit,) if isinstance(label, tuple) else (label, unit)
+        metrics[label] += value
+
+    with context_meter.add_callback(cb):
+        yield metrics
+
+
+@contextmanager
 def new_config(new_config):
     """
     Temporarily change configuration dictionary.
@@ -1489,7 +1501,7 @@ def new_config(new_config):
 
 
 @contextmanager
-def new_config_file(c):
+def new_config_file(c: dict[str, Any]) -> Iterator[None]:
     """
     Temporarily change configuration file to match dictionary *c*.
     """
@@ -1497,18 +1509,16 @@ def new_config_file(c):
 
     old_file = os.environ.get("DASK_CONFIG")
     fd, path = tempfile.mkstemp(prefix="dask-config")
+    with os.fdopen(fd, "w") as f:
+        yaml.dump(c, f)
+    os.environ["DASK_CONFIG"] = path
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(yaml.dump(c))
-        os.environ["DASK_CONFIG"] = path
-        try:
-            yield
-        finally:
-            if old_file:
-                os.environ["DASK_CONFIG"] = old_file
-            else:
-                del os.environ["DASK_CONFIG"]
+        yield
     finally:
+        if old_file:
+            os.environ["DASK_CONFIG"] = old_file
+        else:
+            del os.environ["DASK_CONFIG"]
         os.remove(path)
 
 
@@ -1619,12 +1629,11 @@ def save_sys_modules():
     try:
         yield
     finally:
-        for i, elem in enumerate(sys.path):
+        for i, elem in reversed(list(enumerate(sys.path))):
             if elem not in old_path:
                 del sys.path[i]
-        for elem in sys.modules.keys():
-            if elem not in old_modules:
-                del sys.modules[elem]
+        for elem in sys.modules.keys() - old_modules.keys():
+            del sys.modules[elem]
 
 
 @contextmanager
@@ -1800,9 +1809,12 @@ def config_for_cluster_tests(**extra_config):
         {
             "local_directory": tempfile.gettempdir(),
             "distributed.admin.tick.interval": "500 ms",
+            "distributed.admin.log-length": None,
+            "distributed.admin.low-level-log-length": None,
             "distributed.scheduler.validate": True,
             "distributed.worker.validate": True,
             "distributed.worker.profile.enabled": False,
+            "distributed.admin.system-monitor.gil.enabled": False,
         },
         **extra_config,
     ):
@@ -2100,8 +2112,10 @@ def raises_with_cause(
     match: str | None,
     expected_cause: type[BaseException] | tuple[type[BaseException], ...],
     match_cause: str | None,
+    *more_causes: type[BaseException] | tuple[type[BaseException], ...] | str | None,
 ) -> Generator[None, None, None]:
-    """Contextmanager to assert that a certain exception with cause was raised
+    """Contextmanager to assert that a certain exception with cause was raised.
+    It can travel the causes recursively by adding more expected, match pairs at the end.
 
     Parameters
     ----------
@@ -2111,13 +2125,14 @@ def raises_with_cause(
         yield
 
     exc = exc_info.value
-    assert exc.__cause__
-    if not isinstance(exc.__cause__, expected_cause):
-        raise exc
-    if match_cause:
-        assert re.search(
-            match_cause, str(exc.__cause__)
-        ), f"Pattern ``{match_cause}`` not found in ``{exc.__cause__}``"
+    causes = [expected_cause, *more_causes[::2]]
+    match_causes = [match_cause, *more_causes[1::2]]
+    assert len(causes) == len(match_causes)
+    for expected_cause, match_cause in zip(causes, match_causes):  # type: ignore
+        assert exc.__cause__
+        exc = exc.__cause__
+        with pytest.raises(expected_cause, match=match_cause):
+            raise exc
 
 
 def ucx_exception_handler(loop, context):
@@ -2160,17 +2175,6 @@ def ucx_loop():
     import distributed.comm.ucx
 
     distributed.comm.ucx.ucp = None
-    # If the test created a context, clean it up.
-    # TODO: should we check if there's already a context _before_ the test runs?
-    # I think that would be useful.
-    from distributed.diagnostics.nvml import has_cuda_context
-
-    ctx = has_cuda_context()
-    if ctx.has_context:
-        import numba.cuda
-
-        ctx = numba.cuda.current_context()
-        ctx.device.reset()
 
 
 def wait_for_log_line(
@@ -2216,6 +2220,7 @@ class BlockedGatherDep(Worker):
     See also
     --------
     BlockedGetData
+    BarrierGetData
     BlockedExecute
     """
 
@@ -2237,6 +2242,7 @@ class BlockedGetData(Worker):
 
     See also
     --------
+    BarrierGetData
     BlockedGatherDep
     BlockedExecute
     """
@@ -2256,10 +2262,6 @@ class BlockedExecute(Worker):
     """A Worker that sets event `in_execute` the first time it enters the execute
     method and then does not proceed, thus leaving the task in executing state
     indefinitely, until the test sets `block_execute`.
-
-    After that, the worker sets `in_deserialize_task` to simulate the moment when a
-    large run_spec is being deserialized in a separate thread. The worker will block
-    again until the test sets `block_deserialize_task`.
 
     Finally, the worker sets `in_execute_exit` when execute() terminates, but before the
     worker state has processed its exit callback. The worker will block one last time
@@ -2286,19 +2288,18 @@ class BlockedExecute(Worker):
     --------
     BlockedGatherDep
     BlockedGetData
+    BarrierGetData
     """
 
     def __init__(self, *args, **kwargs):
         self.in_execute = asyncio.Event()
         self.block_execute = asyncio.Event()
-        self.in_deserialize_task = asyncio.Event()
-        self.block_deserialize_task = asyncio.Event()
         self.in_execute_exit = asyncio.Event()
         self.block_execute_exit = asyncio.Event()
 
         super().__init__(*args, **kwargs)
 
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: Key, *, stimulus_id: str) -> StateMachineEvent:
         self.in_execute.set()
         await self.block_execute.wait()
         try:
@@ -2307,12 +2308,31 @@ class BlockedExecute(Worker):
             self.in_execute_exit.set()
             await self.block_execute_exit.wait()
 
-    async def _maybe_deserialize_task(
-        self, ts: WorkerTaskState
-    ) -> tuple[Callable, tuple, dict[str, Any]]:
-        self.in_deserialize_task.set()
-        await self.block_deserialize_task.wait()
-        return await super()._maybe_deserialize_task(ts)
+
+class BarrierGetData(Worker):
+    """Block get_data RPC call until at least barrier_count connections are going on
+    in parallel at the same time
+
+    See also
+    --------
+    BlockedGatherDep
+    BlockedGetData
+    BlockedExecute
+    """
+
+    def __init__(self, *args, barrier_count, **kwargs):
+        # TODO just use asyncio.Barrier (needs Python >=3.11)
+        self.barrier_count = barrier_count
+        self.wait_get_data = asyncio.Event()
+        super().__init__(*args, **kwargs)
+
+    async def get_data(self, comm, *args, **kwargs):
+        self.barrier_count -= 1
+        if self.barrier_count > 0:
+            await self.wait_get_data.wait()
+        else:
+            self.wait_get_data.set()
+        return await super().get_data(comm, *args, **kwargs)
 
 
 @contextmanager
@@ -2376,8 +2396,32 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
         bcomm.comm = orig_comm
 
 
+class BlockedInstantiateNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = asyncio.Event()
+        self.wait_instantiate = asyncio.Event()
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        await self.wait_instantiate.wait()
+        return await super().instantiate()
+
+
+class BlockedKillNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_kill = asyncio.Event()
+        self.wait_kill = asyncio.Event()
+
+    async def kill(self, **kwargs):
+        self.in_kill.set()
+        await self.wait_kill.wait()
+        return await super().kill(**kwargs)
+
+
 async def wait_for_state(
-    key: str,
+    key: Key,
     state: str | Collection[str],
     dask_worker: Worker | Scheduler,
     *,
@@ -2386,7 +2430,7 @@ async def wait_for_state(
     """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
     state or one of a set of possible states.
     """
-    tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
+    tasks: Mapping[Key, SchedulerTaskState | WorkerTaskState]
 
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
@@ -2405,11 +2449,11 @@ async def wait_for_state(
     except (asyncio.CancelledError, asyncio.TimeoutError):
         if key in tasks:
             msg = (
-                f"tasks[{key}].state={tasks[key].state!r} on {dask_worker.address}; "
+                f"tasks[{key!r}].state={tasks[key].state!r} on {dask_worker.address}; "
                 f"expected state={state_str}"
             )
         else:
-            msg = f"tasks[{key}] not found on {dask_worker.address}"
+            msg = f"tasks[{key!r}] not found on {dask_worker.address}"
         # 99% of the times this is triggered by @gen_cluster timeout, so raising the
         # message as an exception wouldn't work.
         print(msg)
@@ -2440,10 +2484,11 @@ async def wait_for_stimulus(
 @pytest.fixture
 def ws():
     """An empty WorkerState"""
-    state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
-    yield state
-    if state.validate:
-        state.validate_state()
+    with dask.config.set({"distributed.admin.low-level-log-length": None}):
+        state = WorkerState(address="127.0.0.1:1", transition_counter_max=50_000)
+        yield state
+        if state.validate:
+            state.validate_state()
 
 
 @pytest.fixture(params=["executing", "long-running"])
@@ -2577,3 +2622,68 @@ class SizeOf:
 def gen_nbytes(nbytes: int) -> SizeOf:
     """A function that emulates exactly nbytes on the worker data structure."""
     return SizeOf(nbytes)
+
+
+def relative_frame_linenumber(frame):
+    """Line number of call relative to the frame"""
+    return inspect.getframeinfo(frame).lineno - frame.f_code.co_firstlineno
+
+
+class NoSchedulerDelayWorker(Worker):
+    """Custom worker class which does not update `scheduler_delay`.
+
+    This worker class is useful for some tests which make time
+    comparisons using times reported from workers.
+
+    See also
+    --------
+    no_time_resync
+    padded_time
+    """
+
+    @property
+    def scheduler_delay(self):
+        return 0
+
+    @scheduler_delay.setter
+    def scheduler_delay(self, value):
+        pass
+
+
+@pytest.fixture()
+def no_time_resync():
+    """Temporarily disable the automatic resync of distributed.metrics._WindowsTime
+    which, every 10 minutes, can cause time() to go backwards a few milliseconds.
+
+    On Linux and MacOSX, this fixture is a no-op.
+
+    See also
+    --------
+    NoSchedulerDelayWorker
+    padded_time
+    """
+    if WINDOWS:
+        time()  # Initialize or refresh delta
+        bak = time.__self__.next_resync
+        time.__self__.next_resync = float("inf")
+        yield
+        time.__self__.next_resync = bak
+    else:
+        yield
+
+
+async def padded_time(before=0.05, after=0.05):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock
+    from disrupting monotonicity tests (t0 < t1 < t2 < ...).
+    This prevents frequent flakiness on Windows and, more rarely, in Linux and
+    MacOSX.
+
+    See also
+    --------
+    NoSchedulerDelayWorker
+    no_time_resync
+    """
+    await asyncio.sleep(before)
+    t = time()
+    await asyncio.sleep(after)
+    return t

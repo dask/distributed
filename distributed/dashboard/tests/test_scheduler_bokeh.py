@@ -9,13 +9,14 @@ import sys
 import pytest
 
 pytest.importorskip("bokeh")
+from urllib.parse import quote_plus
+
 from bokeh.server.server import BokehTornado
 from tlz import first
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 
 import dask
 from dask.core import flatten
-from dask.utils import stringify
 
 from distributed import Event
 from distributed.client import wait
@@ -52,7 +53,8 @@ from distributed.dashboard.components.scheduler import (
 from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
 from distributed.diagnostics.task_stream import TaskStreamPlugin
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
+from distributed.spans import span
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import (
     block_on_event,
@@ -329,19 +331,144 @@ async def test_WorkersMemory(c, s, a, b):
     assert all(d["width"])
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.memory.target": 0.7,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.memory.pause": False,
+    },
+    worker_kwargs={"memory_limit": 100},
+)
 async def test_FinePerformanceMetrics(c, s, a, b):
     cl = FinePerformanceMetrics(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
-    await wait(futures)
-    await asyncio.sleep(1)  # wait for metrics to arrive
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+    assert not cl.visible_activities
+    assert not cl.span_tag_selector.options
+    assert not cl.function_selector.options
+    assert cl.unit_selector.options == ["seconds"]
 
-    assert not cl.task_exec_data
+    # execute on default span; multiple tasks in same TaskGroup
+    x0 = c.submit(inc, 0, key="x-0", workers=[a.address])
+    x1 = c.submit(inc, 1, key="x-1", workers=[a.address])
+
+    # execute with spill (output size is individually larger than target)
+    w = c.submit(lambda: "x" * 75, key="w", workers=[a.address])
+
+    await wait([x0, x1, w])
+
+    a.data.evict()
+    a.data.evict()
+    assert not a.data.fast
+    assert set(a.data.slow) == {"x-0", "x-1", "w"}
+
+    with span("foo"):
+        # execute on named span, with unspill
+        y0 = c.submit(inc, x0, key="y-0", workers=[a.address])
+        # get_data with unspill + gather_dep + execute on named span
+        y1 = c.submit(inc, x1, key="y-1", workers=[b.address])
+
+    # execute on named span (duplicate name, different id)
+    with span("foo"):
+        z = c.submit(inc, 3, key="z")
+
+    # Custom metric with non-string label and custom unit
+    def f():
+        context_meter.digest_metric(None, 1, "seconds")
+        context_meter.digest_metric(("foo", 1), 2, "seconds")
+        context_meter.digest_metric("hideme", 1.1, "custom")
+
+    v = c.submit(f, key="v")
+    await wait([y0, y1, z, v])
+
+    await a.heartbeat()
+    await b.heartbeat()
 
     cl.update()
-    assert cl.task_exec_data
-    assert cl.task_exec_data["functions"] == ["slowinc"]
+    assert sorted(cl.visible_functions) == ["N/A", "v", "w", "x", "y", "z"]
+    assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "custom", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+    assert "('foo', 1)" in cl.visible_activities
+    assert "None" in cl.visible_activities
+    assert "hideme" not in cl.visible_activities
+    assert "idle" in cl.visible_activities
+    assert "idle or other spans" not in cl.visible_activities
+    assert sorted(cl.span_tag_selector.options) == ["default", "foo"]
+
+    orig_activities = cl.visible_activities[:]
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "count"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["disk-read", "disk-write", "memory-read"]
+
+    cl.unit_selector.value = "custom"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["hideme"]
+
+    cl.unit_selector.value = "seconds"
+    cl.update()
+    assert cl.visible_activities == orig_activities
+
+    cl.span_tag_selector.value = ["foo"]
+    cl.update()
+    assert sorted(cl.visible_functions) == ["N/A", "y", "z"]
+    assert sorted(cl.function_selector.options) == ["N/A", "v", "w", "x", "y", "z"]
+    assert "idle" not in cl.visible_activities
+    assert "idle or other spans" in cl.visible_activities
+
+
+@gen_cluster(
+    client=True,
+    scheduler_kwargs={"extensions": {}},
+    worker_kwargs={"extensions": {}},
+)
+async def test_FinePerformanceMetrics_no_spans(c, s, a, b):
+    cl = FinePerformanceMetrics(s)
+
+    # Test with no metrics
+    cl.update()
+    assert not cl.visible_functions
+    await c.submit(inc, 0, key="x-0")
+    await a.heartbeat()
+    await b.heartbeat()
+
+    cl.update()
+    assert sorted(cl.visible_functions) == ["x"]
+    assert sorted(cl.unit_selector.options) == ["bytes", "count", "seconds"]
+    assert "thread-cpu" in cl.visible_activities
+
+    cl.unit_selector.value = "bytes"
+    cl.update()
+    assert sorted(cl.visible_activities) == ["memory-read"]
+
+
+@gen_cluster(client=True)
+async def test_FinePerformanceMetrics_shuffle(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    x = da.random.random((4, 4), chunks=(1, -1))
+    x = x.rechunk((-1, 1), method="p2p")
+    x = x.sum()
+    await c.compute(x)
+    await a.heartbeat()
+    await b.heartbeat()
+
+    cl = FinePerformanceMetrics(s)
+    cl.update()
+    # execute metrics from shuffle
+    assert "shuffle-barrier" in cl.visible_functions
+    assert "p2p-shard-partition-cpu" in cl.visible_activities
+    # shuffle metrics have been filtered out
+    assert "background-comms" not in cl.visible_functions
+    assert "p2p-partition-cpu" not in cl.visible_activities
 
 
 @gen_cluster(client=True)
@@ -805,7 +932,7 @@ async def test_TaskGraph_complex(c, s, a, b):
     gp.update()
     assert set(gp.layout.index.values()) == set(range(len(gp.layout.index)))
     visible = gp.node_source.data["visible"]
-    keys = list(map(stringify, flatten(y.__dask_keys__())))
+    keys = list(flatten(y.__dask_keys__()))
     assert all(visible[gp.layout.index[key]] == "True" for key in keys)
 
 
@@ -1057,6 +1184,74 @@ async def test_memory_by_key(c, s, a, b):
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_worker_info(c, s, a, b):
+    port = s.http_server.port
+    ev1 = Event()
+    ev2 = Event()
+
+    def block_on_event(enter, wait):
+        enter.set()
+        wait.wait()
+
+    f = c.submit(block_on_event, ev1, ev2, workers=[a.address])
+    try:
+        host = f"http://127.0.0.1:{port}"
+        http_client = AsyncHTTPClient()
+        await ev1.wait()
+        response = await http_client.fetch(
+            f"{host}/info/task/foo.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/task/{quote_plus(str(f.key))}.html"
+        )
+        assert response.code == 200
+
+        response = await http_client.fetch(
+            f"{host}/info/call-stack/foo.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/call-stack/{quote_plus(str(f.key))}.html"
+        )
+        assert response.code == 200
+
+        response = await http_client.fetch(f"{host}/info/main/workers.html")
+        assert response.code == 200
+
+        response = await http_client.fetch(
+            f"{host}/info/worker/bar.html", raise_error=False
+        )
+        assert response.code == 404
+        response = await http_client.fetch(
+            f"{host}/info/call-stacks/bar.html", raise_error=False
+        )
+        assert response.code == 404
+
+        response = await http_client.fetch(
+            f"{host}/info/logs/bar.html", raise_error=False
+        )
+        assert response.code == 404
+
+        for w in [a, b]:
+            response = await http_client.fetch(
+                f"{host}/info/worker/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+
+            response = await http_client.fetch(
+                f"{host}/info/call-stacks/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+            response = await http_client.fetch(
+                f"{host}/info/logs/{quote_plus(w.address)}.html"
+            )
+            assert response.code == 200
+    finally:
+        await ev2.set()
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_aggregate_action(c, s, a, b):
     mbk = AggregateAction(s)
 
@@ -1091,7 +1286,6 @@ async def test_compute_per_key(c, s, a, b):
 
     da = pytest.importorskip("dask.array")
     x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
-
     await x
     y = await dask.delayed(inc)(1).persist()
     z = (x + x.T) - x.mean(axis=0)
@@ -1099,14 +1293,18 @@ async def test_compute_per_key(c, s, a, b):
     await c.compute(zsum)
 
     mbk.update()
+
+    # Keep only times which are 2% of max or greater.
+    # This means that the list of names is not stable (but max time is always preserved)
+    assert mbk.compute_source.data["names"]
+    assert set(mbk.compute_source.data["names"]).issubset(s.task_prefixes)
+    assert "angles" in mbk.compute_source.data
+
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(
         "http://localhost:%d/individual-compute-time-per-key" % s.http_server.port
     )
     assert response.code == 200
-    assert ("sum-aggregate") in mbk.compute_source.data["names"]
-    assert ("add") in mbk.compute_source.data["names"]
-    assert "angles" in mbk.compute_source.data.keys()
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})
@@ -1127,6 +1325,14 @@ async def test_prefix_bokeh(s, a, b):
     assert bokeh_app.prefix == f"/{prefix}"
 
 
+@gen_cluster(scheduler_kwargs={"dashboard": True})
+async def test_bokeh_relative(s, a, b):
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(f"http://localhost:{s.http_server.port}/status")
+    assert response.code == 200
+    assert '<script type="text/javascript" src="static/' in response.body.decode()
+
+
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_shuffling(c, s, a, b):
     pytest.importorskip("pyarrow")
@@ -1139,12 +1345,13 @@ async def test_shuffling(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    df2 = dd.shuffle.shuffle(df, "x", shuffle="p2p").persist()
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        df2 = df.shuffle("x").persist()
     start = time()
     while not ss.source.data["comm_written"]:
         ss.update()
-        await asyncio.sleep(0)
-        assert time() < start + 5
+        await asyncio.sleep(0.05)
+        assert time() < start + 10
     await df2
 
 

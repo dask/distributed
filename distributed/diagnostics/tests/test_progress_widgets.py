@@ -1,20 +1,17 @@
 from __future__ import annotations
 
-import contextlib
 import re
 from operator import add
-from unittest import mock
 
 import pytest
-from packaging.version import parse as parse_version
+
+from dask.utils import key_split
 
 from distributed.client import wait
+from distributed.spans import span
 from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
 
-ipywidgets = pytest.importorskip("ipywidgets")
-
-from ipykernel.comm import Comm
-from ipywidgets import Widget
+pytest.importorskip("ipywidgets")
 
 from distributed.diagnostics.progressbar import (
     MultiProgressWidget,
@@ -22,65 +19,7 @@ from distributed.diagnostics.progressbar import (
     progress,
 )
 
-#################
-# Utility stuff #
-#################
 
-# Taken from ipywidgets/widgets/tests/test_interaction.py
-#            https://github.com/ipython/ipywidgets
-# Licensed under Modified BSD.  Copyright IPython Development Team.  See:
-#   https://github.com/ipython/ipywidgets/blob/master/COPYING.md
-
-
-class DummyComm(Comm):
-    comm_id = "a-b-c-d"
-
-    def open(self, *args, **kwargs):
-        pass
-
-    def send(self, *args, **kwargs):
-        pass
-
-    def close(self, *args, **kwargs):
-        pass
-
-
-_DISPLAY_ATTR = (
-    "_repr_mimebundle_"
-    if parse_version(ipywidgets.__version__) >= parse_version("8.0.0")
-    else "_ipython_display_"
-)
-
-
-def _comm_default(self):
-    return DummyComm()
-
-
-@contextlib.contextmanager
-def mock_widget():
-    with mock.patch(
-        f"ipywidgets.Widget.{_DISPLAY_ATTR}", side_effect=NotImplementedError
-    ):
-        assert not hasattr(Widget, "_comm_default")
-        Widget._comm_default = _comm_default
-        try:
-            yield
-        finally:
-            del Widget._comm_default
-
-
-def f(**kwargs):
-    pass
-
-
-# End code taken from ipywidgets
-
-#####################
-# Distributed stuff #
-#####################
-
-
-@mock_widget()
 @gen_cluster(client=True)
 async def test_progressbar_widget(c, s, a, b):
     x = c.submit(inc, 1)
@@ -98,7 +37,6 @@ async def test_progressbar_widget(c, s, a, b):
     await progress.listen()
 
 
-@mock_widget()
 @gen_cluster(client=True)
 async def test_multi_progressbar_widget(c, s, a, b):
     x1 = c.submit(inc, 1)
@@ -139,7 +77,6 @@ async def test_multi_progressbar_widget(c, s, a, b):
     assert sorted(capacities, reverse=True) == capacities
 
 
-@mock_widget()
 def test_values(client):
     L = [client.submit(inc, i) for i in range(5)]
     wait(L)
@@ -157,7 +94,6 @@ def test_values(client):
     assert p.status == "error"
 
 
-@mock_widget()
 def test_progressbar_done(client):
     L = [client.submit(inc, i) for i in range(5)]
     wait(L)
@@ -184,7 +120,6 @@ def test_progressbar_done(client):
         assert repr(e) in p.elapsed_time.value
 
 
-@mock_widget()
 def test_progressbar_cancel(client):
     import time
 
@@ -197,7 +132,6 @@ def test_progressbar_cancel(client):
     assert p.bar.value == 0  # no tasks finish before cancel is called
 
 
-@mock_widget()
 @gen_cluster(client=True)
 async def test_multibar_complete(c, s, a, b):
     x1 = c.submit(inc, 1, key="x-1")
@@ -207,6 +141,7 @@ async def test_multibar_complete(c, s, a, b):
     y2 = c.submit(dec, y1, key="y-2")
     e = c.submit(throws, y2, key="e")
     other = c.submit(inc, 123, key="other")
+    await other.cancel()
 
     p = MultiProgressWidget([e.key], scheduler=s.address, complete=True)
     await p.listen()
@@ -217,7 +152,6 @@ async def test_multibar_complete(c, s, a, b):
     assert "2 / 2" in p.bar_texts["y"].value
 
 
-@mock_widget()
 def test_fast(client):
     L = client.map(inc, range(100))
     L2 = client.map(dec, L)
@@ -227,7 +161,49 @@ def test_fast(client):
     assert set(p._last_response["all"]) == {"inc", "dec", "add"}
 
 
-@mock_widget()
+def test_multibar_with_spans(client):
+    """Test progress(group_by='spans'"""
+    with span("span 1"):
+        L = client.map(inc, range(100))
+    with span("span 2"):
+        L2 = client.map(dec, L)
+    with span("span 3"):
+        L3 = client.map(add, L, L2)
+    with span("other span"):
+        _ = client.submit(inc, 123)
+    e = client.submit(throws, L3)
+
+    p = progress(e, complete=True, multi=True, notebook=True, group_by="spans")
+    client.sync(p.listen)
+
+    # keys are tuples of (group_name, group_id), just get names
+    bar_items = {k[0]: v.value for k, v in p.bars.items()}
+    bar_texts = {k[0]: v.value for k, v in p.bar_texts.items()}
+    bar_labels = {k[0]: v.value for k, v in p.bar_labels.items()}
+
+    assert bar_items == {"span 1": 1, "span 2": 1, "span 3": 1, "default": 0}
+    assert bar_texts.keys() == {"span 1", "span 2", "span 3", "default"}
+    assert all("100 / 100" in v for k, v in bar_texts.items() if k != "default")
+    assert bar_labels.keys() == {"span 1", "span 2", "span 3", "default"}
+    assert all(f">{k}<" in v for k, v in bar_labels.items())
+
+
+def test_multibar_func_warns(client):
+    """Deprecate `func`, use `group_by`"""
+    L = client.map(inc, range(100))
+    L2 = client.map(dec, L)
+    L3 = client.map(add, L, L2)
+
+    # ensure default value if nothing is set
+    p = MultiProgressWidget(L3)
+    assert p.group_by == key_split
+
+    with pytest.warns(
+        DeprecationWarning, match="`func` is deprecated, use `group_by` instead"
+    ):
+        MultiProgressWidget(L3, func="foo")
+
+
 @gen_cluster(client=True, client_kwargs={"serializers": ["msgpack"]})
 async def test_serializers(c, s, a, b):
     x = c.submit(inc, 1)
@@ -242,7 +218,6 @@ async def test_serializers(c, s, a, b):
     assert "3 / 3" in progress.bar_text.value
 
 
-@mock_widget()
 @gen_tls_cluster(client=True)
 async def test_tls(c, s, a, b):
     x = c.submit(inc, 1)

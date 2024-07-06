@@ -20,12 +20,12 @@ from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (
     Serialize,
     Serialized,
+    ToPickle,
     dask_serialize,
     deserialize,
     deserialize_bytes,
     dumps,
     loads,
-    nested_deserialize,
     register_serialization,
     register_serialization_family,
     serialize,
@@ -35,6 +35,7 @@ from distributed.protocol import (
 )
 from distributed.protocol.serialize import (
     _is_msgpack_serializable,
+    _nested_deserialize,
     check_dask_serializable,
 )
 from distributed.utils import ensure_memoryview, nbytes
@@ -166,12 +167,24 @@ def test_nested_deserialize():
         "x": [to_serialize(123), to_serialize(456), 789],
         "y": {"a": ["abc", Serialized(*serialize("def"))], "b": b"ghi"},
     }
-    x_orig = copy.deepcopy(x)
 
-    assert nested_deserialize(x) == {
+    x_orig = copy.deepcopy(x)
+    assert _nested_deserialize(x, emulate_deserialize=False) == x_orig
+
+    assert x == x_orig  # x wasn't mutated
+    x["topickle"] = ToPickle(1)
+    x["topickle_nested"] = [1, ToPickle(2)]
+    x_orig = copy.deepcopy(x)
+    assert (out := _nested_deserialize(x, emulate_deserialize=False)) != x_orig
+    assert out["topickle"] == 1
+    assert out["topickle_nested"] == [1, 2]
+
+    assert _nested_deserialize(x) == {
         "op": "update",
         "x": [123, 456, 789],
         "y": {"a": ["abc", "def"], "b": b"ghi"},
+        "topickle": 1,
+        "topickle_nested": [1, 2],
     }
     assert x == x_orig  # x wasn't mutated
 
@@ -265,13 +278,11 @@ def test_empty_loads_deep():
     assert isinstance(e2[0][0][0], Empty)
 
 
-@pytest.mark.skipif(np is None, reason="Test needs numpy")
 @pytest.mark.parametrize("kwargs", [{}, {"serializers": ["pickle"]}])
 def test_serialize_bytes(kwargs):
     for x in [
         1,
         "abc",
-        np.arange(5),
         b"ab" * int(40e6),
         int(2**26) * b"ab",
         (int(2**25) * b"ab", int(2**25) * b"ab"),
@@ -279,7 +290,39 @@ def test_serialize_bytes(kwargs):
         b = serialize_bytes(x, **kwargs)
         assert isinstance(b, bytes)
         y = deserialize_bytes(b)
-        assert str(x) == str(y)
+        assert x == y
+
+
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
+@pytest.mark.parametrize("kwargs", [{}, {"serializers": ["pickle"]}])
+def test_serialize_bytes_numpy(kwargs):
+    x = np.arange(5)
+    b = serialize_bytes(x, **kwargs)
+    assert isinstance(b, bytes)
+    y = deserialize_bytes(b)
+    assert (x == y).all()
+
+
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
+def test_deserialize_bytes_zero_copy_read_only():
+    x = np.arange(5)
+    x.setflags(write=False)
+    blob = serialize_bytes(x, compression=False)
+    x2 = deserialize_bytes(blob)
+    x3 = deserialize_bytes(blob)
+    addr2 = x2.__array_interface__["data"][0]
+    addr3 = x3.__array_interface__["data"][0]
+    assert addr2 == addr3
+
+
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
+def test_deserialize_bytes_zero_copy_writeable():
+    x = np.arange(5)
+    blob = bytearray(serialize_bytes(x, compression=False))
+    x2 = deserialize_bytes(blob)
+    x3 = deserialize_bytes(blob)
+    x2[0] = 123
+    assert x3[0] == 123
 
 
 @pytest.mark.skipif(np is None, reason="Test needs numpy")
@@ -446,9 +489,15 @@ def test_serialize_raises():
 
 
 @gen_test()
-async def test_profile_nested_sizeof():
-    # https://github.com/dask/distributed/issues/1674
-    n = 500
+@pytest.mark.parametrize("n", range(100, 600, 50))
+async def test_deeply_nested_structures(n):
+    """sizeof() raises RecursionError at ~140 recursion depth.
+    msgpack doesn't raise until 512 (sometimes 256 depending on compile options).
+    These thresholds change substantially between python versions, msgpack versions, and
+    platforms.
+
+    Test that when sizeof() starts failing, things keep working until msgpack fails.
+    """
     original = outer = {}
     inner = {}
 
@@ -456,8 +505,11 @@ async def test_profile_nested_sizeof():
         outer["children"] = inner
         outer, inner = inner, {}
 
-    msg = {"data": original}
-    frames = await to_frames(msg)
+    try:
+        await to_frames(original)
+    except ValueError as e:
+        # msgpack failed
+        assert "recursion limit exceeded" in str(e)
 
 
 def test_different_compression_families():

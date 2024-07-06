@@ -57,7 +57,6 @@ from distributed.worker_state_machine import (
     RetryBusyWorkerEvent,
     RetryBusyWorkerLater,
     SecedeEvent,
-    SerializedTask,
     StateMachineEvent,
     TaskErredMsg,
     TaskState,
@@ -375,27 +374,28 @@ def test_event_to_dict_without_annotations():
 
 def test_computetask_to_dict():
     """The potentially very large ComputeTaskEvent.run_spec is not stored in the log"""
+
+    def f(arg):
+        pass
+
     ev = ComputeTaskEvent(
         key="x",
         who_has={"y": ["w1"]},
         nbytes={"y": 123},
         priority=(0,),
         duration=123.45,
-        run_spec=None,
+        run_spec=(f, "arg", {}),
         resource_restrictions={},
         actor=False,
         annotations={},
+        span_id=None,
         stimulus_id="test",
-        function=b"blob",
-        args=b"blob",
-        kwargs=None,
         run_id=5,
     )
-    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    assert ev.run_spec is not None
     ev2 = ev.to_loggable(handled=11.22)
     assert ev2.handled == 11.22
-    assert ev2.run_spec == SerializedTask(task=None)
-    assert ev.run_spec == SerializedTask(function=b"blob", args=b"blob")
+    assert ev2.run_spec is None
     d = recursive_to_dict(ev2)
     assert d == {
         "cls": "ComputeTaskEvent",
@@ -403,21 +403,19 @@ def test_computetask_to_dict():
         "who_has": {"y": ["w1"]},
         "nbytes": {"y": 123},
         "priority": [0],
-        "run_spec": [None, None, None, None],
+        "run_spec": None,
         "duration": 123.45,
         "resource_restrictions": {},
         "actor": False,
         "annotations": {},
+        "span_id": None,
         "stimulus_id": "test",
         "handled": 11.22,
-        "function": None,
-        "args": None,
-        "kwargs": None,
         "run_id": 5,
     }
     ev3 = StateMachineEvent.from_dict(d)
     assert isinstance(ev3, ComputeTaskEvent)
-    assert ev3.run_spec == SerializedTask(task=None)
+    assert ev3.run_spec is None
     assert ev3.priority == (0,)  # List is automatically converted back to tuple
 
 
@@ -429,14 +427,12 @@ def test_computetask_dummy():
         nbytes={},
         priority=(0,),
         duration=1.0,
-        run_spec=None,
+        run_spec=ComputeTaskEvent.dummy_runspec(),
         resource_restrictions={},
         actor=False,
         annotations={},
+        span_id=None,
         stimulus_id="s",
-        function=None,
-        args=None,
-        kwargs=None,
         run_id=0,
     )
 
@@ -528,6 +524,7 @@ def test_executefailure_to_dict():
     ev = ExecuteFailureEvent(
         stimulus_id="test",
         key="x",
+        run_id=1,
         start=123.4,
         stop=456.7,
         exception=Serialize(ValueError("foo")),
@@ -543,6 +540,7 @@ def test_executefailure_to_dict():
         "stimulus_id": "test",
         "handled": 11.22,
         "key": "x",
+        "run_id": 1,
         "start": 123.4,
         "stop": 456.7,
         "exception": "<Serialize: foo>",
@@ -568,6 +566,7 @@ def test_executefailure_dummy():
     ev = ExecuteFailureEvent.dummy("x", stimulus_id="s")
     assert ev == ExecuteFailureEvent(
         key="x",
+        run_id=1,
         start=None,
         stop=None,
         exception=Serialize(None),
@@ -923,7 +922,7 @@ async def test_task_state_instance_are_garbage_collected(c, s, a, b):
     f2 = c.submit(inc, red, pure=False)
 
     async def check(dask_worker):
-        while dask_worker.tasks:
+        while dask_worker.state.tasks:
             await asyncio.sleep(0.01)
         with profile.lock:
             gc.collect()
@@ -936,9 +935,14 @@ async def test_task_state_instance_are_garbage_collected(c, s, a, b):
     async def check(dask_scheduler):
         while dask_scheduler.tasks:
             await asyncio.sleep(0.01)
-        with profile.lock:
-            gc.collect()
-        assert not SchedulerTaskState._instances
+
+        gc.collect()
+        # Gargabe collection might already be running in which case gc.collect()'s behavior is undefined.
+        # Try again and hope for the best.
+        while SchedulerTaskState._instances:
+            await asyncio.sleep(0.01)
+            with profile.lock:
+                gc.collect()
 
     await c.run_on_scheduler(check)
 
@@ -1326,6 +1330,20 @@ def test_gather_dep_failure(ws):
 
     # FIXME https://github.com/dask/distributed/issues/6705
     ws.validate = False
+
+
+def test_recompute_erred_task(ws):
+    instructions = ws.handle_stimulus(
+        ComputeTaskEvent.dummy("x", run_id=1, stimulus_id="s1"),
+        ExecuteFailureEvent.dummy("x", run_id=1, stimulus_id="s2"),
+        ComputeTaskEvent.dummy("x", run_id=2, stimulus_id="s3"),
+    )
+    assert instructions == [
+        Execute(key="x", stimulus_id="s1"),
+        TaskErredMsg.match(key="x", run_id=1, stimulus_id="s2"),
+        Execute(key="x", stimulus_id="s3"),
+    ]
+    assert ws.tasks["x"].state == "executing"
 
 
 def test_transfer_incoming_metrics(ws):
@@ -1735,8 +1753,9 @@ def test_task_counter(ws):
         # timer accuracy in Windows can be very poor;
         # see awful hack in distributed.metrics
         margin_lo = 0.099 if WINDOWS else 0
-        # sleep() has been observed to have up to 450ms lag on MacOSX GitHub CI
-        margin_hi = 0.6 if MACOS else 0.1
+        # sleep() has been observed to have up to 450ms lag on both
+        # MacOSX and Windows GitHub CI
+        margin_hi = 0.6 if MACOS or WINDOWS else 0.1
         assert expect - margin_lo <= actual < expect + margin_hi
 
     sleep(0.1)

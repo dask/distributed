@@ -25,15 +25,16 @@ import logging
 import os
 import sys
 import warnings
-from collections.abc import Callable, Hashable, MutableMapping
+from collections.abc import Callable, Container, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, Container, Literal, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
 import psutil
 
 import dask.config
 from dask.system import CPU_COUNT
+from dask.typing import Key
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
@@ -52,21 +53,18 @@ if TYPE_CHECKING:
     from distributed.nanny import Nanny
     from distributed.worker import Worker
 
-    # TODO move outside of TYPE_CHECKING (requires Python >=3.9)
-    WorkerDataParameter: TypeAlias = Union[
-        # pre-initialized
-        MutableMapping[str, object],
-        # constructor
-        Callable[[], MutableMapping[str, object]],
-        # constructor, passed worker.local_directory
-        Callable[[str], MutableMapping[str, object]],
-        # (constructor, kwargs to constructor)
-        tuple[Callable[..., MutableMapping[str, object]], dict[str, Any]],
-        # initialize internally
-        None,
-    ]
-else:
-    WorkerDataParameter = object
+WorkerDataParameter: TypeAlias = Union[
+    # pre-initialized
+    MutableMapping[Key, object],
+    # constructor
+    Callable[[], MutableMapping[Key, object]],
+    # constructor, passed worker.local_directory
+    Callable[[str], MutableMapping[Key, object]],
+    # (constructor, kwargs to constructor)
+    tuple[Callable[..., MutableMapping[Key, object]], dict[str, Any]],
+    # initialize internally
+    None,
+]
 
 worker_logger = logging.getLogger("distributed.worker.memory")
 worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high"))
@@ -92,7 +90,7 @@ class WorkerMemoryManager:
 
     """
 
-    data: MutableMapping[str, object]  # {task key: task payload}
+    data: MutableMapping[Key, object]  # {task key: task payload}
     memory_limit: int | None
     memory_target_fraction: float | Literal[False]
     memory_spill_fraction: float | Literal[False]
@@ -141,10 +139,10 @@ class WorkerMemoryManager:
             self.data = data
         elif callable(data):
             if has_arg(data, "worker_local_directory"):
-                data = cast("Callable[[str], MutableMapping[str, object]]", data)
+                data = cast("Callable[[str], MutableMapping[Key, object]]", data)
                 self.data = data(worker.local_directory)
             else:
-                data = cast("Callable[[], MutableMapping[str, object]]", data)
+                data = cast("Callable[[], MutableMapping[Key, object]]", data)
                 self.data = data()
         elif isinstance(data, tuple):
             func, kwargs = data
@@ -419,12 +417,19 @@ class NannyMemoryManager:
             return
 
         if self._last_terminated_pid != process.pid:
-            nanny_logger.warning(
+            msg = (
                 f"Worker {nanny.worker_address} (pid={process.pid}) exceeded "
                 f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
-                "Restarting...",
+                f"Restarting..."
             )
+            nanny_logger.warning(msg)
             self._last_terminated_pid = process.pid
+            event = {
+                "worker": nanny.worker_address,
+                "pid": process.pid,
+                "rss": memory,
+            }
+            nanny.log_event("worker-restart-memory", event)
             process.terminate()
         else:
             # We already sent SIGTERM to the worker, but the process is still alive

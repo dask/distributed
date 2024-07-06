@@ -6,7 +6,7 @@ import operator
 import os
 from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
-from datetime import datetime, timedelta
+from datetime import datetime
 from numbers import Number
 from typing import Any, TypeVar
 
@@ -46,14 +46,13 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
-from bokeh.palettes import Viridis11, small_palettes
+from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
 from jinja2 import Environment, FileSystemLoader
-from tlz import curry, pipe, valmap
+from tlz import curry, pipe, second, valmap
 from tlz.curried import concat, groupby, map
-from tornado import escape
 
 import dask
 from dask import config
@@ -90,7 +89,8 @@ from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
-from distributed.utils import Log, log_errors
+from distributed.spans import SpansSchedulerExtension
+from distributed.utils import Log, log_errors, url_escape
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -198,7 +198,7 @@ class Occupancy(DashboardComponent):
                 "worker": [ws.address for ws in workers],
                 "ms": ms,
                 "color": color,
-                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                "escaped_worker": [url_escape(ws.address) for ws in workers],
                 "x": x,
                 "y": y,
             }
@@ -275,10 +275,17 @@ class MemoryColor:
     orange: float
     red: float
 
-    def __init__(self):
+    def __init__(
+        self, neutral_color="blue", target_color="orange", terminated_color="red"
+    ):
+        self.neutral_color = neutral_color
+        self.target_color = target_color
+        self.terminated_color = terminated_color
+
         target = dask.config.get("distributed.worker.memory.target")
         spill = dask.config.get("distributed.worker.memory.spill")
         terminate = dask.config.get("distributed.worker.memory.terminate")
+
         # These values can be False. It's also common to configure them to impossibly
         # high values to achieve the same effect.
         self.orange = min(target or math.inf, spill or math.inf)
@@ -286,14 +293,14 @@ class MemoryColor:
 
     def _memory_color(self, current: int, limit: int, status: Status) -> str:
         if status != Status.running:
-            return "red"
+            return self.terminated_color
         if not limit:
-            return "blue"
+            return self.neutral_color
         if current >= limit * self.red:
-            return "red"
+            return self.terminated_color
         if current >= limit * self.orange:
-            return "orange"
-        return "blue"
+            return self.target_color
+        return self.neutral_color
 
 
 class ClusterMemory(DashboardComponent, MemoryColor):
@@ -573,7 +580,7 @@ class WorkersMemory(DashboardComponent, MemoryColor):
             "color": color,
             "alpha": [1, 0.7, 0.4, 1] * len(workers),
             "worker": quadlist(ws.address for ws in workers),
-            "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
+            "escaped_worker": quadlist(url_escape(ws.address) for ws in workers),
             "y": quadlist(range(len(workers))),
             "proc_memory": quadlist(procmemory),
             "managed": quadlist(managed),
@@ -724,7 +731,7 @@ class WorkersTransferBytes(DashboardComponent):
             ws.metrics["transfer"]["outgoing_bytes"] for ws in wss
         ]
         workers = [ws.address for ws in wss]
-        escaped_workers = [escape.url_escape(worker) for worker in workers]
+        escaped_workers = [url_escape(worker) for worker in workers]
 
         if wss:
             x_limit = max(
@@ -1515,42 +1522,44 @@ class ComputePerKey(DashboardComponent):
     def update(self):
         compute_times = defaultdict(float)
 
-        for key, ts in self.scheduler.task_prefixes.items():
-            name = key_split(key)
-            for action, t in ts.all_durations.items():
+        for name, tp in self.scheduler.task_prefixes.items():
+            for action, t in tp.all_durations.items():
                 if action == "compute":
                     compute_times[name] += t
 
+        if not compute_times:
+            return
+
         # order by largest time first
-        compute_times = sorted(compute_times.items(), key=lambda x: x[1], reverse=True)
+        compute_times = sorted(compute_times.items(), key=second, reverse=True)
 
-        # keep only time which are 2% of max or greater
-        if compute_times:
-            max_time = compute_times[0][1] * 0.02
-            compute_times = [(n, t) for n, t in compute_times if t > max_time]
-            compute_colors = list()
-            compute_names = list()
-            compute_time = list()
-            total_time = 0
-            for name, t in compute_times:
-                compute_names.append(name)
-                compute_colors.append(ts_color_of(name))
-                compute_time.append(t)
-                total_time += t
+        # Keep only times which are 2% of max or greater
+        max_time = compute_times[0][1] * 0.02
+        compute_colors = []
+        compute_names = []
+        compute_time = []
+        total_time = 0
+        for name, t in compute_times:
+            if t < max_time:
+                break
+            compute_names.append(name)
+            compute_colors.append(ts_color_of(name))
+            compute_time.append(t)
+            total_time += t
 
-            angles = [t / total_time * 2 * math.pi for t in compute_time]
+        angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            self.fig.x_range.factors = compute_names
+        self.fig.x_range.factors = compute_names
 
-            compute_result = dict(
-                angles=angles,
-                times=compute_time,
-                color=compute_colors,
-                names=compute_names,
-                formatted_time=[format_time(t) for t in compute_time],
-            )
+        compute_result = dict(
+            angles=angles,
+            times=compute_time,
+            color=compute_colors,
+            names=compute_names,
+            formatted_time=[format_time(t) for t in compute_time],
+        )
 
-            update(self.compute_source, compute_result)
+        update(self.compute_source, compute_result)
 
 
 class AggregateAction(DashboardComponent):
@@ -1830,7 +1839,7 @@ class CurrentLoad(DashboardComponent):
             "nprocessing-half": [np / 2 for np in nprocessing],
             "nprocessing-color": nprocessing_color,
             "worker": [ws.address for ws in workers],
-            "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+            "escaped_worker": [url_escape(ws.address) for ws in workers],
             "y": list(range(len(workers))),
         }
 
@@ -1912,7 +1921,7 @@ class StealingEvents(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="level",
@@ -1962,12 +1971,12 @@ class StealingEvents(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        log = self.scheduler.get_events(topic="stealing")
-        current = len(self.scheduler.events["stealing"])
-        n = current - self.last
-
-        log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
-        self.last = current
+        topic = self.scheduler._broker._topics["stealing"]
+        log = log = topic.events
+        n = min(topic.count - self.last, len(log))
+        if log:
+            log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
+        self.last = topic.count
 
         if log:
             new = pipe(
@@ -2006,7 +2015,7 @@ class Events(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="y",
@@ -2032,11 +2041,12 @@ class Events(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        log = self.scheduler.events[self.name]
-        n = self.scheduler.event_counts[self.name] - self.last
+        topic = self.scheduler._broker._topics[self.name]
+        log = topic.events
+        n = min(topic.count - self.last, len(log))
         if log:
             log = [log[-i] for i in range(1, n + 1)]
-        self.last = self.scheduler.event_counts[self.name]
+        self.last = topic.count
 
         if log:
             actions = []
@@ -2292,7 +2302,7 @@ class TaskGraph(DashboardComponent):
             color="black",
             alpha=0.3,
         )
-        rect = self.root.square(
+        rect = self.root.scatter(
             x="x",
             y="y",
             size=10,
@@ -2300,6 +2310,7 @@ class TaskGraph(DashboardComponent):
             source=self.node_source,
             view=node_view,
             legend_field="state",
+            marker="square",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -2370,7 +2381,7 @@ class TaskGraph(DashboardComponent):
                     continue
                 xx = x[key]
                 yy = y[key]
-                node_key.append(escape.url_escape(key))
+                node_key.append(url_escape(str(key)))
                 node_x.append(xx)
                 node_y.append(yy)
                 node_state.append(task.state)
@@ -2859,16 +2870,16 @@ class TaskGroupGraph(DashboardComponent):
                 f"{comp_tasks} ({comp_tasks / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_processing"].append(
-                f"{tasks_processing} ({tasks_processing/ tot_tasks * 100:.0f} %)"
+                f"{tasks_processing} ({tasks_processing / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_memory"].append(
-                f"{tasks_memory} ({tasks_memory/ tot_tasks * 100:.0f} %)"
+                f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased/ tot_tasks * 100:.0f} %)"
+                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
-                f"{ tasks_erred} ({tasks_erred/ tot_tasks * 100:.0f} %)"
+                f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
             )
 
         self.nodes_source.data.update(nodes_data)
@@ -3331,15 +3342,15 @@ class TaskProgress(DashboardComponent):
         }
 
         for tp in self.scheduler.task_prefixes.values():
-            active_states = tp.active_states
-            if any(active_states.get(s) for s in state.keys()):
-                state["memory"][tp.name] = active_states["memory"]
-                state["erred"][tp.name] = active_states["erred"]
-                state["released"][tp.name] = active_states["released"]
-                state["processing"][tp.name] = active_states["processing"]
-                state["waiting"][tp.name] = active_states["waiting"]
-                state["queued"][tp.name] = active_states["queued"]
-                state["no_worker"][tp.name] = active_states["no-worker"]
+            states = tp.states
+            if any(states.get(s) for s in state.keys()):
+                state["memory"][tp.name] = states["memory"]
+                state["erred"][tp.name] = states["erred"]
+                state["released"][tp.name] = states["released"]
+                state["processing"][tp.name] = states["processing"]
+                state["waiting"][tp.name] = states["waiting"]
+                state["queued"][tp.name] = states["queued"]
+                state["no_worker"][tp.name] = states["no-worker"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3382,183 +3393,341 @@ class FinePerformanceMetrics(DashboardComponent):
     The main overview of the Fine Performance Metrics page.
     """
 
+    BASE_TOOLS = ["pan", "wheel_zoom", "box_zoom", "reset"]
+    scheduler: Scheduler
+    task_exec_by_prefix_src: ColumnDataSource
+    task_exec_by_prefix_xmax: float
+    task_exec_by_activity_src: ColumnDataSource
+    get_data_by_activity_src: ColumnDataSource
+    substantial_change: bool
+    visible_functions: list[str]
+    visible_activities: list[str]
+    stacked_chart_visible_activities: list[str]
+    function_selector: MultiChoice
+    span_tag_selector: MultiChoice
+    unit_selector: Select
+    task_exec_by_activity_chart: figure | None
+    task_exec_by_prefix_chart: figure | None
+    get_data_by_activity_chart: figure | None
+
     @log_errors
-    def __init__(self, scheduler, **kwargs):
+    def __init__(self, scheduler: Scheduler, **kwargs: Any):
         self.scheduler = scheduler
-        self.senddata = defaultdict(list)
-        self.sendsrc = ColumnDataSource(data=dict())
-        self.task_exec_data = defaultdict(list)
-        self.task_exec_data_limited = defaultdict(list)
-        self.task_exec_by_prefix_src = ColumnDataSource(data=dict())
-        self.task_exec_by_activity_src = ColumnDataSource(data=dict())
+        self.task_exec_by_prefix_src = ColumnDataSource(data={})
+        self.task_exec_by_prefix_xmax = 0.0
+        self.task_exec_by_activity_src = ColumnDataSource(data={})
+        self.get_data_by_activity_src = ColumnDataSource(data={})
         self.substantial_change = False
-        self.task_activities = []
-        self.init_root()
+        self.visible_functions = []
+        self.visible_activities = []
+        self.stacked_chart_visible_activities = []
+        self.task_exec_by_activity_chart = None
+        self.task_exec_by_prefix_chart = None
+        self.get_data_by_activity_chart = None
 
-    def init_root(self):
-        def handle_selector_chng(attr, old, new):
-            self.unit_selected = new
-            self.substantial_change = True
+        # Selectors
+        self.function_selector = MultiChoice(
+            title="Filter by function",
+            placeholder="Select specific functions",
+            value=[],
+            options=[],
+        )
+        self.span_tag_selector = MultiChoice(
+            title="Filter by span tag",
+            placeholder="Select specific span tags",
+            value=[],
+            options=[],
+        )
+        self.unit_selector = Select(title="Unit selection", options=["seconds"])
+        self.unit_selector.value = "seconds"
+        self.unit_selector.on_change("value", self._handle_change_unit)
 
-        self.function_selector = MultiChoice(value=[], options=[])
-        self.function_selector.placeholder = "Select specific functions"
-        self.unit_selector = Select(title="Unit selection", options=[])
-        self.unit_selector.on_change("value", handle_selector_chng)
-        self.unit_selected = "seconds"
-        self.task_exec_by_activity_chart = figure()
-        self.task_exec_by_prefix_chart = figure()
-        self.senddata_by_activity_chart = figure()
+        selectors_row = row(
+            children=[
+                self.span_tag_selector,
+                self.function_selector,
+                self.unit_selector,
+            ],
+            sizing_mode="stretch_width",
+        )
         self.root = column(
-            self.function_selector,
-            self.unit_selector,
-            row(
-                [
-                    self.task_exec_by_prefix_chart,
-                    self.task_exec_by_activity_chart,
-                    self.senddata_by_activity_chart,
-                ],
-                sizing_mode="stretch_width",
-            ),
+            selectors_row,
             sizing_mode="scale_width",
         )
 
-    def format(self, unit: str, val: Any) -> str:
-        formatters = {"bytes": format_bytes, "seconds": format_time}
-        return formatters.get(unit, str)(val)
+    def _handle_change_unit(self, attr: str, old: str, new: str) -> None:
+        self.substantial_change = True
+        assert self.task_exec_by_prefix_chart
+        fmt = self._bokeh_unit_format()
+        self.task_exec_by_prefix_chart.xaxis[0].formatter.format = fmt
 
     @without_property_validation
     @log_errors
     def update(self):
-        items = sorted(
-            (k, v)
-            for k, v in self.scheduler.cumulative_worker_metrics.items()
-            if isinstance(k, tuple)
+        self._update_selectors()
+        self._build_data_sources()
+
+        needs_figures_row = self.task_exec_by_activity_chart is None
+        if needs_figures_row:
+            self.substantial_change = True
+
+        if needs_figures_row:
+            # First call to update()
+            self.task_exec_by_prefix_chart = (
+                self._build_task_execution_by_prefix_chart()
+            )
+            self.task_exec_by_activity_chart = self._build_pie_chart(
+                source=self.task_exec_by_activity_src,
+                title="Task execution, by activity",
+            )
+            self.get_data_by_activity_chart = self._build_pie_chart(
+                source=self.get_data_by_activity_src,
+                # get_data is called via RPC for data pull; the metrics for it are
+                # recorded on the worker *donating* the data
+                title="Send data, by activity",
+            )
+
+        self.task_exec_by_prefix_chart.x_range.end = self.task_exec_by_prefix_xmax * 1.1
+
+        if self.substantial_change:
+            # Visible activities and/or functions changed
+            self.substantial_change = False
+            self._update_task_execution_by_prefix_chart()
+            figures_row = row(
+                children=[
+                    self.task_exec_by_prefix_chart,
+                    self.task_exec_by_activity_chart,
+                    self.get_data_by_activity_chart,
+                ],
+                sizing_mode="stretch_width",
+            )
+
+            if needs_figures_row:
+                # First iteration, initial assignment of figures row
+                self.root.children.append(figures_row)
+            else:
+                # Otherwise needs forced refresh by replacing the figures row
+                self.root.children[-1] = figures_row
+
+    def _update_selectors(self) -> None:
+        """Update choices available in
+
+        - self.unit_selector
+        - self.function_selector
+        - self.span_tag_selector
+        """
+        units = set()
+        functions = set()
+
+        for k in self.scheduler.cumulative_worker_metrics:
+            if not isinstance(k, tuple):
+                continue
+            context, *other, activity, unit = k
+
+            assert isinstance(unit, str)
+            units.add(unit)
+
+            if context == "execute":
+                (function,) = other
+                assert isinstance(function, str)
+                functions.add(function)
+
+        units.difference_update(self.unit_selector.options)
+        if units:
+            self.unit_selector.options.extend(units)
+
+        if functions:
+            # Added on the fly by Span.cumulative_worker_metrics
+            functions.add("N/A")
+        functions.difference_update(self.function_selector.options)
+        if functions:
+            self.function_selector.options.extend(functions)
+            self.function_selector.title = (
+                f"Filter by function ({len(self.function_selector.options)}):"
+            )
+
+        spans_ext: SpansSchedulerExtension | None = self.scheduler.extensions.get(
+            "spans"
         )
-        for (context, *parts), val in items:
-            if context == "get-data":
-                activity, unit = parts
-
-                if unit not in self.unit_selector.options:
-                    # note append doesn't work here
-                    self.unit_selector.options += [unit]
-
-                if activity not in self.senddata["activity"]:
-                    self.substantial_change = True
-                    self.senddata["activity"].append(activity)
-
-                idx = self.senddata["activity"].index(activity)
-                while idx >= len(self.senddata[f"{activity}_{unit}"]):
-                    self.senddata[f"{activity}_{unit}"].append(0)
-                    self.senddata[f"{activity}_{unit}_text"].append("")
-                self.senddata[f"{activity}_{unit}_text"][idx] = self.format(unit, val)
-                self.senddata[f"{activity}_{unit}"][idx] = val
-
-            elif context == "execute":
-                prefix, activity, unit = parts
-
-                if unit not in self.unit_selector.options:
-                    # note append doesn't work here
-                    self.unit_selector.options += [unit]
-
-                if activity not in self.task_activities:
-                    self.substantial_change = True
-                    self.task_activities.append(activity)
-
-                if prefix not in self.task_exec_data["functions"]:
-                    self.substantial_change = True
-                    self.function_selector.options.append(prefix)
-                    self.task_exec_data["functions"].append(prefix)
-                    self.task_exec_data["timestamp"].append(datetime.utcnow())
-                idx = self.task_exec_data["functions"].index(prefix)
-
-                # Some function/activity combos missing, so need to keep columns aligned
-                for op in self.task_activities:
-                    while len(self.task_exec_data[f"{op}_{unit}"]) != len(
-                        self.task_exec_data["functions"]
-                    ):
-                        self.task_exec_data[f"{op}_{unit}"].append(0)
-                        self.task_exec_data[f"{op}_{unit}_text"].append("")
-
-                self.task_exec_data[f"{activity}_{unit}"][idx] = val
-                self.task_exec_data[f"{activity}_{unit}_text"][idx] = self.format(
-                    unit, val
+        if spans_ext:
+            tags = set(spans_ext.spans_search_by_tag)
+            tags.difference_update(self.span_tag_selector.options)
+            if tags:
+                self.span_tag_selector.options.extend(tags)
+                self.span_tag_selector.title = (
+                    f"Filter by span tag ({len(self.span_tag_selector.options)}):"
                 )
 
-        data = self.task_exec_data.copy()
-        # If user has manually selected function(s) then we are only showing them.
-        if self.function_selector.value:
-            indexes = [data["functions"].index(f) for f in self.function_selector.value]
-            for key, values in data.items():
-                data[key] = [values[idx] for idx in indexes]
-
-        # Otherwise limit those being shown which have 'expired' to be displayed
+    def _bokeh_unit_format(self) -> str:
+        unit = self.unit_selector.value
+        if unit == "seconds":
+            return "00:00:00"
+        elif unit == "bytes":
+            return "0.00b"
+        elif unit == "count":
+            return "0"
         else:
-            cutoff = datetime.utcnow() - timedelta(seconds=10)
-            n_show = len([d for d in data["timestamp"] if d > cutoff]) or 5
-            for key in data:
-                data[key] = data[key][-n_show:]
-        self.task_exec_data_limited = data.copy()
+            return "0.000"
 
-        # Show total number of functions to choose from
-        self.function_selector.title = (
-            f"Filter by function ({len(self.function_selector.options)}):"
-        )
-
-        task_exec_piechart = self._build_task_execution_by_activity_chart(
-            self.task_exec_data_limited.copy()
-        )
-        task_exec_barchart = self._build_task_execution_by_prefix_chart(
-            self.task_exec_data_limited.copy()
-        )
-        senddata_piechart = self._build_senddata_chart(self.senddata.copy())
-
-        # Replacing the child causes small blips if done every iteration vs updating
-        # renderers, but it's needed when new functions and/or activities show up to
-        # rerender plot
-        if self.substantial_change:
-            self.root.children[-1].children[0] = task_exec_barchart
-            self.root.children[-1].children[1] = task_exec_piechart
-            self.root.children[-1].children[2] = senddata_piechart
-            self.substantial_change = False
+    def _format(self, val: float) -> str:
+        unit = self.unit_selector.value
+        if unit == "seconds":
+            return format_time(val)
+        elif unit == "bytes":
+            return format_bytes(int(val))
+        # count or custom user-defined metric
+        elif (ival := int(val)) == val:
+            return str(ival)
         else:
-            self.task_exec_by_prefix_chart.renderers = task_exec_piechart.renderers
-            self.task_exec_by_activity_chart.renderers = task_exec_barchart.renderers
-            self.senddata_by_activity_chart.renderers = senddata_piechart.renderers
+            return str(val)
 
-    def _build_task_execution_by_activity_chart(
-        self, task_exec_data: defaultdict[str, list]
-    ) -> figure:
-        piechart_data = {}
-        piechart_data["value"] = [
-            sum(task_exec_data[f"{op}_{self.unit_selected}"])
-            for op in self.task_activities
-        ]
-        piechart_data["text"] = [
-            self.format(self.unit_selected, v) for v in piechart_data["value"]
-        ]
-        piechart_data["angle"] = [
-            (
-                sum(task_exec_data[f"{activity}_{self.unit_selected}"])
-                / sum(piechart_data["value"])
-                if sum(piechart_data["value"])
-                else 0  # may not have any bytes movement reported, avoid divide by zero
-            )
-            * 2
-            * math.pi
-            for activity in self.task_activities
-        ]
-        piechart_data["color"] = small_palettes["YlGnBu"].get(
-            len(self.task_activities), []
+    def _get_palette(self) -> list[str]:
+        n = len(self.visible_activities)
+        try:
+            from bokeh.palettes import interp_palette
+
+            return list(interp_palette(Viridis11, n))
+        except ImportError:
+            # Bokeh 2.4
+            return [Viridis11[i % len(Viridis11)] for i in range(n)]
+
+    def _build_data_sources(self) -> None:
+        """Pre-process and filter fine performance metrics; build data tables in
+        Bokeh format
+
+        Updates:
+
+        - self.substantial_change
+        - self.visible_activities
+        - self.visible_functions
+        - self.task_exec_by_prefix_src.data
+        - self.task_exec_by_activity_src.data
+        - self.get_data_by_activity_src.data
+        """
+        visible_functions = set()
+        visible_activities = set()
+        execute_by_func: defaultdict[tuple[str, str], float] = defaultdict(float)
+        execute: defaultdict[str, float] = defaultdict(float)
+        get_data: defaultdict[str, float] = defaultdict(float)
+
+        function_sel = set(self.function_selector.value)
+
+        spans_ext: SpansSchedulerExtension | None = self.scheduler.extensions.get(
+            "spans"
         )
-        piechart_data["activity"] = self.task_activities
-        self.task_exec_by_activity_src.data = piechart_data
+        if spans_ext and self.span_tag_selector.value:
+            span = spans_ext.merge_by_tags(*self.span_tag_selector.value)
+            metrics = span.cumulative_worker_metrics
+        elif spans_ext and spans_ext.spans:
+            # Calculate idle time
+            span = spans_ext.merge_all()
+            metrics = span.cumulative_worker_metrics
+        else:
+            # Spans extension is not loaded
+            metrics = {
+                k: v
+                for k, v in self.scheduler.cumulative_worker_metrics.items()
+                if isinstance(k, tuple)
+                and len(k) == 4  # Skip get-data, gather-deps, and memory-monitor
+            }
 
+        for (context, function, activity, unit), v in metrics.items():
+            if context != "execute":
+                continue  # TODO visualize 'shuffle' metrics
+            assert isinstance(function, str)
+            assert isinstance(unit, str)
+            assert self.unit_selector.value
+            if unit != self.unit_selector.value:
+                continue
+            if function_sel and function not in function_sel:
+                continue
+
+            # Custom metrics won't necessarily contain a string as the label
+            activity = str(activity)
+
+            # TODO We could implement some fancy logic in spans.py to change the label
+            #      if no other spans are running at the same time.
+            if not self.span_tag_selector.value and activity == "idle or other spans":
+                activity = "idle"
+
+            execute_by_func[function, activity] += v
+            execute[activity] += v
+            visible_functions.add(function)
+            visible_activities.add(activity)
+
+        if not self.function_selector.value and not self.span_tag_selector.value:
+            for k, v in self.scheduler.cumulative_worker_metrics.items():
+                if isinstance(k, tuple) and k[0] == "get-data":
+                    _, activity, unit = k
+                    assert isinstance(activity, str)
+                    assert isinstance(unit, str)
+                    assert self.unit_selector.value
+                    if unit == self.unit_selector.value:
+                        visible_activities.add(activity)
+                        get_data[activity] += v
+
+            # Ignore memory-monitor and gather-dep metrics
+
+        if visible_functions != set(self.visible_functions):
+            self.substantial_change = True
+            self.visible_functions = sorted(visible_functions)
+
+        if visible_activities != set(self.visible_activities):
+            self.visible_activities = sorted(visible_activities)
+
+        (
+            self.task_exec_by_prefix_src.data,
+            self.task_exec_by_prefix_xmax,
+        ) = self._build_task_execution_by_prefix_data(execute_by_func)
+        self.task_exec_by_activity_src.data = self._build_pie_data(execute)
+        self.get_data_by_activity_src.data = self._build_pie_data(get_data)
+
+    def _build_pie_data(self, data: defaultdict[str, float]) -> dict[str, list]:
+        """Build the data source for a pie chart by activity
+
+        See also
+        --------
+        _build_pie_chart
+        """
+        activities = self.visible_activities
+        # Generate palette based on all visible activities to make sure that
+        # colors match between the plots
+        palette = self._get_palette()
+        values = [data[activity] for activity in activities]
+
+        # Sort by values from largest to smallest
+        # Hide activities that are missing in the current plot from the legend
+        idx = [i for i, v in sorted(enumerate(values), key=lambda el: -el[1]) if v]
+        activities = [activities[i] for i in idx]
+        palette = [palette[i] for i in idx]
+        values = [values[i] for i in idx]
+
+        total_value = sum(values)
+        total_text = self._format(total_value)
+        percent_k = 100.0 / total_value if total_value else 0.0
+        angle_k = 2.0 * math.pi / total_value if total_value else 0.0
+        return {
+            "activity": activities,
+            "value": values,
+            "text": [self._format(v) + f" ({v * percent_k:.0f}%)" for v in values],
+            "angle": [v * angle_k for v in values],
+            "color": palette,
+            "total_text": [total_text] * len(values),
+        }
+
+    def _build_pie_chart(self, source: ColumnDataSource, title: str) -> figure:
+        """Create pie chart by activity
+
+        See also
+        --------
+        _build_pie_data
+        """
         piechart = figure(
             height=500,
             sizing_mode="scale_both",
-            title="Task execution, by activity",
+            title=title,
             tools="hover",
-            tooltips="@{activity}: @text",
+            tooltips="@{activity}: @text<br>total: @{total_text}",
             x_range=(-0.5, 1.0),
         )
         piechart.axis.axis_label = None
@@ -3574,98 +3743,109 @@ class FinePerformanceMetrics(DashboardComponent):
             line_color="white",
             fill_color="color",
             legend_field="activity",
-            source=self.task_exec_by_activity_src,
+            source=source,
         )
         return piechart
 
-    def _build_task_execution_by_prefix_chart(
-        self, task_exec_data: defaultdict[str, list]
-    ) -> figure:
+    def _build_task_execution_by_prefix_data(
+        self, data: defaultdict[tuple[str, str], float]
+    ) -> tuple[dict[str, list], float]:
+        """Build the data source for the execute by function stacked chart
+
+        See also
+        --------
+        _build_task_execution_by_prefix_chart
+        _update_task_execution_by_prefix_chart
+        """
+        func_totals = [
+            sum(data[function, activity] for activity in self.visible_activities)
+            for function in self.visible_functions
+        ]
+        perc_k = [100.0 / v if v else 0.0 for v in func_totals]
+        out: dict[str, list] = {
+            "__functions": self.visible_functions,
+            "____total_text": [self._format(v) for v in func_totals],
+        }
+
+        sc_visible_activities = []
+        for activity in self.visible_activities:
+            values = [data[function, activity] for function in self.visible_functions]
+            if not any(values):
+                continue
+            sc_visible_activities.append(activity)
+            out[activity] = values
+            out[f"__{activity}_text"] = [
+                self._format(v) + f" ({v * perc_ki:.0f}%)"
+                for v, perc_ki in zip(values, perc_k)
+            ]
+        if sc_visible_activities != self.stacked_chart_visible_activities:
+            self.substantial_change = True
+            self.stacked_chart_visible_activities[:] = sc_visible_activities
+
+        return out, max(func_totals, default=0.0)
+
+    def _build_task_execution_by_prefix_chart(self) -> figure:
+        """Create empty stacked bar chart for execute by function
+
+        See also
+        --------
+        _build_task_execution_by_prefix_data
+        _update_task_execution_by_prefix_chart
+        """
         barchart = figure(
-            x_range=task_exec_data["functions"],
+            y_range=[],
             height=500,
             sizing_mode="scale_both",
             title="Task execution, by function",
-            tools="pan,wheel_zoom,box_zoom,reset",
+            tools=",".join(self.BASE_TOOLS),
         )
-        barchart.yaxis.visible = False
-        barchart.xaxis.major_label_orientation = 0.2
+        barchart.yaxis.visible = True
+        # As of Bokeh 3.1, DataRange1D (the default) does not work when switching back
+        # from bytes (GiBs) to seconds (hundreds). So we need to manually update it.
+        barchart.x_range = Range1d(0, 1)
+        barchart.xaxis[0].formatter = NumeralTickFormatter(format="00:00:00")
+        barchart.xaxis.major_label_orientation = 0.4
         barchart.grid.grid_line_color = None
-        stackers = [
-            name for name in task_exec_data if name.endswith(self.unit_selected)
-        ]
-        if stackers:
-            renderers = barchart.vbar_stack(
-                stackers,
-                x="functions",
-                width=0.9,
-                source=self.task_exec_by_prefix_src,
-                color=small_palettes["YlGnBu"].get(len(self.task_activities), []),
-                legend_label=self.task_activities,
-            )
-            for vbar in renderers:
-                tooltips = [
-                    (
-                        vbar.name,
-                        f"@{{{vbar.name}_text}}",
-                    ),
-                    ("function", "@functions"),
-                ]
-                barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
-
-            if any(
-                len(self.task_exec_by_prefix_src.data[k]) != len(task_exec_data[k])
-                for k in self.task_exec_by_prefix_src.data
-            ):
-                self.substantial_change = True
-
-            self.task_exec_by_prefix_src.data = dict(task_exec_data)
-            barchart.renderers = renderers
         return barchart
 
-    def _build_senddata_chart(self, senddata: defaultdict[str, list]) -> figure:
-        piedata = {}
-        piedata["activity"] = senddata["activity"]
-        piedata["value"] = [
-            (sum(senddata[f"{op}_{self.unit_selected}"])) for op in senddata["activity"]
-        ]
-        piedata["text"] = [self.format(self.unit_selected, v) for v in piedata["value"]]
-        piedata["angle"] = [
-            (
-                (sum(senddata[f"{op}_{self.unit_selected}"]) / sum(piedata["value"]))
-                if sum(piedata["value"])
-                else 0.0
-            )
-            * 2
-            * math.pi
-            for op in piedata["activity"]
-        ]
-        piedata["color"] = small_palettes["YlGnBu"].get(len(piedata["activity"]), [])
+    def _update_task_execution_by_prefix_chart(self) -> None:
+        """Rebuild X axis and tooltips of execution by prefix stacked chart
 
-        self.sendsrc.data = piedata
-        senddata_piechart = figure(
-            height=500,
-            sizing_mode="scale_both",
-            title="Send data, by activity",
-            tools="hover",
-            tooltips="@{activity}: @text",
-            x_range=(-0.5, 1.0),
+        See also
+        --------
+        _build_task_execution_by_prefix_data
+        _build_task_execution_by_prefix_chart
+        """
+        barchart = self.task_exec_by_prefix_chart
+        assert barchart is not None
+        barchart.y_range = FactorRange(*self.visible_functions)
+
+        palette = [
+            p
+            for p, a in zip(self._get_palette(), self.visible_activities)
+            if a in self.stacked_chart_visible_activities
+        ]
+        assert len(palette) == len(self.stacked_chart_visible_activities)
+        renderers = barchart.hbar_stack(
+            self.stacked_chart_visible_activities,
+            y="__functions",
+            width=0.9,
+            source=self.task_exec_by_prefix_src,
+            color=palette,
+            legend_label=self.stacked_chart_visible_activities,
         )
-        senddata_piechart.wedge(
-            x=0,
-            y=1,
-            radius=0.4,
-            start_angle=cumsum("angle", include_zero=True),
-            end_angle=cumsum("angle"),
-            line_color="white",
-            fill_color="color",
-            legend_field="activity",
-            source=self.sendsrc,
-        )
-        senddata_piechart.axis.axis_label = None
-        senddata_piechart.axis.visible = False
-        senddata_piechart.grid.grid_line_color = None
-        return senddata_piechart
+
+        # Create or refresh hovertools on top of base tools
+        barchart.tools = barchart.tools[: len(self.BASE_TOOLS)]
+
+        for vbar in renderers:
+            tooltips = [
+                ("function", "@__functions"),
+                (vbar.name, f"@{{__{vbar.name}_text}}"),
+                ("total", "@____total_text"),
+            ]
+            barchart.add_tools(HoverTool(tooltips=tooltips, renderers=[vbar]))
+        barchart.renderers = renderers
 
 
 class Contention(DashboardComponent):
@@ -3679,9 +3859,9 @@ class Contention(DashboardComponent):
         self.data = dict(
             names=[
                 ("Scheduler", "Event Loop"),
-                ("Scheduler", "GIL Contention"),
+                ("Scheduler", "GIL"),
                 ("Workers", "Event Loop"),
-                ("Workers", "GIL Contention"),
+                ("Workers", "GIL"),
             ],
             values=[0, 0, 0, 0],
             text=["0s", "0%", "0s", "0%"],
@@ -3712,7 +3892,7 @@ class Contention(DashboardComponent):
             fill_color=factor_cmap(
                 field_name="names",
                 palette=["#b8e0ce", "#81aae4"],
-                factors=["Event Loop", "GIL Contention"],
+                factors=["Event Loop", "GIL"],
                 start=1,
                 end=2,
             ),
@@ -3732,7 +3912,6 @@ class Contention(DashboardComponent):
     @log_errors
     def update(self):
         s = self.scheduler
-        monitor_gil = s.monitor.monitor_gil_contention
 
         self.data["values"] = [
             s._tick_interval_observed,
@@ -3740,11 +3919,13 @@ class Contention(DashboardComponent):
             sum(w.metrics["event_loop_interval"] for w in s.workers.values())
             / (len(s.workers) or 1),
             self.gil_contention_workers,
-        ][:: 1 if monitor_gil else 2]
+        ][:: 1 if s.monitor.monitor_gil_contention else 2]
 
         # Format event loop as time and GIL (if configured) as %
         self.data["text"] = [
-            f"{x * 100:.1f}%" if i % 2 and monitor_gil else format_time(x)
+            f"{x * 100:.1f}%"
+            if i % 2 and s.monitor.monitor_gil_contention
+            else format_time(x)
             for i, x in enumerate(self.data["values"])
         ]
         update(self.source, self.data)
@@ -4018,7 +4199,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        mem_plot.circle(
+        mem_plot.scatter(
             source=self.source, x="memory_percent", y=0, size=10, fill_alpha=0.5
         )
         mem_plot.ygrid.visible = False
@@ -4048,7 +4229,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        cpu_plot.circle(
+        cpu_plot.scatter(
             source=self.source, x="cpu_fraction", y=0, size=10, fill_alpha=0.5
         )
         cpu_plot.ygrid.visible = False
@@ -4148,205 +4329,178 @@ class WorkerTable(DashboardComponent):
 class Shuffling(DashboardComponent):
     """Occupancy (in time) per worker"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
-            self.scheduler = scheduler
-            self.source = ColumnDataSource(
-                {
-                    "worker": [],
-                    "y": [],
-                    "comm_memory": [],
-                    "comm_memory_limit": [],
-                    "comm_buckets": [],
-                    "comm_avg_duration": [],
-                    "comm_avg_size": [],
-                    "comm_read": [],
-                    "comm_written": [],
-                    "comm_color": [],
-                    "disk_memory": [],
-                    "disk_memory_limit": [],
-                    "disk_buckets": [],
-                    "disk_avg_duration": [],
-                    "disk_avg_size": [],
-                    "disk_read": [],
-                    "disk_written": [],
-                    "disk_color": [],
-                }
-            )
-            self.totals_source = ColumnDataSource(
-                {
-                    "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
-                    "values": [0, 0, 0, 0],
-                }
-            )
+        self.scheduler = scheduler
+        self.source = ColumnDataSource(
+            {
+                "worker": [],
+                "y": [],
+                "comm_memory": [],
+                "comm_memory_limit": [],
+                "comm_buckets": [],
+                "comm_avg_duration": [],
+                "comm_avg_size": [],
+                "comm_read": [],
+                "comm_written": [],
+                "comm_color": [],
+                "disk_memory": [],
+                "disk_memory_limit": [],
+                "disk_buckets": [],
+                "disk_avg_duration": [],
+                "disk_avg_size": [],
+                "disk_read": [],
+                "disk_written": [],
+                "disk_color": [],
+            }
+        )
+        self.totals_source = ColumnDataSource(
+            {
+                "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
+                "values": [0, 0, 0, 0],
+            }
+        )
 
-            self.comm_memory = figure(
-                title="Comms Buffer",
-                tools="",
-                toolbar_location="above",
-                x_range=Range1d(0, 100_000_000),
-                **kwargs,
-            )
-            self.comm_memory.hbar(
-                source=self.source,
-                right="comm_memory",
-                y="y",
-                height=0.9,
-                color="comm_color",
-            )
-            hover = HoverTool(
-                tooltips=[
-                    ("Memory Used", "@comm_memory{0.00 b}"),
-                    ("Average Write", "@comm_avg_size{0.00 b}"),
-                    ("# Buckets", "@comm_buckets"),
-                    ("Average Duration", "@comm_avg_duration"),
-                ],
-                formatters={"@comm_avg_duration": "datetime"},
-                mode="hline",
-            )
-            self.comm_memory.add_tools(hover)
-            self.comm_memory.x_range.start = 0
-            self.comm_memory.x_range.end = 1
-            self.comm_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.comm_memory = figure(
+            title="Comms Buffer",
+            tools="",
+            toolbar_location="above",
+            x_range=Range1d(0, 100_000_000),
+            **kwargs,
+        )
+        self.comm_memory.hbar(
+            source=self.source,
+            right="comm_memory",
+            y="y",
+            height=0.9,
+            color="comm_color",
+        )
+        hover = HoverTool(
+            tooltips=[
+                ("Memory Used", "@comm_memory{0.00 b}"),
+                ("Average Write", "@comm_avg_size{0.00 b}"),
+                ("# Buckets", "@comm_buckets"),
+                ("Average Duration", "@comm_avg_duration"),
+            ],
+            formatters={"@comm_avg_duration": "datetime"},
+            mode="hline",
+        )
+        self.comm_memory.add_tools(hover)
+        self.comm_memory.x_range.start = 0
+        self.comm_memory.x_range.end = 1
+        self.comm_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            self.disk_memory = figure(
-                title="Disk Buffer",
-                tools="",
-                toolbar_location="above",
-                x_range=Range1d(0, 100_000_000),
-                **kwargs,
-            )
-            self.disk_memory.yaxis.visible = False
+        self.disk_memory = figure(
+            title="Disk Buffer",
+            tools="",
+            toolbar_location="above",
+            x_range=Range1d(0, 100_000_000),
+            **kwargs,
+        )
+        self.disk_memory.yaxis.visible = False
 
-            self.disk_memory.hbar(
-                source=self.source,
-                right="disk_memory",
-                y="y",
-                height=0.9,
-                color="disk_color",
-            )
+        self.disk_memory.hbar(
+            source=self.source,
+            right="disk_memory",
+            y="y",
+            height=0.9,
+            color="disk_color",
+        )
 
-            hover = HoverTool(
-                tooltips=[
-                    ("Memory Used", "@disk_memory{0.00 b}"),
-                    ("Average Write", "@disk_avg_size{0.00 b}"),
-                    ("# Buckets", "@disk_buckets"),
-                    ("Average Duration", "@disk_avg_duration"),
-                ],
-                formatters={"@disk_avg_duration": "datetime"},
-                mode="hline",
-            )
-            self.disk_memory.add_tools(hover)
-            self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        hover = HoverTool(
+            tooltips=[
+                ("Memory Used", "@disk_memory{0.00 b}"),
+                ("Average Write", "@disk_avg_size{0.00 b}"),
+                ("# Buckets", "@disk_buckets"),
+                ("Average Duration", "@disk_avg_duration"),
+            ],
+            formatters={"@disk_avg_duration": "datetime"},
+            mode="hline",
+        )
+        self.disk_memory.add_tools(hover)
+        self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            self.totals = figure(
-                title="Total movement",
-                tools="",
-                toolbar_location="above",
-                **kwargs,
-            )
-            titles = ["Network Send", "Network Receive", "Disk Write", "Disk Read"]
-            self.totals = figure(
-                x_range=titles,
-                title="Totals",
-                toolbar_location=None,
-                tools="",
-                **kwargs,
-            )
+        self.totals = figure(
+            title="Total movement",
+            tools="",
+            toolbar_location="above",
+            **kwargs,
+        )
+        titles = ["Network Send", "Network Receive", "Disk Write", "Disk Read"]
+        self.totals = figure(
+            x_range=titles,
+            title="Totals",
+            toolbar_location=None,
+            tools="",
+            **kwargs,
+        )
 
-            self.totals.vbar(
-                x="x",
-                top="values",
-                width=0.9,
-                source=self.totals_source,
-            )
+        self.totals.vbar(
+            x="x",
+            top="values",
+            width=0.9,
+            source=self.totals_source,
+        )
 
-            self.totals.xgrid.grid_line_color = None
-            self.totals.y_range.start = 0
-            self.totals.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.totals.xgrid.grid_line_color = None
+        self.totals.y_range.start = 0
+        self.totals.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            hover = HoverTool(
-                tooltips=[("Total", "@values{0.00b}")],
-                mode="vline",
-            )
-            self.totals.add_tools(hover)
+        hover = HoverTool(
+            tooltips=[("Total", "@values{0.00b}")],
+            mode="vline",
+        )
+        self.totals.add_tools(hover)
 
-            self.root = row(self.comm_memory, self.disk_memory)
+        self.root = row(self.comm_memory, self.disk_memory)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
-            input = self.scheduler.extensions["shuffle"].heartbeats
-            if not input:
-                return
+        input = self.scheduler.extensions["shuffle"].heartbeats
+        if not input:
+            return
 
-            input = list(input.values())[-1]  # TODO: multiple concurrent shuffles
+        input = list(input.values())[-1]  # TODO: multiple concurrent shuffles
 
-            data = defaultdict(list)
-            now = time()
+        data = defaultdict(list)
+        now = time()
 
-            for i, (worker, d) in enumerate(input.items()):
-                data["y"].append(i)
-                data["worker"].append(worker)
-                for prefix in ["comm", "disk"]:
-                    data[f"{prefix}_total"].append(d[prefix]["total"])
-                    data[f"{prefix}_memory"].append(d[prefix]["memory"])
-                    data[f"{prefix}_memory_limit"].append(d[prefix]["memory_limit"])
-                    data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
-                    data[f"{prefix}_avg_duration"].append(
-                        d[prefix]["diagnostics"].get("avg_duration", 0)
-                    )
-                    data[f"{prefix}_avg_size"].append(
-                        d[prefix]["diagnostics"].get("avg_size", 0)
-                    )
-                    data[f"{prefix}_read"].append(d[prefix]["read"])
-                    data[f"{prefix}_written"].append(d[prefix]["written"])
-                    if self.scheduler.workers[worker].last_seen < now - 5:
-                        data[f"{prefix}_color"].append("gray")
-                    elif d[prefix]["memory"] > d[prefix]["memory_limit"]:
-                        data[f"{prefix}_color"].append("red")
-                    else:
-                        data[f"{prefix}_color"].append("blue")
+        for i, (worker, d) in enumerate(input.items()):
+            data["y"].append(i)
+            data["worker"].append(worker)
+            for prefix in ["comm", "disk"]:
+                memory_limit = d[prefix]["memory_limit"] or 0
+                data[f"{prefix}_total"].append(d[prefix]["total"])
+                data[f"{prefix}_memory"].append(d[prefix]["memory"])
+                data[f"{prefix}_memory_limit"].append(memory_limit)
+                data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
+                data[f"{prefix}_avg_duration"].append(d[prefix]["avg_duration"])
+                data[f"{prefix}_avg_size"].append(d[prefix]["avg_size"])
+                data[f"{prefix}_read"].append(d[prefix]["read"])
+                data[f"{prefix}_written"].append(d[prefix]["written"])
+                if self.scheduler.workers[worker].last_seen < now - 5:
+                    data[f"{prefix}_color"].append("gray")
+                elif d[prefix]["memory"] > memory_limit:
+                    data[f"{prefix}_color"].append("red")
+                else:
+                    data[f"{prefix}_color"].append("blue")
 
-            """
-            singletons = {
-                f"{prefix}_avg_duration": [
-                    sum(data[f"{prefix}_avg_duration"]) / len(data[f"{prefix}_avg_duration"])
-                ],
-                f"{prefix}_avg_size": [
-                    sum(data[f"{prefix}_avg_size"]) / len(data[f"{prefix}_avg_size"])
-                ],
-                "disk_avg_duration": [
-                    sum(data["disk_avg_duration"]) / len(data["disk_avg_duration"])
-                ],
-                "disk_avg_size": [
-                    sum(data["disk_avg_size"]) / len(data["disk_avg_size"])
-                ],
-            }
-            singletons[f"{prefix}_avg_bandwidth"] = [
-                singletons[f"{prefix}_avg_size"][0] / singletons[f"{prefix}_avg_duration"][0]
-            ]
-            singletons["disk_avg_bandwidth"] = [
-                singletons["disk_avg_size"][0] / singletons["disk_avg_duration"][0]
-            ]
-            singletons["y"] = [data["y"][-1] / 2]
-            """
+        totals = {
+            "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
+            "values": [
+                sum(data["comm_written"]),
+                sum(data["comm_read"]),
+                sum(data["disk_written"]),
+                sum(data["disk_read"]),
+            ],
+        }
+        update(self.totals_source, totals)
 
-            totals = {
-                "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
-                "values": [
-                    sum(data["comm_written"]),
-                    sum(data["comm_read"]),
-                    sum(data["disk_written"]),
-                    sum(data["disk_read"]),
-                ],
-            }
-            update(self.totals_source, totals)
-
-            update(self.source, dict(data))
-            limit = max(data["comm_memory_limit"] + data["disk_memory_limit"]) * 1.2
-            self.comm_memory.x_range.end = limit
-            self.disk_memory.x_range.end = limit
+        update(self.source, dict(data))
+        limit = max(data["comm_memory_limit"] + data["disk_memory_limit"]) * 1.2
+        self.comm_memory.x_range.end = limit
+        self.disk_memory.x_range.end = limit
 
 
 _STYLES = {
@@ -4404,7 +4558,7 @@ def shuffling_doc(scheduler, extra, doc):
     shuffling = Shuffling(scheduler, width=400, height=400)
     workers_memory = WorkersMemory(scheduler, width=400, height=400)
     timeseries = SystemTimeseries(
-        scheduler, width=1600, height=200, follow_interval=3000
+        scheduler, width=1600, height=200, follow_interval=10000
     )
     event_loop = Contention(scheduler, width=200, height=400)
 
@@ -4633,16 +4787,16 @@ def status_doc(scheduler, extra, doc):
     doc.template_variables.update(extra)
 
 
+@log_errors
 @curry
 def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwargs):
     # Note: @log_errors and @curry are not compatible
-    with log_errors():
-        fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
-        fig.update()
-        add_periodic_callback(doc, fig, interval)
-        doc.add_root(getattr(fig, fig_attr))
-        doc.theme = BOKEH_THEME
-        doc.title = "Dask: " + funcname(cls)
+    fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
+    fig.update()
+    add_periodic_callback(doc, fig, interval)
+    doc.add_root(getattr(fig, fig_attr))
+    doc.theme = BOKEH_THEME
+    doc.title = "Dask: " + funcname(cls)
 
 
 @log_errors

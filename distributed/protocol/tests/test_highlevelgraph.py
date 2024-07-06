@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import ast
+import contextlib
 
 import pytest
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
+dd = pytest.importorskip("dask.dataframe")
+da = pytest.importorskip("dask.array")
 
 from numpy.testing import assert_array_equal
 
 import dask
-import dask.array as da
-import dask.dataframe as dd
 
 from distributed.diagnostics import SchedulerPlugin
 from distributed.utils_test import gen_cluster
@@ -42,7 +42,7 @@ async def test_combo_of_layer_types(c, s, a, b):
     )
 
     df = dd.from_pandas(pd.DataFrame({"a": np.arange(3)}), npartitions=3)
-    df = df.shuffle("a", shuffle="tasks")
+    df = df.shuffle("a")
     df = df["a"].to_dask_array()
 
     res = x.sum() + df.sum()
@@ -86,7 +86,7 @@ async def test_shuffle(c, s, a, b):
         ),
         npartitions=5,
     )
-    df = df.shuffle("a", shuffle="tasks", max_branch=2)
+    df = df.shuffle("a", max_branch=2)
     df = df["a"] + df["b"]
     res = await c.compute(df, optimize_graph=False)
     assert res.dtypes == np.float64
@@ -110,8 +110,7 @@ class ExampleAnnotationPlugin(SchedulerPlugin):
 
         if "priority" in annots:
             self.priority_matches = sum(
-                int(self.priority_fn(ast.literal_eval(k)) == p)
-                for k, p in annots["priority"].items()
+                int(self.priority_fn(k) == p) for k, p in annots["priority"].items()
             )
 
         if "qux" in annots:
@@ -172,11 +171,17 @@ async def test_dataframe_annotations(c, s, a, b):
         ),
         npartitions=5,
     )
-    df = df.shuffle("a", shuffle="tasks", max_branch=2)
+    df = df.shuffle("a", max_branch=2)
     acol = df["a"]
     bcol = df["b"]
 
-    with dask.annotate(retries=retries):
+    ctx = contextlib.nullcontext()
+    if dd._dask_expr_enabled():
+        ctx = pytest.warns(
+            UserWarning, match="Annotations will be ignored when using query-planning"
+        )
+
+    with dask.annotate(retries=retries), ctx:
         df = acol + bcol
 
     with dask.config.set(optimization__fuse__active=False):
@@ -185,5 +190,6 @@ async def test_dataframe_annotations(c, s, a, b):
     assert rdf.dtypes == np.float64
     assert (rdf == 10.0).all()
 
-    # There is an annotation match per partition (i.e. task)
-    assert plugin.retry_matches == df.npartitions
+    if not dd._dask_expr_enabled():
+        # There is an annotation match per partition (i.e. task)
+        assert plugin.retry_matches == df.npartitions

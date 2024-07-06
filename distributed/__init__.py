@@ -7,7 +7,15 @@ from distributed import widgets  # load distributed widgets second
 # isort: on
 
 import atexit
+import weakref
 
+# This finalizer registers an atexit handler that has to happen before
+# distributed registers its handlers, otherwise we observe hangs on
+# cluster shutdown when using the UCX comms backend. See
+# https://github.com/dask/distributed/issues/7726 for more discussion
+# of the problem and the search for long term solutions
+
+weakref.finalize(lambda: None, lambda: None)
 import dask
 from dask.config import config  # type: ignore
 
@@ -37,8 +45,8 @@ from distributed.deploy import (
 from distributed.diagnostics.plugin import (
     CondaInstall,
     Environ,
+    InstallPlugin,
     NannyPlugin,
-    PackageInstall,
     PipInstall,
     SchedulerPlugin,
     UploadDirectory,
@@ -55,6 +63,7 @@ from distributed.queues import Queue
 from distributed.scheduler import KilledWorker, Scheduler
 from distributed.security import Security
 from distributed.semaphore import Semaphore
+from distributed.spans import span
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import CancelledError, TimeoutError, sync
 from distributed.variable import Variable
@@ -88,27 +97,6 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-_python_shutting_down = False
-
-
-@atexit.register
-def _():
-    """Set a global when Python shuts down.
-
-    Note
-    ----
-    This function must be registered with atexit *after* any class that invokes
-    ``dstributed.utils.is_python_shutting_down`` has been defined. This way it
-    will be called before the ``__del__`` method of those classes.
-
-    See Also
-    --------
-    distributed.utils.is_python_shutting_down
-    """
-    global _python_shutting_down
-    _python_shutting_down = True
-
-
 __all__ = [
     "Actor",
     "ActorFuture",
@@ -127,7 +115,7 @@ __all__ = [
     "MultiLock",
     "Nanny",
     "NannyPlugin",
-    "PackageInstall",
+    "InstallPlugin",
     "PipInstall",
     "Pub",
     "Queue",
@@ -166,6 +154,7 @@ __all__ = [
     "rejoin",
     "rpc",
     "secede",
+    "span",
     "sync",
     "wait",
     "warn",

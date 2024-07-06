@@ -14,7 +14,8 @@ from tornado.httpclient import AsyncHTTPClient
 from dask.system import CPU_COUNT
 
 from distributed import Client, LocalCluster, Nanny, Worker, get_client
-from distributed.compatibility import LINUX
+from distributed.compatibility import LINUX, asyncio_run
+from distributed.config import get_loop_factory
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
@@ -24,6 +25,7 @@ from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
     assert_cannot_connect,
+    async_poll_for,
     captured_logger,
     gen_test,
     inc,
@@ -670,7 +672,7 @@ def test_ipywidgets_loop(loop):
             box = cluster._cached_widget
             assert isinstance(box, ipywidgets.Widget)
 
-    asyncio.run(amain())
+    asyncio_run(amain(), loop_factory=get_loop_factory())
 
 
 def test_no_ipywidgets(loop, monkeypatch):
@@ -745,37 +747,43 @@ def test_adapt(loop):
             assert time() < start + 5
 
 
-def test_adapt_then_manual(loop):
+@gen_test()
+async def test_adapt_then_manual():
     """We can revert from adaptive, back to manual"""
-    with LocalCluster(
-        silence_logs=False,
-        loop=loop,
+    async with LocalCluster(
+        asynchronous=True,
         dashboard_address=":0",
         processes=False,
         n_workers=8,
+        threads_per_worker=1,
     ) as cluster:
+
+        def wait_workers(n):
+            return async_poll_for(
+                lambda: len(cluster.scheduler.workers) == n
+                and len(cluster.workers) == n,
+                timeout=5,
+            )
+
+        await wait_workers(8)
         cluster.adapt(minimum=0, maximum=4, interval="10ms")
+        await wait_workers(0)
 
-        start = time()
-        while cluster.scheduler.workers or cluster.workers:
-            sleep(0.01)
-            assert time() < start + 30
-
-        assert not cluster.workers
-
-        with Client(cluster) as client:
+        async with Client(cluster, asynchronous=True) as client:
             futures = client.map(slowinc, range(1000), delay=0.1)
-            sleep(0.2)
+            await wait_workers(4)
 
             cluster._adaptive.stop()
-            sleep(0.2)
+            # stop() disables a PeriodicCallback. However, sometimes the callback has
+            # already been scheduled or is halfway through (it's asynchronous).
+            # Wait for it to finish, otherwise you'd get a race condition with
+            # scale() below and flakiness in the test.
+            tasks = {t for t in asyncio.all_tasks() if "PeriodicCallback" in str(t)}
+            if tasks:
+                await asyncio.wait(tasks)
 
             cluster.scale(2)
-
-            start = time()
-            while len(cluster.scheduler.workers) != 2:
-                sleep(0.01)
-                assert time() < start + 30
+            await wait_workers(2)
 
 
 @pytest.mark.parametrize("temporary", [True, False])
@@ -1049,7 +1057,7 @@ async def test_threads_per_worker_set_to_0():
             n_workers=2, processes=False, threads_per_worker=0, asynchronous=True
         ) as cluster:
             assert len(cluster.workers) == 2
-            assert all(w.nthreads < CPU_COUNT for w in cluster.workers.values())
+            assert all(w.state.nthreads < CPU_COUNT for w in cluster.workers.values())
 
 
 @pytest.mark.parametrize("temporary", [True, False])
@@ -1133,16 +1141,18 @@ async def test_local_cluster_redundant_kwarg(nanny):
         dashboard_address=":0",
         asynchronous=True,
     )
-    try:
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
-            # Extra arguments are forwarded to the worker class. Depending on
-            # whether we use the nanny or not, the error treatment is quite
-            # different and we should assert that an exception is raised
-            async with cluster:
-                pass
-    finally:
-        # FIXME: LocalCluster leaks if LocalCluster.__aenter__ raises
-        await cluster.close()
+    if nanny:
+        ctx = raises_with_cause(
+            RuntimeError, None, TypeError, "unexpected keyword argument"
+        )
+    else:
+        ctx = pytest.raises(TypeError, match="unexpected keyword argument")
+    with ctx:
+        # Extra arguments are forwarded to the worker class. Depending on
+        # whether we use the nanny or not, the error treatment is quite
+        # different and we should assert that an exception is raised
+        async with cluster:
+            pass
 
 
 @gen_test()
@@ -1247,7 +1257,14 @@ class MyPlugin:
 
 @pytest.mark.slow
 def test_localcluster_start_exception(loop):
-    with raises_with_cause(RuntimeError, None, ImportError, "my_nonexistent_library"):
+    with raises_with_cause(
+        RuntimeError,
+        "Nanny failed to start",
+        RuntimeError,
+        "Worker failed to start",
+        ImportError,
+        "my_nonexistent_library",
+    ):
         with LocalCluster(
             n_workers=1,
             threads_per_worker=1,

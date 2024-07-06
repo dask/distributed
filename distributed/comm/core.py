@@ -7,7 +7,6 @@ import random
 import sys
 import weakref
 from abc import ABC, abstractmethod
-from contextlib import suppress
 from typing import Any, ClassVar
 
 import dask
@@ -264,20 +263,8 @@ class Listener(ABC):
     ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
-        timeout = dask.config.get("distributed.comm.timeouts.connect")
-        timeout = parse_timedelta(timeout, default="seconds")
-        try:
-            # Timeout is to ensure that we'll terminate connections eventually.
-            # Connector side will employ smaller timeouts and we should only
-            # reach this if the comm is dead anyhow.
-            await wait_for(comm.write(local_info), timeout=timeout)
-            handshake = await wait_for(comm.read(), timeout=timeout)
-            # This would be better, but connections leak if worker is closed quickly
-            # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-        except Exception as e:
-            with suppress(Exception):
-                await comm.close()
-            raise CommClosedError(f"Comm {comm!r} closed.") from e
+        await comm.write(local_info)
+        handshake = await comm.read()
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm.peer_address
@@ -287,6 +274,25 @@ class Listener(ABC):
         comm.handshake_options = comm.handshake_configuration(
             comm.local_info, comm.remote_info
         )
+
+
+class BaseListener(Listener):
+    def __init__(self) -> None:
+        self.__comms: set[Comm] = set()
+
+    async def on_connection(
+        self, comm: Comm, handshake_overrides: dict[str, Any] | None = None
+    ) -> None:
+        self.__comms.add(comm)
+        try:
+            return await super().on_connection(comm, handshake_overrides)
+        finally:
+            self.__comms.discard(comm)
+
+    def abort_handshaking_comms(self) -> None:
+        comms, self.__comms = self.__comms, set()
+        for comm in comms:
+            comm.abort()
 
 
 class Connector(ABC):
@@ -367,17 +373,8 @@ async def connect(
         **comm.handshake_info(),
         **(handshake_overrides or {}),
     }
-    try:
-        # This would be better, but connections leak if worker is closed quickly
-        # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-        handshake = await wait_for(comm.read(), time_left())
-        await wait_for(comm.write(local_info), time_left())
-    except Exception as exc:
-        with suppress(Exception):
-            await comm.close()
-        raise OSError(
-            f"Timed out during handshake while connecting to {addr} after {timeout} s"
-        ) from exc
+    await comm.write(local_info)
+    handshake = await comm.read()
 
     comm.remote_info = handshake
     comm.remote_info["address"] = comm._peer_addr
@@ -387,6 +384,7 @@ async def connect(
     comm.handshake_options = comm.handshake_configuration(
         comm.local_info, comm.remote_info
     )
+    logger.debug("Connection to %s established", loc)
     return comm
 
 

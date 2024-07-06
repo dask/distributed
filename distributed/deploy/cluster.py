@@ -6,7 +6,6 @@ import logging
 import uuid
 import warnings
 from contextlib import suppress
-from inspect import isawaitable
 from typing import Any
 
 from packaging.version import parse as parse_version
@@ -32,9 +31,6 @@ from distributed.utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-no_default = "__no_default__"
 
 
 class Cluster(SyncMethodMixin):
@@ -72,6 +68,7 @@ class Cluster(SyncMethodMixin):
         scheduler_sync_interval=1,
     ):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        self.__asynchronous = asynchronous
 
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
@@ -114,6 +111,15 @@ class Cluster(SyncMethodMixin):
         if value is None:
             raise ValueError("expected an IOLoop, got None")
         self.__loop = value
+
+    @property
+    def called_from_running_loop(self):
+        try:
+            return (
+                getattr(self.loop, "asyncio_loop", None) is asyncio.get_running_loop()
+            )
+        except RuntimeError:
+            return self.__asynchronous
 
     @property
     def name(self):
@@ -161,11 +167,6 @@ class Cluster(SyncMethodMixin):
                     value=self._cluster_info.copy(),
                 )
                 err_count = 0
-            except asyncio.CancelledError:
-                # Task is being closed. When we drop Python < 3.8 we can drop
-                # this check (since CancelledError is not a subclass of
-                # Exception then).
-                break
             except Exception:
                 err_count += 1
                 # Only warn if multiple subsequent attempts fail, and only once
@@ -211,16 +212,17 @@ class Cluster(SyncMethodMixin):
 
         self.status = Status.closed
 
-    def close(self, timeout=None):
+    def close(self, timeout: float | None = None) -> Any:
         # If the cluster is already closed, we're already done
         if self.status == Status.closed:
             if self.asynchronous:
                 return NoOpAwaitable()
-            else:
-                return
+            return None
 
-        with suppress(RuntimeError):  # loop closed during process shutdown
+        try:
             return self.sync(self._close, callback_timeout=timeout)
+        except RuntimeError:  # loop closed during process shutdown
+            return None
 
     def __del__(self, _warn=warnings.warn):
         if getattr(self, "status", Status.closed) != Status.closed:
@@ -524,10 +526,16 @@ class Cluster(SyncMethodMixin):
             display(mimebundle, raw=True)
 
     def __enter__(self):
+        if self.asynchronous:
+            raise TypeError(
+                "Used 'with' with asynchronous class; please use 'async with'"
+            )
+
         return self.sync(self.__aenter__)
 
     def __exit__(self, exc_type, exc_value, traceback):
-        return self.sync(self.__aexit__, exc_type, exc_value, traceback)
+        aw = self.close()
+        assert aw is None, aw
 
     def __await__(self):
         return self
@@ -538,9 +546,7 @@ class Cluster(SyncMethodMixin):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        f = self.close()
-        if isawaitable(f):
-            await f
+        await self._close()
 
     @property
     def scheduler_address(self) -> str:
@@ -612,9 +618,7 @@ class Cluster(SyncMethodMixin):
 
             self.scheduler_info = SchedulerInfo(await self.scheduler_comm.identity())
 
-    def wait_for_workers(
-        self, n_workers: int | str = no_default, timeout: float | None = None
-    ) -> None:
+    def wait_for_workers(self, n_workers: int, timeout: float | None = None) -> None:
         """Blocking call to wait for n workers before continuing
 
         Parameters
@@ -625,13 +629,7 @@ class Cluster(SyncMethodMixin):
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
         """
-        if n_workers is no_default:
-            warnings.warn(
-                "Please specify the `n_workers` argument when using `Client.wait_for_workers`. Not specifying `n_workers` will no longer be supported in future versions.",
-                FutureWarning,
-            )
-            n_workers = 0
-        elif not isinstance(n_workers, int) or n_workers < 1:
+        if not isinstance(n_workers, int) or n_workers < 1:
             raise ValueError(
                 f"`n_workers` must be a positive integer. Instead got {n_workers}."
             )

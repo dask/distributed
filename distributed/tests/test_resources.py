@@ -6,7 +6,6 @@ import pytest
 
 import dask
 from dask import delayed
-from dask.utils import stringify
 
 from distributed import Lock, Worker
 from distributed.client import wait
@@ -223,9 +222,9 @@ async def test_resources_str(c, s, a, b):
     yy = y.persist(resources={"MyRes": 1})
     await wait(yy)
 
-    ts_first = s.tasks[stringify(y.__dask_keys__()[0])]
+    ts_first = s.tasks[y.__dask_keys__()[0]]
     assert ts_first.resource_restrictions == {"MyRes": 1}
-    ts_last = s.tasks[stringify(y.__dask_keys__()[-1])]
+    ts_last = s.tasks[y.__dask_keys__()[-1]]
     assert ts_last.resource_restrictions == {"MyRes": 1}
 
 
@@ -404,7 +403,9 @@ async def test_set_resources(c, s, a):
     ],
 )
 async def test_persist_collections(c, s, a, b):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     x = da.arange(10, chunks=(5,))
     with dask.annotate(resources={"A": 1}):
         y = x.map_blocks(lambda x: x + 1)
@@ -415,7 +416,7 @@ async def test_persist_collections(c, s, a, b):
 
     await wait([ww, yy])
 
-    assert all(stringify(key) in a.data for key in y.__dask_keys__())
+    assert all(key in a.data for key in y.__dask_keys__())
 
 
 @pytest.mark.skip(reason="Should protect resource keys from optimization")
@@ -427,7 +428,9 @@ async def test_persist_collections(c, s, a, b):
     ],
 )
 async def test_dont_optimize_out(c, s, a, b):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     x = da.arange(10, chunks=(5,))
     y = x.map_blocks(lambda x: x + 1)
     z = y.map_blocks(lambda x: 2 * x)
@@ -435,7 +438,7 @@ async def test_dont_optimize_out(c, s, a, b):
 
     await c.compute(w, resources={tuple(y.__dask_keys__()): {"A": 1}})
 
-    for key in map(stringify, y.__dask_keys__()):
+    for key in y.__dask_keys__():
         assert "executing" in str(a.state.story(key))
 
 
@@ -448,6 +451,7 @@ async def test_dont_optimize_out(c, s, a, b):
     ],
 )
 async def test_full_collections(c, s, a, b):
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     df = dd.demo.make_timeseries(
         freq="60s", partition_freq="1d", start="2000-01-01", end="2000-01-31"
@@ -472,6 +476,7 @@ async def test_full_collections(c, s, a, b):
     ],
 )
 def test_collections_get(client, optimize_graph, s, a, b):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
     async def f(dask_worker):

@@ -34,6 +34,15 @@ def test_SystemMonitor():
     assert "cpu" in repr(sm)
 
 
+def test_maxlen_zero():
+    """maxlen is floored to 1 otherwise recent() would not work"""
+    sm = SystemMonitor(maxlen=0)
+    sm.update()
+    sm.update()
+    assert len(sm.quantities["memory"]) == 1
+    assert sm.recent()["memory"] == sm.quantities["memory"][-1]
+
+
 def test_count():
     sm = SystemMonitor(maxlen=5)
     assert sm.count == 1

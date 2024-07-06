@@ -8,7 +8,7 @@ from contextlib import suppress
 
 from tlz import merge
 
-from dask.utils import parse_timedelta, stringify
+from dask.utils import parse_timedelta
 
 from distributed.client import Future
 from distributed.metrics import time
@@ -184,9 +184,7 @@ class Variable:
 
     async def _set(self, value):
         if isinstance(value, Future):
-            await self.client.scheduler.variable_set(
-                key=stringify(value.key), name=self.name
-            )
+            await self.client.scheduler.variable_set(key=value.key, name=self.name)
         else:
             await self.client.scheduler.variable_set(data=value, name=self.name)
 

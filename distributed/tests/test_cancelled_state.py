@@ -14,6 +14,7 @@ from distributed.utils_test import (
     _LockedCommPool,
     assert_story,
     async_poll_for,
+    freeze_batched_send,
     gen_cluster,
     inc,
     lock_inc,
@@ -168,7 +169,11 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         with lock:
             return x + 1
 
-    async with BrokenWorker(s.address) as a:
+    async with BrokenWorker(
+        s.address,
+        # heartbeat will close a worker after remove_worker(close=False)
+        heartbeat_interval="100s",
+    ) as a:
         await c.wait_for_workers(2)
         fut1 = c.submit(
             blockable_compute,
@@ -266,7 +271,11 @@ def test_flight_cancelled_error(ws):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_in_flight_lost_after_resumed(c, s, b):
-    async with BlockedGetData(s.address) as a:
+    async with BlockedGetData(
+        s.address,
+        # heartbeat will close a worker after remove_worker(close=False)
+        heartbeat_interval="100s",
+    ) as a:
         fut1 = c.submit(inc, 1, workers=[a.address], key="fut1")
         # Ensure fut1 is in memory but block any further execution afterwards to
         # ensure we control when the recomputation happens
@@ -281,7 +290,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         s.set_restrictions({fut1.key: [a.address, b.address]})
         # It is removed, i.e. get_data is guaranteed to fail and f1 is scheduled
         # to be recomputed on B
-        await s.remove_worker(a.address, stimulus_id="foo", close=False, safe=True)
+        await s.remove_worker(a.address, stimulus_id="foo", close=False, expected=True)
 
         await wait_for_state(fut1.key, "resumed", b, interval=0)
 
@@ -488,6 +497,8 @@ async def test_resumed_cancelled_handle_compute(
         await lock_compute.release()
         await exit_compute.wait()
 
+        await async_poll_for(lambda: f3.key not in b.state.tasks, timeout=5)
+
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[a.address])
     f3 = c.submit(inc, f2, key="f3", workers=[b.address])
@@ -569,8 +580,7 @@ async def test_resumed_cancelled_handle_compute(
         )
 
     elif wait_for_processing and raise_error:
-        with pytest.raises(RuntimeError, match="test error"):
-            await f3
+        assert await f4 == 4 + 2
 
         assert_story(
             b.state.story(f3.key),
@@ -581,20 +591,31 @@ async def test_resumed_cancelled_handle_compute(
                 (f3.key, "resumed", "released", "cancelled", {}),
                 (f3.key, "cancelled", "waiting", "executing", {}),
                 (f3.key, "executing", "error", "error", {}),
-                # FIXME: (distributed#7489)
+                (
+                    f3.key,
+                    "error",
+                    "released",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
             ],
         )
     else:
         assert False, "unreachable"
 
 
+@pytest.mark.parametrize("raise_error", [True, False])
 @gen_cluster(client=True)
-async def test_cancelled_handle_compute(c, s, a, b):
+async def test_cancelled_handle_compute(c, s, a, b, raise_error):
     """
     Given the history of a task
     executing -> cancelled
 
-    A handle_compute should properly restore executing.
+    A handle_compute should cause the result of the cancelled task to be rejected
+    by the scheduler and the task to be re-run.
 
     See Also
     --------
@@ -611,6 +632,8 @@ async def test_cancelled_handle_compute(c, s, a, b):
     def block(x, lock, enter_event, exit_event):
         enter_event.set()
         with lock:
+            if raise_error:
+                raise RuntimeError("test error")
             return x + 1
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
@@ -650,22 +673,151 @@ async def test_cancelled_handle_compute(c, s, a, b):
 
     assert await f4 == 4 + 2
 
-    story = b.state.story(f3.key)
+    if raise_error:
+        assert_story(
+            b.state.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "waiting", "executing", {}),
+                (f3.key, "executing", "error", "error", {}),
+                (
+                    f3.key,
+                    "error",
+                    "released",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
+            ],
+        )
+    else:
+        assert_story(
+            b.state.story(f3.key),
+            expect=[
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "released", "cancelled", {}),
+                (f3.key, "cancelled", "waiting", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
+                (
+                    f3.key,
+                    "memory",
+                    "released",
+                    "released",
+                    {f2.key: "released", f3.key: "forgotten"},
+                ),
+                (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+                (f3.key, "ready", "executing", "executing", {}),
+                (f3.key, "executing", "memory", "memory", {}),
+            ],
+        )
+
+
+@gen_cluster(client=True)
+async def test_cancelled_task_error_rejected(c, s, a, b):
+    """
+    Given the history of a task
+    executing -> cancelled
+
+    An error in the cancelled task is rejected by the scheduler and superseded
+    by a more recent run on another worker.
+
+    """
+    # This test is heavily using set_restrictions to simulate certain scheduler
+    # decisions of placing keys
+
+    lock_erring = Lock()
+    enter_compute_erring = Event()
+    exit_compute_erring = Event()
+    lock_successful = Lock()
+    enter_compute_successful = Event()
+    exit_compute_successful = Event()
+
+    await lock_erring.acquire()
+    await lock_successful.acquire()
+
+    def block(x, lock, enter_event, exit_event, raise_error):
+        enter_event.set()
+        try:
+            with lock:
+                if raise_error:
+                    raise RuntimeError("test_error")
+                return x + 1
+        finally:
+            exit_event.set()
+
+    f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+    f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+    f3 = c.submit(
+        block,
+        f2,
+        lock=lock_erring,
+        enter_event=enter_compute_erring,
+        exit_event=exit_compute_erring,
+        raise_error=True,
+        key="f3",
+        workers=[b.address],
+    )
+
+    f4 = c.submit(sum, [f1, f3], key="f4", workers=[b.address])
+
+    await enter_compute_erring.wait()
+
+    async def release_all_futures():
+        futs = [f1, f2, f3, f4]
+        for fut in futs:
+            fut.release()
+
+        while any(fut.key in s.tasks for fut in futs):
+            await asyncio.sleep(0.05)
+
+    with freeze_batched_send(s.stream_comms[b.address]):
+        await release_all_futures()
+
+        f1 = c.submit(inc, 1, key="f1", workers=[a.address])
+        f2 = c.submit(inc, f1, key="f2", workers=[a.address])
+        f3 = c.submit(
+            block,
+            f2,
+            lock=lock_successful,
+            enter_event=enter_compute_successful,
+            exit_event=exit_compute_successful,
+            raise_error=False,
+            key="f3",
+            workers=[a.address],
+        )
+        f4 = c.submit(sum, [f1, f3], key="f4", workers=[b.address])
+
+        await wait_for_state(f3.key, "processing", s)
+        await enter_compute_successful.wait()
+
+        await lock_erring.release()
+        await wait_for_state(f3.key, "error", b)
+
+    await lock_successful.release()
+    assert await f4 == 4 + 2
+
     assert_story(
         b.state.story(f3.key),
         expect=[
             (f3.key, "ready", "executing", "executing", {}),
-            (f3.key, "executing", "released", "cancelled", {}),
-            (f3.key, "cancelled", "waiting", "executing", {}),
-            (f3.key, "executing", "memory", "memory", {}),
+            (f3.key, "executing", "error", "error", {}),
             (
                 f3.key,
-                "memory",
+                "error",
                 "released",
                 "released",
-                {f2.key: "released", f3.key: "forgotten"},
+                {f3.key: "forgotten"},
             ),
-            (f3.key, "released", "forgotten", "forgotten", {f2.key: "forgotten"}),
+            (f3.key, "released", "forgotten", "forgotten", {}),
+        ],
+    )
+
+    assert_story(
+        a.state.story(f3.key),
+        expect=[
             (f3.key, "ready", "executing", "executing", {}),
             (f3.key, "executing", "memory", "memory", {}),
         ],
@@ -698,7 +850,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
 
         await s.remove_worker(
             address=x.address,
-            safe=True,
+            expected=True,
             close=close_worker,
             stimulus_id="remove-worker",
         )
@@ -787,7 +939,7 @@ def test_workerstate_executing_failure_to_fetch(ws_with_running_task):
     - executing -> long-running -> cancelled -> resumed(fetch)
 
     The task execution later terminates with a failure.
-    This is an edge case interaction between work stealing and a task that does not
+    This is an edge case interaction involving task cancellation and a task that does not
     deterministically succeed or fail when run multiple times or on different workers.
 
     Test that the task is fetched from the other worker. This is to avoid having to deal
@@ -967,12 +1119,11 @@ def test_workerstate_resumed_waiting_to_flight(ws):
     assert ws.tasks["x"].state == "flight"
 
 
-@pytest.mark.parametrize("critical_section", ["execute", "deserialize_task"])
 @pytest.mark.parametrize("resume_inside_critical_section", [False, True])
 @pytest.mark.parametrize("resumed_status", ["executing", "resumed"])
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_execute_preamble_early_cancel(
-    c, s, b, critical_section, resume_inside_critical_section, resumed_status
+    c, s, b, resume_inside_critical_section, resumed_status
 ):
     """Test multiple race conditions in the preamble of Worker.execute(), which used to
     cause a task to remain permanently in resumed state or to crash the worker through
@@ -985,15 +1136,8 @@ async def test_execute_preamble_early_cancel(
     test_worker.py::test_execute_preamble_abort_retirement
     """
     async with BlockedExecute(s.address) as a:
-        if critical_section == "execute":
-            in_ev = a.in_execute
-            block_ev = a.block_execute
-            a.block_deserialize_task.set()
-        else:
-            assert critical_section == "deserialize_task"
-            in_ev = a.in_deserialize_task
-            block_ev = a.block_deserialize_task
-            a.block_execute.set()
+        in_ev = a.in_execute
+        block_ev = a.block_execute
 
         async def resume():
             if resumed_status == "executing":

@@ -26,9 +26,11 @@ dask_scheduler_clients
     Number of clients connected
 dask_scheduler_desired_workers
     Number of workers scheduler needs for task graph
-dask_scheduler_gil_contention_total
-    Value representing cumulative total of GIL contention,
-    in the form of summed percentages.
+dask_scheduler_gil_contention_seconds_total
+    Value representing cumulative total of *potential* GIL contention,
+    in the form of cumulative seconds during which any thread held the GIL locked.
+    Other threads may or may not have been actually trying to acquire the GIL in the
+    meantime.
 
     .. note::
        Requires ``gilknocker`` to be installed, and 
@@ -60,6 +62,8 @@ dask_scheduler_tasks_output_bytes
     Note that when a task output is transferred between worker, you'll typically end up
     with a duplicate, so this measure is going to be lower than the actual cluster-wide
     managed memory. See also ``dask_worker_memory_bytes``, which does count duplicates.
+dask_scheduler_task_groups
+    Number of task groups known by scheduler
 dask_scheduler_prefix_state_totals_total
     Accumulated count of task prefix in each state
 dask_scheduler_tick_count_total
@@ -128,9 +132,11 @@ dask_worker_tasks
     Number of tasks at worker
 dask_worker_threads
     Number of worker threads
-dask_worker_gil_contention_total
-    Value representing cumulative total GIL contention on worker,
-    in the form of summed percentages.
+dask_worker_gil_contention_seconds_total
+    Value representing cumulative total of *potential* GIL contention,
+    in the form of cumulative seconds during which any thread held the GIL locked.
+    Other threads may or may not have been actually trying to acquire the GIL in the
+    meantime.
 
     .. note::
        Requires ``gilknocker`` to be installed, and

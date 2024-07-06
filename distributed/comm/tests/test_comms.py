@@ -13,7 +13,6 @@ import dask
 
 from distributed.comm import (
     CommClosedError,
-    asyncio_tcp,
     connect,
     get_address_host,
     get_local_address_for,
@@ -25,9 +24,12 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.registry import backends, get_backend
-from distributed.compatibility import to_thread
+from distributed.comm.tcp import get_stream_address
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
+from distributed.protocol.utils_test import get_host_array
 from distributed.utils import get_ip, get_ipv6, get_mp_context, wait_for
 from distributed.utils_test import (
     gen_test,
@@ -41,13 +43,13 @@ from distributed.utils_test import (
 EXTERNAL_IP4 = get_ip()
 
 
-@pytest.fixture(params=["tornado", "asyncio"])
+@pytest.fixture(params=["tornado"])
 def tcp(monkeypatch, request):
     """Set the TCP backend to either tornado or asyncio"""
     if request.param == "tornado":
         import distributed.comm.tcp as tcp
     else:
-        import distributed.comm.asyncio_tcp as tcp
+        raise NotImplementedError()
     monkeypatch.setitem(backends, "tcp", tcp.TCPBackend())
     monkeypatch.setitem(backends, "tls", tcp.TLSBackend())
     return tcp
@@ -337,8 +339,6 @@ async def test_comm_failure_threading(tcp):
     We only assert for PY3, because the thread limit only is
     set for python 3.  See github PR #2403 discussion for info.
     """
-    if tcp is asyncio_tcp:
-        pytest.skip("not applicable for asyncio")
 
     async def sleep_for_60ms():
         max_thread_count = 0
@@ -439,7 +439,9 @@ async def run_coro_in_thread(func, *args, **kwargs):
         t = asyncio.create_task(func(*args, **kwargs))
         return await wait_for(t, timeout=10)
 
-    return await to_thread(asyncio.run, run_with_timeout())
+    return await asyncio.to_thread(
+        asyncio_run, run_with_timeout(), loop_factory=get_loop_factory()
+    )
 
 
 @gen_test()
@@ -882,8 +884,6 @@ async def test_comm_closed_on_write_error(tcp, exc_type):
     # Internal errors from comm.stream.write, such as
     # BufferError should lead to the stream being closed
     # and not re-used. See GitHub #4133
-    if tcp is asyncio_tcp:
-        pytest.skip("Not applicable for asyncio")
 
     reader, writer = await get_tcp_comm_pair()
 
@@ -902,9 +902,6 @@ async def test_comm_closed_on_write_error(tcp, exc_type):
 
 @gen_test()
 async def test_comm_closed_on_read_error(tcp):
-    if tcp is asyncio_tcp:
-        pytest.skip("Not applicable for asyncio")
-
     reader, writer = await get_tcp_comm_pair()
 
     with pytest.raises(asyncio.TimeoutError):
@@ -962,6 +959,7 @@ async def test_retry_connect(tcp, monkeypatch):
         listener.stop()
 
 
+@pytest.mark.slow
 @gen_test()
 async def test_handshake_slow_comm(tcp, monkeypatch):
     class SlowComm(tcp.TCP):
@@ -996,11 +994,9 @@ async def test_handshake_slow_comm(tcp, monkeypatch):
 
         import dask
 
-        with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-            with pytest.raises(
-                IOError, match="Timed out during handshake while connecting to"
-            ):
-                await connect(listener.contact_address)
+        # The connect itself is fast. Only the handshake is slow
+        with dask.config.set({"distributed.comm.timeouts.connect": "500ms"}):
+            await connect(listener.contact_address)
     finally:
         listener.stop()
 
@@ -1341,6 +1337,15 @@ async def test_tcp_adresses(tcp):
 
 
 @gen_test()
+async def test_get_stream_address_raises_if_closed():
+    a, b = await get_tcp_comm_pair()
+    a.abort()
+    with pytest.raises(OSError):
+        get_stream_address(a)
+    b.abort()
+
+
+@gen_test()
 async def test_tls_adresses(tcp):
     a, b = await get_tls_comm_pair()
     await check_addresses(a, b)
@@ -1367,3 +1372,89 @@ def test_register_backend_entrypoint(tmp_path):
     with get_mp_context().Pool(1) as pool:
         assert pool.apply(_get_backend_on_path, args=(tmp_path,)) == 1
     pool.join()
+
+
+class OpaqueList(list):
+    """Don't let the serialization layer travese this object"""
+
+    pass
+
+
+@pytest.mark.parametrize(
+    "list_cls",
+    [
+        list,  # Use protocol.numpy.serialize_numpy_array / deserialize_numpy_array
+        OpaqueList,  # Use generic pickle.dumps / pickle.loads
+    ],
+)
+@gen_test()
+async def test_do_not_share_buffers(tcp, list_cls):
+    """Test that two objects with buffer interface in the same message do not share
+    their buffer upon deserialization
+
+    See Also
+    --------
+    test_share_buffer_with_header
+    test_ucx.py::test_do_not_share_buffers
+    """
+    np = pytest.importorskip("numpy")
+
+    async def handle_comm(comm):
+        msg = await comm.read()
+        msg["data"] = to_serialize(list_cls([np.array([1, 2]), np.array([3, 4])]))
+        await comm.write(msg)
+        await comm.close()
+
+    listener = await tcp.TCPListener("127.0.0.1", handle_comm)
+    comm = await connect(listener.contact_address)
+
+    await comm.write({"op": "ping"})
+    msg = await comm.read()
+    await comm.close()
+
+    a, b = msg["data"]
+    assert get_host_array(a) is not get_host_array(b)
+
+
+@pytest.mark.parametrize(
+    "nbytes_np,nbytes_other,expect_separate_buffer",
+    [
+        (1, 0, False),  # <2 kiB (including prologue and msgpack header)
+        (1, 1800, False),  # <2 kiB
+        (1, 2100, True),  # >2 kiB
+        (200_000, 9500, False),  # <5% of numpy array
+        (200_000, 10500, True),  # >5% of numpy array
+        (350_000, 0, False),  # sharded buffer
+    ],
+)
+@gen_test()
+async def test_share_buffer_with_header(
+    tcp, nbytes_np, nbytes_other, expect_separate_buffer
+):
+    """Test that a numpy or parquet object shares the buffer with its serialized header
+    to improve performance, but only as long as the header is trivial in size.
+
+    See Also
+    --------
+    test_do_not_share_buffers
+    """
+    np = pytest.importorskip("numpy")
+
+    async def handle_comm(comm):
+        comm.max_shard_size = 250_000
+        msg = await comm.read()
+        msg["np"] = to_serialize(np.random.randint(0, 256, nbytes_np, dtype="u1"))
+        msg["other"] = np.random.bytes(nbytes_other)
+        await comm.write(msg)
+        await comm.close()
+
+    listener = await tcp.TCPListener("127.0.0.1", handle_comm)
+    comm = await connect(listener.contact_address)
+
+    await comm.write({"op": "ping"})
+    msg = await comm.read()
+    await comm.close()
+
+    a = msg["np"]
+    ha = get_host_array(a)
+    assert (ha.nbytes == a.nbytes) == expect_separate_buffer

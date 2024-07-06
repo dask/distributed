@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
+import random
 import socket
 import sys
 import threading
@@ -15,6 +17,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed.batched import BatchedSend
 from distributed.comm.core import CommClosedError
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend, TCPListener
@@ -333,7 +336,7 @@ async def test_server_listen():
         if has_ipv6():
             EXTERNAL_IP6 = get_ipv6()
     except socket.gaierror:
-        raise pytest.skip("no network access")
+        pytest.skip("no network access")
 
     from contextlib import asynccontextmanager
 
@@ -768,6 +771,9 @@ async def test_connection_pool():
         assert time() < start + 2
 
     await rpc.close()
+    with pytest.raises(RuntimeError, match=r"ConnectionPool is closed"):
+        await rpc(ip="127.0.0.1", port=s.port).ping()
+
     await asyncio.gather(*[server.close() for server in servers])
 
 
@@ -879,6 +885,30 @@ async def test_remove_cancels_connect_attempts():
             remove_address(),
         )
     assert connect_finished.cancelled()
+
+
+@gen_test()
+async def test_remove_cancels_connect_before_task_running():
+    loop = asyncio.get_running_loop()
+    connect_finished = loop.create_future()
+
+    async def connect(*args, **kwargs):
+        await connect_finished
+
+    async def connect_to_server():
+        with pytest.raises(CommClosedError, match="Address removed."):
+            await rpc.connect("tcp://0.0.0.0")
+        return True
+
+    rpc = await ConnectionPool(limit=1)
+    with mock.patch("distributed.core.connect", connect):
+        t1 = asyncio.create_task(connect_to_server())
+        # Cancel the actual connect task before it can even run
+        while not rpc._connecting:
+            await asyncio.sleep(0)
+        rpc.remove("tcp://0.0.0.0")
+
+        assert await t1
 
 
 @gen_test()
@@ -1022,7 +1052,7 @@ async def test_tick_logging(s, a, b):
 @pytest.mark.parametrize("serialize", [echo_serialize, echo_no_serialize])
 @gen_test()
 async def test_compression(compression, serialize):
-    with dask.config.set(compression=compression):
+    with dask.config.set({"distributed.comm.compression": compression}):
         async with Server({"echo": serialize}) as server:
             await server.listen("tcp://")
 
@@ -1373,7 +1403,106 @@ class TCPAsyncListenerBackend(TCPBackend):
 @gen_test()
 async def test_async_listener_stop(monkeypatch):
     monkeypatch.setitem(backends, "tcp", TCPAsyncListenerBackend())
-    with pytest.warns(PendingDeprecationWarning):
+    with pytest.warns(DeprecationWarning):
         async with Server({}) as s:
             await s.listen(0)
             assert s.listeners
+
+
+@gen_test()
+async def test_messages_are_ordered_bsend():
+    ledger = []
+
+    async def async_handler(val):
+        await asyncio.sleep(0.01 * random.random())
+        ledger.append(val)
+
+    def sync_handler(val):
+        ledger.append(val)
+
+    async with Server(
+        {},
+        stream_handlers={
+            "sync_handler": sync_handler,
+            "async_handler": async_handler,
+        },
+    ) as s:
+        await s.listen()
+        comm = await connect(s.address)
+        try:
+            b = BatchedSend(interval=10)
+            try:
+                await comm.write({"op": "connection_stream"})
+                b.start(comm)
+                n = 100
+                for ix in range(n):
+                    if ix % 2:
+                        b.send({"op": "sync_handler", "val": ix})
+                    else:
+                        b.send({"op": "async_handler", "val": ix})
+                while not len(ledger) == n:
+                    await asyncio.sleep(0.01)
+                assert ledger == list(range(n))
+            finally:
+                await b.close()
+        finally:
+            await comm.close()
+
+
+@gen_test()
+async def test_messages_are_ordered_raw():
+    ledger = []
+
+    async def async_handler(val):
+        await asyncio.sleep(0.01 * random.random())
+        ledger.append(val)
+
+    def sync_handler(val):
+        ledger.append(val)
+
+    async with Server(
+        {},
+        stream_handlers={
+            "sync_handler": sync_handler,
+            "async_handler": async_handler,
+        },
+    ) as s:
+        await s.listen()
+        comm = await connect(s.address)
+        try:
+            await comm.write({"op": "connection_stream"})
+            n = 100
+            for ix in range(n):
+                if ix % 2:
+                    await comm.write({"op": "sync_handler", "val": ix})
+                else:
+                    await comm.write({"op": "async_handler", "val": ix})
+            while not len(ledger) == n:
+                await asyncio.sleep(0.01)
+            assert ledger == list(range(n))
+        finally:
+            await comm.close()
+
+
+@pytest.mark.slow
+@gen_test(timeout=180)
+async def test_large_payload(caplog):
+    """See also: protocol/tests/test_protocol.py::test_large_payload"""
+    critical_size = 2**31 + 1  # >2 GiB
+    data = b"0" * critical_size
+
+    async with Server({"echo": echo_serialize}) as server:
+        await server.listen(0)
+        comm = await connect(server.address)
+
+        # FIXME https://github.com/dask/distributed/issues/8465
+        # At debug level, messages are dumped into the log. By default, pytest captures
+        # all logs, which would make this test extremely expensive to run.
+        with caplog.at_level(logging.INFO, logger="distributed.core"):
+            # Note: if we wrap data in to_serialize, it will be sent as a buffer, which
+            # is not encoded by msgpack.
+            await comm.write({"op": "echo", "x": data})
+            response = await comm.read()
+
+        assert response["result"] == data
+        await comm.close()

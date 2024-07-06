@@ -12,11 +12,10 @@ import threading
 import uuid
 import warnings
 import weakref
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from time import sleep as sync_sleep
-from typing import TYPE_CHECKING, Callable, ClassVar, Literal
+from typing import ClassVar, Literal, cast
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -28,16 +27,19 @@ from dask.utils import parse_timedelta
 from distributed import preloading
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
+from distributed.compatibility import asyncio_run
+from distributed.config import get_loop_factory
 from distributed.core import (
     AsyncTaskGroupClosedError,
     CommClosedError,
     ErrorMessage,
+    OKMessage,
     RPCClosed,
     Status,
     coerce_to_address,
     error_message,
 )
-from distributed.diagnostics.plugin import _get_plugin_name
+from distributed.diagnostics.plugin import NannyPlugin, _get_plugin_name
 from distributed.metrics import time
 from distributed.node import ServerNode
 from distributed.process import AsyncProcess
@@ -60,9 +62,6 @@ from distributed.worker_memory import (
     DeprecatedMemoryMonitor,
     NannyMemoryManager,
 )
-
-if TYPE_CHECKING:
-    from distributed.diagnostics.plugin import NannyPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +233,13 @@ class Nanny(ServerNode):
         self.Worker = Worker if worker_class is None else worker_class
 
         self.pre_spawn_env = _get_env_variables("distributed.nanny.pre-spawn-environ")
+        # To get consistent hashing on subprocesses, we need to set a consistent seed for
+        # the Python hash algorithm; xref https://github.com/dask/distributed/pull/8400
+        if self.pre_spawn_env.get("PYTHONHASHSEED") in (None, "0"):
+            # This number is arbitrary; it was chosen to commemorate
+            # https://github.com/dask/dask/issues/6640.
+            self.pre_spawn_env.update({"PYTHONHASHSEED": "6640"})
+
         self.env = merge(
             self.pre_spawn_env,
             _get_env_variables("distributed.nanny.environ"),
@@ -347,19 +353,36 @@ class Nanny(ServerNode):
 
         self.ip = get_address_host(self.address)
 
-        for preload in self.preloads:
-            await preload.start()
+        await self.preloads.start()
+        saddr = self.scheduler.addr
+        comm = await self.rpc.connect(saddr)
+        comm.name = "Nanny->Scheduler (registration)"
 
-        msg = await self.scheduler.register_nanny()
-        for name, plugin in msg["nanny-plugins"].items():
-            await self.plugin_add(plugin=plugin, name=name)
+        try:
+            await comm.write({"op": "register_nanny", "address": self.address})
+            msg = await comm.read()
+            try:
+                for name, plugin in msg["nanny-plugins"].items():
+                    await self.plugin_add(plugin=plugin, name=name)
 
-        logger.info("        Start Nanny at: %r", self.address)
-        response = await self.instantiate()
+                logger.info("        Start Nanny at: %r", self.address)
+                response = await self.instantiate()
 
-        if response != Status.running:
-            await self.close(reason="nanny-start-failed")
-            return
+                if response != Status.running:
+                    raise RuntimeError("Nanny failed to start worker process")
+            except Exception:
+                try:
+                    await comm.write({"status": "error"})
+
+                # If self.instantiate() failed, the comm will already be closed.
+                except CommClosedError:
+                    pass
+                await self.close(reason="nanny-start-failed")
+                raise
+            else:
+                await comm.write({"status": "ok"})
+        finally:
+            await comm.close()
 
         assert self.worker_address
 
@@ -367,17 +390,14 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout: float = 2, reason: str = "nanny-kill") -> None:
+    async def kill(self, timeout: float = 5, reason: str = "nanny-kill") -> None:
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
         informed
         """
-        if self.process is None:
-            return
-
-        deadline = time() + timeout
-        await self.process.kill(reason=reason, timeout=0.8 * (deadline - time()))
+        if self.process is not None:
+            await self.process.kill(reason=reason, timeout=timeout)
 
     async def instantiate(self) -> Status:
         """Start a local worker process
@@ -437,13 +457,22 @@ class Nanny(ServerNode):
         return result
 
     @log_errors
-    async def plugin_add(self, plugin=None, name=None):
+    async def plugin_add(
+        self, plugin: NannyPlugin | bytes, name: str | None = None
+    ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
+        if not isinstance(plugin, NannyPlugin):
+            warnings.warn(
+                "Registering duck-typed plugins has been deprecated. "
+                "Please make sure your plugin inherits from `NannyPlugin`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        plugin = cast(NannyPlugin, plugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
-
         assert name
 
         self.plugins[name] = plugin
@@ -455,15 +484,14 @@ class Nanny(ServerNode):
                 if isawaitable(result):
                     result = await result
             except Exception as e:
-                msg = error_message(e)
-                return msg
+                return error_message(e)
         if getattr(plugin, "restart", False):
             await self.restart(reason=f"nanny-plugin-{name}-restart")
 
         return {"status": "OK"}
 
     @log_errors
-    async def plugin_remove(self, name=None):
+    async def plugin_remove(self, name: str) -> ErrorMessage | OKMessage:
         logger.info(f"Removing Nanny plugin {name}")
         try:
             plugin = self.plugins.pop(name)
@@ -564,7 +592,7 @@ class Nanny(ServerNode):
             "Closing Nanny gracefully at %r. Reason: %s", self.address_safe, reason
         )
 
-    async def close(
+    async def close(  # type:ignore[override]
         self, timeout: float = 5, reason: str = "nanny-close"
     ) -> Literal["OK"]:
         """
@@ -580,8 +608,7 @@ class Nanny(ServerNode):
         self.status = Status.closing
         logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
 
-        for preload in self.preloads:
-            await preload.teardown()
+        await self.preloads.teardown()
 
         teardowns = [
             plugin.teardown(self)
@@ -592,11 +619,9 @@ class Nanny(ServerNode):
         await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         self.stop()
-        try:
-            if self.process is not None:
-                await self.kill(timeout=timeout, reason=reason)
-        except Exception:
-            logger.exception("Error in Nanny killing Worker subprocess")
+        if self.process is not None:
+            await self.kill(timeout=timeout, reason=reason)
+
         self.process = None
         await self.rpc.close()
         self.status = Status.closed
@@ -687,9 +712,16 @@ class WorkerProcess:
         if self.status == Status.starting:
             await self.running.wait()
             return self.status
-
-        self.init_result_q = init_q = get_mp_context().Queue()
-        self.child_stop_q = get_mp_context().Queue()
+        mp_ctx = get_mp_context()
+        self.init_result_q = mp_ctx.Queue()
+        self.child_stop_q = mp_ctx.Queue()
+        # put an empty message to start the background self._child_stop_q._thread
+        # otherwise calling .put({"op": "stop"}) later in an atexit handler
+        # results in a RuntimeError starting the thread
+        # get the message before passing child_stop_q to AsyncProcess to avoid
+        # dealing with it in watch_stop_q
+        self.child_stop_q.put(None)
+        self.child_stop_q.get()
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
@@ -737,8 +769,6 @@ class WorkerProcess:
         assert self.worker_address
         self.status = Status.running
         self.running.set()
-
-        init_q.close()
 
         return self.status
 
@@ -789,7 +819,7 @@ class WorkerProcess:
 
     async def kill(
         self,
-        timeout: float = 2,
+        timeout: float = 5,
         executor_wait: bool = True,
         reason: str = "workerprocess-kill",
     ) -> None:
@@ -818,16 +848,14 @@ class WorkerProcess:
         assert self.status in (
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
+            Status.closing_gracefully,
         ), self.status
         self.status = Status.stopping
         logger.info("Nanny asking worker to close. Reason: %s", reason)
 
         process = self.process
-        assert process
-        queue = self.child_stop_q
-        assert queue
         wait_timeout = timeout * 0.8
-        queue.put(
+        self.child_stop_q.put(
             {
                 "op": "stop",
                 "timeout": wait_timeout,
@@ -835,10 +863,8 @@ class WorkerProcess:
                 "reason": reason,
             }
         )
-        await asyncio.sleep(0)  # otherwise we get broken pipe errors
-        queue.close()
-        del queue
-
+        self.child_stop_q.close()
+        assert process is not None
         try:
             try:
                 await process.join(wait_timeout)
@@ -847,7 +873,7 @@ class WorkerProcess:
                 pass
 
             logger.warning(
-                f"Worker process still alive after {wait_timeout} seconds, killing"
+                f"Worker process still alive after {wait_timeout:.1f} seconds, killing"
             )
             await process.kill()
             await process.join(max(0, deadline - time()))
@@ -961,14 +987,8 @@ class WorkerProcess:
                 logger.exception(f"Failed to {failure_type} worker")
                 init_result_q.put({"uid": uid, "exception": e})
                 init_result_q.close()
-                # If we hit an exception here we need to wait for a least
-                # one interval for the outside to pick up this message.
-                # Otherwise we arrive in a race condition where the process
-                # cleanup wipes the queue before the exception can be
-                # properly handled. See also
-                # WorkerProcess._wait_until_connected (the 3 is for good
-                # measure)
-                sync_sleep(cls._init_msg_interval * 3)
+            finally:
+                init_result_q.join_thread()
 
         with contextlib.ExitStack() as stack:
 
@@ -996,7 +1016,7 @@ class WorkerProcess:
             if silence_logs:
                 logger.setLevel(silence_logs)
 
-            asyncio.run(run())
+            asyncio_run(run(), loop_factory=get_loop_factory())
 
 
 def _get_env_variables(config_key: str) -> dict[str, str]:
@@ -1006,5 +1026,6 @@ def _get_env_variables(config_key: str) -> dict[str, str]:
             f"{config_key} configuration must be of type dict. Instead got {type(cfg)}"
         )
     # Override dask config with explicitly defined env variables from the OS
-    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items()}
+    # Allow unsetting a variable in a config override by setting its value to None.
+    cfg = {k: os.environ.get(k, str(v)) for k, v in cfg.items() if v is not None}
     return cfg

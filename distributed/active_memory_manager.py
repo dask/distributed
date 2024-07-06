@@ -10,12 +10,14 @@ import abc
 import logging
 from collections import defaultdict
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Union
 
 import dask
+from dask.typing import Key
 from dask.utils import parse_timedelta
 
-# Needed to avoid Sphinx WARNING: more than one target found for cross-reference 'TaskState' and 'WorkerState'"
+# Needed to avoid Sphinx WARNING: more than one target found for cross-reference
+# 'TaskState' and 'WorkerState'"
 # https://github.com/agronholm/sphinx-autodoc-typehints#dealing-with-circular-imports
 from distributed import client
 from distributed import scheduler as scheduler_module
@@ -108,7 +110,6 @@ class ActiveMemoryManagerExtension:
         self.measure = measure
 
         if register:
-            scheduler.extensions["amm"] = self
             scheduler.handlers["amm_handler"] = self.amm_handler
 
         if interval is None:
@@ -255,7 +256,7 @@ class ActiveMemoryManagerExtension:
         if ts.state != "memory":
             log_reject(f"ts.state = {ts.state}")
             return None
-
+        assert ts.who_has
         if ts.actor:
             log_reject("task is an actor")
             return None
@@ -303,6 +304,9 @@ class ActiveMemoryManagerExtension:
         The worker with the highest memory usage (downstream of pending replications and
         drops), or None if no eligible candidates are available.
         """
+        if ts.who_has is None:
+            return None
+
         orig_candidates = candidates
 
         def log_reject(msg: str) -> None:
@@ -333,7 +337,7 @@ class ActiveMemoryManagerExtension:
         # The `candidates &` bit could seem redundant with `candidates -=` immediately
         # below on first look, but beware of the second use of this variable later on!
         candidates_with_dependents_processing = candidates & {
-            waiter_ts.processing_on for waiter_ts in ts.waiters
+            waiter_ts.processing_on for waiter_ts in ts.waiters or ()
         }
 
         candidates -= candidates_with_dependents_processing
@@ -389,10 +393,10 @@ class ActiveMemoryManagerExtension:
 
         validate = self.scheduler.validate
         drop_by_worker: (
-            defaultdict[scheduler_module.WorkerState, list[str]]
+            defaultdict[scheduler_module.WorkerState, list[Key]]
         ) = defaultdict(list)
         repl_by_worker: (
-            defaultdict[scheduler_module.WorkerState, list[str]]
+            defaultdict[scheduler_module.WorkerState, list[Key]]
         ) = defaultdict(list)
 
         for ts, (pending_repl, pending_drop) in self.pending.items():
@@ -404,11 +408,11 @@ class ActiveMemoryManagerExtension:
 
             for ws in pending_repl:
                 if validate:
-                    assert ws not in ts.who_has
+                    assert ws not in (ts.who_has or ())
                 repl_by_worker[ws].append(ts.key)
             for ws in pending_drop:
                 if validate:
-                    assert ws in ts.who_has
+                    assert ws in (ts.who_has or ())
                 drop_by_worker[ws].append(ts.key)
 
         stimulus_id = f"active_memory_manager-{time()}"
@@ -434,10 +438,9 @@ if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
 
-# TODO remove quotes (requires Python >=3.9)
-SuggestionGenerator: TypeAlias = (
-    "Generator[Suggestion, scheduler_module.WorkerState | None, None]"
-)
+SuggestionGenerator: TypeAlias = Generator[
+    Suggestion, Union["scheduler_module.WorkerState", None], None
+]
 
 
 class ActiveMemoryManagerPolicy(abc.ABC):
@@ -532,12 +535,19 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
 
         for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
+            assert ts.who_has
 
-            # If a dependent task has not been assigned to a worker yet, err on the side
-            # of caution and preserve an additional replica for it.
-            # However, if two dependent tasks have been already assigned to the same
-            # worker, don't double count them.
-            nwaiters = len({waiter.processing_on or waiter for waiter in ts.waiters})
+            nwaiters = len(ts.waiters or ())
+            if desired_replicas < nwaiters < 20:
+                # If a dependent task has not been assigned to a worker yet, err on the
+                # side of caution and preserve an additional replica for it.
+                # However, if two dependent tasks have been already assigned to the same
+                # worker, don't double count them.
+                # This calculation is quite CPU-intensive, so it's disabled for tasks
+                # with lots of waiters.
+                nwaiters = len(
+                    {waiter.processing_on or waiter for waiter in ts.waiters or ()}
+                )
 
             ndrop_key = len(ts.who_has) - max(desired_replicas, nwaiters)
             if ts in self.manager.pending:
@@ -651,7 +661,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
                 # would have stopped earlier
                 continue
 
-            if len(ts.who_has) > 1:
+            if ts.who_has and len(ts.who_has) > 1:
                 # There are already replicas of this key on other workers.
                 # Suggest dropping the replica from this worker.
                 # Use cases:
@@ -671,7 +681,7 @@ class RetireWorker(ActiveMemoryManagerPolicy):
                 drop_ws = yield Suggestion("drop", ts, {ws})
                 if drop_ws:
                     continue  # Use case 1 or 2
-                if ts.who_has & self.manager.scheduler.running:
+                if (ts.who_has or set()) & self.manager.scheduler.running:
                     continue  # Use case 3 or 4
                 # Use case 5
 
@@ -726,4 +736,4 @@ class RetireWorker(ActiveMemoryManagerPolicy):
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:
             return True
-        return all(len(ts.who_has) > 1 for ts in ws.has_what)
+        return all(len(ts.who_has or ()) > 1 for ts in ws.has_what)

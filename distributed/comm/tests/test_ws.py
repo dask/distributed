@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import warnings
 
 import pytest
@@ -13,7 +14,6 @@ from distributed.comm import connect, listen, ws
 from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tests.test_comms import check_tls_extra
-from distributed.compatibility import randbytes
 from distributed.security import Security
 from distributed.utils_test import (
     gen_cluster,
@@ -121,6 +121,7 @@ async def test_roundtrip(c, s, a, b):
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
 async def test_collections(c, s, a, b):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
     x = da.random.random((1000, 1000), chunks=(100, 100))
     x = x + x.T
@@ -129,7 +130,7 @@ async def test_collections(c, s, a, b):
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
 async def test_large_transfer(c, s, a, b):
-    x = await c.scatter(randbytes(12_000_000))
+    x = await c.scatter(random.randbytes(12_000_000))
     await c.gather(x)
 
 

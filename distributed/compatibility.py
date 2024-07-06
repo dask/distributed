@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import sys
+import warnings
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 import tornado
+
+__all__ = ["logging_names", "PeriodicCallback", "to_thread", "randbytes"]
 
 logging_names: dict[str | int, int | str] = {}
 logging_names.update(logging._levelToName)  # type: ignore
@@ -14,38 +21,22 @@ MACOS = sys.platform == "darwin"
 WINDOWS = sys.platform == "win32"
 
 
-if sys.version_info >= (3, 9):
-    from asyncio import to_thread
-else:
-    import contextvars
-    import functools
-    from asyncio import events
-
-    async def to_thread(func, /, *args, **kwargs):
-        """Asynchronously run function *func* in a separate thread.
-        Any *args and **kwargs supplied for this function are directly passed
-        to *func*. Also, the current :class:`contextvars.Context` is propagated,
-        allowing context variables from the main thread to be accessed in the
-        separate thread.
-
-        Return a coroutine that can be awaited to get the eventual result of *func*.
-
-        backport from
-        https://github.com/python/cpython/blob/3f1ea163ea54513e00e0e9d5442fee1b639825cc/Lib/asyncio/threads.py#L12-L25
-        """
-        loop = events.get_running_loop()
-        ctx = contextvars.copy_context()
-        func_call = functools.partial(ctx.run, func, *args, **kwargs)
-        return await loop.run_in_executor(None, func_call)
+def to_thread(*args, **kwargs):
+    warnings.warn(
+        "to_thread is deprecated and will be removed in a future release; use asyncio.to_thread instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return asyncio.to_thread(*args, **kwargs)
 
 
-if sys.version_info >= (3, 9):
-    from random import randbytes
-else:
-    from random import getrandbits
-
-    def randbytes(size):
-        return getrandbits(size * 8).to_bytes(size, "little")
+def randbytes(*args, **kwargs):
+    warnings.warn(
+        "randbytes is deprecated and will be removed in a future release; use random.randbytes instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return random.randbytes(*args, **kwargs)
 
 
 if tornado.version_info >= (6, 2, 0, 0):
@@ -59,9 +50,8 @@ else:
     # takes longer than the interval
     import datetime
     import math
-    import random
+    from collections.abc import Awaitable
     from inspect import isawaitable
-    from typing import Awaitable, Callable
 
     from tornado.ioloop import IOLoop
     from tornado.log import app_log
@@ -194,3 +184,84 @@ else:
                 # time.monotonic().
                 # https://github.com/tornadoweb/tornado/issues/2333
                 self._next_timeout += callback_time_sec
+
+
+_T = TypeVar("_T")
+
+if sys.version_info >= (3, 12):
+    asyncio_run = asyncio.run
+elif sys.version_info >= (3, 11):
+
+    def asyncio_run(
+        main: Coroutine[Any, Any, _T],
+        *,
+        debug: bool = False,
+        loop_factory: Callable[[], asyncio.AbstractEventLoop] | None = None,
+    ) -> _T:
+        # asyncio.run from Python 3.12
+        # https://docs.python.org/3/license.html#psf-license
+        with asyncio.Runner(debug=debug, loop_factory=loop_factory) as runner:
+            return runner.run(main)
+
+else:
+    # modified version of asyncio.run from Python 3.10 to add loop_factory kwarg
+    # https://docs.python.org/3/license.html#psf-license
+    def asyncio_run(
+        main: Coroutine[Any, Any, _T],
+        *,
+        debug: bool = False,
+        loop_factory: Callable[[], asyncio.AbstractEventLoop] | None = None,
+    ) -> _T:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError(
+                "asyncio.run() cannot be called from a running event loop"
+            )
+
+        if not asyncio.iscoroutine(main):
+            raise ValueError(f"a coroutine was expected, got {main!r}")
+
+        if loop_factory is None:
+            loop = asyncio.new_event_loop()
+        else:
+            loop = loop_factory()
+        try:
+            if loop_factory is None:
+                asyncio.set_event_loop(loop)
+            if debug is not None:
+                loop.set_debug(debug)
+            return loop.run_until_complete(main)
+        finally:
+            try:
+                _cancel_all_tasks(loop)
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.run_until_complete(loop.shutdown_default_executor())
+            finally:
+                if loop_factory is None:
+                    asyncio.set_event_loop(None)
+                loop.close()
+
+    def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
+        to_cancel = asyncio.all_tasks(loop)
+        if not to_cancel:
+            return
+
+        for task in to_cancel:
+            task.cancel()
+
+        loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
+
+        for task in to_cancel:
+            if task.cancelled():
+                continue
+            if task.exception() is not None:
+                loop.call_exception_handler(
+                    {
+                        "message": "unhandled exception during asyncio.run() shutdown",
+                        "exception": task.exception(),
+                        "task": task,
+                    }
+                )

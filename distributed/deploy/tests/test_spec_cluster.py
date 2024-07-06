@@ -82,8 +82,6 @@ def test_spec_sync(loop):
             assert result == 11
 
 
-@pytest.mark.filterwarnings("ignore:There is no current event loop:DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:make_current is deprecated:DeprecationWarning")
 def test_loop_started_in_constructor(cleanup):
     # test that SpecCluster.__init__ starts a loop in another thread
     cluster = SpecCluster(worker_spec, scheduler=scheduler, loop=None)
@@ -209,7 +207,6 @@ async def test_restart():
                 await asyncio.sleep(0.01)
 
 
-@pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
 @gen_test()
 async def test_broken_worker():
     class BrokenWorkerException(Exception):
@@ -218,7 +215,6 @@ async def test_broken_worker():
     class BrokenWorker(Worker):
         def __await__(self):
             async def _():
-                self.status = Status.closed
                 raise BrokenWorkerException("Worker Broken")
 
             return _().__await__()
@@ -228,13 +224,9 @@ async def test_broken_worker():
         workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
         scheduler=scheduler,
     )
-    try:
-        with pytest.raises(BrokenWorkerException, match=r"Worker Broken"):
-            async with cluster:
-                pass
-    finally:
-        # FIXME: SpecCluster leaks if SpecCluster.__aenter__ raises
-        await cluster.close()
+    with pytest.raises(BrokenWorkerException, match=r"Worker Broken"):
+        async with cluster:
+            pass
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
@@ -277,7 +269,7 @@ async def test_spec_process():
 
 
 @gen_test()
-async def test_logs():
+async def test_get_logs():
     worker = {"cls": Worker, "options": {"nthreads": 1}}
     async with SpecCluster(
         asynchronous=True, scheduler=scheduler, worker=worker
@@ -310,6 +302,14 @@ async def test_logs():
         w = toolz.first(cluster.scheduler.workers)
         logs = await cluster.get_logs(cluster=False, scheduler=False, workers=[w])
         assert set(logs) == {w}
+
+
+@gen_test()
+async def test_logs_deprecated():
+    async with SpecCluster(asynchronous=True, scheduler=scheduler) as cluster:
+        with pytest.warns(FutureWarning, match="get_logs"):
+            logs = await cluster.logs()
+    assert logs["Scheduler"]
 
 
 @gen_test()

@@ -7,6 +7,7 @@ import warnings
 import weakref
 from contextlib import suppress
 from timeit import default_timer
+from typing import Callable
 
 from tlz import valmap
 from tornado.ioloop import IOLoop
@@ -243,7 +244,9 @@ class MultiProgressBar:
         self,
         keys,
         scheduler=None,
-        func=key_split,
+        *,
+        func=None,
+        group_by="prefix",
         interval="100ms",
         complete=False,
         **kwargs,
@@ -256,8 +259,17 @@ class MultiProgressBar:
                 self.client = weakref.ref(key.client)
                 break
 
+        if func is not None:
+            warnings.warn(
+                "`func` is deprecated, use `group_by` instead",
+                category=DeprecationWarning,
+            )
+            group_by = func
+        elif group_by in (None, "prefix"):
+            group_by = key_split
+
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
-        self.func = func
+        self.group_by = group_by
         self.interval = interval
         self.complete = complete
         self._start_time = default_timer()
@@ -269,10 +281,15 @@ class MultiProgressBar:
     async def listen(self):
         complete = self.complete
         keys = self.keys
-        func = self.func
+        group_by = self.group_by
 
         async def setup(scheduler):
-            p = MultiProgress(keys, scheduler, complete=complete, func=func)
+            p = MultiProgress(
+                keys,
+                scheduler,
+                complete=complete,
+                group_by=group_by,
+            )
             await p.setup()
             return p
 
@@ -339,18 +356,22 @@ class MultiProgressWidget(MultiProgressBar):
         keys,
         scheduler=None,
         minimum=0,
-        interval=0.1,
-        func=key_split,
-        complete=False,
         **kwargs,
     ):
-        super().__init__(keys, scheduler, func, interval, complete)
+        super().__init__(keys, scheduler, **kwargs)
         from ipywidgets import VBox
 
         self.widget = VBox([])
 
     def make_widget(self, all):
         from ipywidgets import HTML, FloatProgress, HBox, VBox
+
+        def make_label(key):
+            if isinstance(key, tuple):
+                # tuple of (group_name, group_id)
+                key = key[0]
+            key = key.decode() if isinstance(key, bytes) else key
+            return html.escape(key)
 
         self.elapsed_time = HTML("")
         self.bars = {key: FloatProgress(min=0, max=1, description="") for key in all}
@@ -359,9 +380,7 @@ class MultiProgressWidget(MultiProgressBar):
             key: HTML(
                 '<div style="padding: 0px 10px 0px 10px;'
                 " text-align:left; word-wrap: "
-                'break-word;">'
-                + html.escape(key.decode() if isinstance(key, bytes) else key)
-                + "</div>"
+                'break-word;">' + make_label(key) + "</div>"
             )
             for key in all
         }
@@ -429,7 +448,9 @@ class MultiProgressWidget(MultiProgressBar):
             )
 
 
-def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
+def progress(
+    *futures, notebook=None, multi=True, complete=True, group_by="prefix", **kwargs
+):
     """Track progress of futures
 
     This operates differently in the notebook and the console
@@ -448,6 +469,9 @@ def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
     complete : bool (optional)
         Track all keys (True) or only keys that have not yet run (False)
         (defaults to True)
+    group_by : Callable | Literal["spans"] | Literal["prefix"]
+        Use spans instead of task key names for grouping tasks
+        (defaults to "prefix")
 
     Notes
     -----
@@ -465,9 +489,18 @@ def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
         futures = [futures]
     if notebook is None:
         notebook = is_kernel()  # often but not always correct assumption
+    if kwargs.get("func", None) is not None:
+        warnings.warn(
+            "`func` is deprecated, use `group_by` instead", category=DeprecationWarning
+        )
+        group_by = kwargs.pop("func")
+    if group_by not in ("spans", "prefix") and not isinstance(group_by, Callable):
+        raise ValueError("`group_by` should be 'spans', 'prefix', or a Callable")
     if notebook:
         if multi:
-            bar = MultiProgressWidget(futures, complete=complete, **kwargs)
+            bar = MultiProgressWidget(
+                futures, complete=complete, group_by=group_by, **kwargs
+            )
         else:
             bar = ProgressWidget(futures, complete=complete, **kwargs)
         return bar

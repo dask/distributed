@@ -14,9 +14,10 @@ import dask.config
 from dask import delayed
 from dask.utils import parse_bytes
 
-from distributed import Client, Nanny, profile, wait
+from distributed import Client, KilledWorker, Nanny, get_worker, profile, wait
 from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS
+from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils import CancelledError, sync
 from distributed.utils_test import (
@@ -48,21 +49,59 @@ def test_submit_after_failed_worker_sync(loop):
             assert total.result() == sum(map(inc, range(10)))
 
 
-@pytest.mark.slow()
-@pytest.mark.parametrize("compute_on_failed", [False, True])
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
-async def test_submit_after_failed_worker_async(c, s, a, b, compute_on_failed):
-    async with Nanny(s.address, nthreads=2) as n:
-        await c.wait_for_workers(3)
+@pytest.mark.parametrize("when", ["closing", "closed"])
+@pytest.mark.parametrize("y_on_failed", [False, True])
+@pytest.mark.parametrize("x_on_failed", [False, True])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.comm.timeouts.connect": "1s"},
+)
+async def test_submit_after_failed_worker_async(
+    c, s, a, b, x_on_failed, y_on_failed, when, monkeypatch
+):
+    a_ws = s.workers[a.address]
 
-        L = c.map(inc, range(10))
-        await wait(L)
+    x = c.submit(
+        inc,
+        1,
+        key="x",
+        workers=[b.address if x_on_failed else a.address],
+        allow_other_workers=True,
+    )
+    await wait(x)
 
-        kill_task = asyncio.create_task(n.kill())
-        compute_addr = n.worker_address if compute_on_failed else a.address
-        total = c.submit(sum, L, workers=[compute_addr], allow_other_workers=True)
-        assert await total == sum(range(1, 11))
-        await kill_task
+    if when == "closed":
+        await b.close()
+        await async_poll_for(lambda: b.address not in s.workers, timeout=5)
+    elif when == "closing":
+        orig_remove_worker = s.remove_worker
+        in_remove_worker = asyncio.Event()
+        wait_remove_worker = asyncio.Event()
+
+        async def remove_worker(*args, **kwargs):
+            in_remove_worker.set()
+            await wait_remove_worker.wait()
+            return await orig_remove_worker(*args, **kwargs)
+
+        monkeypatch.setattr(s, "remove_worker", remove_worker)
+        await b.close()
+        await in_remove_worker.wait()
+        assert s.workers[b.address].status.name == "closing"
+
+    y = c.submit(
+        inc,
+        x,
+        key="y",
+        workers=[b.address if y_on_failed else a.address],
+        allow_other_workers=True,
+    )
+    await async_poll_for(lambda: "y" in s.tasks, timeout=5)
+
+    if when == "closing":
+        wait_remove_worker.set()
+    assert await y == 3
+    assert s.tasks["y"].who_has == {a_ws}
 
 
 @gen_cluster(client=True, timeout=60)
@@ -118,8 +157,7 @@ async def test_restart(c, s, a, b):
     assert s.tasks[y.key].state == "memory"
     assert s.tasks[z.key].state != "memory"
 
-    f = await c.restart()
-    assert f is c
+    await c.restart()
 
     assert len(s.workers) == 2
     assert not any(ws.occupancy for ws in s.workers.values())
@@ -221,7 +259,7 @@ async def test_restart_scheduler(s, a, b):
     assert pids[0]
     assert pids[1]
 
-    await s.restart()
+    await s.restart(stimulus_id="test")
 
     assert len(s.workers) == 2
     pids2 = (a.pid, b.pid)
@@ -413,10 +451,10 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, scheduler_kwargs={"worker_ttl": "500ms"})
+@gen_cluster(client=True, config={"distributed.scheduler.worker-ttl": "500ms"})
 async def test_worker_time_to_live(c, s, a, b):
-    from distributed.scheduler import heartbeat_interval
-
+    # Note that this value is ignored because is less than 10x heartbeat_interval
+    assert s.worker_ttl == 0.5
     assert set(s.workers) == {a.address, b.address}
 
     a.periodic_callbacks["heartbeat"].stop()
@@ -428,10 +466,84 @@ async def test_worker_time_to_live(c, s, a, b):
 
     # Worker removal is triggered after 10 * heartbeat
     # This is 10 * 0.5s at the moment of writing.
-    interval = 10 * heartbeat_interval(len(s.workers))
     # Currently observing an extra 0.3~0.6s on top of the interval.
     # Adding some padding to prevent flakiness.
-    assert time() - start < interval + 2.0
+    assert time() - start < 7
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("block_evloop", [False, True])
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    nthreads=[("", 1)],
+    scheduler_kwargs={"worker_ttl": "500ms", "allowed_failures": 0},
+)
+async def test_worker_ttl_restarts_worker(c, s, a, block_evloop):
+    """If the event loop of a worker becomes completely unresponsive, the scheduler will
+    restart it through the nanny.
+    """
+    ws = s.workers[a.worker_address]
+
+    async def f():
+        w = get_worker()
+        w.periodic_callbacks["heartbeat"].stop()
+        if block_evloop:
+            sleep(9999)  # Block event loop indefinitely
+        else:
+            await asyncio.sleep(9999)
+
+    fut = c.submit(f, key="x")
+
+    while not s.workers or (
+        (new_ws := next(iter(s.workers.values()))) is ws
+        or new_ws.status != Status.running
+    ):
+        await asyncio.sleep(0.01)
+
+    if block_evloop:
+        # The nanny killed the worker with SIGKILL.
+        # The restart has increased the suspicious count.
+        with pytest.raises(KilledWorker):
+            await fut
+        assert s.tasks["x"].state == "erred"
+        assert s.tasks["x"].suspicious == 1
+    else:
+        # The nanny sent to the WorkerProcess a {op: stop} through IPC, which in turn
+        # successfully invoked Worker.close(nanny=False).
+        # This behaviour makes sense as the worker-ttl timeout was most likely caused
+        # by a failure in networking, rather than a hung process.
+        assert s.tasks["x"].state == "processing"
+        assert s.tasks["x"].suspicious == 0
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    nthreads=[("", 2)],
+    scheduler_kwargs={"allowed_failures": 0},
+)
+async def test_restart_hung_worker(c, s, a):
+    """Test restart_workers() to restart a worker whose event loop has become completely
+    unresponsive.
+    """
+    ws = s.workers[a.worker_address]
+
+    async def f():
+        w = get_worker()
+        w.periodic_callbacks["heartbeat"].stop()
+        sleep(9999)  # Block event loop indefinitely
+
+    fut = c.submit(f)
+    # Wait for worker to hang
+    with pytest.raises(asyncio.TimeoutError):
+        while True:
+            await wait(c.submit(inc, 1, pure=False), timeout=0.2)
+
+    await c.restart_workers([a.worker_address])
+    assert len(s.workers) == 1
+    assert next(iter(s.workers.values())) is not ws
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

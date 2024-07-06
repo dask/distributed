@@ -4,6 +4,7 @@ import asyncio
 import itertools
 import logging
 import os
+import sys
 import threading
 import weakref
 from collections import deque, namedtuple
@@ -11,9 +12,9 @@ from collections import deque, namedtuple
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
-from distributed.comm.core import Comm, CommClosedError, Connector, Listener
+from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend, backends
-from distributed.protocol import nested_deserialize
+from distributed.protocol.serialize import _nested_deserialize
 from distributed.utils import get_ip
 
 logger = logging.getLogger(__name__)
@@ -186,7 +187,15 @@ class InProc(Comm):
     def _get_finalizer(self):
         r = repr(self)
 
-        def finalize(write_q=self._write_q, write_loop=self._write_loop, r=r):
+        def finalize(
+            read_q=self._read_q,
+            write_q=self._write_q,
+            write_loop=self._write_loop,
+            is_finalizing=sys.is_finalizing,
+            r=r,
+        ):
+            if read_q.peek(None) is _EOF or is_finalizing():
+                return
             logger.warning(f"Closing dangling queue in {r}")
             write_loop.add_callback(write_q.put_nowait, _EOF)
 
@@ -214,8 +223,7 @@ class InProc(Comm):
             self._finalizer.detach()
             raise CommClosedError()
 
-        if self.deserialize:
-            msg = nested_deserialize(msg)
+        msg = _nested_deserialize(msg, self.deserialize)
         return msg
 
     async def write(self, msg, serializers=None, on_error=None):
@@ -257,10 +265,11 @@ class InProc(Comm):
             return False
 
 
-class InProcListener(Listener):
+class InProcListener(BaseListener):
     prefix = "inproc"
 
     def __init__(self, address, comm_handler, deserialize=True):
+        super().__init__()
         self.manager = global_manager
         self.address = address or self.manager.new_address()
         self.comm_handler = comm_handler

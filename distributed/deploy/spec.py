@@ -279,21 +279,21 @@ class SpecCluster(Cluster):
             scheduler_sync_interval=scheduler_sync_interval,
         )
 
-        try:
-            called_from_running_loop = (
-                getattr(loop, "asyncio_loop", None) is asyncio.get_running_loop()
-            )
-        except RuntimeError:
-            called_from_running_loop = asynchronous
-
-        if not called_from_running_loop:
+        if not self.called_from_running_loop:
             self._loop_runner.start()
             self.sync(self._start)
             try:
                 self.sync(self._correct_state)
             except Exception:
                 self.sync(self.close)
+                self._loop_runner.stop()
                 raise
+
+    def close(self, timeout: float | None = None) -> Awaitable[None] | None:
+        aw = super().close(timeout)
+        if not self.asynchronous:
+            self._loop_runner.stop()
+        return aw
 
     async def _start(self):
         while self.status == Status.starting:
@@ -379,13 +379,15 @@ class SpecCluster(Cluster):
                 self._created.add(worker)
                 workers.append(worker)
             if workers:
-                await asyncio.wait(
-                    [asyncio.create_task(_wrap_awaitable(w)) for w in workers]
-                )
+                worker_futs = [asyncio.ensure_future(w) for w in workers]
+                await asyncio.wait(worker_futs)
+                self.workers.update(dict(zip(to_open, workers)))
                 for w in workers:
                     w._cluster = weakref.ref(self)
-                    await w  # for tornado gen.coroutine support
-            self.workers.update(dict(zip(to_open, workers)))
+                # Collect exceptions from failed workers. This must happen after all
+                # *other* workers have finished initialising, so that we can have a
+                # proper teardown.
+                await asyncio.gather(*worker_futs)
 
     def _update_worker_status(self, op, msg):
         if op == "remove":
@@ -467,14 +469,14 @@ class SpecCluster(Cluster):
         await super()._close()
 
     async def __aenter__(self):
-        await self
-        await self._correct_state()
-        assert self.status == Status.running
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        super().__exit__(exc_type, exc_value, traceback)
-        self._loop_runner.stop()
+        try:
+            await self
+            await self._correct_state()
+            assert self.status == Status.running
+            return self
+        except Exception:
+            await self._close()
+            raise
 
     def _threads_per_worker(self) -> int:
         """Return the number of threads per worker for new workers"""
@@ -672,18 +674,20 @@ class SpecCluster(Cluster):
         raise NotImplementedError()
 
 
-async def run_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny]:
+def init_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny]:
     workers = {}
     for k, d in spec.items():
         cls = d["cls"]
         if isinstance(cls, str):
             cls = import_term(cls)
         workers[k] = cls(*args, **d.get("opts", {}))
+    return workers
 
+
+async def run_spec(spec: dict[str, Any], *args: Any) -> dict[str, Worker | Nanny]:
+    workers = init_spec(spec, *args)
     if workers:
         await asyncio.gather(*workers.values())
-        for w in workers.values():
-            await w  # for tornado gen.coroutine support
     return workers
 
 

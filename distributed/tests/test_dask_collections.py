@@ -11,8 +11,10 @@ from pandas.testing import assert_frame_equal, assert_index_equal, assert_series
 import dask
 import dask.bag as db
 import dask.dataframe as dd
+from dask.dataframe._compat import PANDAS_GE_220
 
 from distributed.client import wait
+from distributed.nanny import Nanny
 from distributed.utils_test import gen_cluster
 
 dfs = [
@@ -59,11 +61,11 @@ async def test_dataframes(c, s, a, b):
     exprs = [
         lambda df: df.x.mean(),
         lambda df: df.y.std(),
-        lambda df: df.assign(z=df.x + df.y).drop_duplicates(),
+        lambda df: df.assign(z=df.x + df.y).drop_duplicates(split_out=1),
         lambda df: df.index,
         lambda df: df.x,
         lambda df: df.x.cumsum(),
-        lambda df: df.groupby(["x", "y"]).count(),
+        lambda df: df.groupby(["x", "y"]).count(split_out=1),
         lambda df: df.loc[50:75],
     ]
     for f in exprs:
@@ -124,20 +126,34 @@ async def test_bag_groupby_tasks_default(c, s, a, b):
     assert not any("partd" in k[0] for k in b2.dask)
 
 
+@gen_cluster(client=True, Worker=Nanny)
+async def test_bag_groupby_key_hashing(c, s, a, b):
+    # https://github.com/dask/distributed/issues/4141
+    dsk = {("x", 0): (range, 5), ("x", 1): (range, 5), ("x", 2): (range, 5)}
+    grouped = db.Bag(dsk, "x", 3).groupby(lambda x: "even" if x % 2 == 0 else "odd")
+    remote = c.compute(grouped)
+    result = await remote
+    assert len(result) == 2
+    assert ("odd", [1, 3] * 3) in result
+    assert ("even", [0, 2, 4] * 3) in result
+
+
 @pytest.mark.parametrize("wait", [wait, lambda x: None])
 def test_dataframe_set_index_sync(wait, client):
+    partition_freq_unit = "ME" if PANDAS_GE_220 else "M"
     df = dask.datasets.timeseries(
         start="2000",
         end="2001",
         dtypes={"value": float, "name": str, "id": int},
-        freq="2H",
-        partition_freq="1M",
+        freq="2h",
+        partition_freq=f"1{partition_freq_unit}",
         seed=1,
     )
     df = df.persist()
     wait(df)
 
-    df2 = df.set_index("name", shuffle="tasks")
+    with dask.config.set({"dataframe.shuffle.method": "tasks"}):
+        df2 = df.set_index("name")
     df2 = df2.persist()
 
     assert len(df2)
@@ -173,6 +189,7 @@ async def test_loc(c, s, a, b):
 
 @ignore_single_machine_warning
 def test_dataframe_groupby_tasks(client):
+    INCLUDE_GROUPS = {"include_groups": False} if PANDAS_GE_220 else {}
     df = make_time_dataframe()
 
     df["A"] = df.A // 0.1
@@ -180,21 +197,21 @@ def test_dataframe_groupby_tasks(client):
     ddf = dd.from_pandas(df, npartitions=10)
 
     for ind in [lambda x: "A", lambda x: x.A]:
-        a = df.groupby(ind(df)).apply(len)
-        b = ddf.groupby(ind(ddf)).apply(len, meta=(None, int))
+        a = df.groupby(ind(df)).apply(len, **INCLUDE_GROUPS)
+        b = ddf.groupby(ind(ddf)).apply(len, meta=(None, int), **INCLUDE_GROUPS)
         assert_equal(a, b.compute().sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
-        a = df.groupby(ind(df)).B.apply(len)
-        b = ddf.groupby(ind(ddf)).B.apply(len, meta=("B", int))
+        a = df.groupby(ind(df)).B.apply(len, **INCLUDE_GROUPS)
+        b = ddf.groupby(ind(ddf)).B.apply(len, meta=("B", int), **INCLUDE_GROUPS)
         assert_equal(a, b.compute().sort_index())
         assert not any("partd" in k[0] for k in b.dask)
 
     with pytest.raises((NotImplementedError, ValueError)):
-        ddf.groupby(ddf[["A", "B"]]).apply(len, meta=int)
+        ddf.groupby(ddf[["A", "B"]]).apply(len, meta=int, **INCLUDE_GROUPS)
 
-    a = df.groupby(["A", "B"]).apply(len)
-    b = ddf.groupby(["A", "B"]).apply(len, meta=(None, int))
+    a = df.groupby(["A", "B"]).apply(len, **INCLUDE_GROUPS)
+    b = ddf.groupby(["A", "B"]).apply(len, meta=(None, int), **INCLUDE_GROUPS)
 
     assert_equal(a, b.compute().sort_index())
 

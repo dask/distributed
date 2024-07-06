@@ -75,6 +75,8 @@ The client connects to and submits computation to a Dask cluster (such as a :cla
 .. autosummary::
    distributed.utils.Log
    distributed.utils.Logs
+   distributed.diagnostics.memray.memray_scheduler
+   distributed.diagnostics.memray.memray_workers
 
 
 Asynchronous methods
@@ -199,6 +201,8 @@ Utilities
 
 .. autoclass:: distributed.utils.Log
 .. autoclass:: distributed.utils.Logs
+.. autofunction:: distributed.diagnostics.memray.memray_scheduler
+.. autofunction:: distributed.diagnostics.memray.memray_workers
 
 
 Adaptive

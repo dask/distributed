@@ -214,8 +214,18 @@ class WorkSpace:
                 if stat.S_ISREG(st.st_mode):
                     yield p
 
-    def _purge_directory(self, dir_path):
-        shutil.rmtree(dir_path, onerror=self._on_remove_error)
+    if sys.version_info >= (3, 12):
+
+        def _purge_directory(self, dir_path):
+            shutil.rmtree(dir_path, onexc=self._on_remove_error)
+
+    else:
+
+        def _purge_directory(self, dir_path):
+            def onerror(func, path, exc_info):
+                return self._on_remove_error(func, path, exc_info[1])
+
+            shutil.rmtree(dir_path, onerror=onerror)
 
     def _check_lock_or_purge(self, lock_path):
         """
@@ -247,8 +257,7 @@ class WorkSpace:
         safe_unlink(lock_path)
         return True
 
-    def _on_remove_error(self, func, path, exc_info):
-        typ, exc, tb = exc_info
+    def _on_remove_error(self, func, path, exc):
         logger.error("Failed to remove %r (failed in %r): %s", path, func, str(exc))
 
     def new_work_dir(self, **kwargs):

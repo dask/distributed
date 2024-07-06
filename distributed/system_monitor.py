@@ -6,7 +6,9 @@ from typing import Any
 
 import psutil
 
-import dask
+import dask.config
+from dask.typing import NoDefault, no_default
+from dask.utils import parse_timedelta
 
 from distributed.compatibility import WINDOWS
 from distributed.diagnostics import nvml
@@ -29,23 +31,29 @@ class SystemMonitor:
     _last_host_cpu_counters: Any  # dynamically-defined psutil namedtuple
     _last_gil_contention: float  # 0-1 value
 
-    _cumulative_gil_contention: float
+    cumulative_gil_contention: float
 
     gpu_name: str | None
     gpu_memory_total: int
 
-    # Defaults to 1h capture time assuming the default
-    # distributed.admin.system_monitor.interval = 500ms
     def __init__(
         self,
-        maxlen: int | None = 7200,
+        maxlen: int | None | NoDefault = no_default,
         monitor_disk_io: bool | None = None,
         monitor_host_cpu: bool | None = None,
         monitor_gil_contention: bool | None = None,
     ):
         self.proc = psutil.Process()
         self.count = 0
+
+        if maxlen is no_default:
+            maxlen = dask.config.get("distributed.admin.system-monitor.log-length")
+        if isinstance(maxlen, int):
+            maxlen = max(1, maxlen)
+        elif maxlen is not None:  # pragma: nocover
+            raise TypeError(f"maxlen must be int or None; got {maxlen!r}")
         self.maxlen = maxlen
+
         self.last_time = monotonic()
 
         self.quantities = {
@@ -106,12 +114,11 @@ class SystemMonitor:
                 self.monitor_gil_contention = False
             else:
                 self.quantities["gil_contention"] = deque(maxlen=maxlen)
-                self._cumulative_gil_contention = 0.0
+                self.cumulative_gil_contention = 0.0
                 raw_interval = dask.config.get(
                     "distributed.admin.system-monitor.gil.interval",
                 )
-                interval = dask.utils.parse_timedelta(raw_interval, default="us") * 1e6
-
+                interval = parse_timedelta(raw_interval) * 1e6
                 self._gilknocker = KnockKnock(polling_interval_micros=int(interval))
                 self._gilknocker.start()
 
@@ -122,6 +129,7 @@ class SystemMonitor:
             gpu_extra = nvml.one_time()
             self.gpu_name = gpu_extra["name"]
             self.gpu_memory_total = gpu_extra["memory-total"]
+            self.quantities["gpu-memory-total"] = deque(maxlen=1)
             self.quantities["gpu_utilization"] = deque(maxlen=maxlen)
             self.quantities["gpu_memory_used"] = deque(maxlen=maxlen)
         else:
@@ -130,7 +138,7 @@ class SystemMonitor:
 
         self.update()
 
-    def recent(self) -> dict[str, Any]:
+    def recent(self) -> dict[str, float]:
         return {k: v[-1] for k, v in self.quantities.items()}
 
     def get_process_memory(self) -> int:
@@ -189,10 +197,10 @@ class SystemMonitor:
             self._last_host_cpu_counters = host_cpu
 
         if self.monitor_gil_contention:
-            self._last_gil_contention = self._gilknocker.contention_metric
-            self._cumulative_gil_contention += self._last_gil_contention
-            result["gil_contention"] = self._last_gil_contention
+            gil_contention = self._gilknocker.contention_metric
             self._gilknocker.reset_contention_metric()
+            result["gil_contention"] = self._last_gil_contention = gil_contention
+            self.cumulative_gil_contention += duration * gil_contention
 
         # Note: WINDOWS constant doesn't work with `mypy --platform win32`
         if sys.platform != "win32":
@@ -200,6 +208,7 @@ class SystemMonitor:
 
         if self.gpu_name:
             gpu_metrics = nvml.real_time()
+            result["gpu-memory-total"] = self.gpu_memory_total
             result["gpu_utilization"] = gpu_metrics["utilization"]
             result["gpu_memory_used"] = gpu_metrics["memory-used"]
 
@@ -216,7 +225,7 @@ class SystemMonitor:
             "N/A" if WINDOWS else self.quantities["num_fds"][-1],
         )
 
-    def range_query(self, start: int) -> dict[str, list]:
+    def range_query(self, start: int) -> dict[str, list[float | None]]:
         if start >= self.count:
             return {k: [] for k in self.quantities}
 

@@ -20,7 +20,7 @@ Install
 2. Install anaconda or miniconda (OS-dependent)
 3. ::
 
-     conda env create --file continuous_integration/environment-3.8.yaml
+     conda env create --file continuous_integration/environment-3.11.yaml
      conda activate dask-distributed
      python -m pip install -e .
 

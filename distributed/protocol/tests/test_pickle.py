@@ -14,13 +14,13 @@ from dask.utils import tmpdir
 from distributed import profile
 from distributed.protocol import deserialize, serialize
 from distributed.protocol.pickle import (
-    CLOUDPICKLE_GTE_20,
+    CLOUDPICKLE_GE_20,
     HIGHEST_PROTOCOL,
     dumps,
     loads,
 )
 from distributed.protocol.serialize import dask_deserialize, dask_serialize
-from distributed.utils_test import save_sys_modules
+from distributed.utils_test import popen, save_sys_modules
 
 
 class MemoryviewHolder:
@@ -201,7 +201,7 @@ def test_pickle_functions(protocol):
 
 
 @pytest.mark.skipif(
-    not CLOUDPICKLE_GTE_20, reason="Pickle by value registration not supported"
+    not CLOUDPICKLE_GE_20, reason="Pickle by value registration not supported"
 )
 def test_pickle_by_value_when_registered():
     with save_sys_modules():
@@ -278,3 +278,40 @@ def test_nopickle_nested():
     finally:
         del dask_serialize._lookup[NoPickle]
         del dask_deserialize._lookup[NoPickle]
+
+
+@pytest.mark.slow()
+def test_pickle_functions_in_main(tmp_path):
+    script = """
+from dask.distributed import Client
+if __name__ == "__main__":
+    with Client(n_workers=1) as client:
+        def func(df):
+            return (df + 5)
+        client.submit(func, 5).result()
+        print("script successful", flush=True)
+"""
+    with open(tmp_path / "script.py", mode="w") as f:
+        f.write(script)
+    with popen([sys.executable, tmp_path / "script.py"], capture_output=True) as proc:
+        out, _ = proc.communicate(timeout=60)
+
+    assert "script successful" in out.decode("utf-8")
+
+
+@pytest.mark.parametrize("serializer", ["dask", "pickle"])
+def test_pickle_zero_copy_read_only_flag(serializer):
+    np = pytest.importorskip("numpy")
+    a = np.arange(10)
+    a.flags.writeable = False
+    header, frames = serialize(a, serializers=[serializer])
+    frames = [bytearray(f) for f in frames]  # Simulate network transfer
+    b = deserialize(header, frames)
+    c = deserialize(header, frames)
+    assert not b.flags.writeable
+    assert not c.flags.writeable
+    ptr_a = a.__array_interface__["data"][0]
+    ptr_b = b.__array_interface__["data"][0]
+    ptr_c = c.__array_interface__["data"][0]
+    assert ptr_b != ptr_a
+    assert ptr_b == ptr_c
