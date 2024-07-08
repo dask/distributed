@@ -3331,7 +3331,6 @@ class Client(SyncMethodMixin):
             from distributed.protocol import serialize
             from distributed.protocol.serialize import ToPickle
 
-            # print(dsk.to_dict())
             header, frames = serialize(ToPickle(dsk), on_error="raise")
 
             pickled_size = sum(map(nbytes, [header] + frames))
