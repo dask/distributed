@@ -2163,11 +2163,11 @@ class Client(SyncMethodMixin):
     def map(
         self,
         func: Callable,
-        *iterables: Iterable,
-        key=None,
-        workers=None,
-        retries=None,
-        resources=None,
+        *iterables: Collection,
+        key: str | list | None = None,
+        workers: str | Iterable[str] | None = None,
+        retries: int | None = None,
+        resources: dict[str, Any] | None = None,
         priority: int = 0,
         allow_other_workers: bool = False,
         fifo_timeout: str = "100 ms",
@@ -2263,11 +2263,12 @@ class Client(SyncMethodMixin):
                 "Dask no longer supports mapping over Iterators or Queues."
                 "Consider using a normal for loop and Client.submit"
             )
-        total_length = sum(len(x) for x in iterables)  # type: ignore
+        total_length = sum(len(x) for x in iterables)
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
                 zip(*(partition_all(batch_size, iterable) for iterable in iterables))
             )
+            keys: list[list[Any]] | list[Any]
             if isinstance(key, list):
                 keys = [list(element) for element in partition_all(batch_size, key)]
             else:
