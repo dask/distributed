@@ -814,7 +814,11 @@ _T_LowLevelGraph: TypeAlias = dict[Key, tuple]
 
 def is_nested(iterable):
     for item in iterable:
-        if isinstance(item, Iterable) and not isinstance(item, str):
+        if (
+            isinstance(item, Iterable)
+            and not isinstance(item, str)
+            and not isinstance(item, bytes)
+        ):
             return True
     return False
 
@@ -829,12 +833,12 @@ class MapLayer(Layer):
         annotations: dict[str, Any] | None = None,
         **kwargs,
     ):
-        self.func = func
-        self.iterables = (
-            list(zip(*zip(*iterables))) if is_nested(iterables) else [iterables]  # type: ignore
+        self.func: Callable = func
+        self.iterables: Iterable[Any] = (
+            list(zip(*zip(*iterables))) if is_nested(iterables) else [iterables]
         )
-        self.key = key
-        self.pure = pure
+        self.key: str | Iterable[str] | None = key
+        self.pure: bool = pure
         self.kwargs = kwargs
         super().__init__(annotations=annotations)
 
