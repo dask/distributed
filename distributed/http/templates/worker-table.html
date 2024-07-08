@@ -20,10 +20,10 @@
             <td><a href="../worker/{{ url_escape(ws.address) }}.html">{{ws.address}}</a></td>
             <td> {{ ws.name if ws.name is not None else "" }} </td>
             <td> {{ ws.nthreads }} </td>
-            <td> {{ format_bytes(ws.memory_limit) if ws.memory_limit is not None else "" }} </td>
+            <td sorttable_customkey="{ws.memory_limit}"> {{ format_bytes(ws.memory_limit) if ws.memory_limit is not None else "" }} </td>
             <td> <progress class="progress" value="{{ ws.metrics['memory'] }}" max="{{ ws.memory_limit }}"></progress>
             </td>
-            <td> {{ format_time(ws.occupancy) }} </td>
+            <td sorttable_customkey="{{ ws.occupancy }}"> {{ format_time(ws.occupancy) }} </td>
             <td> {{ len(ws.processing) }} </td>
             <td> {{ len(ws.has_what) }} </td>
             {% if 'dashboard' in ws.services %}
@@ -32,7 +32,7 @@
             <td> </td>
             {% end %}
             <td> <a href="../logs/{{ url_escape(ws.address) }}.html">logs</a></td>
-            <td> {{ format_time(time() - ws.last_seen) }} </td>
+            <td sorttable_customkey="{{time() - ws.last_seen}}"> {{ format_time(time() - ws.last_seen) }} </td>
         </tr>
         {% end %}
     </tbody>
