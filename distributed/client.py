@@ -26,11 +26,22 @@ from functools import partial, singledispatchmethod
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, Callable, ClassVar, Literal, NamedTuple, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    TypedDict,
+    cast,
+)
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
-from typing_extensions import TypeAlias
 
 import dask
 from dask.base import collections_to_dsk, tokenize
