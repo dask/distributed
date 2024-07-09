@@ -834,7 +834,13 @@ def _is_nested(iterable):
     return False
 
 
-class MapLayer(Layer):
+class _MapLayer(Layer):
+    func: Callable
+    iterables: Iterable[Any]
+    key: str | Iterable[str] | None
+    pure: bool
+    annotations: dict[str, Any] | None
+
     def __init__(
         self,
         func: Callable,
@@ -2314,7 +2320,7 @@ class Client(SyncMethodMixin):
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
 
-        dsk = MapLayer(
+        dsk = _MapLayer(
             func,
             iterables,
             key=key,
