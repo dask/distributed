@@ -846,7 +846,7 @@ class MapLayer(Layer):
     ):
         self.func: Callable = func
         self.iterables: Iterable[Any] = (
-            list(zip(*zip(*iterables))) if is_nested(iterables) else [iterables]
+            list(zip(*zip(*iterables))) if _is_nested(iterables) else [iterables]
         )
         self.key: str | Iterable[str] | None = key
         self.pure: bool = pure
