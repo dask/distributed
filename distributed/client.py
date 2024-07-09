@@ -823,7 +823,7 @@ class VersionsDict(TypedDict):
 _T_LowLevelGraph: TypeAlias = dict[Key, tuple]
 
 
-def is_nested(iterable):
+def _is_nested(iterable):
     for item in iterable:
         if (
             isinstance(item, Iterable)
