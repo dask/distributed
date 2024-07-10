@@ -50,7 +50,6 @@ from tlz import (
     valmap,
 )
 from tornado.ioloop import IOLoop
-from typing_extensions import Self
 
 import dask
 import dask.utils
@@ -6199,9 +6198,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         assert isinstance(data, dict)
 
-        keys, who_has, nbytes = await scatter_to_workers(
-            nthreads, data, rpc=self.server.rpc
-        )
+        keys, who_has, nbytes = await scatter_to_workers(wss, data, rpc=self.server.rpc)
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 

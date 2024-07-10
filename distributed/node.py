@@ -86,6 +86,8 @@ class Node:
 
     _event_finished: asyncio.Event
 
+    _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
+
     def __init__(
         self,
         local_directory=None,

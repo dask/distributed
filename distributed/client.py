@@ -49,7 +49,7 @@ from dask.utils import (
 )
 from dask.widgets import get_template
 
-from distributed.core import ErrorMessage, OKMessage, Server
+from distributed.core import OKMessage, Server
 from distributed.protocol.serialize import _is_dumpable
 from distributed.utils import Deadline, wait_for
 
