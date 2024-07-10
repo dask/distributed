@@ -874,11 +874,39 @@ class _MapLayer(Layer):
             self._cached_dict = dsk
         return self._cached_dict
 
+    @property
+    def _keys(self) -> Iterable[Key]:
+        if hasattr(self, "_cached_keys"):
+            return self._cached_keys
+        else:
+            if isinstance(self.key, Iterable) and not isinstance(self.key, str):
+                self._cached_keys: Iterable[Key] = self.key
+                return self.key
+
+            else:
+                if self.pure:
+                    keys = [
+                        self.key + "-" + tokenize(self.func, self.kwargs, args)  # type: ignore
+                        for args in zip(*self.iterables)
+                    ]
+                else:
+                    uid = str(uuid.uuid4())
+                    keys = (
+                        [
+                            f"{self.key}-{uid}-{i}"
+                            for i in range(min(map(len, self.iterables)))
+                        ]
+                        if self.iterables
+                        else []
+                    )
+                self._cached_keys = keys
+                return keys
+
     def get_output_keys(self) -> set[Key]:
-        return set(self.keys())
+        return set(self._keys)
 
     def get_ordered_keys(self):
-        return list(self.keys())
+        return list(self._keys)
 
     def is_materialized(self) -> bool:
         return hasattr(self, "_cached_dict")
@@ -893,35 +921,12 @@ class _MapLayer(Layer):
         return len(self._dict)
 
     def _construct_graph(self) -> _T_LowLevelGraph:
-        if (
-            isinstance(self.key, Iterable)
-            and not isinstance(self.key, str)
-            and not isinstance(self.key, bytes)
-        ):
-            keys = self.key
-        else:
-            if self.pure:
-                keys = [
-                    self.key + "-" + tokenize(self.func, self.kwargs, args)  # type: ignore
-                    for args in zip(*self.iterables)
-                ]
-            else:
-                uid = str(uuid.uuid4())
-                keys = (
-                    [
-                        f"{self.key}-{uid}-{i}"
-                        for i in range(min(map(len, self.iterables)))
-                    ]
-                    if self.iterables
-                    else []
-                )
-
         dsk: _T_LowLevelGraph = {}
 
         if not self.kwargs:
             dsk = {
                 key: (self.func,) + args
-                for key, args in zip(keys, zip(*self.iterables))
+                for key, args in zip(self._keys, zip(*self.iterables))
             }
 
         else:
@@ -938,7 +943,7 @@ class _MapLayer(Layer):
                 dsk.update(
                     {
                         key: (apply, self.func, (tuple, list(args)), kwargs2)
-                        for key, args in zip(keys, zip(*self.iterables))
+                        for key, args in zip(self._keys, zip(*self.iterables))
                     }
                 )
         return dsk
@@ -3304,7 +3309,9 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-
+            # if this comes from MapLayer, check if its materialized
+            if hasattr(dsk, "is_materialized"):
+                assert not dsk.is_materialized(), "Graph must be non-materialized"
             # Make sure `dsk` is a high level graph
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
