@@ -893,7 +893,11 @@ class _MapLayer(Layer):
         return len(self._dict)
 
     def _construct_graph(self) -> _T_LowLevelGraph:
-        if isinstance(self.key, Iterable) and not isinstance(self.key, str):
+        if (
+            isinstance(self.key, Iterable)
+            and not isinstance(self.key, str)
+            and not isinstance(self.key, bytes)
+        ):
             keys = self.key
         else:
             if self.pure:
