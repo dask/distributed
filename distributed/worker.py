@@ -43,7 +43,6 @@ from typing import (
 
 from tlz import keymap, pluck
 from tornado.ioloop import IOLoop
-from typing_extensions import Self
 
 import dask
 from dask.core import istask
@@ -153,7 +152,7 @@ from distributed.worker_state_machine import (
 
 if TYPE_CHECKING:
     # FIXME import from typing (needs Python >=3.10)
-    from typing_extensions import ParamSpec
+    from typing_extensions import ParamSpec, Self
 
     # Circular imports
     from distributed.client import Client
