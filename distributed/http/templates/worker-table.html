@@ -23,7 +23,7 @@
             <td data-sort="{{ws.memory_limit}}"> {{ format_bytes(ws.memory_limit) if ws.memory_limit is not None else "" }} </td>
             <td> <progress class="progress" value="{{ ws.metrics['memory'] }}" max="{{ ws.memory_limit }}"></progress>
             </td>
-            <td data-sort={{ ws.occupancy }}> {{ format_time(ws.occupancy) }} </td>
+            <td data-sort="{{ ws.occupancy }}"> {{ format_time(ws.occupancy) }} </td>
             <td> {{ len(ws.processing) }} </td>
             <td> {{ len(ws.has_what) }} </td>
             {% if 'dashboard' in ws.services %}
