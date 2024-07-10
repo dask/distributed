@@ -11,6 +11,7 @@ from tlz import first, merge
 from tornado import escape
 from tornado.websocket import WebSocketHandler
 
+import dask
 from dask.typing import Key
 from dask.utils import format_bytes, format_time
 
@@ -32,6 +33,10 @@ rel_path_statics = {"rel_path_statics": "../../.."}
 
 logger = logging.getLogger(__name__)
 
+API_ENABLED = "distributed.http.scheduler.api" in dask.config.get(
+    "distributed.scheduler.http.routes"
+)
+
 
 class Workers(RequestHandler):
     @log_errors
@@ -40,6 +45,7 @@ class Workers(RequestHandler):
             "workers.html",
             title="Workers",
             scheduler=self.server,
+            api_enabled=API_ENABLED,
             **merge(
                 self.server.__dict__,
                 self.server.__pdict__,
@@ -62,6 +68,7 @@ class Worker(RequestHandler):
             "worker.html",
             title="Worker: " + worker,
             scheduler=self.server,
+            api_enabled=API_ENABLED,
             Worker=worker,
             **merge(
                 self.server.__dict__,
@@ -134,6 +141,7 @@ class Task(RequestHandler):
             title=f"Task: {key!r}",
             Task=key,
             scheduler=self.server,
+            api_enabled=API_ENABLED,
             **merge(
                 self.server.__dict__,
                 self.server.__pdict__,
