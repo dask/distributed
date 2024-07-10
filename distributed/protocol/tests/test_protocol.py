@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sys
 
 import pytest
@@ -169,11 +170,13 @@ def test_deeply_nested_structures():
         return d
 
     msg = {}
-    for _ in range(4):
+    for _ in range(10):
         msg = gen_deeply_nested(sys.getrecursionlimit() // 2, msg=msg)
 
+    with pytest.raises(RecursionError):
+        copy.deepcopy(msg)
+
     with pytest.raises(TypeError, match="Could not serialize object"):
-        # Python3.12 this is very slow
         serialize(msg, on_error="raise")
 
     msg = gen_deeply_nested(sys.getrecursionlimit() // 2)
