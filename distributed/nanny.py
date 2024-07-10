@@ -25,12 +25,12 @@ from dask.system import CPU_COUNT
 from dask.utils import parse_timedelta
 
 from distributed import preloading
+from distributed._async_taskgroup import AsyncTaskGroupClosedError
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import (
-    AsyncTaskGroupClosedError,
     CommClosedError,
     ErrorMessage,
     OKMessage,
