@@ -91,6 +91,14 @@ properties:
 
               Works in conjunction with idle-timeout.
 
+          no-clients-timeout:
+            type:
+            - string
+            - "null"
+            description: |
+              Shut down the scheduler after this duration if no client heartbeats received,
+              and there are no running or queued tasks.
+
           work-stealing:
             type: boolean
             description: |
