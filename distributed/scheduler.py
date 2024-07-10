@@ -6197,8 +6197,10 @@ class Scheduler(SchedulerState, ServerNode):
             await asyncio.sleep(0.1)
 
         assert isinstance(data, dict)
-
-        keys, who_has, nbytes = await scatter_to_workers(wss, data, rpc=self.server.rpc)
+        workers = list(ws.address for ws in wss)
+        keys, who_has, nbytes = await scatter_to_workers(
+            workers, data, rpc=self.server.rpc
+        )
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
