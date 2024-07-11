@@ -17,7 +17,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Coroutine, Iterator, Sequence
+from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -26,7 +26,19 @@ from functools import partial, singledispatchmethod
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, Callable, ClassVar, Literal, NamedTuple, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    TypedDict,
+    cast,
+)
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
@@ -35,8 +47,9 @@ import dask
 from dask.base import collections_to_dsk, tokenize
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
+from dask.layers import Layer
 from dask.optimization import SubgraphCallable
-from dask.typing import NoDefault, no_default
+from dask.typing import Key, NoDefault, no_default
 from dask.utils import (
     apply,
     ensure_dict,
@@ -805,6 +818,135 @@ class VersionsDict(TypedDict):
     scheduler: dict[str, dict[str, Any]]
     workers: dict[str, dict[str, dict[str, Any]]]
     client: dict[str, dict[str, Any]]
+
+
+_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
+
+
+def _is_nested(iterable):
+    for item in iterable:
+        if (
+            isinstance(item, Iterable)
+            and not isinstance(item, str)
+            and not isinstance(item, bytes)
+        ):
+            return True
+    return False
+
+
+class _MapLayer(Layer):
+    func: Callable
+    iterables: Iterable[Any]
+    key: str | Iterable[str] | None
+    pure: bool
+    annotations: dict[str, Any] | None
+
+    def __init__(
+        self,
+        func: Callable,
+        iterables: Iterable[Any],
+        key: str | Iterable[str] | None = None,
+        pure: bool = True,
+        annotations: dict[str, Any] | None = None,
+        **kwargs,
+    ):
+        self.func: Callable = func
+        self.iterables: Iterable[Any] = (
+            list(zip(*zip(*iterables))) if _is_nested(iterables) else [iterables]
+        )
+        self.key: str | Iterable[str] | None = key
+        self.pure: bool = pure
+        self.kwargs = kwargs
+        super().__init__(annotations=annotations)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__} <func='{funcname(self.func)}'>"
+
+    @property
+    def _dict(self) -> _T_LowLevelGraph:
+        self._cached_dict: _T_LowLevelGraph
+        dsk: _T_LowLevelGraph
+
+        if hasattr(self, "_cached_dict"):
+            return self._cached_dict
+        else:
+            dsk = self._construct_graph()
+            self._cached_dict = dsk
+        return self._cached_dict
+
+    @property
+    def _keys(self) -> Iterable[Key]:
+        if hasattr(self, "_cached_keys"):
+            return self._cached_keys
+        else:
+            if isinstance(self.key, Iterable) and not isinstance(self.key, str):
+                self._cached_keys: Iterable[Key] = self.key
+                return self.key
+
+            else:
+                if self.pure:
+                    keys = [
+                        self.key + "-" + tokenize(self.func, self.kwargs, args)  # type: ignore
+                        for args in zip(*self.iterables)
+                    ]
+                else:
+                    uid = str(uuid.uuid4())
+                    keys = (
+                        [
+                            f"{self.key}-{uid}-{i}"
+                            for i in range(min(map(len, self.iterables)))
+                        ]
+                        if self.iterables
+                        else []
+                    )
+                self._cached_keys = keys
+                return keys
+
+    def get_output_keys(self) -> set[Key]:
+        return set(self._keys)
+
+    def get_ordered_keys(self):
+        return list(self._keys)
+
+    def is_materialized(self) -> bool:
+        return hasattr(self, "_cached_dict")
+
+    def __getitem__(self, key: Key) -> tuple:
+        return self._dict[key]
+
+    def __iter__(self) -> Iterator[Key]:
+        return iter(self._dict)
+
+    def __len__(self) -> int:
+        return len(self._dict)
+
+    def _construct_graph(self) -> _T_LowLevelGraph:
+        dsk: _T_LowLevelGraph = {}
+
+        if not self.kwargs:
+            dsk = {
+                key: (self.func,) + args
+                for key, args in zip(self._keys, zip(*self.iterables))
+            }
+
+        else:
+            kwargs2 = {}
+            dsk = {}
+            for k, v in self.kwargs.items():
+                if sizeof(v) > 1e5:
+                    vv = dask.delayed(v)
+                    kwargs2[k] = vv._key
+                    dsk.update(vv.dask)
+                else:
+                    kwargs2[k] = v
+
+                dsk.update(
+                    {
+                        key: (apply, self.func, (tuple, list(args)), kwargs2)
+                        for key, args in zip(self._keys, zip(*self.iterables))
+                    }
+                )
+        return dsk
 
 
 class Client(SyncMethodMixin):
@@ -2046,18 +2188,18 @@ class Client(SyncMethodMixin):
 
     def map(
         self,
-        func,
-        *iterables,
-        key=None,
-        workers=None,
-        retries=None,
-        resources=None,
-        priority=0,
-        allow_other_workers=False,
-        fifo_timeout="100 ms",
-        actor=False,
-        actors=False,
-        pure=True,
+        func: Callable,
+        *iterables: Collection,
+        key: str | list | None = None,
+        workers: str | Iterable[str] | None = None,
+        retries: int | None = None,
+        resources: dict[str, Any] | None = None,
+        priority: int = 0,
+        allow_other_workers: bool = False,
+        fifo_timeout: str = "100 ms",
+        actor: bool = False,
+        actors: bool = False,
+        pure: bool = True,
         batch_size=None,
         **kwargs,
     ):
@@ -2148,11 +2290,11 @@ class Client(SyncMethodMixin):
                 "Consider using a normal for loop and Client.submit"
             )
         total_length = sum(len(x) for x in iterables)
-
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
                 zip(*(partition_all(batch_size, iterable) for iterable in iterables))
             )
+            keys: list[list[Any]] | list[Any]
             if isinstance(key, list):
                 keys = [list(element) for element in partition_all(batch_size, key)]
             else:
@@ -2187,45 +2329,14 @@ class Client(SyncMethodMixin):
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
 
-        iterables = list(zip(*zip(*iterables)))
-        if isinstance(key, list):
-            keys = key
-        else:
-            if pure:
-                keys = [
-                    key + "-" + tokenize(func, kwargs, *args)
-                    for args in zip(*iterables)
-                ]
-            else:
-                uid = str(uuid.uuid4())
-                keys = (
-                    [
-                        key + "-" + uid + "-" + str(i)
-                        for i in range(min(map(len, iterables)))
-                    ]
-                    if iterables
-                    else []
-                )
-
-        if not kwargs:
-            dsk = {key: (func,) + args for key, args in zip(keys, zip(*iterables))}
-        else:
-            kwargs2 = {}
-            dsk = {}
-            for k, v in kwargs.items():
-                if sizeof(v) > 1e5:
-                    vv = dask.delayed(v)
-                    kwargs2[k] = vv._key
-                    dsk.update(vv.dask)
-                else:
-                    kwargs2[k] = v
-            dsk.update(
-                {
-                    key: (apply, func, (tuple, list(args)), kwargs2)
-                    for key, args in zip(keys, zip(*iterables))
-                }
-            )
-
+        dsk = _MapLayer(
+            func,
+            iterables,
+            key=key,
+            pure=pure,
+            **kwargs,
+        )
+        keys = dsk.get_ordered_keys()
         if isinstance(workers, (str, Number)):
             workers = [workers]
         if workers is not None and not isinstance(workers, (list, set)):
@@ -2246,8 +2357,10 @@ class Client(SyncMethodMixin):
             actors=actor,
             span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
         )
-        logger.debug("map(%s, ...)", funcname(func))
 
+        # make sure the graph is not materialized
+        assert not dsk.is_materialized(), "Graph must be non-materialized"
+        logger.debug("map(%s, ...)", funcname(func))
         return [futures[k] for k in keys]
 
     async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
@@ -3199,7 +3312,6 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-
             # Make sure `dsk` is a high level graph
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
