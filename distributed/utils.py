@@ -1989,7 +1989,7 @@ class TupleComparable:
         return self.obj < other.obj
 
 
-@functools.lru_cache
+@functools.cache
 def url_escape(url, *args, **kwargs):
     """
     Escape a URL path segment. Cache results for better performance.
