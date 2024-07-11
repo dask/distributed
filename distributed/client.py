@@ -2357,6 +2357,9 @@ class Client(SyncMethodMixin):
             actors=actor,
             span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
         )
+
+        # make sure the graph is not materialized
+        assert not dsk.is_materialized(), "Graph must be non-materialized"
         logger.debug("map(%s, ...)", funcname(func))
         return [futures[k] for k in keys]
 
@@ -3309,9 +3312,6 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-            # if this comes from MapLayer, check if its materialized
-            if hasattr(dsk, "is_materialized"):
-                assert not dsk.is_materialized(), "Graph must be non-materialized"
             # Make sure `dsk` is a high level graph
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
