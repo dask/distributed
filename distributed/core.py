@@ -121,7 +121,7 @@ tick_maximum_delay = parse_timedelta(
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
-@functools.lru_cache
+@functools.cache
 def _expects_comm(func: Callable) -> bool:
     sig = inspect.signature(func)
     params = list(sig.parameters)
