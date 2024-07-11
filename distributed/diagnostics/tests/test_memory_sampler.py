@@ -42,7 +42,7 @@ def test_sync(loop):
         with ms.sample("foo", measure="managed", interval=0.001):
             f = client.submit(lambda: 1)
             f.result()
-            time.sleep(0.01)
+            time.sleep(0.1)
 
         assert ms.samples["foo"][0][1] == 0
         assert sum([s[1] for s in ms.samples["foo"]]) > 0
