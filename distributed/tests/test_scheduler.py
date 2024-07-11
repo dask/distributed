@@ -2541,6 +2541,36 @@ async def test_no_workers_timeout_processing(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_no_clients_timeout(c, s, a, b):
+    """Tests that with setting `no_clients_timeout` value, a submitted future
+    does complete, but afterwards cluster shuts down with the expected log message."""
+
+    beginning = time()
+    future = c.submit(slowinc, 1)
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+    s.no_clients_timeout = 1.0
+    pc = PeriodicCallback(s._check_no_clients, 10)
+    pc.start()
+    await future
+
+    with captured_logger("distributed.scheduler") as logs:
+        start = time()
+        while s.status != Status.closed:
+            await asyncio.sleep(0.01)
+            assert time() < start + 3
+
+        start = time()
+        while not (a.status == Status.closed and b.status == Status.closed):
+            await asyncio.sleep(0.01)
+            assert time() < start + 1
+
+    assert "No tasks and no client heartbeat" in logs.getvalue()
+    pc.stop()
+
+
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
 async def test_bandwidth(c, s, a, b):
     start = s.bandwidth
