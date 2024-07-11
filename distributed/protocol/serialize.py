@@ -209,17 +209,20 @@ register_serialization_family("error", None, serialization_error_loads)
 
 
 def check_dask_serializable(x):
-    if type(x) in (list, set, tuple) and len(x):
-        return check_dask_serializable(next(iter(x)))
-    elif type(x) is dict and len(x):
-        return check_dask_serializable(next(iter(x.items()))[1])
-    else:
-        try:
-            dask_serialize.dispatch(type(x))
-            return True
-        except TypeError:
-            pass
-    return False
+    try:
+        if type(x) in (list, set, tuple) and len(x):
+            return check_dask_serializable(next(iter(x)))
+        elif type(x) is dict and len(x):
+            return check_dask_serializable(next(iter(x.items()))[1])
+        else:
+            try:
+                dask_serialize.dispatch(type(x))
+                return True
+            except TypeError:
+                pass
+        return False
+    except RecursionError:
+        return False
 
 
 def serialize(  # type: ignore[no-untyped-def]
