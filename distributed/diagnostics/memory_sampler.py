@@ -169,8 +169,16 @@ class MemorySampler:
         =======
         Output of :meth:`pandas.DataFrame.plot`
         """
-        df = self.to_pandas(align=align).resample("1s").nearest() / 2**30
-        return df.plot(
+        df = self.to_pandas(align=align)
+        resampled = df.resample("1s").nearest() / 2**30
+        # If resampling collapses data onto one point, we'll run into
+        # https://stackoverflow.com/questions/58322744/matplotlib-userwarning-attempting-to-set-identical-left-right-737342-0
+        # This should only happen in tests since users typically sample for more
+        # than a second
+        if len(resampled) == 1:
+            resampled = df.resample("1ms").nearest() / 2**30
+
+        return resampled.plot(
             xlabel="time",
             ylabel="Cluster memory (GiB)",
             **kwargs,
