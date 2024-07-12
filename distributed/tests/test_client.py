@@ -8472,6 +8472,7 @@ def _release_persisted(obj):
 
 @gen_cluster(client=True)
 async def test_release_persisted_collection(c, s, a, b):
+    np = pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
     arr = c.persist(da.random.random((10,), chunks=(10,)))
@@ -8487,6 +8488,7 @@ async def test_release_persisted_collection(c, s, a, b):
 
 
 def test_release_persisted_collection_sync(c):
+    np = pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
     arr = da.random.random((10,), chunks=(10,)).persist()
 
