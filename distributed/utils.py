@@ -49,7 +49,6 @@ from typing import TYPE_CHECKING
 from typing import Any as AnyType
 from typing import ClassVar, TypeVar, overload
 
-import click
 import psutil
 import tblib.pickling_support
 from tornado import escape
@@ -1274,6 +1273,10 @@ def has_keyword(func, keyword):
 
 @functools.lru_cache(1000)
 def command_has_keyword(cmd, k):
+    # Click is a relatively expensive import
+    # That hurts startup time a little
+    import click
+
     if cmd is not None:
         if isinstance(cmd, str):
             try:
