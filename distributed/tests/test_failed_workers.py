@@ -482,6 +482,7 @@ async def test_worker_time_to_live(c, s, a, b):
     Worker=Nanny,
     nthreads=[("", 1)],
     scheduler_kwargs={"worker_ttl": "100ms", "allowed_failures": 0},
+    clean_kwargs={"threads": False},
 )
 async def test_worker_ttl_restarts_worker(c, s, a, block_on, monkeypatch):
     """If the event loop of a worker becomes completely unresponsive, the scheduler will
