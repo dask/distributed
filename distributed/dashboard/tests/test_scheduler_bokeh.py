@@ -1349,10 +1349,10 @@ async def test_shuffling(c, s, a, b):
         df2 = df.shuffle("x").persist()
     start = time()
     while not ss.source.data["comm_written"]:
+        await asyncio.gather(*[a.heartbeat(), b.heartbeat()])
         ss.update()
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         assert time() < start + 10
-    await df2
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)
