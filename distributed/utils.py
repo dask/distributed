@@ -52,6 +52,7 @@ from typing import ClassVar, TypeVar, overload
 import click
 import psutil
 import tblib.pickling_support
+from tornado import escape
 
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
@@ -170,12 +171,20 @@ def get_fileno_limit():
 
 @toolz.memoize
 def _get_ip(host, port, family):
+    def hostname_fallback():
+        addr_info = socket.getaddrinfo(
+            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
+        )[0]
+        return addr_info[4][0]
+
     # By using a UDP socket, we don't actually try to connect but
     # simply select the local address through which *host* is reachable.
     sock = socket.socket(family, socket.SOCK_DGRAM)
     try:
         sock.connect((host, port))
         ip = sock.getsockname()[0]
+        if ip == "0.0.0.0":
+            return hostname_fallback()
         return ip
     except OSError as e:
         warnings.warn(
@@ -183,10 +192,7 @@ def _get_ip(host, port, family):
             "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        addr_info = socket.getaddrinfo(
-            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
-        )[0]
-        return addr_info[4][0]
+        return hostname_fallback()
     finally:
         sock.close()
 
@@ -1825,19 +1831,6 @@ def recursive_to_dict(
         tok.var.reset(tok)
 
 
-def is_python_shutting_down() -> bool:
-    """Is the interpreter shutting down now?
-
-    This is a variant of ``sys.is_finalizing`` which can return True inside the ``__del__``
-    method of classes defined inside the distributed package.
-    """
-    # This import must remain local for the global variable to be
-    # properly evaluated
-    from distributed import _python_shutting_down
-
-    return _python_shutting_down
-
-
 class Deadline:
     """Utility class tracking a deadline and the progress toward it"""
 
@@ -1994,3 +1987,11 @@ class TupleComparable:
 
     def __lt__(self, other):
         return self.obj < other.obj
+
+
+@functools.cache
+def url_escape(url, *args, **kwargs):
+    """
+    Escape a URL path segment. Cache results for better performance.
+    """
+    return escape.url_escape(url, *args, **kwargs)

@@ -25,12 +25,12 @@ from dask.system import CPU_COUNT
 from dask.utils import parse_timedelta
 
 from distributed import preloading
+from distributed._async_taskgroup import AsyncTaskGroupClosedError
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import (
-    AsyncTaskGroupClosedError,
     CommClosedError,
     ErrorMessage,
     OKMessage,
@@ -387,18 +387,14 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout: float = 2, reason: str = "nanny-kill") -> None:
+    async def kill(self, timeout: float = 5, reason: str = "nanny-kill") -> None:
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
         informed
         """
-
-        if self.process is None or not self.process.is_alive():
-            return
-
-        deadline = time() + timeout
-        await self.process.kill(reason=reason, timeout=0.8 * (deadline - time()))
+        if self.process is not None:
+            await self.process.kill(reason=reason, timeout=timeout)
 
     def instantiate_worker_process(self) -> WorkerProcess:
         worker_kwargs = dict(
@@ -823,7 +819,7 @@ class WorkerProcess:
 
     async def kill(
         self,
-        timeout: float = 2,
+        timeout: float = 5,
         executor_wait: bool = True,
         reason: str = "workerprocess-kill",
     ) -> None:
@@ -872,7 +868,7 @@ class WorkerProcess:
             await process.join(timeout)
         except asyncio.TimeoutError:
             logger.warning(
-                f"Worker process still alive after {timeout} seconds, killing"
+                f"Worker process still alive after {timeout:.1f} seconds, killing"
             )
             await process.kill()
             await process.join()

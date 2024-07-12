@@ -12,6 +12,7 @@ np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
 
 from concurrent.futures import ThreadPoolExecutor
+from itertools import product
 
 from tornado.ioloop import IOLoop
 
@@ -33,7 +34,7 @@ from distributed.shuffle._rechunk import (
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
-from distributed.utils_test import gen_cluster, gen_test
+from distributed.utils_test import async_poll_for, gen_cluster, gen_test
 
 NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 
@@ -83,9 +84,6 @@ class ArrayRechunkTestPool(AbstractShuffleTestPool):
         )
         self.shuffles[name] = s
         return s
-
-
-from itertools import product
 
 
 @pytest.mark.parametrize("n_workers", [1, 10])
@@ -533,6 +531,7 @@ async def test_rechunk_same_fully_unknown(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_same_fully_unknown
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 10))
     y = dd.from_array(x).values
@@ -551,6 +550,8 @@ async def test_rechunk_same_fully_unknown_floats(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_same_fully_unknown_floats
     """
+
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 10))
     y = dd.from_array(x).values
@@ -566,6 +567,7 @@ async def test_rechunk_same_partially_unknown(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_same_partially_unknown
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 10))
     y = dd.from_array(x).values
@@ -623,8 +625,8 @@ async def test_rechunk_unknown_from_pandas(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_unknown_from_pandas
     """
-    dd = pytest.importorskip("dask.dataframe")
     pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
 
     arr = np.random.default_rng().standard_normal((50, 10))
     x = dd.from_pandas(pd.DataFrame(arr), 2).values
@@ -645,6 +647,7 @@ async def test_rechunk_unknown_from_array(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_unknown_from_array
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = dd.from_array(da.ones(shape=(4, 4), chunks=(2, 2))).values
     result = x.rechunk((None, 4), method="p2p")
@@ -678,6 +681,7 @@ async def test_rechunk_with_fully_unknown_dimension(c, s, *ws, x, chunks):
     --------
     dask.array.tests.test_rechunk.test_rechunk_with_fully_unknown_dimension
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     y = dd.from_array(x).values
     result = y.rechunk(chunks, method="p2p")
@@ -720,6 +724,7 @@ async def test_rechunk_with_partially_unknown_dimension(c, s, *ws, x, chunks):
     --------
     dask.array.tests.test_rechunk.test_rechunk_with_partially_unknown_dimension
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     y = dd.from_array(x).values
     z = da.concatenate([x, y])
@@ -745,6 +750,7 @@ async def test_rechunk_with_fully_unknown_dimension_explicit(c, s, *ws, new_chun
     --------
     dask.array.tests.test_rechunk.test_rechunk_with_fully_unknown_dimension_explicit
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
     x = da.ones(shape=(10, 10), chunks=(5, 2))
     y = dd.from_array(x).values
@@ -766,6 +772,7 @@ async def test_rechunk_unknown_raises(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_unknown_raises
     """
+    pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
 
     x = da.ones(shape=(10, 10), chunks=(5, 5))
@@ -788,8 +795,6 @@ async def test_rechunk_zero_dim(c, s, *ws):
     --------
     dask.array.tests.test_rechunk.test_rechunk_zero_dim
     """
-    da = pytest.importorskip("dask.array")
-
     x = da.ones((0, 10, 100), chunks=(0, 10, 10)).rechunk((0, 10, 50), method="p2p")
     assert len(await c.compute(x)) == 0
 
@@ -1259,8 +1264,6 @@ def test_pick_worker_homogeneous_distribution(nworkers):
     config={"distributed.scheduler.active-memory-manager.start": False},
 )
 async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
-    da = pytest.importorskip("dask.array")
-
     # This rechunk operation can be split into 10 independent shuffles with 4 output
     # chunks each. This is less than the number of workers, so we are at risk of
     # choosing the same 4 output workers in each separate shuffle.
@@ -1275,3 +1278,45 @@ async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
     nchunks = [len(w.data.keys() & out_keys) for w in workers]
     # There are 40 output chunks and 5 workers. Expect exactly 8 chunks per worker.
     assert nchunks == [8, 8, 8, 8, 8]
+
+
+@gen_cluster(client=True, nthreads=[], config={"optimization.fuse.active": False})
+async def test_partial_rechunk_taskgroups(c, s):
+    """Regression test for https://github.com/dask/distributed/issues/8656"""
+    arr = da.random.random(
+        (10, 10, 10),
+        chunks=(
+            (
+                2,
+                2,
+                2,
+                2,
+                2,
+            ),
+        )
+        * 3,
+    )
+    arr = arr.rechunk(
+        (
+            (
+                1,
+                2,
+                2,
+                2,
+                2,
+                1,
+            ),
+        )
+        * 3,
+        method="p2p",
+    )
+
+    _ = c.compute(arr)
+    await async_poll_for(
+        lambda: any(
+            isinstance(task, str) and task.startswith("shuffle-barrier")
+            for task in s.tasks
+        ),
+        timeout=5,
+    )
+    assert len(s.task_groups) < 7

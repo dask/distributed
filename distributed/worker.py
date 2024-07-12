@@ -101,7 +101,6 @@ from distributed.utils import (
     get_ip,
     has_arg,
     in_async_call,
-    is_python_shutting_down,
     iscoroutinefunction,
     json_load_robust,
     log_errors,
@@ -1029,23 +1028,22 @@ class Worker(BaseWorker, ServerNode):
             spilled_memory, spilled_disk = 0, 0
 
         # Send Fine Performance Metrics
-        # Make sure we do not yield the event loop between the moment we parse
-        # self.digests_total_since_heartbeat to send it to the scheduler and the moment
-        # we clear it!
+        # Swap the dictionary to avoid updates while we iterate over it
+        digests_total_since_heartbeat = self.digests_total_since_heartbeat
+        self.digests_total_since_heartbeat = defaultdict(int)
+
         spans_ext: SpansWorkerExtension | None = self.extensions.get("spans")
         if spans_ext:
             # Send metrics with disaggregated span_id
-            spans_ext.collect_digests()
+            spans_ext.collect_digests(digests_total_since_heartbeat)
 
         # Send metrics with squashed span_id
         # Don't cast int metrics to float
         digests: defaultdict[Hashable, float] = defaultdict(int)
-        for k, v in self.digests_total_since_heartbeat.items():
+        for k, v in digests_total_since_heartbeat.items():
             if isinstance(k, tuple) and k[0] in CONTEXTS_WITH_SPAN_ID:
                 k = k[:1] + k[2:]
             digests[k] += v
-
-        self.digests_total_since_heartbeat.clear()
 
         out: dict = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
@@ -1634,7 +1632,9 @@ class Worker(BaseWorker, ServerNode):
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            if is_python_shutting_down():
+
+            # Are we shutting down the process?
+            if self._is_finalizing() or not threading.main_thread().is_alive():
                 # If we're shutting down there is no need to wait for daemon
                 # threads to finish
                 _close(executor=executor, wait=False)
@@ -1643,7 +1643,7 @@ class Worker(BaseWorker, ServerNode):
                     await asyncio.to_thread(
                         _close, executor=executor, wait=executor_wait
                     )
-                except RuntimeError:  # Are we shutting down the process?
+                except RuntimeError:
                     logger.error(
                         "Could not close executor %r by dispatching to thread. Trying synchronously.",
                         executor,
@@ -2339,19 +2339,25 @@ class Worker(BaseWorker, ServerNode):
                     key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
                 )
 
-            logger.warning(
-                "Compute Failed\n"
-                "Key:       %s\n"
-                "Function:  %s\n"
-                "args:      %s\n"
-                "kwargs:    %s\n"
-                "Exception: %r\n",
-                key,
-                str(funcname(function))[:1000],
-                convert_args_to_str(args2, max_len=1000),
-                convert_kwargs_to_str(kwargs2, max_len=1000),
-                result["exception_text"],
-            )
+            if ts.state in ("executing", "long-running", "resumed"):
+                logger.warning(
+                    "Compute Failed\n"
+                    "Key:       %s\n"
+                    "State:     %s\n"
+                    "Function:  %s\n"
+                    "args:      %s\n"
+                    "kwargs:    %s\n"
+                    "Exception: %r\n"
+                    "Traceback: %r\n",
+                    key,
+                    ts.state,
+                    str(funcname(function))[:1000],
+                    convert_args_to_str(args2, max_len=1000),
+                    convert_kwargs_to_str(kwargs2, max_len=1000),
+                    result["exception_text"],
+                    result["traceback_text"],
+                )
+
             return ExecuteFailureEvent.from_exception(
                 result,
                 key=key,
@@ -2369,7 +2375,7 @@ class Worker(BaseWorker, ServerNode):
             #   _prepare_args_for_execution() to raise KeyError;
             # - A dependency was unspilled but failed to deserialize due to a bug in
             #   user-defined or third party classes.
-            if ts.state == "executing":
+            if ts.state in ("executing", "long-running"):
                 logger.error(
                     f"Exception during execution of task {key!r}",
                     exc_info=True,

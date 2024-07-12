@@ -24,12 +24,10 @@ from dask.utils import key_split
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.worker import Status
 
-dd = pytest.importorskip("dask.dataframe")
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
 
-import numpy as np
-import pandas as pd
-
-from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_200
+import dask.dataframe as dd
 from dask.typing import Key
 
 from distributed import (
@@ -41,7 +39,7 @@ from distributed import (
     Scheduler,
     Worker,
 )
-from distributed.core import ConnectionPool
+from distributed.core import ConnectionPool, ErrorMessage, OKMessage
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
     buffers_to_table,
@@ -49,6 +47,7 @@ from distributed.shuffle._arrow import (
     read_from_disk,
     serialize_table,
 )
+from distributed.shuffle._exceptions import P2PConsistencyError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
@@ -434,7 +433,34 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
+    await c.close()
+    await check_worker_cleanup(a)
+    await check_worker_cleanup(b, closed=True)
+    await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 1},
+)
+async def test_restarting_does_not_log_p2p_failed(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = df.shuffle("x")
+    out = c.compute(out.x.size)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
+    await b.close()
+
+    await out
+    assert not s.get_events("p2p")
     await c.close()
     await check_worker_cleanup(a)
     await check_worker_cleanup(b, closed=True)
@@ -535,18 +561,21 @@ async def test_crashed_worker_during_transfer(c, s, a):
 async def test_restarting_does_not_deadlock(c, s):
     """Regression test for https://github.com/dask/distributed/issues/8088"""
     async with Worker(s.address) as a:
+        # Ensure that a holds the input tasks to the shuffle
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-03-01",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        df = await c.persist(df)
+        expected = await c.compute(df)
+
         async with Nanny(s.address) as b:
-            # Ensure that a holds the input tasks to the shuffle
-            with dask.annotate(workers=[a.address]):
-                df = dask.datasets.timeseries(
-                    start="2000-01-01",
-                    end="2000-03-01",
-                    dtypes={"x": float, "y": float},
-                    freq="10 s",
-                )
             with dask.config.set({"dataframe.shuffle.method": "p2p"}):
                 out = df.shuffle("x")
-            fut = c.compute(out.x.size)
+            assert not s.workers[b.worker_address].has_what
+            result = c.compute(out)
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", b.worker_address, 1, s
             )
@@ -560,7 +589,8 @@ async def test_restarting_does_not_deadlock(c, s):
             a.status = Status.running
 
             await async_poll_for(lambda: s.running, timeout=5)
-            await fut
+            result = await result
+            assert dd.assert_eq(result, expected)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -631,19 +661,23 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             await check_scheduler_cleanup(s)
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
-    with dask.annotate(workers=[w1.address, w2.address], allow_other_workers=False):
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-02-01",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            shuffled = df.shuffle("x")
-        fut = c.compute([shuffled, df], sync=True)
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        shuffled = df.shuffle("x")
+    fut = c.compute(
+        [shuffled, df],
+        sync=True,
+        workers=[w1.address, w2.address],
+        allow_other_workers=False,
+    )
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w1)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w2)
     await w3.close()
@@ -797,6 +831,7 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
     alive_shuffle.block_inputs_done.set()
 
@@ -959,6 +994,7 @@ async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
     await c.close()
     await check_worker_cleanup(a)
@@ -1108,41 +1144,38 @@ def test_processing_chain(tmp_path, drop_column):
             }
         )
 
-    if PANDAS_GE_150:
-        columns.update(
-            {
-                # PyArrow dtypes
-                f"col{next(counter)}": pd.array(
-                    [True, False] * 50, dtype="bool[pyarrow]"
-                ),
-                f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
-                f"col{next(counter)}": pd.array(
-                    [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
-                    dtype=pd.ArrowDtype(pa.timestamp("ms")),
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype="string[pyarrow]",
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype=pd.StringDtype("pyarrow"),
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype="string[python]",
-                ),
-            }
-        )
+    columns.update(
+        {
+            # PyArrow dtypes
+            f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
+            f"col{next(counter)}": pd.array(
+                [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
+                dtype=pd.ArrowDtype(pa.timestamp("ms")),
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[pyarrow]",
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype=pd.StringDtype("pyarrow"),
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[python]",
+            ),
+        }
+    )
 
     df = pd.DataFrame(columns)
     df["_partitions"] = df.col4 % npartitions
@@ -1232,12 +1265,90 @@ async def test_head(c, s, a, b):
 
 
 def test_split_by_worker():
-    workers = ["a", "b", "c"]
-    npartitions = 5
-    df = pd.DataFrame({"x": range(100), "y": range(100)})
-    df["_partitions"] = df.x % npartitions
-    worker_for = {i: random.choice(workers) for i in range(npartitions)}
-    s = pd.Series(worker_for, name="_worker").astype("category")
+    pytest.importorskip("pyarrow")
+
+    df = pd.DataFrame(
+        {
+            "x": [1, 2, 3, 4, 5],
+            "_partition": [0, 1, 2, 0, 1],
+        }
+    )
+    meta = df[["x"]].head(0)
+    workers = ["alice", "bob"]
+    worker_for_mapping = {}
+    npartitions = 3
+    for part in range(npartitions):
+        worker_for_mapping[part] = _get_worker_for_range_sharding(
+            npartitions, part, workers
+        )
+    worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
+    out = split_by_worker(df, "_partition", meta, worker_for)
+    assert set(out) == {"alice", "bob"}
+    assert list(out["alice"].to_pandas().columns) == list(df.columns)
+
+    assert sum(map(len, out.values())) == len(df)
+
+
+def test_split_by_worker_empty():
+    pytest.importorskip("pyarrow")
+
+    df = pd.DataFrame(
+        {
+            "x": [1, 2, 3, 4, 5],
+            "_partition": [0, 1, 2, 0, 1],
+        }
+    )
+    meta = df[["x"]].head(0)
+    worker_for = pd.Series({5: "chuck"}, name="_workers").astype("category")
+    out = split_by_worker(df, "_partition", meta, worker_for)
+    assert out == {}
+
+
+def test_split_by_worker_many_workers():
+    pytest.importorskip("pyarrow")
+
+    df = pd.DataFrame(
+        {
+            "x": [1, 2, 3, 4, 5],
+            "_partition": [5, 7, 5, 0, 1],
+        }
+    )
+    meta = df[["x"]].head(0)
+    workers = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    npartitions = 10
+    worker_for_mapping = {}
+    for part in range(npartitions):
+        worker_for_mapping[part] = _get_worker_for_range_sharding(
+            npartitions, part, workers
+        )
+    worker_for = pd.Series(worker_for_mapping, name="_workers").astype("category")
+    out = split_by_worker(df, "_partition", meta, worker_for)
+    assert _get_worker_for_range_sharding(npartitions, 5, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 0, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 7, workers) in out
+    assert _get_worker_for_range_sharding(npartitions, 1, workers) in out
+
+    assert sum(map(len, out.values())) == len(df)
+
+
+@pytest.mark.parametrize("drop_column", [True, False])
+def test_split_by_partition(drop_column):
+    pa = pytest.importorskip("pyarrow")
+
+    df = pd.DataFrame(
+        {
+            "x": [1, 2, 3, 4, 5],
+            "_partition": [3, 1, 2, 3, 1],
+        }
+    )
+    t = pa.Table.from_pandas(df)
+
+    out = split_by_partition(t, "_partition", drop_column)
+    assert set(out) == {1, 2, 3}
+    if drop_column:
+        df = df.drop(columns="_partition")
+    assert out[1].column_names == list(df.columns)
+    assert sum(map(len, out.values())) == len(df)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -1833,7 +1944,7 @@ async def test_error_send(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
 
     class ErrorSend(DataFrameShuffleRun):
-        async def send(self, *args: Any, **kwargs: Any) -> None:
+        async def send(self, *args: Any, **kwargs: Any) -> OKMessage | ErrorMessage:
             raise RuntimeError("Error during send")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
@@ -1865,8 +1976,9 @@ async def test_error_send(tmp_path, loop_in_thread):
 
 
 @pytest.mark.skipif(not pa, reason="Requires PyArrow")
+@pytest.mark.parametrize("Error", [P2PConsistencyError, ValueError])
 @gen_test()
-async def test_error_receive(tmp_path, loop_in_thread):
+async def test_error_receive(tmp_path, loop_in_thread, Error):
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -1890,7 +2002,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
 
     class ErrorReceive(DataFrameShuffleRun):
         async def _receive(self, data: list[tuple[int, bytes]]) -> None:
-            raise RuntimeError("Error during receive")
+            raise Error("Error during receive")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
@@ -1914,7 +2026,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         )
         try:
             sB.add_partition(dfs[0], 0)
-            with pytest.raises(RuntimeError, match="Error during receive"):
+            with pytest.raises(Error, match="Error during receive"):
                 await sB.barrier(run_ids=[sB.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
@@ -1926,7 +2038,9 @@ class BlockedShuffleReceiveShuffleWorkerPlugin(ShuffleWorkerPlugin):
         self.in_shuffle_receive = asyncio.Event()
         self.block_shuffle_receive = asyncio.Event()
 
-    async def shuffle_receive(self, *args: Any, **kwargs: Any) -> None:
+    async def shuffle_receive(
+        self, *args: Any, **kwargs: Any
+    ) -> OKMessage | ErrorMessage:
         self.in_shuffle_receive.set()
         await self.block_shuffle_receive.wait()
         return await super().shuffle_receive(*args, **kwargs)
@@ -2058,7 +2172,7 @@ async def test_shuffle_run_consistency(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
 
     # Shuffle run manager can fetch the current run
     assert await run_manager.get_with_run_id(shuffle_id, spec.run_id)
@@ -2084,7 +2198,7 @@ async def test_shuffle_run_consistency(c, s, a):
     new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id == new_shuffle_id
 
-    new_spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    new_spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
 
     # Check invariant that the new run ID is larger than the previous
     assert spec.run_id < new_spec.run_id
@@ -2110,7 +2224,9 @@ async def test_shuffle_run_consistency(c, s, a):
     independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id != independent_shuffle_id
 
-    independent_spec = scheduler_ext.get(independent_shuffle_id, a.worker_address).data
+    independent_spec = scheduler_ext.get(independent_shuffle_id, a.worker_address)[
+        "run_spec"
+    ].data
 
     # Check invariant that the new run ID is larger than the previous
     # for independent shuffles
@@ -2150,7 +2266,7 @@ async def test_fail_fetch_race(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
     await worker_plugin.in_barrier.wait()
     # Pretend that the fail from the scheduler arrives first
     run_manager.fail(shuffle_id, spec.run_id, "error")
@@ -2279,7 +2395,6 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await check_scheduler_cleanup(s)
 
 
-@pytest.mark.skipif(not PANDAS_GE_200, reason="requires pandas >=2.0")
 @gen_cluster(client=True)
 async def test_handle_null_partitions(c, s, a, b):
     data = [

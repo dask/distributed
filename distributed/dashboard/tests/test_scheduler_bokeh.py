@@ -1350,8 +1350,8 @@ async def test_shuffling(c, s, a, b):
     start = time()
     while not ss.source.data["comm_written"]:
         ss.update()
-        await asyncio.sleep(0)
-        assert time() < start + 5
+        await asyncio.sleep(0.05)
+        assert time() < start + 10
     await df2
 
 

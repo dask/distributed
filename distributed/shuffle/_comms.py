@@ -5,10 +5,10 @@ from typing import Any
 
 from dask.utils import parse_bytes
 
+from distributed.core import ErrorMessage, OKMessage, clean_exception
 from distributed.metrics import context_meter
 from distributed.shuffle._disk import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
-from distributed.utils import log_errors
 
 
 class CommShardsBuffer(ShardsBuffer):
@@ -53,7 +53,9 @@ class CommShardsBuffer(ShardsBuffer):
 
     def __init__(
         self,
-        send: Callable[[str, list[tuple[Any, Any]]], Awaitable[None]],
+        send: Callable[
+            [str, list[tuple[Any, Any]]], Awaitable[OKMessage | ErrorMessage]
+        ],
         memory_limiter: ResourceLimiter,
         concurrency_limit: int = 10,
     ):
@@ -64,9 +66,14 @@ class CommShardsBuffer(ShardsBuffer):
         )
         self.send = send
 
-    @log_errors
     async def _process(self, address: str, shards: list[tuple[Any, Any]]) -> None:
         """Send one message off to a neighboring worker"""
         # Consider boosting total_size a bit here to account for duplication
         with context_meter.meter("send"):
-            await self.send(address, shards)
+            response = await self.send(address, shards)
+            status = response["status"]
+            if status == "error":
+                _, exc, tb = clean_exception(**response)
+                assert exc
+                raise exc.with_traceback(tb)
+            assert status == "OK"

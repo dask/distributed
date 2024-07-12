@@ -6,8 +6,10 @@ from functools import partial
 from distributed.protocol.core import decompress, dumps, loads, maybe_compress, msgpack
 from distributed.protocol.cuda import cuda_deserialize, cuda_serialize
 from distributed.protocol.serialize import (
+    Pickled,
     Serialize,
     Serialized,
+    ToPickle,
     dask_deserialize,
     dask_serialize,
     deserialize,

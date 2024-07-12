@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 
-class ShuffleClosedError(RuntimeError):
+class P2PIllegalStateError(RuntimeError):
+    pass
+
+
+class P2PConsistencyError(RuntimeError):
+    pass
+
+
+class ShuffleClosedError(P2PConsistencyError):
     pass
 
 
