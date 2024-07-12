@@ -8473,12 +8473,18 @@ class Scheduler(SchedulerState, ServerNode):
                     f"Worker failed to heartbeat for {last_seen:.0f}s; "
                     f"{'attempting restart' if ws.nanny else 'removing'}: {ws}"
                 )
-
         if to_restart:
             await self.restart_workers(
                 to_restart,
                 wait_for_workers=False,
                 stimulus_id=stimulus_id,
+                # At this point we gave up on the worker, no reason to add an
+                # artificial timeout. Kill it right away.
+                # FIXME: Setting this to zero somehow causes things to hang.
+                timeout=0.1,
+            )
+            self.log_event(
+                "all", {"action": "worker-ttl-restart", "workers": to_restart.copy()}
             )
 
     def check_idle(self) -> float | None:
