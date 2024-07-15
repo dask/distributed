@@ -506,6 +506,8 @@ def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
         yield
     except ShuffleClosedError:
         raise Reschedule()
+    except P2PConsistencyError:
+        raise
     except Exception as e:
         raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
 
@@ -518,6 +520,8 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
         raise e
     except ShuffleClosedError:
         raise Reschedule()
+    except P2PConsistencyError:
+        raise
     except Exception as e:
         raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
 

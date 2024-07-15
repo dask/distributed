@@ -254,9 +254,7 @@ async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
 
     if npartitions == 1:
         # FIXME: distributed#7816
-        with raises_with_cause(
-            RuntimeError, "failed during transfer", RuntimeError, "Barrier task"
-        ):
+        with pytest.raises(P2PConsistencyError, match="Barrier task"):
             await c.compute(out)
     else:
         await c.compute(out)
