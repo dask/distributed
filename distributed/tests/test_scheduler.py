@@ -4701,26 +4701,24 @@ async def test_deadlock_dependency_of_queued_released_when_worker_removed(
         return input + 1
 
     @delayed
-    def block_on_event(input, block, executing):
-        executing.set()
+    def block_on_event(input, block):
         block.wait()
         return input
 
     block = Event()
-    executing = Event()
 
-    dep = inc(0)
+    with dask.annotate(workers=a.address, allow_other_workers=True):
+        dep = inc(0)
     futs = [
-        block_on_event(dep, block, executing, dask_key_name=("rootish", i))
+        block_on_event(dep, block, dask_key_name=("rootish", i))
         for i in range(s.total_nthreads * 2 + 1)
     ]
-    dep_key = dep.key
-    del dep
+    dep.release()
     futs = c.compute(futs)
     with freeze_batched_send(b.batched_stream):
         await async_poll_for(
-            lambda: b.state.tasks.get(dep_key) is not None
-            and b.state.tasks.get(dep_key).state == "memory",
+            lambda: b.state.tasks.get(dep.key) is not None
+            and b.state.tasks.get(dep.key).state == "memory",
             timeout=5,
         )
         assert s.queued
@@ -4730,7 +4728,6 @@ async def test_deadlock_dependency_of_queued_released_when_worker_removed(
         s.validate_state()
 
     await block.set()
-    await executing.clear()
 
     if validate:
         s.validate_state()
