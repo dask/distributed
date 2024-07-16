@@ -4723,8 +4723,8 @@ async def test_deadlock_dependency_of_queued_released_when_worker_removed(
             and b.state.tasks.get(dep_key).state == "memory",
             timeout=5,
         )
-    assert s.queued
-    await s.remove_worker(address=a.address, stimulus_id="test")
+        assert s.queued
+        await s.remove_worker(address=a.address, stimulus_id="test")
 
     if validate:
         s.validate_state()
