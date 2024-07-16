@@ -6,37 +6,35 @@ from time import sleep
 
 import pytest
 
+import dask
+
 from distributed import Lock, get_client
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 8)] * 2)
+@gen_cluster(client=True, nthreads=[("", 8)] * 2)
 async def test_lock(c, s, a, b):
     await c.set_metadata("locked", False)
 
     def f(x):
         client = get_client()
-        with Lock("x") as lock:
+        with Lock("x"):
             assert client.get_metadata("locked") is False
             client.set_metadata("locked", True)
-            sleep(0.05)
+            sleep(0.01)
             assert client.get_metadata("locked") is True
             client.set_metadata("locked", False)
 
     futures = c.map(f, range(20))
     await c.gather(futures)
-    assert not s.extensions["locks"].events
-    assert not s.extensions["locks"].ids
 
 
 @gen_cluster(client=True)
 async def test_timeout(c, s, a, b):
-    locks = s.extensions["locks"]
     lock = Lock("x")
     result = await lock.acquire()
     assert result is True
-    assert locks.ids["x"] == lock.id
 
     lock2 = Lock("x")
     assert lock.id != lock2.id
@@ -46,9 +44,6 @@ async def test_timeout(c, s, a, b):
     stop = time()
     assert stop - start < 0.3
     assert result is False
-    assert locks.ids["x"] == lock.id
-    assert not locks.events["x"]
-
     await lock.release()
 
 
@@ -56,7 +51,7 @@ async def test_timeout(c, s, a, b):
 async def test_acquires_with_zero_timeout(c, s, a, b):
     lock = Lock("x")
     await lock.acquire(timeout=0)
-    assert lock.locked()
+    assert await lock.locked()
     await lock.release()
 
     await lock.acquire(timeout="1s")
@@ -69,12 +64,12 @@ async def test_acquires_with_zero_timeout(c, s, a, b):
 async def test_acquires_blocking(c, s, a, b):
     lock = Lock("x")
     await lock.acquire(blocking=False)
-    assert lock.locked()
+    assert await lock.locked()
     await lock.release()
-    assert not lock.locked()
+    assert not await lock.locked()
 
     with pytest.raises(ValueError):
-        lock.acquire(blocking=False, timeout=1)
+        lock.acquire(blocking=False, timeout=0.1)
 
 
 def test_timeout_sync(client):
@@ -85,7 +80,7 @@ def test_timeout_sync(client):
 @gen_cluster(client=True)
 async def test_errors(c, s, a, b):
     lock = Lock("x")
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError):
         await lock.release()
 
 
@@ -95,7 +90,7 @@ def test_lock_sync(client):
             client = get_client()
             assert client.get_metadata("locked") is False
             client.set_metadata("locked", True)
-            sleep(0.05)
+            sleep(0.01)
             assert client.get_metadata("locked") is True
             client.set_metadata("locked", False)
 
@@ -113,8 +108,6 @@ async def test_lock_types(c, s, a, b):
         await lock.acquire()
         await lock.release()
 
-    assert not s.extensions["locks"].events
-
 
 @gen_cluster(client=True)
 async def test_serializable(c, s, a, b):
@@ -129,13 +122,21 @@ async def test_serializable(c, s, a, b):
 
     lock2 = pickle.loads(pickle.dumps(lock))
     assert lock2.name == lock.name
-    assert lock2.client is lock.client
 
 
 @gen_cluster(client=True, nthreads=[])
 async def test_locks(c, s):
     async with Lock("x") as l1:
         l2 = Lock("x")
-        assert l1.client is c
-        assert l2.client is c
         assert await l2.acquire(timeout=0.01) is False
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_locks_inf_lease_timeout(c, s):
+    sem_ext = s.extensions["semaphores"]
+    async with Lock("x"):
+        assert sem_ext.lease_timeouts["x"]
+
+    with dask.config.set({"distributed.scheduler.locks.lease-timeout": "inf"}):
+        async with Lock("y"):
+            assert sem_ext.lease_timeouts.get("y") is None

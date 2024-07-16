@@ -100,8 +100,8 @@ def test_timeout_sync(client):
 @gen_cluster(
     client=True,
     config={
-        "distributed.scheduler.locks.lease-validation-interval": "200ms",
-        "distributed.scheduler.locks.lease-timeout": "200ms",
+        "distributed.scheduler.locks.lease-validation-interval": "100ms",
+        "distributed.scheduler.locks.lease-timeout": "100ms",
     },
 )
 async def test_release_semaphore_after_timeout(c, s, a, b):
@@ -199,14 +199,16 @@ async def test_close_async(c, s, a):
     assert await sem.acquire()
     with pytest.warns(
         RuntimeWarning,
-        match="Closing semaphore .* but there remain unreleased leases .*",
+        match="Closing semaphore test but there remain unreleased leases .*",
     ):
         await sem.close()
-
-    with pytest.raises(
-        RuntimeError, match="Semaphore `test` not known or already closed."
+    # After close, the semaphore is reset
+    await sem.acquire()
+    with pytest.warns(
+        RuntimeWarning,
+        match="Closing semaphore test but there remain unreleased leases .*",
     ):
-        await sem.acquire()
+        await sem.close()
 
     sem2 = await Semaphore(name="t2", max_leases=1)
     assert await sem2.acquire()
@@ -229,14 +231,6 @@ async def test_close_async(c, s, a):
     assert not semaphore_object.events
     for metric_dict in semaphore_object.metrics.values():
         assert not metric_dict
-
-
-def test_close_sync(client):
-    sem = Semaphore()
-    sem.close()
-
-    with pytest.raises(RuntimeError, match="Semaphore .* not known or already closed."):
-        sem.acquire()
 
 
 @gen_cluster(client=True)
