@@ -174,8 +174,9 @@ async def test_fail_to_pickle_execute_1(c, s, a, b):
 
     assert x.status == "error"
 
-    with pytest.raises(TypeError, match="Could not serialize"):
+    with pytest.raises(TypeError, match="Failed to pickle 'x'") as e:
         await x
+    assert isinstance(e.value.__cause__.__cause__, CustomError)
 
     await assert_basic_futures(c)
 

@@ -1,10 +1,12 @@
 channels:
   - conda-forge
 dependencies:
+  - python=3.9
   - altair
   - altair_saver
   - pandas
   - pip
   - requests
+  - urllib3
   - pip:
     - junitparser

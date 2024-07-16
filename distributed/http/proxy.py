@@ -19,6 +19,15 @@ try:
             self.scheduler = dask_server
             self.extra = extra or {}
 
+        # `get_current_user` and `prepare` method impls reference
+        # issue in tornado & jupyter server compat here
+        # https://github.com/jupyter-server/jupyter_server/issues/1012
+        def get_current_user(self):
+            return "dask"
+
+        async def prepare(self):
+            web.authenticated(lambda rq: None)(self)
+
         async def http_get(self, port, host, proxied_path):
             # route here first
             # incoming URI /proxy/{port}/{host}/{proxied_path}
@@ -28,6 +37,9 @@ try:
             # rewrite uri for jupyter-server-proxy handling
             uri = f"/proxy/{port}/{proxied_path}"
             self.request.uri = uri
+
+            if self.host not in self.host_allowlist:
+                self.host_allowlist.append(self.host)
 
             # slash is removed during regex in handler
             proxied_path = "/%s" % proxied_path
@@ -41,6 +53,8 @@ try:
             return await self.proxy(port, proxied_path)
 
         async def open(self, port, host, proxied_path):
+            if host not in self.host_allowlist:
+                self.host_allowlist.append(host)
             # finally, proxy to other address/port
             return await self.proxy_open(host, port, proxied_path)
 

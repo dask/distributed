@@ -76,7 +76,20 @@ properties:
             description: |
               Shut down the scheduler after this duration if no activity has occurred
 
-              This can be helpful to reduce costs and stop zombie processes from roaming the earth.
+          no-workers-timeout:
+            type:
+            - string
+            - "null"
+            description: |
+              Shut down the scheduler after this duration if there are pending tasks,
+              but no workers that can process them. This can either mean that there are
+              no workers running at all, or that there are idle workers but they've been
+              excluded through worker or resource restrictions.
+
+              In adaptive clusters, this timeout must be set to be safely higher than
+              the time it takes for workers to spin up.
+
+              Works in conjunction with idle-timeout.
 
           work-stealing:
             type: boolean
@@ -129,16 +142,6 @@ properties:
               Time to live for workers.
 
               If we don't receive a heartbeat faster than this then we assume that the worker has died.
-
-          pickle:
-            type: boolean
-            description: |
-              Is the scheduler allowed to deserialize arbitrary bytestrings?
-
-              The scheduler almost never deserializes user data.
-              However there are some cases where the user can submit functions to run directly on the scheduler.
-              This can be convenient for debugging, but also introduces some security risk.
-              By setting this to false we ensure that the user is unable to run arbitrary code on the scheduler.
 
           preload:
             type: array
@@ -969,13 +972,6 @@ properties:
 
                   For a full list of supported UCX environment
                   variables, run ``ucx_info -f``.
-          tcp:
-            type: object
-            properties:
-              backend:
-                type: string
-                description: |
-                  The TCP backend implementation to use. Must be either `tornado` or `asyncio`.
 
           websockets:
             type: object
@@ -1001,6 +997,12 @@ properties:
               not a problem and will be automatically disabled if no GPUs are found in the
               system, but in certain cases it may be desirable to completely disable NVML
               diagnostics.
+          cudf:
+            type: boolean
+            description: |
+              If ``True``, enables tracking of GPU spilling and unspilling managed by cuDF (if it is enabled).
+              Note that this forces a cuDF import at worker startup, which may be undesirable for performance
+              and memory footprint.
           computations:
             type: object
             properties:
@@ -1008,7 +1010,7 @@ properties:
                 type: integer
                 minimum: 0
                 description: |
-                  The maximum number of Computations to remember.
+                  The maximum number of computations to remember.
               nframes:
                 type: integer
                 minimum: 0
@@ -1034,6 +1036,42 @@ properties:
                 minimum: 0
                 description: |
                   The maximum number of erred tasks to remember.
+
+      p2p:
+        type: object
+        description: Configuration for P2P shuffles
+        properties:
+
+          comm:
+            type: object
+            description: Configuration settings for Dask communications specific to P2P
+            properties:
+
+              retry:
+                type: object
+                description: |
+                  Sending data during P2P is subject to re-tries with the below parameters
+                properties:
+
+                  count:
+                    type: integer
+                    minimum: 0
+                    description: |
+                      The number of times to retry a connection
+
+                  delay:
+                    type: object
+                    properties:
+                      min:
+                        type: string
+                        description: The first non-zero delay between retry attempts
+                      max:
+                        type: string
+                        description: The maximum delay between retries
+          disk:
+            type: boolean
+            description: |
+              Whether or not P2P stores intermediate data on disk instead of memory
 
       dashboard:
         type: object
@@ -1065,6 +1103,12 @@ properties:
         description: |
           Options for logs, event loops, and so on
         properties:
+          large-graph-warning-threshold:
+            type: string
+            description: |
+              Threshold in bytes for when a warning is raised about a large
+              submitted task graph.
+              Default is 10MB.
           tick:
             type: object
             description: |

@@ -134,29 +134,64 @@ def _pynvml_handles():
     count = device_get_count()
     if NVML_STATE == NVMLState.DISABLED_PYNVML_NOT_AVAILABLE:
         raise RuntimeError("NVML monitoring requires PyNVML and NVML to be installed")
-    elif NVML_STATE == NVMLState.DISABLED_LIBRARY_NOT_FOUND:
+    if NVML_STATE == NVMLState.DISABLED_LIBRARY_NOT_FOUND:
         raise RuntimeError("PyNVML is installed, but NVML is not")
-    elif NVML_STATE == NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER:
+    if NVML_STATE == NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER:
         raise RuntimeError(
             "Outdated NVIDIA drivers for WSL, please upgrade to "
             f"{MINIMUM_WSL_VERSION} or newer"
         )
-    elif NVML_STATE == NVMLState.DISABLED_CONFIG:
+    if NVML_STATE == NVMLState.DISABLED_CONFIG:
         raise RuntimeError(
             "PyNVML monitoring disabled by 'distributed.diagnostics.nvml' "
             "config setting"
         )
-    elif count == 0:
+    if count == 0:
         raise RuntimeError("No GPUs available")
-    else:
-        try:
-            gpu_idx = next(
-                map(int, os.environ.get("CUDA_VISIBLE_DEVICES", "").split(","))
+
+    device = 0
+    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if cuda_visible_devices:
+        device = _parse_cuda_visible_device(cuda_visible_devices.split(",")[0])
+    return _get_handle(device)
+
+
+# Port from https://github.com/rapidsai/dask-cuda/blob/0f34116c4f3cdf5dfc0df0dbfeba92655f686716/dask_cuda/utils.py#L403-L437
+def _parse_cuda_visible_device(dev):
+    """Parses a single CUDA device identifier
+
+    A device identifier must either be an integer, a string containing an
+    integer or a string containing the device's UUID, beginning with prefix
+    'GPU-' or 'MIG-'.
+
+    >>> parse_cuda_visible_device(2)
+    2
+    >>> parse_cuda_visible_device('2')
+    2
+    >>> parse_cuda_visible_device('GPU-9baca7f5-0f2f-01ac-6b05-8da14d6e9005')
+    'GPU-9baca7f5-0f2f-01ac-6b05-8da14d6e9005'
+    >>> parse_cuda_visible_device('Foo')
+    Traceback (most recent call last):
+    ...
+    ValueError: Devices in CUDA_VISIBLE_DEVICES must be comma-separated integers or
+    strings beginning with 'GPU-' or 'MIG-' prefixes.
+    """
+    try:
+        return int(dev)
+    except ValueError:
+        if any(
+            dev.startswith(prefix)
+            for prefix in [
+                "GPU-",
+                "MIG-",
+            ]
+        ):
+            return dev
+        else:
+            raise ValueError(
+                "Devices in CUDA_VISIBLE_DEVICES must be comma-separated integers "
+                "or strings beginning with 'GPU-' or 'MIG-' prefixes."
             )
-        except ValueError:
-            # CUDA_VISIBLE_DEVICES is not set, take first device
-            gpu_idx = 0
-        return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
 def _running_process_matches(handle):
@@ -281,16 +316,20 @@ def get_device_mig_mode(device):
         A ``list`` with two integers ``[current_mode, pending_mode]``.
     """
     init_once()
-    try:
-        device_index = int(device)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
-    except ValueError:
-        uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
-        handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
+    handle = _get_handle(device)
     try:
         return pynvml.nvmlDeviceGetMigMode(handle)
     except pynvml.NVMLError_NotSupported:
         return [0, 0]
+
+
+def _get_handle(device):
+    try:
+        device_index = int(device)
+        return pynvml.nvmlDeviceGetHandleByIndex(device_index)
+    except ValueError:
+        uuid = device if isinstance(device, bytes) else bytes(device, "utf-8")
+        return pynvml.nvmlDeviceGetHandleByUUID(uuid)
 
 
 def _get_utilization(h):

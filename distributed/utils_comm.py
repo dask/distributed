@@ -9,10 +9,11 @@ from functools import partial
 from itertools import cycle
 from typing import Any, TypeVar
 
-from tlz import concat, drop, groupby, merge
+from tlz import drop, groupby, merge
 
 import dask.config
 from dask.optimization import SubgraphCallable
+from dask.typing import Key
 from dask.utils import is_namedtuple_instance, parse_timedelta
 
 from distributed.core import ConnectionPool, rpc
@@ -22,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 async def gather_from_workers(
-    who_has: Mapping[str, Collection[str]],
+    who_has: Mapping[Key, Collection[str]],
     rpc: ConnectionPool,
     *,
     serializers: list[str] | None = None,
     who: str | None = None,
-) -> tuple[dict[str, object], list[str], list[str], list[str]]:
+) -> tuple[dict[Key, object], list[Key], list[Key], list[str]]:
     """Gather data directly from peers
 
     Parameters
@@ -55,8 +56,8 @@ async def gather_from_workers(
     from distributed.worker import get_data_from_worker
 
     to_gather = {k: set(v) for k, v in who_has.items()}
-    data: dict[str, object] = {}
-    failed_keys: list[str] = []
+    data: dict[Key, object] = {}
+    failed_keys: list[Key] = []
     missing_workers: set[str] = set()
     busy_workers: set[str] = set()
 
@@ -150,19 +151,16 @@ class WrappedKey:
 _round_robin_counter = [0]
 
 
-async def scatter_to_workers(nthreads, data, rpc=rpc):
+async def scatter_to_workers(workers, data, rpc=rpc):
     """Scatter data directly to workers
 
-    This distributes data in a round-robin fashion to a set of workers based on
-    how many cores they have.  nthreads should be a dictionary mapping worker
-    identities to numbers of cores.
+    This distributes data in a round-robin fashion to a set of workers.
 
     See scatter for parameter docstring
     """
-    assert isinstance(nthreads, dict)
     assert isinstance(data, dict)
 
-    workers = list(concat([w] * nc for w, nc in nthreads.items()))
+    workers = sorted(workers)
     names, data = list(zip(*data.items()))
 
     worker_iter = drop(_round_robin_counter[0] % len(workers), cycle(workers))
@@ -269,6 +267,13 @@ def _unpack_remotedata_inner(
         return k
     else:
         return o
+
+
+class DoNotUnpack(tuple):
+    """A tuple sublass to indicate that we should not unpack its contents
+
+    See also unpack_remotedata
+    """
 
 
 def unpack_remotedata(o: Any, byte_keys: bool = False) -> tuple[Any, set]:

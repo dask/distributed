@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from packaging.version import parse
 
@@ -10,6 +11,9 @@ from dask.utils import parse_bytes
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
+
+
+_INPUT_PARTITION_ID_COLUMN = "__input_partition_id__"
 
 
 def check_dtype_support(meta_input: pd.DataFrame) -> None:
@@ -34,8 +38,7 @@ def check_minimal_arrow_version() -> None:
     Raises a ModuleNotFoundError if pyarrow is not installed or an
     ImportError if the installed version is not recent enough.
     """
-    # First version that supports concatenating extension arrays (apache/arrow#14463)
-    minversion = "12.0.0"
+    minversion = "7.0.0"
     try:
         import pyarrow as pa
     except ModuleNotFoundError:
@@ -46,22 +49,89 @@ def check_minimal_arrow_version() -> None:
         )
 
 
-def convert_shards(shards: list[pa.Table], meta: pd.DataFrame) -> pd.DataFrame:
+def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
     import pyarrow as pa
+
+    if parse(pa.__version__) >= parse("14.0.0"):
+        return pa.concat_tables(tables, promote_options="permissive")
+    try:
+        return pa.concat_tables(tables, promote=True)
+    except pa.ArrowNotImplementedError as e:
+        if parse(pa.__version__) >= parse("12.0.0"):
+            raise e
+        raise
+
+
+def convert_shards(
+    shards: list[pa.Table], meta: pd.DataFrame, partition_column: str, drop_column: bool
+) -> pd.DataFrame:
+    import pandas as pd
+    from pandas.core.dtypes.cast import find_common_type  # type: ignore[attr-defined]
 
     from dask.dataframe.dispatch import from_pyarrow_table_dispatch
 
-    table = pa.concat_tables(shards)
+    table = concat_tables(shards)
+    table = table.sort_by(_INPUT_PARTITION_ID_COLUMN)
+    table = table.drop([_INPUT_PARTITION_ID_COLUMN])
 
+    if drop_column:
+        meta = meta.drop(columns=partition_column)
     df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
-    return df.astype(meta.dtypes, copy=False)
+    reconciled_dtypes = {}
+    for column, dtype in meta.dtypes.items():
+        actual = df[column].dtype
+        if actual == dtype:
+            continue
+        # Use the specific string dtype from meta (e.g., string[pyarrow])
+        if isinstance(actual, pd.StringDtype) and isinstance(dtype, pd.StringDtype):
+            reconciled_dtypes[column] = dtype
+            continue
+        # meta might not be aware of the actual categories so the two dtype objects are not equal
+        # Also, the categories_dtype does not properly roundtrip through Arrow
+        if isinstance(actual, pd.CategoricalDtype) and isinstance(
+            dtype, pd.CategoricalDtype
+        ):
+            continue
+        reconciled_dtypes[column] = find_common_type([actual, dtype])
+
+    from dask.dataframe._compat import PANDAS_GE_300
+
+    kwargs = {} if PANDAS_GE_300 else {"copy": False}
+    return df.astype(reconciled_dtypes, **kwargs)
 
 
-def list_of_buffers_to_table(data: list[bytes]) -> pa.Table:
-    """Convert a list of arrow buffers and a schema to an Arrow Table"""
+def buffers_to_table(data: list[tuple[int, bytes]]) -> pa.Table:
+    import numpy as np
     import pyarrow as pa
 
-    return pa.concat_tables(deserialize_table(buffer) for buffer in data)
+    """Convert a list of arrow buffers and a schema to an Arrow Table"""
+
+    def _create_input_partition_id_array(
+        table: pa.Table, input_partition_id: int
+    ) -> pa.ChunkedArray:
+        arrays = (
+            np.full(
+                (batch.num_rows,),
+                input_partition_id,
+                dtype=np.uint32(),
+            )
+            for batch in table.to_batches()
+        )
+        return pa.chunked_array(arrays)
+
+    tables = (
+        (input_partition_id, deserialize_table(buffer))
+        for input_partition_id, buffer in data
+    )
+    tables = (
+        table.append_column(
+            _INPUT_PARTITION_ID_COLUMN,
+            _create_input_partition_id_array(table, input_partition_id),
+        )
+        for input_partition_id, table in tables
+    )
+
+    return concat_tables(tables)
 
 
 def serialize_table(table: pa.Table) -> bytes:
@@ -80,15 +150,12 @@ def deserialize_table(buffer: bytes) -> pa.Table:
         return reader.read_all()
 
 
-def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
+def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
     import pyarrow as pa
-
-    from dask.dataframe.dispatch import pyarrow_schema_dispatch
 
     batch_size = parse_bytes("1 MiB")
     batch = []
     shards = []
-    schema = pyarrow_schema_dispatch(meta, preserve_index=True)
 
     with pa.OSFile(str(path), mode="rb") as f:
         size = f.seek(0, whence=2)
@@ -102,18 +169,33 @@ def read_from_disk(path: Path, meta: pd.DataFrame) -> tuple[Any, int]:
             batch.append(shard)
 
             if offset - prev >= batch_size:
-                table = pa.concat_tables(batch)
-                shards.append(_copy_table(table, schema))
+                table = concat_tables(batch)
+                shards.append(_copy_table(table))
                 batch = []
                 prev = offset
     if batch:
-        table = pa.concat_tables(batch)
-        shards.append(_copy_table(table, schema))
+        table = concat_tables(batch)
+        shards.append(_copy_table(table))
     return shards, size
 
 
-def _copy_table(table: pa.Table, schema: pa.Schema) -> pa.Table:
+def concat_arrays(arrays: Iterable[pa.Array]) -> pa.Array:
     import pyarrow as pa
 
-    arrs = [pa.concat_arrays(column.chunks) for column in table.columns]
-    return pa.table(data=arrs, schema=schema)
+    try:
+        return pa.concat_arrays(arrays)
+    except pa.ArrowNotImplementedError as e:
+        if parse(pa.__version__) >= parse("12.0.0"):
+            raise
+        if e.args[0].startswith("concatenation of extension"):
+            raise RuntimeError(
+                "P2P shuffling requires pyarrow>=12.0.0 to support extension types."
+            ) from e
+        raise
+
+
+def _copy_table(table: pa.Table) -> pa.Table:
+    import pyarrow as pa
+
+    arrs = [concat_arrays(column.chunks) for column in table.columns]
+    return pa.table(data=arrs, schema=table.schema)

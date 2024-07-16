@@ -51,9 +51,8 @@ from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
 from jinja2 import Environment, FileSystemLoader
-from tlz import curry, pipe, valmap
+from tlz import curry, pipe, second, valmap
 from tlz.curried import concat, groupby, map
-from tornado import escape
 
 import dask
 from dask import config
@@ -91,7 +90,7 @@ from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
 from distributed.spans import SpansSchedulerExtension
-from distributed.utils import Log, log_errors
+from distributed.utils import Log, log_errors, url_escape
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -199,7 +198,7 @@ class Occupancy(DashboardComponent):
                 "worker": [ws.address for ws in workers],
                 "ms": ms,
                 "color": color,
-                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                "escaped_worker": [url_escape(ws.address) for ws in workers],
                 "x": x,
                 "y": y,
             }
@@ -276,10 +275,17 @@ class MemoryColor:
     orange: float
     red: float
 
-    def __init__(self):
+    def __init__(
+        self, neutral_color="blue", target_color="orange", terminated_color="red"
+    ):
+        self.neutral_color = neutral_color
+        self.target_color = target_color
+        self.terminated_color = terminated_color
+
         target = dask.config.get("distributed.worker.memory.target")
         spill = dask.config.get("distributed.worker.memory.spill")
         terminate = dask.config.get("distributed.worker.memory.terminate")
+
         # These values can be False. It's also common to configure them to impossibly
         # high values to achieve the same effect.
         self.orange = min(target or math.inf, spill or math.inf)
@@ -287,14 +293,14 @@ class MemoryColor:
 
     def _memory_color(self, current: int, limit: int, status: Status) -> str:
         if status != Status.running:
-            return "red"
+            return self.terminated_color
         if not limit:
-            return "blue"
+            return self.neutral_color
         if current >= limit * self.red:
-            return "red"
+            return self.terminated_color
         if current >= limit * self.orange:
-            return "orange"
-        return "blue"
+            return self.target_color
+        return self.neutral_color
 
 
 class ClusterMemory(DashboardComponent, MemoryColor):
@@ -574,7 +580,7 @@ class WorkersMemory(DashboardComponent, MemoryColor):
             "color": color,
             "alpha": [1, 0.7, 0.4, 1] * len(workers),
             "worker": quadlist(ws.address for ws in workers),
-            "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
+            "escaped_worker": quadlist(url_escape(ws.address) for ws in workers),
             "y": quadlist(range(len(workers))),
             "proc_memory": quadlist(procmemory),
             "managed": quadlist(managed),
@@ -725,7 +731,7 @@ class WorkersTransferBytes(DashboardComponent):
             ws.metrics["transfer"]["outgoing_bytes"] for ws in wss
         ]
         workers = [ws.address for ws in wss]
-        escaped_workers = [escape.url_escape(worker) for worker in workers]
+        escaped_workers = [url_escape(worker) for worker in workers]
 
         if wss:
             x_limit = max(
@@ -1516,42 +1522,44 @@ class ComputePerKey(DashboardComponent):
     def update(self):
         compute_times = defaultdict(float)
 
-        for key, ts in self.scheduler.task_prefixes.items():
-            name = key_split(key)
-            for action, t in ts.all_durations.items():
+        for name, tp in self.scheduler.task_prefixes.items():
+            for action, t in tp.all_durations.items():
                 if action == "compute":
                     compute_times[name] += t
 
+        if not compute_times:
+            return
+
         # order by largest time first
-        compute_times = sorted(compute_times.items(), key=lambda x: x[1], reverse=True)
+        compute_times = sorted(compute_times.items(), key=second, reverse=True)
 
-        # keep only time which are 2% of max or greater
-        if compute_times:
-            max_time = compute_times[0][1] * 0.02
-            compute_times = [(n, t) for n, t in compute_times if t > max_time]
-            compute_colors = list()
-            compute_names = list()
-            compute_time = list()
-            total_time = 0
-            for name, t in compute_times:
-                compute_names.append(name)
-                compute_colors.append(ts_color_of(name))
-                compute_time.append(t)
-                total_time += t
+        # Keep only times which are 2% of max or greater
+        max_time = compute_times[0][1] * 0.02
+        compute_colors = []
+        compute_names = []
+        compute_time = []
+        total_time = 0
+        for name, t in compute_times:
+            if t < max_time:
+                break
+            compute_names.append(name)
+            compute_colors.append(ts_color_of(name))
+            compute_time.append(t)
+            total_time += t
 
-            angles = [t / total_time * 2 * math.pi for t in compute_time]
+        angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            self.fig.x_range.factors = compute_names
+        self.fig.x_range.factors = compute_names
 
-            compute_result = dict(
-                angles=angles,
-                times=compute_time,
-                color=compute_colors,
-                names=compute_names,
-                formatted_time=[format_time(t) for t in compute_time],
-            )
+        compute_result = dict(
+            angles=angles,
+            times=compute_time,
+            color=compute_colors,
+            names=compute_names,
+            formatted_time=[format_time(t) for t in compute_time],
+        )
 
-            update(self.compute_source, compute_result)
+        update(self.compute_source, compute_result)
 
 
 class AggregateAction(DashboardComponent):
@@ -1831,7 +1839,7 @@ class CurrentLoad(DashboardComponent):
             "nprocessing-half": [np / 2 for np in nprocessing],
             "nprocessing-color": nprocessing_color,
             "worker": [ws.address for ws in workers],
-            "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+            "escaped_worker": [url_escape(ws.address) for ws in workers],
             "y": list(range(len(workers))),
         }
 
@@ -1913,7 +1921,7 @@ class StealingEvents(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="level",
@@ -1963,12 +1971,12 @@ class StealingEvents(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        log = self.scheduler.get_events(topic="stealing")
-        current = len(self.scheduler.events["stealing"])
-        n = current - self.last
-
-        log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
-        self.last = current
+        topic = self.scheduler._broker._topics["stealing"]
+        log = log = topic.events
+        n = min(topic.count - self.last, len(log))
+        if log:
+            log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
+        self.last = topic.count
 
         if log:
             new = pipe(
@@ -2007,7 +2015,7 @@ class Events(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="y",
@@ -2033,11 +2041,12 @@ class Events(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        log = self.scheduler.events[self.name]
-        n = self.scheduler.event_counts[self.name] - self.last
+        topic = self.scheduler._broker._topics[self.name]
+        log = topic.events
+        n = min(topic.count - self.last, len(log))
         if log:
             log = [log[-i] for i in range(1, n + 1)]
-        self.last = self.scheduler.event_counts[self.name]
+        self.last = topic.count
 
         if log:
             actions = []
@@ -2293,7 +2302,7 @@ class TaskGraph(DashboardComponent):
             color="black",
             alpha=0.3,
         )
-        rect = self.root.square(
+        rect = self.root.scatter(
             x="x",
             y="y",
             size=10,
@@ -2301,6 +2310,7 @@ class TaskGraph(DashboardComponent):
             source=self.node_source,
             view=node_view,
             legend_field="state",
+            marker="square",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -2371,7 +2381,7 @@ class TaskGraph(DashboardComponent):
                     continue
                 xx = x[key]
                 yy = y[key]
-                node_key.append(escape.url_escape(str(key)))
+                node_key.append(url_escape(str(key)))
                 node_x.append(xx)
                 node_y.append(yy)
                 node_state.append(task.state)
@@ -2860,16 +2870,16 @@ class TaskGroupGraph(DashboardComponent):
                 f"{comp_tasks} ({comp_tasks / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_processing"].append(
-                f"{tasks_processing} ({tasks_processing/ tot_tasks * 100:.0f} %)"
+                f"{tasks_processing} ({tasks_processing / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_memory"].append(
-                f"{tasks_memory} ({tasks_memory/ tot_tasks * 100:.0f} %)"
+                f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased/ tot_tasks * 100:.0f} %)"
+                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
-                f"{ tasks_erred} ({tasks_erred/ tot_tasks * 100:.0f} %)"
+                f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
             )
 
         self.nodes_source.data.update(nodes_data)
@@ -3332,15 +3342,15 @@ class TaskProgress(DashboardComponent):
         }
 
         for tp in self.scheduler.task_prefixes.values():
-            active_states = tp.active_states
-            if any(active_states.get(s) for s in state.keys()):
-                state["memory"][tp.name] = active_states["memory"]
-                state["erred"][tp.name] = active_states["erred"]
-                state["released"][tp.name] = active_states["released"]
-                state["processing"][tp.name] = active_states["processing"]
-                state["waiting"][tp.name] = active_states["waiting"]
-                state["queued"][tp.name] = active_states["queued"]
-                state["no_worker"][tp.name] = active_states["no-worker"]
+            states = tp.states
+            if any(states.get(s) for s in state.keys()):
+                state["memory"][tp.name] = states["memory"]
+                state["erred"][tp.name] = states["erred"]
+                state["released"][tp.name] = states["released"]
+                state["processing"][tp.name] = states["processing"]
+                state["waiting"][tp.name] = states["waiting"]
+                state["queued"][tp.name] = states["queued"]
+                state["no_worker"][tp.name] = states["no-worker"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3607,21 +3617,23 @@ class FinePerformanceMetrics(DashboardComponent):
         )
         if spans_ext and self.span_tag_selector.value:
             span = spans_ext.merge_by_tags(*self.span_tag_selector.value)
-            execute_metrics = span.cumulative_worker_metrics
+            metrics = span.cumulative_worker_metrics
         elif spans_ext and spans_ext.spans:
             # Calculate idle time
             span = spans_ext.merge_all()
-            execute_metrics = span.cumulative_worker_metrics
+            metrics = span.cumulative_worker_metrics
         else:
             # Spans extension is not loaded
-            execute_metrics = {
+            metrics = {
                 k: v
                 for k, v in self.scheduler.cumulative_worker_metrics.items()
-                if isinstance(k, tuple) and k[0] == "execute"
+                if isinstance(k, tuple)
+                and len(k) == 4  # Skip get-data, gather-deps, and memory-monitor
             }
 
-        for (context, function, activity, unit), v in execute_metrics.items():
-            assert context == "execute"
+        for (context, function, activity, unit), v in metrics.items():
+            if context != "execute":
+                continue  # TODO visualize 'shuffle' metrics
             assert isinstance(function, str)
             assert isinstance(unit, str)
             assert self.unit_selector.value
@@ -3847,9 +3859,9 @@ class Contention(DashboardComponent):
         self.data = dict(
             names=[
                 ("Scheduler", "Event Loop"),
-                ("Scheduler", "GIL Contention"),
+                ("Scheduler", "GIL"),
                 ("Workers", "Event Loop"),
-                ("Workers", "GIL Contention"),
+                ("Workers", "GIL"),
             ],
             values=[0, 0, 0, 0],
             text=["0s", "0%", "0s", "0%"],
@@ -3880,7 +3892,7 @@ class Contention(DashboardComponent):
             fill_color=factor_cmap(
                 field_name="names",
                 palette=["#b8e0ce", "#81aae4"],
-                factors=["Event Loop", "GIL Contention"],
+                factors=["Event Loop", "GIL"],
                 start=1,
                 end=2,
             ),
@@ -3900,7 +3912,6 @@ class Contention(DashboardComponent):
     @log_errors
     def update(self):
         s = self.scheduler
-        monitor_gil = s.monitor.monitor_gil_contention
 
         self.data["values"] = [
             s._tick_interval_observed,
@@ -3908,11 +3919,13 @@ class Contention(DashboardComponent):
             sum(w.metrics["event_loop_interval"] for w in s.workers.values())
             / (len(s.workers) or 1),
             self.gil_contention_workers,
-        ][:: 1 if monitor_gil else 2]
+        ][:: 1 if s.monitor.monitor_gil_contention else 2]
 
         # Format event loop as time and GIL (if configured) as %
         self.data["text"] = [
-            f"{x * 100:.1f}%" if i % 2 and monitor_gil else format_time(x)
+            f"{x * 100:.1f}%"
+            if i % 2 and s.monitor.monitor_gil_contention
+            else format_time(x)
             for i, x in enumerate(self.data["values"])
         ]
         update(self.source, self.data)
@@ -4186,7 +4199,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        mem_plot.circle(
+        mem_plot.scatter(
             source=self.source, x="memory_percent", y=0, size=10, fill_alpha=0.5
         )
         mem_plot.ygrid.visible = False
@@ -4216,7 +4229,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        cpu_plot.circle(
+        cpu_plot.scatter(
             source=self.source, x="cpu_fraction", y=0, size=10, fill_alpha=0.5
         )
         cpu_plot.ygrid.visible = False
@@ -4316,205 +4329,178 @@ class WorkerTable(DashboardComponent):
 class Shuffling(DashboardComponent):
     """Occupancy (in time) per worker"""
 
+    @log_errors
     def __init__(self, scheduler, **kwargs):
-        with log_errors():
-            self.scheduler = scheduler
-            self.source = ColumnDataSource(
-                {
-                    "worker": [],
-                    "y": [],
-                    "comm_memory": [],
-                    "comm_memory_limit": [],
-                    "comm_buckets": [],
-                    "comm_avg_duration": [],
-                    "comm_avg_size": [],
-                    "comm_read": [],
-                    "comm_written": [],
-                    "comm_color": [],
-                    "disk_memory": [],
-                    "disk_memory_limit": [],
-                    "disk_buckets": [],
-                    "disk_avg_duration": [],
-                    "disk_avg_size": [],
-                    "disk_read": [],
-                    "disk_written": [],
-                    "disk_color": [],
-                }
-            )
-            self.totals_source = ColumnDataSource(
-                {
-                    "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
-                    "values": [0, 0, 0, 0],
-                }
-            )
+        self.scheduler = scheduler
+        self.source = ColumnDataSource(
+            {
+                "worker": [],
+                "y": [],
+                "comm_memory": [],
+                "comm_memory_limit": [],
+                "comm_buckets": [],
+                "comm_avg_duration": [],
+                "comm_avg_size": [],
+                "comm_read": [],
+                "comm_written": [],
+                "comm_color": [],
+                "disk_memory": [],
+                "disk_memory_limit": [],
+                "disk_buckets": [],
+                "disk_avg_duration": [],
+                "disk_avg_size": [],
+                "disk_read": [],
+                "disk_written": [],
+                "disk_color": [],
+            }
+        )
+        self.totals_source = ColumnDataSource(
+            {
+                "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
+                "values": [0, 0, 0, 0],
+            }
+        )
 
-            self.comm_memory = figure(
-                title="Comms Buffer",
-                tools="",
-                toolbar_location="above",
-                x_range=Range1d(0, 100_000_000),
-                **kwargs,
-            )
-            self.comm_memory.hbar(
-                source=self.source,
-                right="comm_memory",
-                y="y",
-                height=0.9,
-                color="comm_color",
-            )
-            hover = HoverTool(
-                tooltips=[
-                    ("Memory Used", "@comm_memory{0.00 b}"),
-                    ("Average Write", "@comm_avg_size{0.00 b}"),
-                    ("# Buckets", "@comm_buckets"),
-                    ("Average Duration", "@comm_avg_duration"),
-                ],
-                formatters={"@comm_avg_duration": "datetime"},
-                mode="hline",
-            )
-            self.comm_memory.add_tools(hover)
-            self.comm_memory.x_range.start = 0
-            self.comm_memory.x_range.end = 1
-            self.comm_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.comm_memory = figure(
+            title="Comms Buffer",
+            tools="",
+            toolbar_location="above",
+            x_range=Range1d(0, 100_000_000),
+            **kwargs,
+        )
+        self.comm_memory.hbar(
+            source=self.source,
+            right="comm_memory",
+            y="y",
+            height=0.9,
+            color="comm_color",
+        )
+        hover = HoverTool(
+            tooltips=[
+                ("Memory Used", "@comm_memory{0.00 b}"),
+                ("Average Write", "@comm_avg_size{0.00 b}"),
+                ("# Buckets", "@comm_buckets"),
+                ("Average Duration", "@comm_avg_duration"),
+            ],
+            formatters={"@comm_avg_duration": "datetime"},
+            mode="hline",
+        )
+        self.comm_memory.add_tools(hover)
+        self.comm_memory.x_range.start = 0
+        self.comm_memory.x_range.end = 1
+        self.comm_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            self.disk_memory = figure(
-                title="Disk Buffer",
-                tools="",
-                toolbar_location="above",
-                x_range=Range1d(0, 100_000_000),
-                **kwargs,
-            )
-            self.disk_memory.yaxis.visible = False
+        self.disk_memory = figure(
+            title="Disk Buffer",
+            tools="",
+            toolbar_location="above",
+            x_range=Range1d(0, 100_000_000),
+            **kwargs,
+        )
+        self.disk_memory.yaxis.visible = False
 
-            self.disk_memory.hbar(
-                source=self.source,
-                right="disk_memory",
-                y="y",
-                height=0.9,
-                color="disk_color",
-            )
+        self.disk_memory.hbar(
+            source=self.source,
+            right="disk_memory",
+            y="y",
+            height=0.9,
+            color="disk_color",
+        )
 
-            hover = HoverTool(
-                tooltips=[
-                    ("Memory Used", "@disk_memory{0.00 b}"),
-                    ("Average Write", "@disk_avg_size{0.00 b}"),
-                    ("# Buckets", "@disk_buckets"),
-                    ("Average Duration", "@disk_avg_duration"),
-                ],
-                formatters={"@disk_avg_duration": "datetime"},
-                mode="hline",
-            )
-            self.disk_memory.add_tools(hover)
-            self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        hover = HoverTool(
+            tooltips=[
+                ("Memory Used", "@disk_memory{0.00 b}"),
+                ("Average Write", "@disk_avg_size{0.00 b}"),
+                ("# Buckets", "@disk_buckets"),
+                ("Average Duration", "@disk_avg_duration"),
+            ],
+            formatters={"@disk_avg_duration": "datetime"},
+            mode="hline",
+        )
+        self.disk_memory.add_tools(hover)
+        self.disk_memory.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            self.totals = figure(
-                title="Total movement",
-                tools="",
-                toolbar_location="above",
-                **kwargs,
-            )
-            titles = ["Network Send", "Network Receive", "Disk Write", "Disk Read"]
-            self.totals = figure(
-                x_range=titles,
-                title="Totals",
-                toolbar_location=None,
-                tools="",
-                **kwargs,
-            )
+        self.totals = figure(
+            title="Total movement",
+            tools="",
+            toolbar_location="above",
+            **kwargs,
+        )
+        titles = ["Network Send", "Network Receive", "Disk Write", "Disk Read"]
+        self.totals = figure(
+            x_range=titles,
+            title="Totals",
+            toolbar_location=None,
+            tools="",
+            **kwargs,
+        )
 
-            self.totals.vbar(
-                x="x",
-                top="values",
-                width=0.9,
-                source=self.totals_source,
-            )
+        self.totals.vbar(
+            x="x",
+            top="values",
+            width=0.9,
+            source=self.totals_source,
+        )
 
-            self.totals.xgrid.grid_line_color = None
-            self.totals.y_range.start = 0
-            self.totals.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+        self.totals.xgrid.grid_line_color = None
+        self.totals.y_range.start = 0
+        self.totals.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
 
-            hover = HoverTool(
-                tooltips=[("Total", "@values{0.00b}")],
-                mode="vline",
-            )
-            self.totals.add_tools(hover)
+        hover = HoverTool(
+            tooltips=[("Total", "@values{0.00b}")],
+            mode="vline",
+        )
+        self.totals.add_tools(hover)
 
-            self.root = row(self.comm_memory, self.disk_memory)
+        self.root = row(self.comm_memory, self.disk_memory)
 
     @without_property_validation
+    @log_errors
     def update(self):
-        with log_errors():
-            input = self.scheduler.extensions["shuffle"].heartbeats
-            if not input:
-                return
+        input = self.scheduler.extensions["shuffle"].heartbeats
+        if not input:
+            return
 
-            input = list(input.values())[-1]  # TODO: multiple concurrent shuffles
+        input = list(input.values())[-1]  # TODO: multiple concurrent shuffles
 
-            data = defaultdict(list)
-            now = time()
+        data = defaultdict(list)
+        now = time()
 
-            for i, (worker, d) in enumerate(input.items()):
-                data["y"].append(i)
-                data["worker"].append(worker)
-                for prefix in ["comm", "disk"]:
-                    data[f"{prefix}_total"].append(d[prefix]["total"])
-                    data[f"{prefix}_memory"].append(d[prefix]["memory"])
-                    data[f"{prefix}_memory_limit"].append(d[prefix]["memory_limit"])
-                    data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
-                    data[f"{prefix}_avg_duration"].append(
-                        d[prefix]["diagnostics"].get("avg_duration", 0)
-                    )
-                    data[f"{prefix}_avg_size"].append(
-                        d[prefix]["diagnostics"].get("avg_size", 0)
-                    )
-                    data[f"{prefix}_read"].append(d[prefix]["read"])
-                    data[f"{prefix}_written"].append(d[prefix]["written"])
-                    if self.scheduler.workers[worker].last_seen < now - 5:
-                        data[f"{prefix}_color"].append("gray")
-                    elif d[prefix]["memory"] > d[prefix]["memory_limit"]:
-                        data[f"{prefix}_color"].append("red")
-                    else:
-                        data[f"{prefix}_color"].append("blue")
+        for i, (worker, d) in enumerate(input.items()):
+            data["y"].append(i)
+            data["worker"].append(worker)
+            for prefix in ["comm", "disk"]:
+                memory_limit = d[prefix]["memory_limit"] or 0
+                data[f"{prefix}_total"].append(d[prefix]["total"])
+                data[f"{prefix}_memory"].append(d[prefix]["memory"])
+                data[f"{prefix}_memory_limit"].append(memory_limit)
+                data[f"{prefix}_buckets"].append(d[prefix]["buckets"])
+                data[f"{prefix}_avg_duration"].append(d[prefix]["avg_duration"])
+                data[f"{prefix}_avg_size"].append(d[prefix]["avg_size"])
+                data[f"{prefix}_read"].append(d[prefix]["read"])
+                data[f"{prefix}_written"].append(d[prefix]["written"])
+                if self.scheduler.workers[worker].last_seen < now - 5:
+                    data[f"{prefix}_color"].append("gray")
+                elif d[prefix]["memory"] > memory_limit:
+                    data[f"{prefix}_color"].append("red")
+                else:
+                    data[f"{prefix}_color"].append("blue")
 
-            """
-            singletons = {
-                f"{prefix}_avg_duration": [
-                    sum(data[f"{prefix}_avg_duration"]) / len(data[f"{prefix}_avg_duration"])
-                ],
-                f"{prefix}_avg_size": [
-                    sum(data[f"{prefix}_avg_size"]) / len(data[f"{prefix}_avg_size"])
-                ],
-                "disk_avg_duration": [
-                    sum(data["disk_avg_duration"]) / len(data["disk_avg_duration"])
-                ],
-                "disk_avg_size": [
-                    sum(data["disk_avg_size"]) / len(data["disk_avg_size"])
-                ],
-            }
-            singletons[f"{prefix}_avg_bandwidth"] = [
-                singletons[f"{prefix}_avg_size"][0] / singletons[f"{prefix}_avg_duration"][0]
-            ]
-            singletons["disk_avg_bandwidth"] = [
-                singletons["disk_avg_size"][0] / singletons["disk_avg_duration"][0]
-            ]
-            singletons["y"] = [data["y"][-1] / 2]
-            """
+        totals = {
+            "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
+            "values": [
+                sum(data["comm_written"]),
+                sum(data["comm_read"]),
+                sum(data["disk_written"]),
+                sum(data["disk_read"]),
+            ],
+        }
+        update(self.totals_source, totals)
 
-            totals = {
-                "x": ["Network Send", "Network Receive", "Disk Write", "Disk Read"],
-                "values": [
-                    sum(data["comm_written"]),
-                    sum(data["comm_read"]),
-                    sum(data["disk_written"]),
-                    sum(data["disk_read"]),
-                ],
-            }
-            update(self.totals_source, totals)
-
-            update(self.source, dict(data))
-            limit = max(data["comm_memory_limit"] + data["disk_memory_limit"]) * 1.2
-            self.comm_memory.x_range.end = limit
-            self.disk_memory.x_range.end = limit
+        update(self.source, dict(data))
+        limit = max(data["comm_memory_limit"] + data["disk_memory_limit"]) * 1.2
+        self.comm_memory.x_range.end = limit
+        self.disk_memory.x_range.end = limit
 
 
 _STYLES = {
@@ -4572,7 +4558,7 @@ def shuffling_doc(scheduler, extra, doc):
     shuffling = Shuffling(scheduler, width=400, height=400)
     workers_memory = WorkersMemory(scheduler, width=400, height=400)
     timeseries = SystemTimeseries(
-        scheduler, width=1600, height=200, follow_interval=3000
+        scheduler, width=1600, height=200, follow_interval=10000
     )
     event_loop = Contention(scheduler, width=200, height=400)
 
@@ -4801,16 +4787,16 @@ def status_doc(scheduler, extra, doc):
     doc.template_variables.update(extra)
 
 
+@log_errors
 @curry
 def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwargs):
     # Note: @log_errors and @curry are not compatible
-    with log_errors():
-        fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
-        fig.update()
-        add_periodic_callback(doc, fig, interval)
-        doc.add_root(getattr(fig, fig_attr))
-        doc.theme = BOKEH_THEME
-        doc.title = "Dask: " + funcname(cls)
+    fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
+    fig.update()
+    add_periodic_callback(doc, fig, interval)
+    doc.add_root(getattr(fig, fig_attr))
+    doc.theme = BOKEH_THEME
+    doc.title = "Dask: " + funcname(cls)
 
 
 @log_errors

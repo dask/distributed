@@ -11,6 +11,7 @@ from distributed.client import futures_of
 from distributed.metrics import time
 from distributed.protocol import Serialized
 from distributed.utils_test import gen_cluster, inc
+from distributed.worker import get_worker
 
 
 @gen_cluster()
@@ -301,3 +302,30 @@ async def test_deserialize_client(c, s, a, b):
     from distributed.client import _current_client
 
     assert _current_client.get() is c
+
+
+@gen_cluster(client=True, worker_kwargs={"resources": {"A": 1}})
+async def test_publish_submit_ordering(c, s, a, b):
+    RESOURCES = {"A": 1}
+
+    def _retrieve_annotations():
+        worker = get_worker()
+        task = worker.state.tasks.get(worker.get_current_task())
+        return task.annotations
+
+    # If publish does not take the same comm channel as the submit, it can
+    # happen that the publish message reaches the scheduler before the submit
+    # such that the state of the published future is not the one that has been
+    # requested from the submit. Particularly, this lets us drop annotations
+    # The current implementation does in fact not use the same channel due to
+    # serialization issue (including Futures in BatchedSend appends them to the
+    # "recent messages" log which screws with the refcounting) but ensure that
+    # all queued up messages are flushed and received by the schduler befure
+    # publishing
+    future = c.submit(_retrieve_annotations, resources=RESOURCES, pure=False)
+
+    await c.publish_dataset(future, name="foo")
+    assert await c.list_datasets() == ("foo",)
+
+    result = await future.result()
+    assert result == {"resources": RESOURCES}

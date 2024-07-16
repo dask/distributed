@@ -11,7 +11,7 @@ from dask.utils import parse_bytes
 from distributed.shuffle._buffer import ShardsBuffer
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import wait_for
-from distributed.utils_test import gen_test
+from distributed.utils_test import captured_context_meter, gen_test
 
 
 def gen_bytes(percentage: float, limit: int) -> bytes:
@@ -51,54 +51,64 @@ limit = parse_bytes("10.0 MiB")
 async def test_memory_limit(big_payloads):
     small_payload = {"small": gen_bytes(0.1, limit)}
 
-    limiter = ResourceLimiter(limit)
+    limiter = ResourceLimiter(limit, "my_label")
 
     async with BufferTest(
         memory_limiter=limiter,
         concurrency_limit=2,
     ) as buf:
-        # It's OK to write nothing
-        await buf.write({})
+        with captured_context_meter() as metrics:
+            # It's OK to write nothing
+            await buf.write({})
+            assert buf.avg_size == 0
 
-        many_small = [asyncio.create_task(buf.write(small_payload)) for _ in range(9)]
-        buf.allow_process.set()
-        many_small = asyncio.gather(*many_small)
-        # Puts that do not breach the limit do not block
-        await many_small
-        assert buf.memory_limiter.time_blocked_total == 0
-        buf.allow_process.clear()
+            many_small = [
+                asyncio.create_task(buf.write(small_payload)) for _ in range(9)
+            ]
+            buf.allow_process.set()
+            many_small = asyncio.gather(*many_small)
+            # Puts that do not breach the limit do not block
+            await many_small
+            assert metrics.keys() == {("my_label", "count")}  # non-blocking only
+            buf.allow_process.clear()
 
-        many_small = [asyncio.create_task(buf.write(small_payload)) for _ in range(11)]
-        assert buf.memory_limiter
-        while buf.memory_limiter.available():
-            await asyncio.sleep(0.1)
+            many_small = [
+                asyncio.create_task(buf.write(small_payload)) for _ in range(11)
+            ]
+            assert buf.memory_limiter
+            while buf.memory_limiter.available:
+                await asyncio.sleep(0.1)
 
-        new_put = asyncio.create_task(buf.write(small_payload))
-        with pytest.raises(asyncio.TimeoutError):
-            await wait_for(asyncio.shield(new_put), 0.1)
-        buf.allow_process.set()
-        many_small = asyncio.gather(*many_small)
-        await new_put
+            new_put = asyncio.create_task(buf.write(small_payload))
+            with pytest.raises(asyncio.TimeoutError):
+                await wait_for(asyncio.shield(new_put), 0.1)
+            buf.allow_process.set()
+            await asyncio.gather(new_put, *many_small)
 
-        while not buf.memory_limiter.free():
-            await asyncio.sleep(0.1)
-        buf.allow_process.clear()
-        big_tasks = [
-            asyncio.create_task(buf.write(big_payload)) for big_payload in big_payloads
-        ]
-        small = asyncio.create_task(buf.write(small_payload))
-        with pytest.raises(asyncio.TimeoutError):
-            await wait_for(asyncio.shield(asyncio.gather(*big_tasks)), 0.1)
-        with pytest.raises(asyncio.TimeoutError):
-            await wait_for(asyncio.shield(small), 0.1)
-        # Puts only return once we're below memory limit
-        buf.allow_process.set()
-        await asyncio.gather(*big_tasks)
-        await small
-        # Once the big write is through, we can write without blocking again
-        before = buf.memory_limiter.time_blocked_total
-        await buf.write(small_payload)
-        assert before == buf.memory_limiter.time_blocked_total
+            while not buf.memory_limiter.empty:
+                await asyncio.sleep(0.1)
+            buf.allow_process.clear()
+            big_tasks = [
+                asyncio.create_task(buf.write(big_payload))
+                for big_payload in big_payloads
+            ]
+            small = asyncio.create_task(buf.write(small_payload))
+            with pytest.raises(asyncio.TimeoutError):
+                await wait_for(asyncio.shield(asyncio.gather(*big_tasks)), 0.1)
+            with pytest.raises(asyncio.TimeoutError):
+                await wait_for(asyncio.shield(small), 0.1)
+            # Puts only return once we're below memory limit
+            buf.allow_process.set()
+            await asyncio.gather(*big_tasks)
+            await small
+            # Once the big write is through, we can write without blocking again
+            before_count = metrics["my_label", "count"]
+            before_seconds = metrics["my_label", "seconds"]
+            assert before_seconds > 0
+            await buf.write(small_payload)
+            assert metrics["my_label", "count"] == before_count + 1
+            assert metrics["my_label", "seconds"] == before_seconds
+            assert buf.avg_size > 0
 
 
 class BufferShardsBroken(ShardsBuffer):

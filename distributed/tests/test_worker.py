@@ -18,7 +18,6 @@ from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
 from operator import add
 from time import sleep
-from unittest import mock
 
 import psutil
 import pytest
@@ -30,7 +29,6 @@ from dask import delayed
 from dask.system import CPU_COUNT
 from dask.utils import tmpfile
 
-import distributed
 from distributed import (
     Client,
     Event,
@@ -46,17 +44,11 @@ from distributed.comm.registry import backends
 from distributed.comm.utils import OFFLOAD_THRESHOLD
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
-from distributed.diagnostics import nvml
-from distributed.diagnostics.plugin import (
-    CondaInstall,
-    ForwardOutput,
-    PackageInstall,
-    PipInstall,
-)
+from distributed.diagnostics.plugin import ForwardOutput
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
-from distributed.utils import wait_for
+from distributed.utils import get_mp_context, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -181,6 +173,7 @@ async def test_worker_bad_args(c, s, a, b):
     assert any("1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line)
     assert "Compute Failed" in hdlr.messages["warning"][0]
     assert y.key in hdlr.messages["warning"][0]
+    assert "executing" in hdlr.messages["warning"][0]
     logger.setLevel(old_level)
 
     # Now we check that both workers are still alive.
@@ -874,39 +867,6 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_log_event(c, s, a):
-    def log_event(msg):
-        w = get_worker()
-        w.log_event("test-topic", msg)
-
-    await c.submit(log_event, "foo")
-
-    class C:
-        pass
-
-    with pytest.raises(TypeError, match="msgpack"):
-        await c.submit(log_event, C())
-
-    # Worker still works
-    await c.submit(log_event, "bar")
-    await c.submit(log_event, error_message(Exception()))
-
-    # assertion reversed for mock.ANY.__eq__(Serialized())
-    assert [
-        "foo",
-        "bar",
-        {
-            "status": "error",
-            "exception": mock.ANY,
-            "traceback": mock.ANY,
-            "exception_text": "Exception()",
-            "traceback_text": "",
-            "worker": a.address,
-        },
-    ] == [msg[1] for msg in s.get_events("test-topic")]
-
-
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
     with captured_logger("distributed.worker") as logger:
@@ -918,6 +878,7 @@ async def test_log_exception_on_failed_task(c, s, a, b):
     text = logger.getvalue()
     assert "ZeroDivisionError" in text
     assert "Exception" in text
+    assert "Traceback" in text
 
 
 @gen_cluster(client=True)
@@ -1223,7 +1184,9 @@ async def test_statistical_profiling(c, s, a, b):
     },
 )
 async def test_statistical_profiling_2(c, s, a, b):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     while True:
         x = da.random.random(1000000, chunks=(10000,))
         y = (x + x * 2) - x.sum().persist()
@@ -1231,7 +1194,7 @@ async def test_statistical_profiling_2(c, s, a, b):
 
         profile = await a.get_profile()
         text = str(profile)
-        if profile["count"] and "sum" in text and "random" in text:
+        if profile["count"] and "sum" in text or "random" in text:
             break
 
 
@@ -1239,7 +1202,7 @@ async def test_statistical_profiling_2(c, s, a, b):
     client=True,
     config={
         "distributed.worker.profile.enabled": True,
-        "distributed.worker.profile.cycle": "100ms",
+        "distributed.worker.profile.cycle": "10ms",
     },
 )
 async def test_statistical_profiling_cycle(c, s, a, b):
@@ -1576,6 +1539,37 @@ async def test_close_gracefully(c, s, a, b):
         assert_amm_transfer_story(key, b, a)
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny)
+async def test_close_gracefully_no_suspicious_tasks(c, s, a, b):
+    workers = {a.worker_address: a, b.worker_address: b}
+    started = Event()
+    block_task = Event()
+
+    def blocking_task():
+        started.set()
+        block_task.wait()
+
+    fut = c.submit(blocking_task)
+    await started.wait()
+
+    to_close = s.tasks[fut.key].processing_on.address
+
+    async def close_gracefully(dask_worker):
+        await asyncio.shield(dask_worker.close_gracefully())
+
+    try:
+        await c.run(close_gracefully, workers=[to_close])
+    except CommClosedError:
+        pass
+    await async_poll_for(lambda: to_close not in s.workers, 5)
+
+    assert b.address not in s.workers
+    assert s.tasks[fut.key].suspicious == 0
+    await block_task.set()
+    await fut
+
+
 @pytest.mark.parametrize("sync", [False, pytest.param(True, marks=[pytest.mark.slow])])
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_close_while_executing(c, s, a, sync):
@@ -1596,7 +1590,7 @@ async def test_close_while_executing(c, s, a, sync):
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
     task = next(
-        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+        task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
     )
     await a.close()
     assert task.done()
@@ -1618,7 +1612,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
     f1 = c.submit(f, ev, key="f1")
     await ev.wait()
     task = next(
-        task for task in asyncio.all_tasks() if "execute(f1)" in task.get_name()
+        task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
     )
     with captured_logger(
         "distributed.worker.state_machine", level=logging.ERROR
@@ -1685,199 +1679,6 @@ async def test_bad_startup(s):
 
     async with Worker(s.address, startup_information={"bad": bad_startup}):
         pass
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_pip_install(c, s, a):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        mocked = mock.Mock()
-        mocked.configure_mock(
-            **{"communicate.return_value": (b"", b""), "wait.return_value": 0}
-        )
-        with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
-        ) as Popen:
-            await c.register_plugin(
-                PipInstall(packages=["requests"], pip_options=["--upgrade"])
-            )
-            assert Popen.call_count == 1
-            args = Popen.call_args[0][0]
-            assert "python" in args[0]
-            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
-            logs = logger.getvalue()
-            assert "pip installing" in logs
-            assert "failed" not in logs
-            assert "restart" not in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_conda_install(c, s, a):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(return_value=(b"", b"", 0))
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            await c.register_plugin(
-                CondaInstall(packages=["requests"], conda_options=["--update-deps"])
-            )
-            assert run_command_mock.call_count == 1
-            command = run_command_mock.call_args[0][0]
-            assert command == "INSTALL"
-            arguments = run_command_mock.call_args[0][1]
-            assert arguments == ["--update-deps", "requests"]
-            logs = logger.getvalue()
-            assert "conda installing" in logs
-            assert "failed" not in logs
-            assert "restart" not in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_pip_install_fails(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        mocked = mock.Mock()
-        mocked.configure_mock(
-            **{
-                "communicate.return_value": (
-                    b"",
-                    b"Could not find a version that satisfies the requirement not-a-package",
-                ),
-                "wait.return_value": 1,
-            }
-        )
-        with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=mocked
-        ) as Popen:
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(PipInstall(packages=["not-a-package"]))
-
-            assert Popen.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-            assert "not-a-package" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_when_conda_not_found(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        with mock.patch.dict("sys.modules", {"conda": None}):
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
-            logs = logger.getvalue()
-            assert "install failed" in logs
-            assert "conda could not be found" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_when_conda_raises(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(side_effect=RuntimeError)
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
-            assert run_command_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-
-
-@gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
-async def test_conda_install_fails_on_returncode(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        run_command_mock = mock.Mock(name="run_command_mock")
-        run_command_mock.configure_mock(return_value=(b"", b"", 1))
-        module_mock = mock.Mock(name="conda_cli_python_api_mock")
-        module_mock.run_command = run_command_mock
-        module_mock.Commands.INSTALL = "INSTALL"
-        with mock.patch.dict("sys.modules", {"conda.cli.python_api": module_mock}):
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
-            assert run_command_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "install failed" in logs
-
-
-class StubInstall(PackageInstall):
-    INSTALLER = "stub"
-
-    def __init__(self, packages: list[str], restart: bool = False):
-        super().__init__(packages=packages, restart=restart)
-
-    def install(self) -> None:
-        pass
-
-
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
-async def test_package_install_installs_once_with_multiple_workers(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.INFO
-    ) as logger:
-        install_mock = mock.Mock(name="install")
-        with mock.patch.object(StubInstall, "install", install_mock):
-            await c.register_plugin(
-                StubInstall(
-                    packages=["requests"],
-                )
-            )
-            assert install_mock.call_count == 1
-            logs = logger.getvalue()
-            assert "already been installed" in logs
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_package_install_restarts_on_nanny(c, s, a):
-    (addr,) = s.workers
-    await c.register_plugin(
-        StubInstall(
-            packages=["requests"],
-            restart=True,
-        )
-    )
-    # Wait until the worker is restarted
-    while len(s.workers) != 1 or set(s.workers) == {addr}:
-        await asyncio.sleep(0.01)
-
-
-class FailingInstall(PackageInstall):
-    INSTALLER = "fail"
-
-    def __init__(self, packages: list[str], restart: bool = False):
-        super().__init__(packages=packages, restart=restart)
-
-    def install(self) -> None:
-        raise RuntimeError()
-
-
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_package_install_failing_does_not_restart_on_nanny(c, s, a):
-    (addr,) = s.workers
-    with pytest.raises(RuntimeError):
-        await c.register_plugin(
-            FailingInstall(
-                packages=["requests"],
-                restart=True,
-            )
-        )
-    # Nanny does not restart
-    assert a.status is Status.running
-    assert set(s.workers) == {addr}
 
 
 @gen_cluster(nthreads=[])
@@ -2003,7 +1804,8 @@ async def test_heartbeat_missing_real_cluster(s, a):
     Worker=Nanny,
     worker_kwargs={"heartbeat_interval": "1ms"},
 )
-async def test_heartbeat_missing_restarts(c, s, n):
+async def test_heartbeat_missing_doesnt_restart(c, s, n):
+    """Read: https://github.com/dask/distributed/pull/8522"""
     old_heartbeat_handler = s.handlers["heartbeat_worker"]
     s.handlers["heartbeat_worker"] = lambda *args, **kwargs: {"status": "missing"}
 
@@ -2012,11 +1814,8 @@ async def test_heartbeat_missing_restarts(c, s, n):
 
     assert not s.workers
     s.handlers["heartbeat_worker"] = old_heartbeat_handler
-
-    await n.process.running.wait()
-    assert n.status == Status.running
-
-    await c.wait_for_workers(1)
+    assert n.status == Status.closing_gracefully
+    assert not n.process.is_alive()
 
 
 @gen_cluster(nthreads=[])
@@ -2369,7 +2168,7 @@ async def test_bad_executor_annotation(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_process_executor(c, s, a, b):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         b.executors["processes"] = e
 
@@ -2401,7 +2200,7 @@ def kill_process():
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_process_executor_kills_process(c, s, a):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
             future = c.submit(kill_process)
@@ -2424,7 +2223,7 @@ def raise_exc():
 
 @gen_cluster(client=True)
 async def test_process_executor_raise_exception(c, s, a, b):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         b.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
@@ -2432,17 +2231,6 @@ async def test_process_executor_raise_exception(c, s, a, b):
 
         with pytest.raises(RuntimeError, match="foo"):
             await future
-
-
-@pytest.mark.gpu
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_gpu_executor(c, s, w):
-    if nvml.device_get_count() > 0:
-        e = w.executors["gpu"]
-        assert isinstance(e, distributed.threadpoolexecutor.ThreadPoolExecutor)
-        assert e._max_workers == 1
-    else:
-        assert "gpu" not in w.executors
 
 
 async def assert_task_states_on_worker(
@@ -3119,32 +2907,183 @@ async def test_worker_status_sync(s, a):
     while ws.status != Status.closed:
         await asyncio.sleep(0.01)
 
-    events = [ev for _, ev in s.events[ws.address] if ev["action"] != "heartbeat"]
+    events = [ev for _, ev in s.get_events(ws.address) if ev["action"] != "heartbeat"]
+    for ev in events:
+        if "stimulus_id" in ev:  # Strip timestamp
+            ev["stimulus_id"] = ev["stimulus_id"].rsplit("-", 1)[0]
+
     assert events == [
         {"action": "add-worker"},
         {
             "action": "worker-status-change",
             "prev-status": "init",
             "status": "running",
+            "stimulus_id": "worker-status-change",
         },
         {
             "action": "worker-status-change",
             "prev-status": "running",
             "status": "paused",
+            "stimulus_id": "worker-status-change",
         },
         {
             "action": "worker-status-change",
             "prev-status": "paused",
             "status": "running",
+            "stimulus_id": "worker-status-change",
         },
         {
             "action": "worker-status-change",
             "prev-status": "running",
             "status": "closing_gracefully",
+            "stimulus_id": "retire-workers",
         },
-        {"action": "remove-worker", "processing-tasks": set()},
-        {"action": "retired"},
+        {
+            "action": "remove-worker",
+            "lost-computed-tasks": set(),
+            "lost-scattered-tasks": set(),
+            "processing-tasks": set(),
+            "expected": True,
+            "stimulus_id": "retire-workers",
+        },
+        {"action": "retired", "stimulus_id": "retire-workers"},
     ]
+
+
+@gen_cluster(client=True)
+async def test_log_remove_worker(c, s, a, b):
+    # Computed task
+    x = c.submit(inc, 1, key="x", workers=a.address)
+    await x
+    ev = Event()
+    # Processing task
+    y = c.submit(
+        lambda ev: ev.wait(), ev, key="y", workers=a.address, allow_other_workers=True
+    )
+    await wait_for_state("y", "processing", s)
+    # Scattered task
+    z = await c.scatter({"z": 3}, workers=a.address)
+
+    s._broker.truncate()
+
+    with captured_logger("distributed.scheduler", level=logging.INFO) as log:
+        # Successful graceful shutdown
+        await s.retire_workers([a.address], stimulus_id="graceful")
+        # Refuse to retire gracefully as there's nowhere to put x and z
+        await s.retire_workers([b.address], stimulus_id="graceful_abort")
+        await asyncio.sleep(0.2)
+        # Ungraceful shutdown
+        await s.remove_worker(b.address, stimulus_id="ungraceful")
+        await asyncio.sleep(0.2)
+    await ev.set()
+
+    assert log.getvalue().splitlines() == [
+        # Successful graceful
+        f"Retire worker addresses ['{a.address}']",
+        f"Retiring worker '{a.address}' (stimulus_id='graceful')",
+        f"Remove worker <WorkerState '{a.address}', name: 0, status: "
+        "closing_gracefully, memory: 2, processing: 1> (stimulus_id='graceful')",
+        f"Retired worker '{a.address}' (stimulus_id='graceful')",
+        # Aborted graceful
+        f"Retire worker addresses ['{b.address}']",
+        f"Retiring worker '{b.address}' (stimulus_id='graceful_abort')",
+        f"Could not retire worker '{b.address}': unique data could not be "
+        "moved to any other worker (stimulus_id='graceful_abort')",
+        # Ungraceful
+        f"Remove worker <WorkerState '{b.address}', name: 1, status: "
+        "running, memory: 2, processing: 1> (stimulus_id='ungraceful')",
+        f"Removing worker '{b.address}' caused the cluster to lose already "
+        "computed task(s), which will be recomputed elsewhere: {'x'} "
+        "(stimulus_id='ungraceful')",
+        f"Removing worker '{b.address}' caused the cluster to lose scattered "
+        "data, which can't be recovered: {'z'} (stimulus_id='ungraceful')",
+        "Lost all workers",
+    ]
+
+    events = {topic: [ev for _, ev in evs] for topic, evs in s.get_events().items()}
+    for evs in events.values():
+        for ev in evs:
+            if ev["action"] == "retire-workers":
+                for k in ("retired", "could-not-retire"):
+                    ev[k] = {addr: "snip" for addr in ev[k]}
+            if "stimulus_id" in ev:  # Strip timestamp
+                ev["stimulus_id"] = ev["stimulus_id"].rsplit("-", 1)[0]
+
+    assert events == {
+        a.address: [
+            {
+                "action": "worker-status-change",
+                "prev-status": "running",
+                "status": "closing_gracefully",
+                "stimulus_id": "graceful",
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": set(),
+                "lost-scattered-tasks": set(),
+                "processing-tasks": {"y"},
+                "expected": True,
+                "stimulus_id": "graceful",
+            },
+            {"action": "retired", "stimulus_id": "graceful"},
+        ],
+        b.address: [
+            {
+                "action": "worker-status-change",
+                "prev-status": "running",
+                "status": "closing_gracefully",
+                "stimulus_id": "graceful_abort",
+            },
+            {"action": "could-not-retire", "stimulus_id": "graceful_abort"},
+            {
+                "action": "worker-status-change",
+                "prev-status": "closing_gracefully",
+                "status": "running",
+                "stimulus_id": "worker-status-change",
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": {"x"},
+                "lost-scattered-tasks": {"z"},
+                "processing-tasks": {"y"},
+                "expected": False,
+                "stimulus_id": "ungraceful",
+            },
+            {"action": "closing-worker", "reason": "scheduler-remove-worker"},
+        ],
+        "all": [
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": set(),
+                "lost-scattered-tasks": set(),
+                "processing-tasks": {"y"},
+                "expected": True,
+                "stimulus_id": "graceful",
+                "worker": a.address,
+            },
+            {
+                "action": "retire-workers",
+                "stimulus_id": "graceful",
+                "retired": {a.address: "snip"},
+                "could-not-retire": {},
+            },
+            {
+                "action": "retire-workers",
+                "stimulus_id": "graceful_abort",
+                "retired": {},
+                "could-not-retire": {b.address: "snip"},
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": {"x"},
+                "lost-scattered-tasks": {"z"},
+                "processing-tasks": {"y"},
+                "expected": False,
+                "stimulus_id": "ungraceful",
+                "worker": b.address,
+            },
+        ],
+    }
 
 
 @gen_cluster(client=True)
@@ -3485,13 +3424,15 @@ class BreakingWorker(Worker):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=BreakingWorker)
 async def test_broken_comm(c, s, a, b):
-    pytest.importorskip("dask.dataframe")
+    pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
     )
-    s = df.shuffle("id", shuffle="tasks")
+    with dask.config.set({"dataframe.shuffle.method": "tasks"}):
+        s = df.shuffle("id")
     await c.compute(s.size)
 
 
@@ -3784,3 +3725,53 @@ async def test_startstops(c, s, a, b):
         < ss[1]["stop"]
         < t1 + b.scheduler_delay
     )
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+@pytest.mark.parametrize("state", ["cancelled", "resumed"])
+async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
+    async with BlockedExecute(s.address) as b:
+        with captured_logger("distributed.worker", level=logging.ERROR) as log:
+            x = (await c.scatter({"x": 1}))["x"]
+            y = c.submit(inc, x, key="y", workers=[b.address])
+            await b.in_execute.wait()
+            del x, y
+            await async_poll_for(lambda: "x" not in b.data, timeout=5)
+
+            if state == "resumed":
+                y = c.submit(inc, 1, key="y", workers=[a.address])
+                z = c.submit(inc, y, key="z", workers=[b.address])
+                await wait_for_state("y", "resumed", b)
+
+            b.block_execute.set()
+            b.block_execute_exit.set()
+
+            if state == "resumed":
+                assert await z == 3
+                del y, z
+
+            await async_poll_for(lambda: not b.state.tasks, timeout=5)
+
+    assert not log.getvalue()
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_suppress_compute_failure_for_cancelled_tasks(c, s, a):
+    with captured_logger("distributed.worker", level=logging.WARNING) as log:
+        in_event = Event()
+        block_event = Event()
+
+        def block_and_raise(in_event, block_event):
+            in_event.set()
+            block_event.wait()
+            return 1 / 0
+
+        x = c.submit(block_and_raise, in_event, block_event, key="x")
+        await in_event.wait()
+        del x
+
+        await wait_for_state("x", "cancelled", a)
+        await block_event.set()
+        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+
+    assert not log.getvalue()

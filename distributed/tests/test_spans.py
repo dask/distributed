@@ -9,7 +9,6 @@ from dask import delayed
 
 import distributed
 from distributed import Client, Event, Future, Worker, span, wait
-from distributed.compatibility import WINDOWS
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.utils_test import (
     NoSchedulerDelayWorker,
@@ -215,7 +214,9 @@ async def test_no_extension(c, s, a, b):
     config={"optimization.fuse.active": False},
 )
 async def test_task_groups(c, s, a, b, release, no_time_resync):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     t0 = await padded_time(before=0)
 
     with span("wf"):
@@ -537,9 +538,13 @@ async def test_worker_metrics(c, s, a, b):
         ]
     )
 
-    if not WINDOWS:
-        for metrics in (foo_metrics, bar0_metrics, bar1_metrics):
-            assert all(v > 0 for v in metrics.values()), metrics
+    for metrics in (foo_metrics, bar0_metrics, bar1_metrics):
+        # On OSes other than Windows, time metrics are, 99.9% of the time, strictly
+        # greater than zero. However adjustments in the wall clock can occasionally
+        # cause them to be exactly zero. Here we're testing that there is a floor to
+        # zero implemented.
+        for k, v in metrics.items():
+            assert v >= 0, (k, v)
 
     # Metrics have been synchronized from scheduler to spans
     for k, v in foo_metrics.items():
@@ -671,7 +676,7 @@ async def test_merge_nothing(s):
 
 @gen_cluster(client=True)
 async def test_active_cpu_seconds_trivial(c, s, a, b):
-    await c.submit(slowinc, 1, delay=0.1, key="x")
+    await c.submit(slowinc, 1, delay=0.2, key="x")
     await a.heartbeat()
     await b.heartbeat()
     span = s.extensions["spans"].spans_search_by_name["default",][0]
@@ -679,8 +684,12 @@ async def test_active_cpu_seconds_trivial(c, s, a, b):
     assert span.done
     assert span.nthreads_intervals == [(span.enqueued, span.stop, 3)]
     assert span.active_cpu_seconds == (span.stop - span.enqueued) * 3
-    k = "execute", "N/A", "idle or other spans", "seconds"
-    assert 0.15 < span.cumulative_worker_metrics[k] < span.active_cpu_seconds
+    idle_time = span.cumulative_worker_metrics[
+        "execute", "N/A", "idle or other spans", "seconds"
+    ]
+    # Allow for some very generous margins to compensate for occasional corrections in
+    # the wall clock (much more frequent in Windows)
+    assert 0.15 < idle_time <= span.active_cpu_seconds
 
 
 @pytest.mark.parametrize("some_done", [False, True])
@@ -834,3 +843,44 @@ async def test_spans_are_visible_from_tasks(c, s, a, b):
 
     # No annotation is created for the default span
     assert await c.submit(dask.get_annotations) == {}
+
+
+@gen_cluster(client=True)
+async def test_span_on_persist(c, s, a, b):
+    """As a workaround to lack of annotations support in dask-expr and loss of
+    annotations due to low level optimization in dask.array, you can use span() to wrap
+    calls to persist() and compute()
+    """
+    x = delayed(inc)(1, dask_key_name="x")
+    with span("x") as x_id:
+        x = c.persist(x)
+    y = delayed(inc)(x, dask_key_name="y")
+    with span("y") as y_id:
+        y = c.compute(y)
+    assert await y == 3
+
+    assert s.tasks["x"].group.span_id == x_id
+    assert s.tasks["y"].group.span_id == y_id
+
+
+@pytest.mark.filterwarnings("ignore:Dask annotations")
+@gen_cluster(client=True)
+async def test_collections_metadata(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+    df = pd.DataFrame(
+        {"x": np.random.random(1000), "y": np.random.random(1000)},
+        index=np.arange(1000),
+    )
+    ldf = dd.from_pandas(df, npartitions=10)
+
+    with span("foo") as span_id:
+        await c.compute(ldf)
+
+    ext = s.extensions["spans"]
+    span_ = ext.spans[span_id]
+    collections_meta = span_.metadata["collections"]
+    assert isinstance(collections_meta, list)
+    assert len(collections_meta) == 1
+    assert collections_meta[0]["type"] == type(ldf).__name__

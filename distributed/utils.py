@@ -16,6 +16,7 @@ import socket
 import sys
 import tempfile
 import threading
+import traceback
 import warnings
 import weakref
 import xml.etree.ElementTree
@@ -26,7 +27,6 @@ from collections.abc import (
     Callable,
     Collection,
     Container,
-    Coroutine,
     Generator,
     Iterator,
     KeysView,
@@ -49,9 +49,9 @@ from typing import TYPE_CHECKING
 from typing import Any as AnyType
 from typing import ClassVar, TypeVar, overload
 
-import click
 import psutil
 import tblib.pickling_support
+from tornado import escape
 
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
@@ -170,12 +170,20 @@ def get_fileno_limit():
 
 @toolz.memoize
 def _get_ip(host, port, family):
+    def hostname_fallback():
+        addr_info = socket.getaddrinfo(
+            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
+        )[0]
+        return addr_info[4][0]
+
     # By using a UDP socket, we don't actually try to connect but
     # simply select the local address through which *host* is reachable.
     sock = socket.socket(family, socket.SOCK_DGRAM)
     try:
         sock.connect((host, port))
         ip = sock.getsockname()[0]
+        if ip == "0.0.0.0":
+            return hostname_fallback()
         return ip
     except OSError as e:
         warnings.warn(
@@ -183,10 +191,7 @@ def _get_ip(host, port, family):
             "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        addr_info = socket.getaddrinfo(
-            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
-        )[0]
-        return addr_info[4][0]
+        return hostname_fallback()
     finally:
         sock.close()
 
@@ -374,9 +379,9 @@ def in_async_call(loop, default=False):
 
 def sync(
     loop: IOLoop,
-    func: Callable[..., Coroutine[AnyType, AnyType, T]],
+    func: Callable[..., Awaitable[T]],
     *args: AnyType,
-    callback_timeout: str | timedelta | float | None = None,
+    callback_timeout: str | float | timedelta | None = None,
     **kwargs: AnyType,
 ) -> T:
     """
@@ -388,7 +393,11 @@ def sync(
 
     e = threading.Event()
     main_tid = threading.get_ident()
-    result = error = future = None  # set up non-locals
+
+    # set up non-locals
+    result: T
+    error: BaseException | None = None
+    future: asyncio.Future[T]
 
     @gen.coroutine
     def f() -> Generator[AnyType, AnyType, None]:
@@ -397,13 +406,13 @@ def sync(
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
-            coro = func(*args, **kwargs)
+            awaitable = func(*args, **kwargs)
             if timeout is not None:
-                coro = wait_for(coro, timeout)
-            future = asyncio.ensure_future(coro)
+                awaitable = wait_for(awaitable, timeout)
+            future = asyncio.ensure_future(awaitable)
             result = yield future
-        except Exception:
-            error = sys.exc_info()
+        except Exception as exception:
+            error = exception
         finally:
             e.set()
 
@@ -411,7 +420,7 @@ def sync(
         if future is not None:
             future.cancel()
 
-    def wait(timeout: float) -> bool:
+    def wait(timeout: float | None) -> bool:
         try:
             return e.wait(timeout)
         except KeyboardInterrupt:
@@ -426,11 +435,10 @@ def sync(
         while not e.is_set():
             wait(10)
 
-    if error:
-        typ, exc, tb = error
-        raise exc.with_traceback(tb)  # type: ignore[union-attr]
+    if error is not None:
+        raise error
     else:
-        return result  # type: ignore[return-value]
+        return result
 
 
 if sys.version_info >= (3, 10):
@@ -753,7 +761,7 @@ def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
     ...
 
 
-def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
+def log_errors(func=None, /, *, pdb=False, unroll_stack=0):
     """Log any errors and then reraise them.
 
     This can be used:
@@ -781,11 +789,32 @@ def log_errors(func=None, /, *, pdb=False, unroll_stack=1):
         Set to True to break into the debugger in case of exception
     unroll_stack: int, optional
         Number of levels of stack to unroll when determining the module's name for the
-        purpose of logging. Normally you should omit this. Set to 2 if you are writing a
+        purpose of logging. Normally you should omit this. Set to 1 if you are writing a
         helper function, context manager, or decorator.
     """
     le = _LogErrors(pdb=pdb, unroll_stack=unroll_stack)
     return le(func) if func else le
+
+
+_getmodulename_with_path_map: dict[str, str] = {}
+
+
+def _getmodulename_with_path(fname: str) -> str:
+    """Variant of inspect.getmodulename that returns the full module path"""
+    try:
+        return _getmodulename_with_path_map[fname]
+    except KeyError:
+        pass
+
+    for modname, mod in sys.modules.copy().items():
+        fname2 = getattr(mod, "__file__", None)
+        if fname2:
+            _getmodulename_with_path_map[fname2] = modname
+
+    try:
+        return _getmodulename_with_path_map[fname]
+    except KeyError:  # pragma: nocover
+        return os.path.splitext(os.path.basename(fname))[0]
 
 
 class _LogErrors:
@@ -818,16 +847,15 @@ class _LogErrors:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, tb):
         from distributed.comm import CommClosedError
 
         if not exc_type or issubclass(exc_type, (CommClosedError, gen.Return)):
             return
 
-        stack = inspect.stack()
-        frame = stack[self.unroll_stack]
-        mod = inspect.getmodule(frame[0])
-        modname = mod.__name__
+        stack = traceback.extract_tb(tb)
+        frame = stack[min(self.unroll_stack, len(stack) - 1)]
+        modname = _getmodulename_with_path(frame.filename)
 
         try:
             logger = logging.getLogger(modname)
@@ -1245,6 +1273,10 @@ def has_keyword(func, keyword):
 
 @functools.lru_cache(1000)
 def command_has_keyword(cmd, k):
+    # Click is a relatively expensive import
+    # That hurts startup time a little
+    import click
+
     if cmd is not None:
         if isinstance(cmd, str):
             try:
@@ -1802,68 +1834,76 @@ def recursive_to_dict(
         tok.var.reset(tok)
 
 
-def is_python_shutting_down() -> bool:
-    """Is the interpreter shutting down now?
-
-    This is a variant of ``sys.is_finalizing`` which can return True inside the ``__del__``
-    method of classes defined inside the distributed package.
-    """
-    # This import must remain local for the global variable to be
-    # properly evaluated
-    from distributed import _python_shutting_down
-
-    return _python_shutting_down
-
-
 class Deadline:
     """Utility class tracking a deadline and the progress toward it"""
 
-    #: Expiry time of the deadline in seconds since the epoch
+    #: Expiry time of the deadline in seconds since the start of the monotonic timer
     #: or None if the deadline never expires
-    expires_at: float | None
+    expires_at_mono: float | None
     #: Seconds since the epoch when the deadline was created
+    started_at_mono: float
+    #: Seconds since the start of the monotonic timer when the deadline was created
     started_at: float
 
+    __slots__ = tuple(__annotations__)
+
     def __init__(self, expires_at: float | None = None):
-        self.expires_at = expires_at
         self.started_at = time()
+        self.started_at_mono = monotonic()
+        if expires_at is not None:
+            self.expires_at_mono = expires_at - self.started_at + self.started_at_mono
+        else:
+            self.expires_at_mono = None
 
     @classmethod
     def after(cls, duration: float | None = None) -> Deadline:
         """Create a new ``Deadline`` that expires in ``duration`` seconds
-        or never if ``duration`` is None"""
-        started_at = time()
-        expires_at = duration + started_at if duration is not None else duration
-        deadline = cls(expires_at)
-        deadline.started_at = started_at
-        return deadline
+        or never if ``duration`` is None
+        """
+        inst = cls()
+        if duration is not None:
+            inst.expires_at_mono = inst.started_at_mono + duration
+        return inst
+
+    @property
+    def expires_at(self) -> float | None:
+        """Expiry time of the deadline in seconds since the unix epoch
+        or None if the deadline never expires.
+
+        Note that this can change over time if the wall clock is adjusted by the OS.
+        """
+        if (exp := self.expires_at_mono) is None:
+            return None
+        return exp - monotonic() + time()
 
     @property
     def duration(self) -> float | None:
         """Seconds between the creation and expiration time of the deadline
-        if the deadline expires, None otherwise"""
-        if self.expires_at is None:
+        if the deadline expires, None otherwise
+        """
+        if (exp := self.expires_at_mono) is None:
             return None
-        return self.expires_at - self.started_at
+        return exp - self.started_at_mono
 
     @property
     def expires(self) -> bool:
         """Whether the deadline ever expires"""
-        return self.expires_at is not None
+        return self.expires_at_mono is not None
 
     @property
     def elapsed(self) -> float:
         """Seconds that elapsed since the deadline was created"""
-        return time() - self.started_at
+        return monotonic() - self.started_at_mono
 
     @property
     def remaining(self) -> float | None:
         """Seconds remaining until the deadline expires if an expiry time is set,
-        None otherwise"""
-        if self.expires_at is None:
+        None otherwise
+        """
+        if (exp := self.expires_at_mono) is None:
             return None
         else:
-            return max(0, self.expires_at - time())
+            return max(0, exp - monotonic())
 
     @property
     def expired(self) -> bool:
@@ -1950,3 +1990,11 @@ class TupleComparable:
 
     def __lt__(self, other):
         return self.obj < other.obj
+
+
+@functools.cache
+def url_escape(url, *args, **kwargs):
+    """
+    Escape a URL path segment. Cache results for better performance.
+    """
+    return escape.url_escape(url, *args, **kwargs)

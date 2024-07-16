@@ -30,29 +30,33 @@ export DASK_DISTRIBUTED__ADMIN__SYSTEM_MONITOR__GIL__ENABLED=False
 # SETUP - Check environment
 ################################################################################
 
-gpuci_logger "Check environment variables"
+rapids-logger "Check environment variables"
 env
 
-gpuci_logger "Check GPU usage"
+rapids-logger "Check GPU usage"
 nvidia-smi
 
-gpuci_logger "Activate conda env"
+rapids-logger "Activate conda env"
 . /opt/conda/etc/profile.d/conda.sh
 conda activate dask
 
-gpuci_logger "Install distributed"
+rapids-logger "Install distributed"
 python -m pip install -e .
 
-gpuci_logger "Install dask"
+rapids-logger "Install dask"
 python -m pip install git+https://github.com/dask/dask
 
-gpuci_logger "Check Python versions"
+rapids-logger "Check Python versions"
 python --version
 
-gpuci_logger "Check conda environment"
+rapids-logger "Check conda environment"
 conda info
 conda config --show-sources
 conda list --show-channel-urls
 
-gpuci_logger "Python py.test for distributed"
+rapids-logger "Python py.test for distributed"
 py.test distributed -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"
+
+# cuDF spill stats monitoring must be enabled for this test
+CUDF_SPILL=on CUDF_SPILL_STATS=1 DASK_DISTRIBUTED__DIAGNOSTICS__CUDF=1 \
+    py.test distributed/diagnostics/tests/test_cudf_diagnostics.py -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"

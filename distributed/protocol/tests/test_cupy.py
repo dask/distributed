@@ -17,7 +17,7 @@ numpy = pytest.importorskip("numpy")
 @pytest.mark.parametrize("order", ["C", "F"])
 @pytest.mark.parametrize("serializers", [("cuda",), ("dask",), ("pickle",)])
 def test_serialize_cupy(shape, dtype, order, serializers):
-    x = cupy.arange(numpy.product(shape), dtype=dtype)
+    x = cupy.arange(numpy.prod(shape), dtype=dtype)
     x = cupy.ndarray(shape, dtype=x.dtype, memptr=x.data, order=order)
     header, frames = serialize(x, serializers=serializers)
     y = deserialize(header, frames, deserializers=serializers)

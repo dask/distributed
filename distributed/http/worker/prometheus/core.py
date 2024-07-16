@@ -32,6 +32,7 @@ class WorkerMetricCollector(PrometheusCollector):
             )
 
     def collect(self) -> Iterator[Metric]:
+        self.server.monitor.update()
         ws = self.server.state
 
         tasks = GaugeMetricFamily(
@@ -63,7 +64,8 @@ class WorkerMetricCollector(PrometheusCollector):
             yield CounterMetricFamily(
                 self.build_name("gil_contention"),
                 "GIL contention metric",
-                value=self.server.monitor._cumulative_gil_contention,
+                value=self.server.monitor.cumulative_gil_contention,
+                unit="seconds",
             )
 
         yield GaugeMetricFamily(
@@ -170,6 +172,7 @@ class WorkerMetricCollector(PrometheusCollector):
         # The following metrics will export NaN, if the corresponding digests are None
         if not self.crick_available:
             return
+        assert self.server.digests
 
         yield GaugeMetricFamily(
             self.build_name("tick_duration_median"),

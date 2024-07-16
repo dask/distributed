@@ -25,12 +25,12 @@ from dask.system import CPU_COUNT
 from dask.utils import parse_timedelta
 
 from distributed import preloading
+from distributed._async_taskgroup import AsyncTaskGroupClosedError
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import (
-    AsyncTaskGroupClosedError,
     CommClosedError,
     ErrorMessage,
     OKMessage,
@@ -233,6 +233,13 @@ class Nanny(ServerNode):
         self.Worker = Worker if worker_class is None else worker_class
 
         self.pre_spawn_env = _get_env_variables("distributed.nanny.pre-spawn-environ")
+        # To get consistent hashing on subprocesses, we need to set a consistent seed for
+        # the Python hash algorithm; xref https://github.com/dask/distributed/pull/8400
+        if self.pre_spawn_env.get("PYTHONHASHSEED") in (None, "0"):
+            # This number is arbitrary; it was chosen to commemorate
+            # https://github.com/dask/dask/issues/6640.
+            self.pre_spawn_env.update({"PYTHONHASHSEED": "6640"})
+
         self.env = merge(
             self.pre_spawn_env,
             _get_env_variables("distributed.nanny.environ"),
@@ -383,17 +390,14 @@ class Nanny(ServerNode):
 
         return self
 
-    async def kill(self, timeout: float = 2, reason: str = "nanny-kill") -> None:
+    async def kill(self, timeout: float = 5, reason: str = "nanny-kill") -> None:
         """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
         informed
         """
-        if self.process is None:
-            return
-
-        deadline = time() + timeout
-        await self.process.kill(reason=reason, timeout=0.8 * (deadline - time()))
+        if self.process is not None:
+            await self.process.kill(reason=reason, timeout=timeout)
 
     async def instantiate(self) -> Status:
         """Start a local worker process
@@ -711,6 +715,13 @@ class WorkerProcess:
         mp_ctx = get_mp_context()
         self.init_result_q = mp_ctx.Queue()
         self.child_stop_q = mp_ctx.Queue()
+        # put an empty message to start the background self._child_stop_q._thread
+        # otherwise calling .put({"op": "stop"}) later in an atexit handler
+        # results in a RuntimeError starting the thread
+        # get the message before passing child_stop_q to AsyncProcess to avoid
+        # dealing with it in watch_stop_q
+        self.child_stop_q.put(None)
+        self.child_stop_q.get()
         uid = uuid.uuid4().hex
 
         self.process = AsyncProcess(
@@ -808,7 +819,7 @@ class WorkerProcess:
 
     async def kill(
         self,
-        timeout: float = 2,
+        timeout: float = 5,
         executor_wait: bool = True,
         reason: str = "workerprocess-kill",
     ) -> None:
@@ -837,6 +848,7 @@ class WorkerProcess:
         assert self.status in (
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
+            Status.closing_gracefully,
         ), self.status
         self.status = Status.stopping
         logger.info("Nanny asking worker to close. Reason: %s", reason)
@@ -861,7 +873,7 @@ class WorkerProcess:
                 pass
 
             logger.warning(
-                f"Worker process still alive after {wait_timeout} seconds, killing"
+                f"Worker process still alive after {wait_timeout:.1f} seconds, killing"
             )
             await process.kill()
             await process.join(max(0, deadline - time()))

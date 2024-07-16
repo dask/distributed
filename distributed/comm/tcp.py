@@ -35,24 +35,23 @@ from distributed.comm.utils import (
     ensure_concrete_host,
     from_frames,
     get_tcp_server_address,
-    host_array,
     to_frames,
 )
-from distributed.protocol.utils import pack_frames_prelude, unpack_frames
+from distributed.protocol.utils import host_array, pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nbytes
 
 logger = logging.getLogger(__name__)
 
 
-# Workaround for OpenSSL 1.0.2.
-# Can drop with OpenSSL 1.1.1 used by Python 3.10+.
-# ref: https://bugs.python.org/issue42853
-if sys.version_info < (3, 10):
-    OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
-else:
-    OPENSSL_MAX_CHUNKSIZE = 256 ** ctypes.sizeof(ctypes.c_size_t) - 1
+# We must not load more than this into a buffer at a time
+# It's currently unclear why that is
+# see
+# - https://github.com/dask/distributed/pull/5854
+# - https://bugs.python.org/issue42853
+# - https://github.com/dask/distributed/pull/8507
 
+C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
@@ -221,23 +220,20 @@ class TCP(Comm):
         fmt_size = struct.calcsize(fmt)
 
         try:
-            frames_nbytes = await stream.read_bytes(fmt_size)
-            (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
+            # Don't store multiple numpy or parquet buffers into the same buffer, or
+            # none will be released until all are released.
+            frames_nosplit_nbytes_bin = await stream.read_bytes(fmt_size)
+            (frames_nosplit_nbytes,) = struct.unpack(fmt, frames_nosplit_nbytes_bin)
+            frames_nosplit = await read_bytes_rw(stream, frames_nosplit_nbytes)
+            frames, buffers_nbytes = unpack_frames(frames_nosplit, partial=True)
+            for buffer_nbytes in buffers_nbytes:
+                buffer = await read_bytes_rw(stream, buffer_nbytes)
+                frames.append(buffer)
 
-            frames = host_array(frames_nbytes)
-            for i, j in sliding_window(
-                2,
-                range(0, frames_nbytes + OPENSSL_MAX_CHUNKSIZE, OPENSSL_MAX_CHUNKSIZE),
-            ):
-                chunk = frames[i:j]
-                chunk_nbytes = chunk.nbytes
-                n = await stream.read_into(chunk)
-                assert n == chunk_nbytes, (n, chunk_nbytes)
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not sys.is_finalizing():
-                convert_stream_closed_error(self, e)
+            convert_stream_closed_error(self, e)
         except BaseException:
             # Some OSError, CancelledError or another "low-level" exception.
             # We do not really know what was already read from the underlying
@@ -248,8 +244,6 @@ class TCP(Comm):
             raise
         else:
             try:
-                frames = unpack_frames(frames)
-
                 msg = await from_frames(
                     frames,
                     deserialize=self.deserialize,
@@ -279,23 +273,10 @@ class TCP(Comm):
             },
             frame_split_size=self.max_shard_size,
         )
-        frames_nbytes = [nbytes(f) for f in frames]
-        frames_nbytes_total = sum(frames_nbytes)
-
-        header = pack_frames_prelude(frames)
-        header = struct.pack("Q", nbytes(header) + frames_nbytes_total) + header
-
-        frames = [header, *frames]
-        frames_nbytes = [nbytes(header), *frames_nbytes]
-        frames_nbytes_total += frames_nbytes[0]
-
-        if frames_nbytes_total < 2**17:  # 128kiB
-            # small enough, send in one go
-            frames = [b"".join(frames)]
-            frames_nbytes = [frames_nbytes_total]
+        frames, frames_nbytes, frames_nbytes_total = _add_frames_header(frames)
 
         try:
-            # trick to enque all frames for writing beforehand
+            # trick to enqueue all frames for writing beforehand
             for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
                 if each_frame_nbytes:
                     # Make sure that `len(data) == data.nbytes`
@@ -305,8 +286,8 @@ class TCP(Comm):
                         2,
                         range(
                             0,
-                            each_frame_nbytes + OPENSSL_MAX_CHUNKSIZE,
-                            OPENSSL_MAX_CHUNKSIZE,
+                            each_frame_nbytes + C_INT_MAX,
+                            C_INT_MAX,
                         ),
                     ):
                         chunk = each_frame[i:j]
@@ -323,8 +304,7 @@ class TCP(Comm):
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not sys.is_finalizing():
-                convert_stream_closed_error(self, e)
+            convert_stream_closed_error(self, e)
         except BaseException:
             # Some OSError or a another "low-level" exception. We do not really know
             # what was already written to the underlying socket, so it is not even safe
@@ -372,12 +352,88 @@ class TCP(Comm):
         return self._extra
 
 
+async def read_bytes_rw(stream: IOStream, n: int) -> memoryview:
+    """Read n bytes from stream. Unlike stream.read_bytes, allow for
+    very large messages and return a writeable buffer.
+    """
+    buf = host_array(n)
+
+    for i, j in sliding_window(
+        2,
+        range(0, n + C_INT_MAX, C_INT_MAX),
+    ):
+        chunk = buf[i:j]
+        actual = await stream.read_into(chunk)  # type: ignore[arg-type]
+        assert actual == chunk.nbytes
+
+    return buf
+
+
+def _add_frames_header(
+    frames: list[bytes | memoryview],
+) -> tuple[list[bytes | memoryview], list[int], int]:
+    """ """
+    frames_nbytes = [nbytes(f) for f in frames]
+    frames_nbytes_total = sum(frames_nbytes)
+
+    # Calculate the number of bytes that are inclusive of:
+    # - prelude
+    # - msgpack header
+    # - simple pickle bytes
+    # - compressed buffers
+    # - first uncompressed buffer (possibly sharded), IFF the pickle bytes are
+    #   negligible in size
+    #
+    # All these can be fetched by read() into a single buffer with a single call to
+    # Tornado, because they will be dereferenced soon after they are deserialized.
+    # Read uncompressed numpy/parquet buffers, which will survive indefinitely past
+    # the end of read(), into their own host arrays so that their memory can be
+    # released independently.
+    frames_nbytes_nosplit = 0
+    first_uncompressed_buffer: object = None
+    for frame, nb in zip(frames, frames_nbytes):
+        buffer = frame.obj if isinstance(frame, memoryview) else frame
+        if not isinstance(buffer, bytes):
+            # Uncompressed buffer; it will be referenced by the unpickled object
+            if first_uncompressed_buffer is None:
+                if frames_nbytes_nosplit > max(2048, nb * 0.05):
+                    # Don't extend the lifespan of non-trivial amounts of pickled bytes
+                    # to that of the buffers
+                    break
+                first_uncompressed_buffer = buffer
+            elif first_uncompressed_buffer is not buffer:  # don't split sharded frame
+                # Always store 2+ separate numpy/parquet objects onto separate
+                # buffers
+                break
+
+        frames_nbytes_nosplit += nb
+
+    header = pack_frames_prelude(frames)
+    header = struct.pack("Q", nbytes(header) + frames_nbytes_nosplit) + header
+    header_nbytes = nbytes(header)
+
+    frames = [header, *frames]
+    frames_nbytes = [header_nbytes, *frames_nbytes]
+    frames_nbytes_total += header_nbytes
+
+    if frames_nbytes_total < 2**17 or (  # 128 kiB total
+        frames_nbytes_total < 2**25  # 32 MiB total
+        and frames_nbytes_total // len(frames) < 2**15  # 32 kiB mean
+    ):
+        # very small or very fragmented; send in one go
+        frames = [b"".join(frames)]
+        frames_nbytes = [frames_nbytes_total]
+
+    return frames, frames_nbytes, frames_nbytes_total
+
+
 class TLS(TCP):
     """
     A TLS-specific version of TCP.
     """
 
-    max_shard_size = min(OPENSSL_MAX_CHUNKSIZE, TCP.max_shard_size)
+    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+    max_shard_size = min(C_INT_MAX, TCP.max_shard_size)
 
     def _read_extra(self):
         TCP._read_extra(self)

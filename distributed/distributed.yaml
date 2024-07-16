@@ -17,18 +17,20 @@ distributed:
     # Number of seconds to wait until workers or clients are removed from the events log
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
-    idle-timeout: null      # Shut down after this duration, like "1h" or "30 minutes"
+    idle-timeout: null       # Shut down after this duration, like "1h" or "30 minutes"
+    no-workers-timeout: null # Shut down if there are tasks but no workers to process them
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
-    worker-saturation: 1.1 # Send this fraction of nthreads root tasks to workers
+    worker-saturation: 1.1  # Send this fraction of nthreads root tasks to workers
     worker-ttl: "5 minutes" # like '60s'. Time to live for workers.  They must heartbeat faster than this
-    pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
     preload: []             # Run custom modules with Scheduler
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
     unknown-task-duration: 500ms  # Default duration for all tasks with unknown durations ("15m", "2h")
-    default-task-durations:  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
+    default-task-durations: # How long we expect function names to run ("1h", "1s") (helps for long tasks)
       rechunk-split: 1us
       split-shuffle: 1us
+      split-taskshuffle: 1us
+      split-stage: 1us
     validate: False         # Check scheduler state at every step for debugging
     dashboard:
       status:
@@ -259,20 +261,20 @@ distributed:
         key: null
         cert: null
 
-    tcp:
-      backend: tornado  # The backend to use for TCP, one of {tornado, asyncio}
 
     websockets:
       shard: 8MiB
 
   diagnostics:
     nvml: True
+    cudf: False
     computations:
       max-history: 100
       nframes: 0
       ignore-modules:
         - asyncio
         - functools
+        - threading
         - datashader
         - dask
         - debugpy
@@ -280,11 +282,13 @@ distributed:
         - coiled
         - cudf
         - cuml
+        - matplotlib
         - pluggy  # part of pytest
         - prefect
         - rechunker
         - xarray
         - xgboost
+        - xdist
       ignore-files:
         - runpy\.py  # `python -m pytest` (or other module) shell command
         - pytest  # `pytest` shell command
@@ -296,6 +300,15 @@ distributed:
         - get_output_via_markers\.py
     erred-tasks:
       max-history: 100
+
+  p2p:
+    comm:
+      retry:
+        count: 10
+        delay:
+          min: 1s  # the first non-zero delay between re-tries
+          max: 30s  # the maximum delay between re-tries
+    disk: True
 
   ###################
   # Bokeh dashboard #
@@ -313,6 +326,7 @@ distributed:
   ##################
 
   admin:
+    large-graph-warning-threshold: 10MB  # Threshold for warning on large graph
     tick:
       interval: 20ms  # time between event loop health checks
       limit: 3s       # time allowed before triggering a warning

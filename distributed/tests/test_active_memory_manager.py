@@ -22,7 +22,9 @@ from distributed.core import Status
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
+    BlockedGetData,
     assert_story,
+    async_poll_for,
     captured_logger,
     gen_cluster,
     gen_test,
@@ -739,9 +741,72 @@ async def test_ReduceReplicas(c, s, *workers):
         ],
     ):
         s.extensions["amm"].run_once()
+    await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1, timeout=5)
 
-    while len(s.tasks["x"].who_has) > 1:
-        await asyncio.sleep(0.01)
+
+@pytest.mark.parametrize(
+    "nwaiters_w1,nwaiters_w2,nwaiters_nonproc,nreplicas",
+    [
+        (0, 0, 0, 1),
+        (1, 0, 0, 1),
+        (0, 0, 1, 1),
+        (2, 0, 0, 1),
+        (1, 1, 0, 2),
+        (1, 1, 1, 3),
+        (1, 1, 2, 4),
+        (2, 1, 1, 3),
+        (1, 1, 17, 4),
+        (17, 1, 1, 3),
+        # Fast code path: if there are 20+ waiters, don't check processing_on
+        (18, 1, 1, 4),
+    ],
+)
+@gen_cluster(
+    nthreads=[("", 1)] * 4,
+    client=True,
+    config={
+        "distributed.scheduler.active-memory-manager.start": False,
+        "distributed.scheduler.active-memory-manager.policies": [
+            {"class": "distributed.active_memory_manager.ReduceReplicas"},
+        ],
+    },
+)
+async def test_ReduceReplicas_with_waiters(
+    c, s, w1, w2, w3, w4, nwaiters_w1, nwaiters_w2, nwaiters_nonproc, nreplicas
+):
+    """If there are waiters, even if they are not processing on a worker yet, preserve
+    extra replicas.
+    If there are between 2 and 19 waiters, consider which workers they've been assigned
+    to and don't double count waiters that have been assigned to the same worker.
+    """
+    ev = Event()
+    x = (await c.scatter({"x": 123}, broadcast=True))["x"]
+    y = c.submit(lambda ev: ev.wait(), ev, key="y", workers=[w4.address])
+    waiters_w1 = [
+        c.submit(lambda x, ev: ev.wait(), x, ev, key=("zw1", i), workers=[w1.address])
+        for i in range(nwaiters_w1)
+    ]
+    waiters_w2 = [
+        c.submit(lambda x, ev: ev.wait(), x, ev, key=("zw2", i), workers=[w2.address])
+        for i in range(nwaiters_w2)
+    ]
+    waiters_nonproc = [
+        c.submit(lambda x, y: None, x, y, key=("znp", i))
+        for i in range(nwaiters_nonproc)
+    ]
+    nwaiters = nwaiters_w1 + nwaiters_w2 + nwaiters_nonproc
+    await async_poll_for(lambda: len(s.tasks) == nwaiters + 2, timeout=5)
+    for fut in waiters_w1:
+        assert s.tasks[fut.key].processing_on == s.workers[w1.address]
+    for fut in waiters_w2:
+        assert s.tasks[fut.key].processing_on == s.workers[w2.address]
+    for fut in waiters_nonproc:
+        assert s.tasks[fut.key].processing_on is None
+
+    s.extensions["amm"].run_once()
+    await asyncio.sleep(0.2)  # Test no excessive drops
+    await async_poll_for(lambda: len(s.tasks["x"].who_has) == nreplicas, timeout=5)
+    await ev.set()
 
 
 @pytest.mark.parametrize("start_amm", [False, True])
@@ -1019,7 +1084,6 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b
 @gen_cluster(
     client=True,
     config={
-        "distributed.scheduler.worker-ttl": "500ms",
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.interval": 0.05,
         "distributed.scheduler.active-memory-manager.measure": "managed",
@@ -1063,6 +1127,60 @@ async def test_RetireWorker_faulty_recipient(c, s, w1, w2):
     assert w1.address not in s.workers
     assert w3.address not in s.workers
     assert dict(w2.data) == {"x": 123, clutter.key: 456}
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 10,
+    config={
+        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.interval": 0.05,
+        "distributed.scheduler.active-memory-manager.measure": "managed",
+        "distributed.scheduler.active-memory-manager.policies": [],
+    },
+)
+async def test_RetireWorker_mass(c, s, *workers):
+    """Retire 90% of a cluster at once."""
+    # Note: by using scatter instead of submit/map, we're also testing that tasks
+    # aren't being recomputed
+    data = await c.scatter(range(100))
+    for w in workers:
+        assert len(w.data) == 10
+
+    await c.retire_workers([w.address for w in workers[:-1]])
+    assert set(s.workers) == {workers[-1].address}
+    assert len(workers[-1].data) == 100
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.active-memory-manager.start": True,
+        "distributed.scheduler.active-memory-manager.interval": 0.05,
+        "distributed.scheduler.active-memory-manager.measure": "managed",
+        "distributed.scheduler.active-memory-manager.policies": [],
+    },
+)
+async def test_RetireWorker_incremental(c, s, w2, w3):
+    """Retire worker w1; this causes its keys to be replicated onto w2.
+    Before that can happen, retire w2 too.
+    """
+    async with BlockedGetData(s.address) as w1:
+        # Note: by using scatter instead of submit/map, we're also testing that tasks
+        # aren't being recomputed
+        x = await c.scatter({"x": 1}, workers=[w1.address])
+        y = await c.scatter({"y": 2}, workers=[w3.address])
+
+        # Because w2's memory is lower than w3, AMM will choose w2
+        retire1 = asyncio.create_task(c.retire_workers([w1.address]))
+        await w1.in_get_data.wait()
+        assert w2.state.tasks["x"].state == "flight"
+        await c.retire_workers([w2.address])
+
+        w1.block_get_data.set()
+        await retire1
+        assert set(s.workers) == {w3.address}
+        assert set(w3.data) == {"x", "y"}
 
 
 class Counter:
@@ -1159,7 +1277,8 @@ class DropEverything(ActiveMemoryManagerPolicy):
             self.manager.policies.remove(self)
 
 
-async def tensordot_stress(c):
+async def tensordot_stress(c, s):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
     rng = da.random.RandomState(0)
@@ -1169,6 +1288,10 @@ async def tensordot_stress(c):
         warnings.simplefilter("ignore")
         b = (a @ a.T).sum().round(3)
     assert await c.compute(b) == 245.394
+
+    # Test that we didn't recompute any tasks during the stress test
+    await async_poll_for(lambda: not s.tasks, timeout=5)
+    assert sum(t.start == "memory" for t in s.transition_log) == 1639
 
 
 @pytest.mark.slow
@@ -1181,7 +1304,7 @@ async def test_noamm_stress(c, s, *workers):
     """Test the tensordot_stress helper without AMM. This is to figure out if a
     stability issue is AMM-specific or not.
     """
-    await tensordot_stress(c)
+    await tensordot_stress(c, s)
 
 
 @pytest.mark.slow
@@ -1203,7 +1326,7 @@ async def test_drop_stress(c, s, *workers):
 
     See also: test_ReduceReplicas_stress
     """
-    await tensordot_stress(c)
+    await tensordot_stress(c, s)
 
 
 @pytest.mark.slow
@@ -1224,7 +1347,7 @@ async def test_ReduceReplicas_stress(c, s, *workers):
     test_drop_stress above, this test does not stop running after a few seconds - the
     policy must not disrupt the computation too much.
     """
-    await tensordot_stress(c)
+    await tensordot_stress(c, s)
 
 
 @pytest.mark.slow
@@ -1250,14 +1373,9 @@ async def test_RetireWorker_stress(c, s, *workers, use_ReduceReplicas):
 
     addrs = list(s.workers)
     random.shuffle(addrs)
-    print(f"Removing all workers except {addrs[-1]}")
+    print(f"Removing all workers except {addrs[9]}")
 
-    # Note: Scheduler._lock effectively prevents multiple calls to retire_workers from
-    # running at the same time. However, the lock only exists for the benefit of legacy
-    # (non-AMM) rebalance() and replicate() methods. Once the lock is removed, these
-    # calls will become parallel and the test *should* continue working.
-
-    tasks = [asyncio.create_task(tensordot_stress(c))]
+    tasks = [asyncio.create_task(tensordot_stress(c, s))]
     await asyncio.sleep(1)
     tasks.append(asyncio.create_task(c.retire_workers(addrs[0:2])))
     await asyncio.sleep(1)

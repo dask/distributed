@@ -12,7 +12,6 @@ import logging
 import logging.config
 import multiprocessing
 import os
-import re
 import signal
 import socket
 import ssl
@@ -23,7 +22,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Generator, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Hashable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
@@ -36,6 +35,7 @@ from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.typing import Key
 
 from distributed import Event, Scheduler, system
 from distributed import versions as version_module
@@ -55,7 +55,7 @@ from distributed.core import (
 )
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
@@ -806,24 +806,25 @@ async def start_cluster(
 
 
 def check_invalid_worker_transitions(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-transition"):
+    if not s.get_events("invalid-worker-transition"):
         return
 
-    for _, msg in s.events["invalid-worker-transition"]:
+    for _, msg in s.get_events("invalid-worker-transition"):
         worker = msg.pop("worker")
         print("Worker:", worker)
         print(InvalidTransition(**msg))
 
     raise ValueError(
-        "Invalid worker transitions found", len(s.events["invalid-worker-transition"])
+        "Invalid worker transitions found",
+        len(s.get_events("invalid-worker-transition")),
     )
 
 
 def check_invalid_task_states(s: Scheduler) -> None:
-    if not s.events.get("invalid-worker-task-state"):
+    if not s.get_events("invalid-worker-task-state"):
         return
 
-    for _, msg in s.events["invalid-worker-task-state"]:
+    for _, msg in s.get_events("invalid-worker-task-state"):
         print("Worker:", msg["worker"])
         print("State:", msg["state"])
         for line in msg["story"]:
@@ -833,10 +834,10 @@ def check_invalid_task_states(s: Scheduler) -> None:
 
 
 def check_worker_fail_hard(s: Scheduler) -> None:
-    if not s.events.get("worker-fail-hard"):
+    if not s.get_events("worker-fail-hard"):
         return
 
-    for _, msg in s.events["worker-fail-hard"]:
+    for _, msg in s.get_events("worker-fail-hard"):
         msg = msg.copy()
         worker = msg.pop("worker")
         msg["exception"] = deserialize(msg["exception"].header, msg["exception"].frames)
@@ -1465,6 +1466,20 @@ def captured_handler(handler):
 
 
 @contextmanager
+def captured_context_meter() -> Generator[defaultdict[tuple, float], None, None]:
+    """Capture distributed.metrics.context_meter metrics into a local defaultdict"""
+    # Don't cast int metrics to float
+    metrics: defaultdict[tuple, float] = defaultdict(int)
+
+    def cb(label: Hashable, value: float, unit: str) -> None:
+        label = label + (unit,) if isinstance(label, tuple) else (label, unit)
+        metrics[label] += value
+
+    with context_meter.add_callback(cb):
+        yield metrics
+
+
+@contextmanager
 def new_config(new_config):
     """
     Temporarily change configuration dictionary.
@@ -1486,7 +1501,7 @@ def new_config(new_config):
 
 
 @contextmanager
-def new_config_file(c):
+def new_config_file(c: dict[str, Any]) -> Iterator[None]:
     """
     Temporarily change configuration file to match dictionary *c*.
     """
@@ -1494,18 +1509,16 @@ def new_config_file(c):
 
     old_file = os.environ.get("DASK_CONFIG")
     fd, path = tempfile.mkstemp(prefix="dask-config")
+    with os.fdopen(fd, "w") as f:
+        yaml.dump(c, f)
+    os.environ["DASK_CONFIG"] = path
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(yaml.dump(c))
-        os.environ["DASK_CONFIG"] = path
-        try:
-            yield
-        finally:
-            if old_file:
-                os.environ["DASK_CONFIG"] = old_file
-            else:
-                del os.environ["DASK_CONFIG"]
+        yield
     finally:
+        if old_file:
+            os.environ["DASK_CONFIG"] = old_file
+        else:
+            del os.environ["DASK_CONFIG"]
         os.remove(path)
 
 
@@ -1616,12 +1629,11 @@ def save_sys_modules():
     try:
         yield
     finally:
-        for i, elem in enumerate(sys.path):
+        for i, elem in reversed(list(enumerate(sys.path))):
             if elem not in old_path:
                 del sys.path[i]
-        for elem in sys.modules.keys():
-            if elem not in old_modules:
-                del sys.modules[elem]
+        for elem in sys.modules.keys() - old_modules.keys():
+            del sys.modules[elem]
 
 
 @contextmanager
@@ -1802,6 +1814,7 @@ def config_for_cluster_tests(**extra_config):
             "distributed.scheduler.validate": True,
             "distributed.worker.validate": True,
             "distributed.worker.profile.enabled": False,
+            "distributed.admin.system-monitor.gil.enabled": False,
         },
         **extra_config,
     ):
@@ -2099,8 +2112,10 @@ def raises_with_cause(
     match: str | None,
     expected_cause: type[BaseException] | tuple[type[BaseException], ...],
     match_cause: str | None,
+    *more_causes: type[BaseException] | tuple[type[BaseException], ...] | str | None,
 ) -> Generator[None, None, None]:
-    """Contextmanager to assert that a certain exception with cause was raised
+    """Contextmanager to assert that a certain exception with cause was raised.
+    It can travel the causes recursively by adding more expected, match pairs at the end.
 
     Parameters
     ----------
@@ -2110,13 +2125,14 @@ def raises_with_cause(
         yield
 
     exc = exc_info.value
-    assert exc.__cause__
-    if not isinstance(exc.__cause__, expected_cause):
-        raise exc
-    if match_cause:
-        assert re.search(
-            match_cause, str(exc.__cause__)
-        ), f"Pattern ``{match_cause}`` not found in ``{exc.__cause__}``"
+    causes = [expected_cause, *more_causes[::2]]
+    match_causes = [match_cause, *more_causes[1::2]]
+    assert len(causes) == len(match_causes)
+    for expected_cause, match_cause in zip(causes, match_causes):  # type: ignore
+        assert exc.__cause__
+        exc = exc.__cause__
+        with pytest.raises(expected_cause, match=match_cause):
+            raise exc
 
 
 def ucx_exception_handler(loop, context):
@@ -2283,7 +2299,7 @@ class BlockedExecute(Worker):
 
         super().__init__(*args, **kwargs)
 
-    async def execute(self, key: str, *, stimulus_id: str) -> StateMachineEvent:
+    async def execute(self, key: Key, *, stimulus_id: str) -> StateMachineEvent:
         self.in_execute.set()
         await self.block_execute.wait()
         try:
@@ -2380,8 +2396,32 @@ def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
         bcomm.comm = orig_comm
 
 
+class BlockedInstantiateNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_instantiate = asyncio.Event()
+        self.wait_instantiate = asyncio.Event()
+
+    async def instantiate(self):
+        self.in_instantiate.set()
+        await self.wait_instantiate.wait()
+        return await super().instantiate()
+
+
+class BlockedKillNanny(Nanny):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.in_kill = asyncio.Event()
+        self.wait_kill = asyncio.Event()
+
+    async def kill(self, **kwargs):
+        self.in_kill.set()
+        await self.wait_kill.wait()
+        return await super().kill(**kwargs)
+
+
 async def wait_for_state(
-    key: str,
+    key: Key,
     state: str | Collection[str],
     dask_worker: Worker | Scheduler,
     *,
@@ -2390,7 +2430,7 @@ async def wait_for_state(
     """Wait for a task to appear on a Worker or on the Scheduler and to be in a specific
     state or one of a set of possible states.
     """
-    tasks: Mapping[str, SchedulerTaskState | WorkerTaskState]
+    tasks: Mapping[Key, SchedulerTaskState | WorkerTaskState]
 
     if isinstance(dask_worker, Worker):
         tasks = dask_worker.state.tasks
@@ -2409,11 +2449,11 @@ async def wait_for_state(
     except (asyncio.CancelledError, asyncio.TimeoutError):
         if key in tasks:
             msg = (
-                f"tasks[{key}].state={tasks[key].state!r} on {dask_worker.address}; "
+                f"tasks[{key!r}].state={tasks[key].state!r} on {dask_worker.address}; "
                 f"expected state={state_str}"
             )
         else:
-            msg = f"tasks[{key}] not found on {dask_worker.address}"
+            msg = f"tasks[{key!r}] not found on {dask_worker.address}"
         # 99% of the times this is triggered by @gen_cluster timeout, so raising the
         # message as an exception wouldn't work.
         print(msg)
@@ -2632,8 +2672,8 @@ def no_time_resync():
         yield
 
 
-async def padded_time(before=0.01, after=0.01):
-    """Sample time(), preventing millisecond-magnitude corrections in the wall clock in
+async def padded_time(before=0.05, after=0.05):
+    """Sample time(), preventing millisecond-magnitude corrections in the wall clock
     from disrupting monotonicity tests (t0 < t1 < t2 < ...).
     This prevents frequent flakiness on Windows and, more rarely, in Linux and
     MacOSX.

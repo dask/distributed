@@ -10,6 +10,7 @@ import shelve
 import sys
 import zipfile
 from collections.abc import Iterable, Iterator
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any, cast
 
 import altair
@@ -18,7 +19,7 @@ import junitparser
 import pandas
 import requests
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
 
 TOKEN = os.environ.get("GITHUB_TOKEN")
 
@@ -121,7 +122,7 @@ def maybe_get_next_page_path(response: requests.Response) -> str | None:
     return next_page_path
 
 
-def get_jobs(run, session):
+def get_jobs(run, session, repo):
     with shelve.open("test_report_jobs") as cache:
         url = run["jobs_url"]
         try:
@@ -140,26 +141,46 @@ def get_jobs(run, session):
     # Somehow the job ID is not part of the workflow schema and we have no other way to later join
     # this to the JXML results.
 
-    name_components = (
-        df_jobs.name.str.extract(r"test \((.+)\)", expand=False)
-        .dropna()
-        .str.split(", ", expand=True)
-    )
-    if len(name_components.columns) == 4:
-        name_components.columns = ["OS", "python_version", "queuing", "partition"]
-    elif len(name_components.columns) == 3:
-        # Migration: handle older jobs without the `queuing` configuration.
-        # This branch can be removed after 2022-12-07.
-        name_components.columns = ["OS", "python_version", "partition"]
+    if repo.endswith("/dask"):
+        # example name: "test (windows-latest, 3.9)" or "test (ubuntu-latest, 3.12, dask-expr)"
+        df_jobs = df_jobs[~df_jobs.name.str.contains("Event File")]
+
+        def format(row):
+            return ",".join((row[1].strip(), row[2].strip(), (row[3] or "").strip()))
+
+        name_components = (
+            df_jobs[df_jobs.name.str.startswith("test")]
+            .name.str.replace("(", ",")
+            .str.replace(")", ",")
+            .str.split(",", expand=True)
+            .apply(format, axis=1)
+            .str.split(",", expand=True)
+        )
+
+        # See `Set $TEST_ID` step in `tests.yaml`
+        name_components.columns = ["OS version", "environment", "option"]
+        df_jobs["suite_name"] = name_components.iloc[:, 0].str.cat(
+            name_components.iloc[:, 1:], sep="-"
+        )
+        df_jobs["suite_name"] = df_jobs.suite_name.str.replace("--", "-")
     else:
-        raise ValueError(f"Job names must have 3 or 4 components:\n{name_components!r}")
+        name_components = df_jobs.name.str.split("-", expand=True).dropna()
+        if len(name_components.columns) != 5:
+            raise ValueError(f"Job names must have 5 components:\n{name_components!r}")
+        name_components.columns = [
+            "OS",
+            "OS version",
+            "environment",
+            "label",
+            "partition",
+        ]
 
-    # See `Set $TEST_ID` step in `tests.yaml`
-    name_components["partition"] = name_components.partition.str.replace(" ", "")
+        # See `Set $TEST_ID` step in `tests.yaml`
+        name_components["partition"] = name_components.partition.str.replace(" ", "")
 
-    df_jobs["suite_name"] = name_components.iloc[:, 0].str.cat(
-        name_components.iloc[:, 1:], sep="-"
-    )
+        df_jobs["suite_name"] = name_components.iloc[:, 0].str.cat(
+            name_components.iloc[:, 1:], sep="-"
+        )
     return df_jobs
 
 
@@ -208,14 +229,16 @@ def get_artifacts_for_workflow_run(
     return artifacts
 
 
-def suite_from_name(name: str) -> str:
+def suite_from_name(name: str, n: int | None = None) -> str:
     """
     Get a test suite name from an artifact name. The artifact
     can have matrix partitions, pytest marks, etc. Basically,
     just lop off the front of the name to get the suite.
     """
-    parts = name.split("-")
-    return "-".join(parts[:4])
+    if n is not None:
+        parts = name.split("-")
+        return "-".join(parts[:n])
+    return name
 
 
 def download_and_parse_artifact(
@@ -346,7 +369,7 @@ def download_and_parse_artifacts(
         print(f"Downloading and parsing {nartifacts} artifacts...")
 
         for r in runs:
-            jobs_df = get_jobs(r, session=session)
+            jobs_df = get_jobs(r, session=session, repo=repo)
             r["dfs"] = []
             for a in r["artifacts"]:
                 url = a["archive_download_url"]
@@ -358,6 +381,17 @@ def download_and_parse_artifacts(
 
                 # Needed until *-*-mindeps-numpy shows up in TEST_ID
                 a["name"] = a["name"].replace("--", "-numpy-")
+
+                # TODO: Some artifacts created w/ wrong name in dask
+                # This can be removed after ~90 days.
+                # Between time https://github.com/dask/dask/pull/10769 was merged and
+                # then https://github.com/dask/dask/pull/10781 which changed the name
+                if a["name"].startswith("test-results") and repo.endswith("/dask"):
+                    continue
+
+                # NOTE: Temporarily ignore reporting dask-expr related test cases
+                if "dask-expr" in a["name"]:
+                    continue
 
                 # Note: we assign a column with the workflow run timestamp rather
                 # than the artifact timestamp so that artifacts triggered under
@@ -371,7 +405,9 @@ def download_and_parse_artifacts(
                 assert html_url is not None
                 df2 = df.assign(
                     name=a["name"],
-                    suite=suite_from_name(a["name"]),
+                    suite=suite_from_name(
+                        a["name"], None if repo.endswith("/dask") else 4
+                    ),
                     date=r["created_at"],
                     html_url=html_url,
                 )
@@ -382,6 +418,44 @@ def download_and_parse_artifacts(
                 ndownloaded += 1
                 if ndownloaded and not ndownloaded % 20:
                     print(f"{ndownloaded}... ", end="")
+
+
+def make_chart(name, df, times):
+    # Create an aggregated form of the suite with overall pass rate
+    # over the time in question.
+    df_agg = (
+        df[df.status != "x"]
+        .groupby("suite")
+        .size()
+        .truediv(df.groupby("suite").size(), fill_value=0)
+        .to_frame(name="Pass Rate")
+        .reset_index()
+    )
+
+    # Create a grid with hover tooltip for error messages
+    return altair.Chart(df).mark_rect(stroke="gray").encode(
+        x=altair.X("date:O", scale=altair.Scale(domain=sorted(list(times)))),
+        y=altair.Y("suite:N", title=None),
+        href=altair.Href("html_url:N"),
+        color=altair.Color(
+            "status:N",
+            scale=altair.Scale(
+                domain=list(COLORS.keys()),
+                range=list(COLORS.values()),
+            ),
+        ),
+        tooltip=["suite:N", "date:O", "status:N", "message:N", "html_url:N"],
+    ).properties(title=name) | altair.Chart(df_agg.assign(_="_")).mark_rect(
+        stroke="gray"
+    ).encode(
+        y=altair.Y("suite:N", title=None, axis=altair.Axis(labels=False)),
+        x=altair.X("_:N", title=None),
+        color=altair.Color(
+            "Pass Rate:Q",
+            scale=altair.Scale(range=[COLORS["x"], COLORS["✓"]], domain=[0.0, 1.0]),
+        ),
+        tooltip=["suite:N", "Pass Rate:Q"],
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -424,63 +498,23 @@ def main(argv: list[str] | None = None) -> None:
     )
     overall = {name: grouped.get_group(name) for name in grouped.groups}
 
-    # Get all of the workflow run timestamps that we wound up with, which we can use
+    # Get all the workflow run timestamps that we wound up with, which we can use
     # below to align the different groups.
-    times = set()
+    times: set = set()
     for df in overall.values():
         times.update(df.date.unique())
 
     print("Making chart...")
     altair.data_transformers.disable_max_rows()
-    charts = []
-    for name, df in overall.items():
-        # Don't show this suite if it has passed all tests recently.
-        if not len(df):
-            continue
 
-        # Create an aggregated form of the suite with overall pass rate
-        # over the time in question.
-        df_agg = (
-            df[df.status != "x"]
-            .groupby("suite")
-            .size()
-            .truediv(df.groupby("suite").size(), fill_value=0)
-            .to_frame(name="Pass Rate")
-            .reset_index()
-        )
-
-        # Create a grid with hover tooltip for error messages
-        charts.append(
-            altair.Chart(df)
-            .mark_rect(stroke="gray")
-            .encode(
-                x=altair.X("date:O", scale=altair.Scale(domain=sorted(list(times)))),
-                y=altair.Y("suite:N", title=None),
-                href=altair.Href("html_url:N"),
-                color=altair.Color(
-                    "status:N",
-                    scale=altair.Scale(
-                        domain=list(COLORS.keys()),
-                        range=list(COLORS.values()),
-                    ),
-                ),
-                tooltip=["suite:N", "date:O", "status:N", "message:N", "html_url:N"],
-            )
-            .properties(title=name)
-            | altair.Chart(df_agg.assign(_="_"))
-            .mark_rect(stroke="gray")
-            .encode(
-                y=altair.Y("suite:N", title=None, axis=altair.Axis(labels=False)),
-                x=altair.X("_:N", title=None),
-                color=altair.Color(
-                    "Pass Rate:Q",
-                    scale=altair.Scale(
-                        range=[COLORS["x"], COLORS["✓"]], domain=[0.0, 1.0]
-                    ),
-                ),
-                tooltip=["suite:N", "Pass Rate:Q"],
-            )
-        )
+    jobs = []
+    with ProcessPoolExecutor() as executor:
+        for name, df in overall.items():
+            # Don't show this suite if it has passed all tests recently.
+            if not len(df):
+                continue
+            jobs.append(executor.submit(make_chart, name, df, times))
+        charts = [job.result() for job in jobs]
 
     # Concat the sub-charts and output to file
     chart = (

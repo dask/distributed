@@ -22,13 +22,14 @@ from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import CommClosedError, Status, error_message
+from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.diagnostics.plugin import NannyPlugin, WorkerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
 from distributed.utils_test import (
+    BlockedInstantiateNanny,
     async_poll_for,
     captured_logger,
     gen_cluster,
@@ -217,7 +218,7 @@ async def test_nanny_timeout(c, s, a):
     with captured_logger(
         logging.getLogger("distributed.nanny"), level=logging.ERROR
     ) as logger:
-        response = await a.restart(timeout=0.1)
+        await a.restart(timeout=0.1)
 
     out = logger.getvalue()
     assert "timed out" in out.lower()
@@ -340,10 +341,13 @@ async def test_environment_variable_config(c, s, monkeypatch):
     },
 )
 async def test_environment_variable_pre_post_spawn(c, s, n):
-    assert n.env == {"PRE-SPAWN": "1", "POST-SPAWN": "2"}
+    assert n.env == {"PRE-SPAWN": "1", "POST-SPAWN": "2", "PYTHONHASHSEED": "6640"}
     results = await c.run(lambda: os.environ)
     assert results[n.worker_address]["PRE-SPAWN"] == "1"
     assert results[n.worker_address]["POST-SPAWN"] == "2"
+    # if unset in pre-spawn-environ config, PYTHONHASHSEED defaults to "6640" to ensure
+    # consistent hashing across workers; https://github.com/dask/distributed/issues/4141
+    assert results[n.worker_address]["PYTHONHASHSEED"] == "6640"
 
     del os.environ["PRE-SPAWN"]
     assert "POST-SPAWN" not in os.environ
@@ -550,7 +554,7 @@ async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
         ) as n:
             await n.process.stopped.wait()
             # Check that the scheduler has been notified about the closed worker
-            assert "remove-worker" in str(s.events)
+            assert "remove-worker" in str(s.get_events())
 
 
 class BrokenWorker(worker.Worker):
@@ -656,6 +660,12 @@ async def test_restart_memory(c, s, n):
     while not s.workers:
         await asyncio.sleep(0.1)
 
+    msgs = s.get_events("worker-restart-memory")
+    assert len(msgs)
+    msg = msgs[0][1]
+    assert isinstance(msg, dict)
+    assert {"worker", "pid", "rss"}.issubset(set(msg))
+
 
 class BlockClose(WorkerPlugin):
     def __init__(self, close_happened):
@@ -736,7 +746,9 @@ async def test_malloc_trim_threshold(c, s, a):
     This test may start failing in a future Python version if CPython switches to
     using mimalloc by default. If it does, a thorough benchmarking exercise is needed.
     """
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     arr = da.random.random(2**29 // 8, chunks="512 kiB")  # 0.5 GiB
     arr = arr.persist()
     await wait(arr)
@@ -788,36 +800,6 @@ async def test_worker_inherits_temp_config(c, s):
             assert out == 123
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_log_event(c, s):
-    async with Nanny(s.address) as n:
-        n.log_event("test-topic1", "foo")
-
-        class C:
-            pass
-
-        with pytest.raises(TypeError, match="msgpack"):
-            n.log_event("test-topic2", C())
-        n.log_event("test-topic3", "bar")
-        n.log_event("test-topic4", error_message(Exception()))
-
-        # Worker unaffected
-        assert await c.submit(lambda x: x + 1, 1) == 2
-
-    assert [msg[1] for msg in s.get_events("test-topic1")] == ["foo"]
-    assert [msg[1] for msg in s.get_events("test-topic3")] == ["bar"]
-    # assertion reversed for mock.ANY.__eq__(Serialized())
-    assert [
-        {
-            "status": "error",
-            "exception": mock.ANY,
-            "traceback": mock.ANY,
-            "exception_text": "Exception()",
-            "traceback_text": "",
-        },
-    ] == [msg[1] for msg in s.get_events("test-topic4")]
-
-
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_nanny_plugin_simple(c, s, a):
     """A plugin should be registered to already existing workers but also to new ones."""
@@ -843,23 +825,11 @@ class DummyNannyPlugin(NannyPlugin):
         nanny._plugin_registered = False
 
 
-class SlowNanny(Nanny):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.in_instantiate = asyncio.Event()
-        self.wait_instantiate = asyncio.Event()
-
-    async def instantiate(self):
-        self.in_instantiate.set()
-        await self.wait_instantiate.wait()
-        return await super().instantiate()
-
-
 @pytest.mark.parametrize("restart", [True, False])
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_plugin_register_during_start_success(c, s, restart):
     plugin = DummyNannyPlugin("foo", restart=restart)
-    n = SlowNanny(s.address)
+    n = BlockedInstantiateNanny(s.address)
     assert not hasattr(n, "_plugin_registered")
     start = asyncio.create_task(n.start())
     try:

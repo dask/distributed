@@ -20,7 +20,7 @@ def test_serialize_numba(shape, dtype, order, serializers):
     if not cuda.is_available():
         pytest.skip("CUDA is not available")
 
-    ary = np.arange(np.product(shape), dtype=dtype)
+    ary = np.arange(np.prod(shape), dtype=dtype)
     ary = np.ndarray(shape, dtype=ary.dtype, buffer=ary.data, order=order)
     x = cuda.to_device(ary)
     header, frames = serialize(x, serializers=serializers)

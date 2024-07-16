@@ -4,8 +4,6 @@ import logging
 
 import msgpack
 
-import dask.config
-
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.serialize import (
@@ -13,6 +11,7 @@ from distributed.protocol.serialize import (
     Serialize,
     Serialized,
     ToPickle,
+    _is_msgpack_serializable,
     merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
@@ -106,7 +105,31 @@ def dumps(  # type: ignore[no-untyped-def]
             else:
                 return msgpack_encode_default(obj)
 
-        frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        try:
+            frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        except TypeError as e:
+            logger.info(
+                f"Failed to serialize ({e}); falling back to pickle. "
+                "Be aware that this may degrade performance."
+            )
+
+            def _encode_default_safe(obj):
+                encoded = _encode_default(obj)
+                if encoded is not obj or _is_msgpack_serializable(obj):
+                    return encoded
+
+                obj = ToPickle(obj)
+                offset = len(frames)
+                frames.extend(create_pickled_sub_frames(obj))
+                return {"__Pickled__": offset}
+
+            # If possible, we want to avoid the performance penalty from the checks
+            # implemented in _encode_default_safe to fall back to pickle, so we
+            # try to serialize the data without the fallback first assuming that
+            # this succeeds in the overwhelming majority of cases.
+            frames[0] = msgpack.dumps(
+                msg, default=_encode_default_safe, use_bin_type=True
+            )
         return frames
 
     except Exception:
@@ -116,8 +139,6 @@ def dumps(  # type: ignore[no-untyped-def]
 
 def loads(frames, deserialize=True, deserializers=None):
     """Transform bytestream back into Python value"""
-
-    allow_pickle = dask.config.get("distributed.scheduler.pickle")
 
     try:
 
@@ -146,13 +167,9 @@ def loads(frames, deserialize=True, deserializers=None):
                 sub_header = msgpack.loads(frames[offset])
                 offset += 1
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
-                if allow_pickle:
-                    return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
-                else:
-                    raise ValueError(
-                        "Unpickle on the Scheduler isn't allowed, set `distributed.scheduler.pickle=true`"
-                    )
-
+                if "compression" in sub_header:
+                    sub_frames = decompress(sub_header, sub_frames)
+                return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
             return msgpack_decode_default(obj)
 
         return msgpack.loads(

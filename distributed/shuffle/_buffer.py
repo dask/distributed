@@ -1,25 +1,26 @@
 from __future__ import annotations
 
+import abc
 import asyncio
-import contextlib
 import logging
 from collections import defaultdict
-from collections.abc import Iterator, Sized
-from typing import Any, Generic, TypeVar
+from collections.abc import Sized
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from distributed.metrics import time
+from distributed.metrics import context_meter, time
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
+if TYPE_CHECKING:
+    # TODO import from collections.abc (requires Python >=3.12)
+    from typing_extensions import Buffer
+else:
+    Buffer = Sized
 
-ShardType = TypeVar("ShardType", bound=Sized)
+ShardType = TypeVar("ShardType", bound=Buffer)
+
 T = TypeVar("T")
-
-
-class _List(list[T]):
-    # This ensures that the distributed.protocol will not iterate over this collection
-    pass
 
 
 class ShardsBuffer(Generic[ShardType]):
@@ -43,17 +44,19 @@ class ShardsBuffer(Generic[ShardType]):
     Flushing will not raise an exception. To ensure that the buffer finished successfully, please call `ShardsBuffer.raise_on_exception`
     """
 
-    shards: defaultdict[str, _List[ShardType]]
+    shards: defaultdict[str, list[ShardType]]
     sizes: defaultdict[str, int]
+    sizes_detail: defaultdict[str, list[int]]
     concurrency_limit: int
-    memory_limiter: ResourceLimiter | None
-    diagnostics: dict[str, float]
+    memory_limiter: ResourceLimiter
     max_message_size: int
 
     bytes_total: int
     bytes_memory: int
     bytes_written: int
     bytes_read: int
+    avg_size: float
+    avg_duration: float
 
     _accepts_input: bool
     _inputs_done: bool
@@ -64,18 +67,18 @@ class ShardsBuffer(Generic[ShardType]):
 
     def __init__(
         self,
-        memory_limiter: ResourceLimiter | None,
+        memory_limiter: ResourceLimiter,
         concurrency_limit: int = 2,
         max_message_size: int = -1,
     ) -> None:
         self._accepts_input = True
-        self.shards = defaultdict(_List)
+        self.shards = defaultdict(list)
         self.sizes = defaultdict(int)
+        self.sizes_detail = defaultdict(list)
         self._exception = None
         self.concurrency_limit = concurrency_limit
         self._inputs_done = False
         self.memory_limiter = memory_limiter
-        self.diagnostics: dict[str, float] = defaultdict(float)
         self._tasks = [
             asyncio.create_task(self._background_task())
             for _ in range(concurrency_limit)
@@ -88,6 +91,8 @@ class ShardsBuffer(Generic[ShardType]):
         self.bytes_memory = 0
         self.bytes_written = 0
         self.bytes_read = 0
+        self.avg_size = 0.0
+        self.avg_duration = 0.0
 
     def heartbeat(self) -> dict[str, Any]:
         return {
@@ -96,38 +101,36 @@ class ShardsBuffer(Generic[ShardType]):
             "buckets": len(self.shards),
             "written": self.bytes_written,
             "read": self.bytes_read,
-            "diagnostics": self.diagnostics,
-            "memory_limit": self.memory_limiter._maxvalue if self.memory_limiter else 0,
+            "avg_size": self.avg_size,
+            "avg_duration": self.avg_duration,
+            "memory_limit": self.memory_limiter.limit,
         }
 
     async def process(self, id: str, shards: list[ShardType], size: int) -> None:
         try:
             start = time()
-            try:
+            with context_meter.meter("process"):
                 await self._process(id, shards)
-                self.bytes_written += size
+            context_meter.digest_metric("process", size, "bytes")
+            context_meter.digest_metric("process", 1, "count")
+            self.bytes_written += size
 
-            except Exception as e:
-                self._exception = e
-                self._inputs_done = True
             stop = time()
-
-            self.diagnostics["avg_size"] = (
-                0.98 * self.diagnostics["avg_size"] + 0.02 * size
-            )
-            self.diagnostics["avg_duration"] = 0.98 * self.diagnostics[
-                "avg_duration"
-            ] + 0.02 * (stop - start)
+            self.avg_size = 0.98 * self.avg_size + 0.02 * size
+            self.avg_duration = 0.98 * self.avg_duration + 0.02 * (stop - start)
+        except Exception as e:
+            self._exception = e
+            self._inputs_done = True
         finally:
-            if self.memory_limiter:
-                await self.memory_limiter.decrease(size)
+            await self.memory_limiter.decrease(size)
             self.bytes_memory -= size
 
+    @abc.abstractmethod
     async def _process(self, id: str, shards: list[ShardType]) -> None:
-        raise NotImplementedError()
+        ...
 
     def read(self, id: str) -> ShardType:
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: nocover
 
     @property
     def empty(self) -> bool:
@@ -138,33 +141,36 @@ class ShardsBuffer(Generic[ShardType]):
             return bool(self.shards or self._inputs_done)
 
         while True:
-            async with self._shards_available:
-                await self._shards_available.wait_for(_continue)
-                if self._inputs_done and not self.shards:
-                    break
-                part_id = max(self.sizes, key=self.sizes.__getitem__)
-                if self.max_message_size > 0:
-                    size = 0
-                    shards: _List[ShardType] = _List()
-                    while size < self.max_message_size:
-                        try:
-                            shard = self.shards[part_id].pop()
-                            shards.append(shard)
-                            s = sizeof(shard)
-                            size += s
-                            self.sizes[part_id] -= s
-                        except IndexError:
-                            break
-                        finally:
-                            if not self.shards[part_id]:
-                                del self.shards[part_id]
-                                assert not self.sizes[part_id]
-                                del self.sizes[part_id]
-                else:
-                    shards = self.shards.pop(part_id)
-                    size = self.sizes.pop(part_id)
-                self._shards_available.notify_all()
-            await self.process(part_id, shards, size)
+            with context_meter.meter("idle"):
+                async with self._shards_available:
+                    await self._shards_available.wait_for(_continue)
+                    if self._inputs_done and not self.shards:
+                        break
+                    part_id = max(self.sizes, key=self.sizes.__getitem__)
+                    if self.max_message_size > 0:
+                        size = 0
+                        shards = []
+                        while size < self.max_message_size:
+                            try:
+                                shard = self.shards[part_id].pop()
+                                shards.append(shard)
+                                s = self.sizes_detail[part_id].pop()
+                                size += s
+                                self.sizes[part_id] -= s
+                            except IndexError:
+                                break
+                            finally:
+                                if not self.shards[part_id]:
+                                    del self.shards[part_id]
+                                    assert not self.sizes[part_id]
+                                    del self.sizes[part_id]
+                                    assert not self.sizes_detail[part_id]
+                                    del self.sizes_detail[part_id]
+                    else:
+                        shards = self.shards.pop(part_id)
+                        size = self.sizes.pop(part_id)
+                    self._shards_available.notify_all()
+                await self.process(part_id, shards, size)
 
     async def write(self, data: dict[str, ShardType]) -> None:
         """
@@ -198,15 +204,14 @@ class ShardsBuffer(Generic[ShardType]):
         self.bytes_memory += total_batch_size
         self.bytes_total += total_batch_size
 
-        if self.memory_limiter:
-            self.memory_limiter.increase(total_batch_size)
+        self.memory_limiter.increase(total_batch_size)
         async with self._shards_available:
             for worker, shard in data.items():
                 self.shards[worker].append(shard)
+                self.sizes_detail[worker].append(sizes[worker])
                 self.sizes[worker] += sizes[worker]
             self._shards_available.notify()
-        if self.memory_limiter:
-            await self.memory_limiter.wait_for_available()
+        await self.memory_limiter.wait_for_available()
         del data
         assert total_batch_size
 
@@ -252,15 +257,8 @@ class ShardsBuffer(Generic[ShardType]):
             self._shards_available.notify_all()
         await asyncio.gather(*self._tasks)
 
-    async def __aenter__(self) -> "ShardsBuffer":
+    async def __aenter__(self) -> ShardsBuffer:
         return self
 
     async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:
         await self.close()
-
-    @contextlib.contextmanager
-    def time(self, name: str) -> Iterator[None]:
-        start = time()
-        yield
-        stop = time()
-        self.diagnostics[name] += stop - start

@@ -93,7 +93,7 @@ class ReplayTaskClient:
         Take raw components and resolve future dependencies.
         """
         function, args, kwargs, deps = raw_components
-        futures = self.client._graph_to_futures({}, deps)
+        futures = self.client._graph_to_futures({}, deps, span_metadata={})
         data = await self.client._gather(futures)
         args = pack_data(args, data)
         kwargs = pack_data(kwargs, data)
