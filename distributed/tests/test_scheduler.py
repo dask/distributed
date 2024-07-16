@@ -4692,7 +4692,7 @@ async def test_deadlock_dependency_of_queued_released_when_worker_replaced(
     reason="The situation handled in this test requires queueing.",
 )
 @pytest.mark.parametrize("validate", [True, False])
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
+@gen_cluster(client=True)
 async def test_deadlock_dependency_of_queued_released_when_worker_removed(
     c, s, a, b, validate
 ):
