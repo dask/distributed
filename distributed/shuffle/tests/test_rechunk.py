@@ -246,6 +246,8 @@ async def test_cull_p2p_rechunking_single_chunk(c, s, *ws):
     n_inputs = len(
         [1 for key in dsk.dask.get_all_dependencies() if key[0].startswith("array-")]
     )
+    assert n_inputs > 0
+    
     n_culled_inputs = len(
         [
             1
