@@ -409,7 +409,6 @@ class P2PRechunkLayer(Layer):
                     partial_concatenate(
                         input_name=self.name_input,
                         input_chunks=self.chunks_input,
-                        output_chunks=self.chunks,
                         ndpartial=ndpartial,
                         token=self.token,
                         keepmap=self.keepmap,
@@ -515,7 +514,6 @@ def _global_index(partial_index: NDIndex, partial_offset: NDIndex) -> NDIndex:
 def partial_concatenate(
     input_name: str,
     input_chunks: ChunkedAxes,
-    output_chunks: ChunkedAxes,
     ndpartial: _NDPartial,
     token: str,
     keepmap: np.ndarray,
