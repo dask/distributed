@@ -2088,6 +2088,16 @@ class SchedulerState:
             return recommendations, client_msgs, worker_msgs
         except Exception:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
+            self.log_event(
+                "transistions",
+                {
+                    "action": "transition-failure",
+                    "key": key,
+                    "start": start,
+                    "finish": finish,
+                    "transistion_log": self.transition_log.copy(),
+                },
+            )
             if LOG_PDB:
                 import pdb
 

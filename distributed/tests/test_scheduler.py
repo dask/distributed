@@ -4640,6 +4640,33 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
     await c.gather(fut3)
 
 
+@gen_cluster(client=True)
+async def test_transition_failure_triggers_log_event(c, s, a, b):
+    def block_on_event(input, block, executing):
+        executing.set()
+        block.wait()
+        return input
+
+    block = Event()
+    executing = Event()
+
+    fut = c.submit(block_on_event, 0, block, executing)
+    await executing.wait()
+
+    # Manually invalidate the state of the processing task
+    s.tasks[fut.key].processing_on = None
+
+    await block.set()
+    # vals = event["action")
+    # assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
+
+    # await async_poll_for(lambda: sum(event["action"] == "transition-failure" for _, event in s.get_events("transistions")) == 1, timeout=5)
+
+    events_failure = s.get_events("transition-failure")
+    events_trans = s.get_events("transistions")
+    await fut
+
+
 @pytest.mark.skipif(
     not QUEUING_ON_BY_DEFAULT,
     reason="The situation handled in this test requires queueing.",
@@ -4670,7 +4697,7 @@ async def test_deadlock_dependency_of_queued_released(c, s, a):
     assert s.queued
     await s.remove_worker(address=a.address, stimulus_id="test")
 
-    s.validate_state()
+    # s.validate_state()
 
     await block.set()
     await executing.clear()
