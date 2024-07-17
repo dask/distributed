@@ -359,11 +359,10 @@ class P2PRechunkLayer(Layer):
         """
         import numpy as np
 
-        keepmap = np.zeros_like(self.keepmap)
-        indices_to_keep = self._keys_to_indices(keys)
-
         from dask.array.rechunk import old_to_new
 
+        keepmap = np.zeros_like(self.keepmap)
+        indices_to_keep = self._keys_to_indices(keys)
         _old_to_new = old_to_new(self.chunks_input, self.chunks)
 
         culled_deps: defaultdict[Key, set[Key]] = defaultdict(set)
@@ -433,7 +432,7 @@ class P2PRechunkLayer(Layer):
 
 
 def _split_partials(
-    old_to_new,
+    old_to_new: list[Any],
     chunked_shape: tuple[int, ...],
 ) -> Generator[_NDPartial, None, None]:
     """Split the rechunking into partials that can be performed separately"""
@@ -447,7 +446,7 @@ def _split_partials(
 
 
 def _split_partials_per_axis(
-    old_to_new, chunked_shape: tuple[int, ...]
+    old_to_new: list[Any], chunked_shape: tuple[int, ...]
 ) -> tuple[tuple[_Partial, ...], ...]:
     """Split the rechunking into partials that can be performed separately
     on each axis"""
@@ -520,7 +519,7 @@ def partial_concatenate(
     ndpartial: _NDPartial,
     token: str,
     keepmap: np.ndarray,
-    old_to_new,
+    old_to_new: list[Any],
 ) -> dict[Key, Any]:
     import numpy as np
 
