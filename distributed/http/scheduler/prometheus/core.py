@@ -48,9 +48,6 @@ class SchedulerMetricCollector(PrometheusCollector):
             - len(self.server.saturated),
         )
         worker_states.add_metric(["saturated"], len(self.server.saturated))
-        worker_states.add_metric(
-            ["paused_or_retiring"], len(self.server.workers) - len(self.server.running)
-        )
         paused_workers = len(
             [w for w in self.server.workers.values() if w.status == Status.paused]
         )

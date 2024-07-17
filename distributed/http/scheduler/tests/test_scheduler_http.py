@@ -281,7 +281,6 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 2,
         "partially_saturated": 0,
         "saturated": 0,
-        "paused_or_retiring": 0,
         "paused": 0,
         "retiring": 0,
     }
@@ -293,7 +292,6 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 1,
         "saturated": 0,
-        "paused_or_retiring": 0,
         "paused": 0,
         "retiring": 0,
     }
@@ -307,7 +305,6 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 0,
         "saturated": 1,
-        "paused_or_retiring": 0,
         "paused": 0,
         "retiring": 0,
     }
@@ -319,7 +316,6 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 0,
         "saturated": 0,
-        "paused_or_retiring": 1,
         "paused": 1,
         "retiring": 0,
     }
@@ -332,7 +328,6 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 0,
         "saturated": 0,
-        "paused_or_retiring": 1,
         "paused": 0,
         "retiring": 1,
     }
