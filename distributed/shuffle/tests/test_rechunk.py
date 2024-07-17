@@ -239,7 +239,7 @@ async def test_cull_p2p_rechunking_single_chunk(c, s, *ws):
     new = (5, 1, -1)
     rechunked = rechunk(x, chunks=new, method="p2p")
     (dsk,) = dask.optimize(rechunked)
-    culled = rechunked[:5, :1]
+    culled = rechunked[:5, 1:2]
     (dsk_culled,) = dask.optimize(culled)
 
     # The culled graph requires only 1/2 of the input tasks
@@ -257,7 +257,7 @@ async def test_cull_p2p_rechunking_single_chunk(c, s, *ws):
     # The culled graph should also have less than 1/4 the tasks
     assert len(dsk_culled.dask) < len(dsk.dask) / 4
 
-    assert np.all(await c.compute(culled) == a[:5, :1])
+    assert np.all(await c.compute(culled) == a[:5, 1:2])
 
 
 @gen_cluster(client=True)

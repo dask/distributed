@@ -528,6 +528,47 @@ def partial_concatenate(
     dsk: dict[Key, Any] = {}
 
     slice_group = f"rechunk-slice-{token}"
+
+    # TODO: Recalculate partial based on the ONE output chunk we're interested in
+
+    # Narrow slice from left
+    # Narrow slice from right
+    # ...
+
+    # Identify exact position of output chunk
+    # See what we need from inputs
+
+    partial_keepmap = keepmap[ndpartial.new]
+    assert np.sum(partial_keepmap) == 1
+
+    ndindex = np.argwhere(partial_keepmap)[0]
+
+    from dask.array.rechunk import old_to_new
+
+    # old = ndpartial.old
+    # new = tuple(slice(slc.start + index, slc.start + index + 1) for slc, index in zip(ndpartial.new, ndindex))
+    _old_to_new = old_to_new(input_chunks, output_chunks)
+
+    partial_per_axis = []
+    for axis_index, index in enumerate(ndindex):
+        slc = slice(
+            ndpartial.new[axis_index].start + index,
+            ndpartial.new[axis_index].start + index + 1,
+        )
+        first_old_chunk, first_old_slice = _old_to_new[axis_index][slc.start][0]
+        last_old_chunk, last_old_slice = _old_to_new[axis_index][slc.stop - 1][-1]
+        partial_per_axis.append(
+            _Partial(
+                old=slice(first_old_chunk, last_old_chunk + 1),
+                new=slc,
+                left_start=first_old_slice.start,
+                right_stop=last_old_slice.stop,
+            )
+        )
+
+    old, new, left_starts, right_stops = zip(*partial_per_axis)
+    ndpartial = _NDPartial(old, new, left_starts, right_stops, ndpartial.ix)
+
     old_offset = tuple(slice_.start for slice_ in ndpartial.old)
 
     shape = tuple(slice_.stop - slice_.start for slice_ in ndpartial.old)
