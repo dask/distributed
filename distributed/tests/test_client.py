@@ -155,6 +155,7 @@ async def test_map(c, s, a, b):
     assert all(isinstance(x, Future) for x in L1)
 
     result = await L1[0]
+
     assert result == inc(0)
     assert len(s.tasks) == 5
 
@@ -2128,9 +2129,12 @@ async def test_repr_no_memory_limit(c, s, a, b):
 
 @gen_test()
 async def test_repr_localcluster():
-    async with LocalCluster(
-        processes=False, dashboard_address=":0", asynchronous=True
-    ) as cluster, Client(cluster, asynchronous=True) as client:
+    async with (
+        LocalCluster(
+            processes=False, dashboard_address=":0", asynchronous=True
+        ) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
         text = client._repr_html_()
         assert cluster.scheduler.address in text
         assert is_valid_xml(client._repr_html_())
@@ -2308,9 +2312,10 @@ async def test_cleanup_after_broken_client_connection(s, a, b):
 
 @gen_cluster()
 async def test_multi_garbage_collection(s, a, b):
-    async with Client(s.address, asynchronous=True) as c, Client(
-        s.address, asynchronous=True
-    ) as f:
+    async with (
+        Client(s.address, asynchronous=True) as c,
+        Client(s.address, asynchronous=True) as f,
+    ):
         x = c.submit(inc, 1)
         y = f.submit(inc, 2)
         y2 = c.submit(inc, 2)
@@ -3774,9 +3779,10 @@ async def test_reconnect():
     stack = ExitStack()
     proc = popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"])
     stack.enter_context(proc)
-    async with Client(f"127.0.0.1:{port}", asynchronous=True) as c, Worker(
-        f"127.0.0.1:{port}"
-    ) as w:
+    async with (
+        Client(f"127.0.0.1:{port}", asynchronous=True) as c,
+        Worker(f"127.0.0.1:{port}") as w,
+    ):
         await c.wait_for_workers(1, timeout=10)
         x = c.submit(inc, 1)
         assert (await x) == 2
@@ -3855,9 +3861,10 @@ def catch_unhandled_exceptions() -> Generator[None, None, None]:
 
 @gen_cluster(client=True, nthreads=[], client_kwargs={"timeout": 0.5})
 async def test_reconnect_timeout(c, s):
-    with catch_unhandled_exceptions(), captured_logger(
-        logging.getLogger("distributed.client")
-    ) as logger:
+    with (
+        catch_unhandled_exceptions(),
+        captured_logger(logging.getLogger("distributed.client")) as logger,
+    ):
         await s.close()
         while c.status != "closed":
             await asyncio.sleep(0.05)
@@ -3939,9 +3946,10 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
 @gen_cluster()
 async def test_idempotence(s, a, b):
-    async with Client(s.address, asynchronous=True) as c, Client(
-        s.address, asynchronous=True
-    ) as f:
+    async with (
+        Client(s.address, asynchronous=True) as c,
+        Client(s.address, asynchronous=True) as f,
+    ):
         # Submit
         x = c.submit(inc, 1)
         await x
@@ -4154,9 +4162,10 @@ async def test_scatter_compute_store_lose_processing(c, s, a, b):
 
 @gen_cluster()
 async def test_serialize_future(s, a, b):
-    async with Client(s.address, asynchronous=True) as c1, Client(
-        s.address, asynchronous=True
-    ) as c2:
+    async with (
+        Client(s.address, asynchronous=True) as c1,
+        Client(s.address, asynchronous=True) as c2,
+    ):
         future = c1.submit(lambda: 1)
         result = await future
 
@@ -4198,9 +4207,10 @@ async def test_serialize_future_without_client(s, a, b):
 
 @gen_cluster()
 async def test_temp_default_client(s, a, b):
-    async with Client(s.address, asynchronous=True) as c1, Client(
-        s.address, asynchronous=True
-    ) as c2:
+    async with (
+        Client(s.address, asynchronous=True) as c1,
+        Client(s.address, asynchronous=True) as c2,
+    ):
         with temp_default_client(c1):
             assert default_client() is c1
             assert default_client(c2) is c2
@@ -4212,9 +4222,10 @@ async def test_temp_default_client(s, a, b):
 
 @gen_cluster(client=True)
 async def test_as_current(c, s, a, b):
-    async with Client(s.address, asynchronous=True) as c1, Client(
-        s.address, asynchronous=True
-    ) as c2:
+    async with (
+        Client(s.address, asynchronous=True) as c1,
+        Client(s.address, asynchronous=True) as c2,
+    ):
         with temp_default_client(c):
             assert Client.current() is c
             assert Client.current(allow_global=False) is c
@@ -6284,9 +6295,10 @@ def test_direct_sync(c):
 
 @gen_cluster()
 async def test_mixing_clients_same_scheduler(s, a, b):
-    async with Client(s.address, asynchronous=True) as c1, Client(
-        s.address, asynchronous=True
-    ) as c2:
+    async with (
+        Client(s.address, asynchronous=True) as c1,
+        Client(s.address, asynchronous=True) as c2,
+    ):
         future = c1.submit(inc, 1)
         assert await c2.submit(inc, future) == 3
     assert not s.tasks
@@ -6294,9 +6306,12 @@ async def test_mixing_clients_same_scheduler(s, a, b):
 
 @gen_cluster()
 async def test_mixing_clients_different_scheduler(s, a, b):
-    async with Scheduler(port=open_port()) as s2, Worker(s2.address) as w1, Client(
-        s.address, asynchronous=True
-    ) as c1, Client(s2.address, asynchronous=True) as c2:
+    async with (
+        Scheduler(port=open_port()) as s2,
+        Worker(s2.address) as w1,
+        Client(s.address, asynchronous=True) as c1,
+        Client(s2.address, asynchronous=True) as c2,
+    ):
         future = c1.submit(inc, 1)
         with pytest.raises(CancelledError):
             await c2.submit(inc, future)
@@ -6505,8 +6520,10 @@ async def test_file_descriptors_dont_leak(Worker):
     proc = psutil.Process()
     before = proc.num_fds()
     async with Scheduler(dashboard_address=":0") as s:
-        async with Worker(s.address), Worker(s.address), Client(
-            s.address, asynchronous=True
+        async with (
+            Worker(s.address),
+            Worker(s.address),
+            Client(s.address, asynchronous=True),
         ):
             assert proc.num_fds() > before
             await df.sum().persist()
@@ -6929,16 +6946,19 @@ async def test_mixed_compression(c, s):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
-    async with Nanny(
-        s.address,
-        host="127.0.0.2",
-        nthreads=1,
-        config={"distributed.comm.compression": "lz4"},
-    ), Nanny(
-        s.address,
-        host="127.0.0.3",
-        nthreads=1,
-        config={"distributed.comm.compression": "zlib"},
+    async with (
+        Nanny(
+            s.address,
+            host="127.0.0.2",
+            nthreads=1,
+            config={"distributed.comm.compression": "lz4"},
+        ),
+        Nanny(
+            s.address,
+            host="127.0.0.3",
+            nthreads=1,
+            config={"distributed.comm.compression": "zlib"},
+        ),
     ):
         await c.wait_for_workers(2)
         await c.get_versions()
@@ -8464,3 +8484,42 @@ async def test_scheduler_restart_exception_on_cancelled_futures(c, s, a, b):
 
     with pytest.raises(CancelledError, match="Scheduler has restarted"):
         await fut.result()
+
+
+def _release_persisted(obj):
+    return len([f.release() for f in futures_of(obj)])
+
+
+@gen_cluster(client=True)
+async def test_release_persisted_collection(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
+    arr = c.persist(da.random.random((10,), chunks=(10,)))
+
+    await wait(arr)
+
+    _release_persisted(arr)
+    while s.tasks:
+        await asyncio.sleep(0.01)
+
+    with pytest.raises(CancelledError):
+        await c.compute(arr)
+
+
+def test_release_persisted_collection_sync(c):
+    np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+    arr = da.random.random((10,), chunks=(10,)).persist()
+
+    wait(arr)
+    _release_persisted(arr)
+
+    while c.run_on_scheduler(lambda dask_scheduler: len(dask_scheduler.tasks)) > 0:
+        sleep(0.01)
+
+    with pytest.raises(CancelledError):
+        # Note: dask.compute is actually calling client.get, i.e. what we are
+        # submitting to the scheduler is different to what we are in
+        # client.compute
+        arr.compute()

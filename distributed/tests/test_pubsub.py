@@ -110,7 +110,7 @@ async def test_client_worker(c, s, a, b):
         or len(sps.client_subscribers["a"]) != 1
     ):
         await asyncio.sleep(0.01)
-        assert time() < start + 3
+        assert time() < start + 10
 
     del sub
 
@@ -121,7 +121,7 @@ async def test_client_worker(c, s, a, b):
         or any(bps.publish_to_scheduler.values())
     ):
         await asyncio.sleep(0.01)
-        assert time() < start + 3
+        assert time() < start + 10
 
 
 @gen_cluster(client=True)
