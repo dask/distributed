@@ -391,9 +391,14 @@ class P2PRechunkLayer(Layer):
     def _construct_graph(self) -> _T_LowLevelGraph:
         import numpy as np
 
+        from dask.array.rechunk import old_to_new
+
         dsk: _T_LowLevelGraph = {}
 
-        for ndpartial in _split_partials(self.chunks_input, self.chunks):
+        _old_to_new = old_to_new(self.chunks_input, self.chunks)
+        chunked_shape = tuple(len(axis) for axis in self.chunks)
+
+        for ndpartial in _split_partials(_old_to_new, chunked_shape):
             output_count = np.sum(self.keepmap[ndpartial.new])
             if output_count == 0:
                 continue
@@ -408,6 +413,7 @@ class P2PRechunkLayer(Layer):
                         ndpartial=ndpartial,
                         token=self.token,
                         keepmap=self.keepmap,
+                        old_to_new=_old_to_new,
                     )
                 )
             else:
@@ -426,10 +432,11 @@ class P2PRechunkLayer(Layer):
 
 
 def _split_partials(
-    input_chunks: ChunkedAxes, output_chunks: ChunkedAxes
+    old_to_new,
+    chunked_shape: tuple[int, ...],
 ) -> Generator[_NDPartial, None, None]:
     """Split the rechunking into partials that can be performed separately"""
-    partials_per_axis = _split_partials_per_axis(input_chunks, output_chunks)
+    partials_per_axis = _split_partials_per_axis(old_to_new, chunked_shape)
     indices_per_axis = (range(len(partials)) for partials in partials_per_axis)
     for nindex, partial_per_axis in zip(
         product(*indices_per_axis), product(*partials_per_axis)
@@ -439,26 +446,23 @@ def _split_partials(
 
 
 def _split_partials_per_axis(
-    input_chunks: ChunkedAxes, output_chunks: ChunkedAxes
+    old_to_new, chunked_shape: tuple[int, ...]
 ) -> tuple[tuple[_Partial, ...], ...]:
     """Split the rechunking into partials that can be performed separately
     on each axis"""
-    from dask.array.rechunk import old_to_new
+    # from dask.array.rechunk import old_to_new
 
-    chunked_shape = tuple(len(axis) for axis in output_chunks)
-    _old_to_new = old_to_new(input_chunks, output_chunks)
+    # _old_to_new = old_to_new(input_chunks, output_chunks)
 
-    sliced_axes = _partial_slices(_old_to_new, chunked_shape)
+    sliced_axes = _partial_slices(old_to_new, chunked_shape)
 
     partial_axes = []
     for axis_index, slices in enumerate(sliced_axes):
         partials = []
         for slice_ in slices:
             last_old_chunk: int
-            first_old_chunk, first_old_slice = _old_to_new[axis_index][slice_.start][0]
-            last_old_chunk, last_old_slice = _old_to_new[axis_index][slice_.stop - 1][
-                -1
-            ]
+            first_old_chunk, first_old_slice = old_to_new[axis_index][slice_.start][0]
+            last_old_chunk, last_old_slice = old_to_new[axis_index][slice_.stop - 1][-1]
             partials.append(
                 _Partial(
                     old=slice(first_old_chunk, last_old_chunk + 1),
@@ -519,35 +523,25 @@ def partial_concatenate(
     ndpartial: _NDPartial,
     token: str,
     keepmap: np.ndarray,
+    old_to_new,
 ) -> dict[Key, Any]:
     import numpy as np
 
     from dask.array.chunk import getitem
     from dask.array.core import concatenate3
 
+    # from dask.array.rechunk import old_to_new
+
     dsk: dict[Key, Any] = {}
 
     slice_group = f"rechunk-slice-{token}"
-
-    # TODO: Recalculate partial based on the ONE output chunk we're interested in
-
-    # Narrow slice from left
-    # Narrow slice from right
-    # ...
-
-    # Identify exact position of output chunk
-    # See what we need from inputs
 
     partial_keepmap = keepmap[ndpartial.new]
     assert np.sum(partial_keepmap) == 1
 
     ndindex = np.argwhere(partial_keepmap)[0]
 
-    from dask.array.rechunk import old_to_new
-
-    # old = ndpartial.old
-    # new = tuple(slice(slc.start + index, slc.start + index + 1) for slc, index in zip(ndpartial.new, ndindex))
-    _old_to_new = old_to_new(input_chunks, output_chunks)
+    # _old_to_new = old_to_new(input_chunks, output_chunks)
 
     partial_per_axis = []
     for axis_index, index in enumerate(ndindex):
@@ -555,8 +549,8 @@ def partial_concatenate(
             ndpartial.new[axis_index].start + index,
             ndpartial.new[axis_index].start + index + 1,
         )
-        first_old_chunk, first_old_slice = _old_to_new[axis_index][slc.start][0]
-        last_old_chunk, last_old_slice = _old_to_new[axis_index][slc.stop - 1][-1]
+        first_old_chunk, first_old_slice = old_to_new[axis_index][slc.start][0]
+        last_old_chunk, last_old_slice = old_to_new[axis_index][slc.stop - 1][-1]
         partial_per_axis.append(
             _Partial(
                 old=slice(first_old_chunk, last_old_chunk + 1),
