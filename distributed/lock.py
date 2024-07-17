@@ -6,6 +6,8 @@ from distributed.semaphore import Semaphore
 
 logger = logging.getLogger(__name__)
 
+_no_value = object()
+
 
 class Lock(Semaphore):
     """Distributed Centralized Lock
@@ -48,10 +50,20 @@ class Lock(Semaphore):
     def __init__(
         self,
         name=None,
+        client=_no_value,
         register=True,
         scheduler_rpc=None,
         loop=None,
     ):
+        if client is not _no_value:
+            import warnings
+
+            warnings.warn(
+                "The `client` parameter is deprecated. It is no longer necessary to pass a client to Lock.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         super().__init__(
             max_leases=1,
             name=name,

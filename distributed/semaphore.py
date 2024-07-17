@@ -351,21 +351,25 @@ class Semaphore(SyncMethodMixin):
         # this should give ample time to refresh without introducing another
         # config parameter since this *must* be smaller than the timeout anyhow
         lease_timeout = dask.config.get("distributed.scheduler.locks.lease-timeout")
-        if lease_timeout != "inf":
-            lease_timeout = parse_timedelta(
-                dask.config.get("distributed.scheduler.locks.lease-timeout"),
-                default="s",
-            )
-            refresh_leases_interval = lease_timeout / 5
-            pc = PeriodicCallback(
-                self._refresh_leases, callback_time=refresh_leases_interval * 1000
-            )
-            self.refresh_callback = pc
+        if lease_timeout == "inf":
+            return
 
-            # Need to start the callback using IOLoop.add_callback to ensure that the
-            # PC uses the correct event loop.
-            if self.loop is not None:
-                self.loop.add_callback(pc.start)
+        ## Below is all code for the lease timout validation
+
+        lease_timeout = parse_timedelta(
+            dask.config.get("distributed.scheduler.locks.lease-timeout"),
+            default="s",
+        )
+        refresh_leases_interval = lease_timeout / 5
+        pc = PeriodicCallback(
+            self._refresh_leases, callback_time=refresh_leases_interval * 1000
+        )
+        self.refresh_callback = pc
+
+        # Need to start the callback using IOLoop.add_callback to ensure that the
+        # PC uses the correct event loop.
+        if self.loop is not None:
+            self.loop.add_callback(pc.start)
 
     @property
     def scheduler(self):
