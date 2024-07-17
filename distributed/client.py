@@ -17,7 +17,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Coroutine, Iterator, Sequence
+from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -26,7 +26,19 @@ from functools import partial, singledispatchmethod
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
-from typing import Any, Callable, ClassVar, Literal, NamedTuple, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    TypedDict,
+    cast,
+)
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
@@ -35,8 +47,9 @@ import dask
 from dask.base import collections_to_dsk, tokenize
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
+from dask.layers import Layer
 from dask.optimization import SubgraphCallable
-from dask.typing import NoDefault, no_default
+from dask.typing import Key, NoDefault, no_default
 from dask.utils import (
     apply,
     ensure_dict,
@@ -92,6 +105,7 @@ from distributed.publish import Datasets
 from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
 from distributed.sizeof import sizeof
+from distributed.spans import SpanMetadata
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
     CancelledError,
@@ -102,7 +116,6 @@ from distributed.utils import (
     format_dashboard_link,
     has_keyword,
     import_term,
-    is_python_shutting_down,
     log_errors,
     nbytes,
     sync,
@@ -132,6 +145,68 @@ DEFAULT_EXTENSIONS = {
 }
 
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
+
+
+class FutureCancelledError(CancelledError):
+    key: str
+    reason: str
+    msg: str | None
+
+    def __init__(self, key: str, reason: str | None, msg: str | None = None):
+        self.key = key
+        self.reason = reason if reason else "unknown"
+        self.msg = msg
+
+    def __str__(self) -> str:
+        result = f"{self.key} cancelled for reason: {self.reason}."
+        if self.msg:
+            result = "\n".join([result, self.msg])
+        return result
+
+
+class FuturesCancelledError(CancelledError):
+    error_groups: list[CancelledFuturesGroup]
+
+    def __init__(self, error_groups: list[CancelledFuturesGroup]):
+        self.error_groups = sorted(
+            error_groups, key=lambda group: len(group.errors), reverse=True
+        )
+
+    def __str__(self):
+        count = sum(map(lambda group: len(group.errors), self.error_groups))
+        result = f"{count} Future{'s' if count > 1 else ''} cancelled:"
+        return "\n".join(
+            [result, "Reasons:"] + [str(group) for group in self.error_groups]
+        )
+
+
+class CancelledFuturesGroup:
+    #: Errors of the cancelled futures
+    errors: list[FutureCancelledError]
+
+    #: Reason for cancelling the futures
+    reason: str
+
+    __slots__ = tuple(__annotations__)
+
+    def __init__(self, errors: list[FutureCancelledError], reason: str):
+        self.errors = errors
+        self.reason = reason
+
+    def __str__(self):
+        keys = [error.key for error in self.errors]
+        example_message = None
+
+        for error in self.errors:
+            if error.msg:
+                example_message = error.msg
+                break
+
+        return (
+            f"{len(keys)} Future{'s' if len(keys) > 1 else ''} cancelled for reason: "
+            f"{self.reason}.\nMessage: {example_message}\n"
+            f"Future{'s' if len(keys) > 1 else ''}: {keys}"
+        )
 
 
 class SourceCode(NamedTuple):
@@ -209,6 +284,8 @@ class Future(WrappedKey):
     Client:  Creates futures
     """
 
+    _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
+
     _cb_executor = None
     _cb_executor_pid = None
     _counter = itertools.count()
@@ -244,7 +321,7 @@ class Future(WrappedKey):
             if self.key in self._client.futures:
                 self._state = self._client.futures[self.key]
             else:
-                self._state = self._client.futures[self.key] = FutureState()
+                self._state = self._client.futures[self.key] = FutureState(self.key)
 
             if self._inform:
                 self._client._send_to_scheduler(
@@ -336,8 +413,10 @@ class Future(WrappedKey):
                 raise exc.with_traceback(tb)
             else:
                 return exc
-        elif self.status == "cancelled":
-            exception = CancelledError(self.key)
+        elif self.cancelled():
+            assert self._state
+            exception = self._state.exception
+            assert isinstance(exception, CancelledError)
             if raiseit:
                 raise exception
             else:
@@ -413,7 +492,7 @@ class Future(WrappedKey):
             done_callback, self, partial(cls._cb_executor.submit, execute_callback)
         )
 
-    def cancel(self, **kwargs):
+    def cancel(self, reason=None, msg=None, **kwargs):
         """Cancel the request to run this future
 
         See Also
@@ -421,7 +500,7 @@ class Future(WrappedKey):
         Client.cancel
         """
         self._verify_initialized()
-        return self.client.cancel([self], **kwargs)
+        return self.client.cancel([self], reason=reason, msg=msg, **kwargs)
 
     def retry(self, **kwargs):
         """Retry this future if it has failed
@@ -521,7 +600,7 @@ class Future(WrappedKey):
         except AttributeError:
             # Occasionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
-            if not is_python_shutting_down():
+            if not self._is_finalizing():
                 raise
         except RuntimeError:  # closed event loop
             pass
@@ -551,11 +630,14 @@ class FutureState:
     This is shared between all Futures with the same key and client.
     """
 
-    __slots__ = ("_event", "status", "type", "exception", "traceback")
+    __slots__ = ("_event", "key", "status", "type", "exception", "traceback")
 
-    def __init__(self):
+    def __init__(self, key: str):
         self._event = None
+        self.key = key
+        self.exception = None
         self.status = "pending"
+        self.traceback = None
         self.type = None
 
     def _get_event(self):
@@ -567,10 +649,10 @@ class FutureState:
             event = self._event = asyncio.Event()
         return event
 
-    def cancel(self):
+    def cancel(self, reason=None, msg=None):
         """Cancels the operation"""
         self.status = "cancelled"
-        self.exception = CancelledError()
+        self.exception = FutureCancelledError(key=self.key, reason=reason, msg=msg)
         self._get_event().set()
 
     def finish(self, type=None):
@@ -738,6 +820,135 @@ class VersionsDict(TypedDict):
     client: dict[str, dict[str, Any]]
 
 
+_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
+
+
+def _is_nested(iterable):
+    for item in iterable:
+        if (
+            isinstance(item, Iterable)
+            and not isinstance(item, str)
+            and not isinstance(item, bytes)
+        ):
+            return True
+    return False
+
+
+class _MapLayer(Layer):
+    func: Callable
+    iterables: Iterable[Any]
+    key: str | Iterable[str] | None
+    pure: bool
+    annotations: dict[str, Any] | None
+
+    def __init__(
+        self,
+        func: Callable,
+        iterables: Iterable[Any],
+        key: str | Iterable[str] | None = None,
+        pure: bool = True,
+        annotations: dict[str, Any] | None = None,
+        **kwargs,
+    ):
+        self.func: Callable = func
+        self.iterables: Iterable[Any] = (
+            list(zip(*zip(*iterables))) if _is_nested(iterables) else [iterables]
+        )
+        self.key: str | Iterable[str] | None = key
+        self.pure: bool = pure
+        self.kwargs = kwargs
+        super().__init__(annotations=annotations)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__} <func='{funcname(self.func)}'>"
+
+    @property
+    def _dict(self) -> _T_LowLevelGraph:
+        self._cached_dict: _T_LowLevelGraph
+        dsk: _T_LowLevelGraph
+
+        if hasattr(self, "_cached_dict"):
+            return self._cached_dict
+        else:
+            dsk = self._construct_graph()
+            self._cached_dict = dsk
+        return self._cached_dict
+
+    @property
+    def _keys(self) -> Iterable[Key]:
+        if hasattr(self, "_cached_keys"):
+            return self._cached_keys
+        else:
+            if isinstance(self.key, Iterable) and not isinstance(self.key, str):
+                self._cached_keys: Iterable[Key] = self.key
+                return self.key
+
+            else:
+                if self.pure:
+                    keys = [
+                        self.key + "-" + tokenize(self.func, self.kwargs, args)  # type: ignore
+                        for args in zip(*self.iterables)
+                    ]
+                else:
+                    uid = str(uuid.uuid4())
+                    keys = (
+                        [
+                            f"{self.key}-{uid}-{i}"
+                            for i in range(min(map(len, self.iterables)))
+                        ]
+                        if self.iterables
+                        else []
+                    )
+                self._cached_keys = keys
+                return keys
+
+    def get_output_keys(self) -> set[Key]:
+        return set(self._keys)
+
+    def get_ordered_keys(self):
+        return list(self._keys)
+
+    def is_materialized(self) -> bool:
+        return hasattr(self, "_cached_dict")
+
+    def __getitem__(self, key: Key) -> tuple:
+        return self._dict[key]
+
+    def __iter__(self) -> Iterator[Key]:
+        return iter(self._dict)
+
+    def __len__(self) -> int:
+        return len(self._dict)
+
+    def _construct_graph(self) -> _T_LowLevelGraph:
+        dsk: _T_LowLevelGraph = {}
+
+        if not self.kwargs:
+            dsk = {
+                key: (self.func,) + args
+                for key, args in zip(self._keys, zip(*self.iterables))
+            }
+
+        else:
+            kwargs2 = {}
+            dsk = {}
+            for k, v in self.kwargs.items():
+                if sizeof(v) > 1e5:
+                    vv = dask.delayed(v)
+                    kwargs2[k] = vv._key
+                    dsk.update(vv.dask)
+                else:
+                    kwargs2[k] = v
+
+                dsk.update(
+                    {
+                        key: (apply, self.func, (tuple, list(args)), kwargs2)
+                        for key, args in zip(self._keys, zip(*self.iterables))
+                    }
+                )
+        return dsk
+
+
 class Client(SyncMethodMixin):
     """Connect to and submit computation to a Dask cluster
 
@@ -831,6 +1042,8 @@ class Client(SyncMethodMixin):
     distributed.scheduler.Scheduler: Internal scheduler
     distributed.LocalCluster:
     """
+
+    _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
 
     _instances: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
 
@@ -1320,7 +1533,13 @@ class Client(SyncMethodMixin):
         self.scheduler_comm = None
 
         for st in self.futures.values():
-            st.cancel()
+            st.cancel(
+                reason="scheduler-connection-lost",
+                msg=(
+                    "Client lost the connection to the scheduler. "
+                    "Please check your connection and re-run your work."
+                ),
+            )
         self.futures.clear()
 
         timeout = self._timeout
@@ -1554,7 +1773,7 @@ class Client(SyncMethodMixin):
                 try:
                     msgs = await self.scheduler_comm.comm.read()
                 except CommClosedError:
-                    if is_python_shutting_down():
+                    if self._is_finalizing():
                         return
                     if self.status == "running":
                         if self.cluster and self.cluster.status in (
@@ -1639,7 +1858,10 @@ class Client(SyncMethodMixin):
     def _handle_restart(self):
         logger.info("Receive restart signal from scheduler")
         for state in self.futures.values():
-            state.cancel()
+            state.cancel(
+                reason="scheduler-restart",
+                msg="Scheduler has restarted. Please re-run your work.",
+            )
         self.futures.clear()
         self.generation += 1
         with self._refcount_lock:
@@ -1775,7 +1997,7 @@ class Client(SyncMethodMixin):
         sync(self.loop, self._close, fast=True, callback_timeout=timeout)
         assert self.status == "closed"
 
-        if not is_python_shutting_down():
+        if not self._is_finalizing():
             self._loop_runner.stop()
 
     async def _shutdown(self):
@@ -1946,7 +2168,6 @@ class Client(SyncMethodMixin):
             dsk = {key: (apply, func, list(args), kwargs)}
         else:
             dsk = {key: (func,) + tuple(args)}
-
         futures = self._graph_to_futures(
             dsk,
             [key],
@@ -1958,6 +2179,7 @@ class Client(SyncMethodMixin):
             retries=retries,
             fifo_timeout=fifo_timeout,
             actors=actor,
+            span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
         )
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
@@ -1966,18 +2188,18 @@ class Client(SyncMethodMixin):
 
     def map(
         self,
-        func,
-        *iterables,
-        key=None,
-        workers=None,
-        retries=None,
-        resources=None,
-        priority=0,
-        allow_other_workers=False,
-        fifo_timeout="100 ms",
-        actor=False,
-        actors=False,
-        pure=True,
+        func: Callable,
+        *iterables: Collection,
+        key: str | list | None = None,
+        workers: str | Iterable[str] | None = None,
+        retries: int | None = None,
+        resources: dict[str, Any] | None = None,
+        priority: int = 0,
+        allow_other_workers: bool = False,
+        fifo_timeout: str = "100 ms",
+        actor: bool = False,
+        actors: bool = False,
+        pure: bool = True,
         batch_size=None,
         **kwargs,
     ):
@@ -2068,11 +2290,11 @@ class Client(SyncMethodMixin):
                 "Consider using a normal for loop and Client.submit"
             )
         total_length = sum(len(x) for x in iterables)
-
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
                 zip(*(partition_all(batch_size, iterable) for iterable in iterables))
             )
+            keys: list[list[Any]] | list[Any]
             if isinstance(key, list):
                 keys = [list(element) for element in partition_all(batch_size, key)]
             else:
@@ -2107,45 +2329,14 @@ class Client(SyncMethodMixin):
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
 
-        iterables = list(zip(*zip(*iterables)))
-        if isinstance(key, list):
-            keys = key
-        else:
-            if pure:
-                keys = [
-                    key + "-" + tokenize(func, kwargs, *args)
-                    for args in zip(*iterables)
-                ]
-            else:
-                uid = str(uuid.uuid4())
-                keys = (
-                    [
-                        key + "-" + uid + "-" + str(i)
-                        for i in range(min(map(len, iterables)))
-                    ]
-                    if iterables
-                    else []
-                )
-
-        if not kwargs:
-            dsk = {key: (func,) + args for key, args in zip(keys, zip(*iterables))}
-        else:
-            kwargs2 = {}
-            dsk = {}
-            for k, v in kwargs.items():
-                if sizeof(v) > 1e5:
-                    vv = dask.delayed(v)
-                    kwargs2[k] = vv._key
-                    dsk.update(vv.dask)
-                else:
-                    kwargs2[k] = v
-            dsk.update(
-                {
-                    key: (apply, func, (tuple, list(args)), kwargs2)
-                    for key, args in zip(keys, zip(*iterables))
-                }
-            )
-
+        dsk = _MapLayer(
+            func,
+            iterables,
+            key=key,
+            pure=pure,
+            **kwargs,
+        )
+        keys = dsk.get_ordered_keys()
         if isinstance(workers, (str, Number)):
             workers = [workers]
         if workers is not None and not isinstance(workers, (list, set)):
@@ -2164,9 +2355,12 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actor,
+            span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
         )
-        logger.debug("map(%s, ...)", funcname(func))
 
+        # make sure the graph is not materialized
+        assert not dsk.is_materialized(), "Graph must be non-materialized"
+        logger.debug("map(%s, ...)", funcname(func))
         return [futures[k] for k in keys]
 
     async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
@@ -2218,19 +2412,15 @@ class Client(SyncMethodMixin):
 
             exceptions = set()
             bad_keys = set()
-            for key in keys:
-                if key not in self.futures or self.futures[key].status in failed:
+            for future in future_set:
+                key = future.key
+                if key not in self.futures or future.status in failed:
                     exceptions.add(key)
                     if errors == "raise":
-                        try:
-                            st = self.futures[key]
-                            exception = st.exception
-                            traceback = st.traceback
-                        except (KeyError, AttributeError):
-                            exc = CancelledError(key)
-                        else:
-                            raise exception.with_traceback(traceback)
-                        raise exc
+                        st = future._state
+                        exception = st.exception
+                        traceback = st.traceback
+                        raise exception.with_traceback(traceback)
                     if errors == "skip":
                         bad_keys.add(key)
                         bad_data[key] = None
@@ -2450,10 +2640,9 @@ class Client(SyncMethodMixin):
                     nthreads = await self.scheduler.ncores_running(workers=workers)
                 if not nthreads:  # pragma: no cover
                     raise ValueError("No valid workers found")
+                workers = list(nthreads.keys())
 
-                _, who_has, nbytes = await scatter_to_workers(
-                    nthreads, data2, rpc=self.rpc
-                )
+                _, who_has, nbytes = await scatter_to_workers(workers, data2, self.rpc)
 
                 await self.scheduler.update_data(
                     who_has=who_has, nbytes=nbytes, client=self.id
@@ -2601,16 +2790,16 @@ class Client(SyncMethodMixin):
             hash=hash,
         )
 
-    async def _cancel(self, futures, force=False):
+    async def _cancel(self, futures, reason=None, msg=None, force=False):
         # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
         keys = list({f.key for f in futures_of(futures)})
         self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
-                st.cancel()
+                st.cancel(reason=reason, msg=msg)
 
-    def cancel(self, futures, asynchronous=None, force=False):
+    def cancel(self, futures, asynchronous=None, force=False, reason=None, msg=None):
         """
         Cancel running futures
         This stops future tasks from being scheduled if they have not yet run
@@ -2625,8 +2814,14 @@ class Client(SyncMethodMixin):
             If True the client is in asynchronous mode
         force : boolean (False)
             Cancel this future even if other clients desire it
+        reason: str
+            Reason for cancelling the futures
+        msg : str
+            Message that will be attached to the cancelled future
         """
-        return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
+        return self.sync(
+            self._cancel, futures, asynchronous=asynchronous, force=force, msg=msg
+        )
 
     async def _retry(self, futures):
         keys = list({f.key for f in futures_of(futures)})
@@ -2651,18 +2846,23 @@ class Client(SyncMethodMixin):
     @log_errors
     async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
         coroutines = []
+        uid = uuid.uuid4().hex
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
 
         def add_coro(name, data):
             keys = [f.key for f in futures_of(data)]
-            coroutines.append(
-                self.scheduler.publish_put(
+
+            async def _():
+                await self.scheduler.publish_wait_flush(uid=uid)
+                await self.scheduler.publish_put(
                     keys=keys,
                     name=name,
                     data=to_serialize(data),
                     override=override,
                     client=self.id,
                 )
-            )
+
+            coroutines.append(_())
 
         if name:
             if len(args) == 0:
@@ -3099,6 +3299,7 @@ class Client(SyncMethodMixin):
         self,
         dsk,
         keys,
+        span_metadata,
         workers=None,
         allow_other_workers=None,
         internal_priority=None,
@@ -3111,7 +3312,6 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-
             # Make sure `dsk` is a high level graph
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
@@ -3175,6 +3375,7 @@ class Client(SyncMethodMixin):
                     "actors": actors,
                     "code": ToPickle(computations),
                     "annotations": ToPickle(annotations),
+                    "span_metadata": ToPickle(span_metadata),
                 }
             )
             return futures
@@ -3262,6 +3463,7 @@ class Client(SyncMethodMixin):
             retries=retries,
             user_priority=priority,
             actors=actors,
+            span_metadata=SpanMetadata(collections=[{"type": "low-level-graph"}]),
         )
         packed = pack_data(keys, futures)
         if sync:
@@ -3444,6 +3646,9 @@ class Client(SyncMethodMixin):
             )
 
         variables = [a for a in collections if dask.is_dask_collection(a)]
+        metadata = SpanMetadata(
+            collections=[get_collections_metadata(v) for v in variables]
+        )
 
         dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
         names = ["finalize-%s" % tokenize(v) for v in variables]
@@ -3477,6 +3682,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actors,
+            span_metadata=metadata,
         )
 
         i = 0
@@ -3568,7 +3774,9 @@ class Client(SyncMethodMixin):
             collections = [collections]
 
         assert all(map(dask.is_dask_collection, collections))
-
+        metadata = SpanMetadata(
+            collections=[get_collections_metadata(v) for v in collections]
+        )
         dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
@@ -3583,6 +3791,7 @@ class Client(SyncMethodMixin):
             user_priority=priority,
             fifo_timeout=fifo_timeout,
             actors=actors,
+            span_metadata=metadata,
         )
 
         postpersists = [c.__dask_postpersist__() for c in collections]
@@ -4883,6 +5092,8 @@ class Client(SyncMethodMixin):
         name: str,
         idempotent: bool,
     ):
+        if isinstance(plugin, type):
+            raise TypeError("Please provide an instance of a plugin, not a type.")
         raise TypeError(
             "Registering duck-typed plugins is not allowed. Please inherit from "
             "NannyPlugin, WorkerPlugin, or SchedulerPlugin to create a plugin."
@@ -5429,9 +5640,19 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         {fu for fu in fs if fu.status != "pending"},
         {fu for fu in fs if fu.status == "pending"},
     )
-    cancelled = [f.key for f in done if f.status == "cancelled"]
-    if cancelled:
-        raise CancelledError(cancelled)
+    cancelled_errors = defaultdict(list)
+    for f in done:
+        if not f.cancelled():
+            continue
+        exception = f._state.exception
+        assert isinstance(exception, FutureCancelledError)
+        cancelled_errors[exception.reason].append(exception)
+    if cancelled_errors:
+        groups = [
+            CancelledFuturesGroup(errors=errors, reason=reason)
+            for reason, errors in cancelled_errors.items()
+        ]
+        raise FuturesCancelledError(groups)
 
     return DoneAndNotDoneFutures(done, not_done)
 
@@ -5662,8 +5883,6 @@ class as_completed:
             if self.raise_errors and future.status == "error":
                 typ, exc, tb = result
                 raise exc.with_traceback(tb)
-            elif future.status == "cancelled":
-                res = (res[0], CancelledError(future.key))
         return res
 
     def __next__(self):
@@ -5875,10 +6094,19 @@ def futures_of(o, client=None):
             stack.extend(x.__dask_graph__().values())
 
     if client is not None:
-        bad = {f for f in futures if f.cancelled()}
-        if bad:
-            raise CancelledError(bad)
-
+        cancelled_errors = defaultdict(list)
+        for f in futures:
+            if not f.cancelled():
+                continue
+            exception = f._state.exception
+            assert isinstance(exception, FutureCancelledError)
+            cancelled_errors[exception.reason].append(exception)
+        if cancelled_errors:
+            groups = [
+                CancelledFuturesGroup(errors=errors, reason=reason)
+                for reason, errors in cancelled_errors.items()
+            ]
+            raise FuturesCancelledError(groups)
     return futures[::-1]
 
 
@@ -6148,6 +6376,12 @@ def _close_global_client():
                 c.loop.add_callback(c.close, timeout=3)
             else:
                 c.close(timeout=3)
+
+
+def get_collections_metadata(collection):
+    return {
+        "type": type(collection).__name__,
+    }
 
 
 atexit.register(_close_global_client)

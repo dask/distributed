@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from time import sleep
 
-from distributed.metrics import time
+import pytest
+
+from distributed.metrics import monotonic
 from distributed.utils import Deadline
 from distributed.utils_test import gen_test
 
@@ -11,10 +13,10 @@ from distributed.utils_test import gen_test
 def test_deadline():
     deadline = Deadline.after(5)
 
-    assert deadline.duration == 5
+    assert deadline.duration == pytest.approx(5)
     assert deadline.expired is False
     assert deadline.expires is True
-    assert deadline.expires_at_mono - deadline.started_at_mono == 5
+    assert deadline.expires_at_mono - deadline.started_at_mono == pytest.approx(5)
     assert 4 < deadline.expires_at - deadline.started_at < 6
     assert 0 <= deadline.elapsed <= 1
     assert 4 <= deadline.remaining <= 5
@@ -36,21 +38,21 @@ def test_infinite_deadline():
 
 @gen_test()
 async def test_deadline_progress():
-    before_start = time()
+    before_start = monotonic()
     deadline = Deadline.after(100)
-    after_start = time()
+    after_start = monotonic()
 
-    assert before_start <= deadline.started_at <= after_start
-    assert deadline.started_at - time() <= deadline.remaining <= 100
+    assert before_start <= deadline.started_at_mono <= after_start
+    assert deadline.started_at_mono - monotonic() <= deadline.remaining <= 100
 
     await asyncio.sleep(0.1)
-    before_elapsed = time()
+    before_elapsed = monotonic()
     elapsed = deadline.elapsed
-    after_elapsed = time()
+    after_elapsed = monotonic()
     assert (
-        before_elapsed - deadline.started_at
+        before_elapsed - deadline.started_at_mono
         <= elapsed
-        <= after_elapsed - deadline.started_at
+        <= after_elapsed - deadline.started_at_mono
     )
 
 

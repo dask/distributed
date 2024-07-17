@@ -3,6 +3,7 @@ from __future__ import annotations
 import codecs
 import importlib
 import traceback
+import warnings
 from array import array
 from enum import Enum
 from functools import partial
@@ -208,17 +209,20 @@ register_serialization_family("error", None, serialization_error_loads)
 
 
 def check_dask_serializable(x):
-    if type(x) in (list, set, tuple) and len(x):
-        return check_dask_serializable(next(iter(x)))
-    elif type(x) is dict and len(x):
-        return check_dask_serializable(next(iter(x.items()))[1])
-    else:
-        try:
-            dask_serialize.dispatch(type(x))
-            return True
-        except TypeError:
-            pass
-    return False
+    try:
+        if type(x) in (list, set, tuple) and len(x):
+            return check_dask_serializable(next(iter(x)))
+        elif type(x) is dict and len(x):
+            return check_dask_serializable(next(iter(x.items()))[1])
+        else:
+            try:
+                dask_serialize.dispatch(type(x))
+                return True
+            except TypeError:
+                pass
+        return False
+    except RecursionError:
+        return False
 
 
 def serialize(  # type: ignore[no-untyped-def]
@@ -621,6 +625,14 @@ class Pickled:
 
 
 def nested_deserialize(x):
+    warnings.warn(
+        "nested_deserialize is deprecated and will be removed in a future release.",
+        DeprecationWarning,
+    )
+    return _nested_deserialize(x, emulate_deserialize=True)
+
+
+def _nested_deserialize(x, emulate_deserialize=True):
     """
     Replace all Serialize and Serialized values nested in *x*
     with the original values.  Returns a copy of *x*.
@@ -637,10 +649,13 @@ def nested_deserialize(x):
                 typ = type(v)
                 if typ is dict or typ is list:
                     x[k] = replace_inner(v)
-                elif typ is Serialize:
+                if emulate_deserialize:
+                    if typ is Serialize:
+                        x[k] = v.data
+                    elif typ is Serialized:
+                        x[k] = deserialize(v.header, v.frames)
+                if typ is ToPickle:
                     x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
 
         elif type(x) is list:
             x = list(x)
@@ -648,10 +663,13 @@ def nested_deserialize(x):
                 typ = type(v)
                 if typ is dict or typ is list:
                     x[k] = replace_inner(v)
-                elif typ is Serialize:
+                if emulate_deserialize:
+                    if typ is Serialize:
+                        x[k] = v.data
+                    elif typ is Serialized:
+                        x[k] = deserialize(v.header, v.frames)
+                if typ is ToPickle:
                     x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
 
         return x
 

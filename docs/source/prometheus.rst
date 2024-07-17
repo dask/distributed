@@ -62,6 +62,8 @@ dask_scheduler_tasks_output_bytes
     Note that when a task output is transferred between worker, you'll typically end up
     with a duplicate, so this measure is going to be lower than the actual cluster-wide
     managed memory. See also ``dask_worker_memory_bytes``, which does count duplicates.
+dask_scheduler_task_groups
+    Number of task groups known by scheduler
 dask_scheduler_prefix_state_totals_total
     Accumulated count of task prefix in each state
 dask_scheduler_tick_count_total

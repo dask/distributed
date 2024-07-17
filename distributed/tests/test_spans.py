@@ -214,7 +214,9 @@ async def test_no_extension(c, s, a, b):
     config={"optimization.fuse.active": False},
 )
 async def test_task_groups(c, s, a, b, release, no_time_resync):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     t0 = await padded_time(before=0)
 
     with span("wf"):
@@ -859,3 +861,26 @@ async def test_span_on_persist(c, s, a, b):
 
     assert s.tasks["x"].group.span_id == x_id
     assert s.tasks["y"].group.span_id == y_id
+
+
+@pytest.mark.filterwarnings("ignore:Dask annotations")
+@gen_cluster(client=True)
+async def test_collections_metadata(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+    df = pd.DataFrame(
+        {"x": np.random.random(1000), "y": np.random.random(1000)},
+        index=np.arange(1000),
+    )
+    ldf = dd.from_pandas(df, npartitions=10)
+
+    with span("foo") as span_id:
+        await c.compute(ldf)
+
+    ext = s.extensions["spans"]
+    span_ = ext.spans[span_id]
+    collections_meta = span_.metadata["collections"]
+    assert isinstance(collections_meta, list)
+    assert len(collections_meta) == 1
+    assert collections_meta[0]["type"] == type(ldf).__name__
