@@ -298,6 +298,7 @@ class P2PRechunkLayer(Layer):
         return {
             (self.name,) + nindex
             for nindex in np.ndindex(tuple(len(axis) for axis in self.chunks))
+            if self.keepmap[nindex]
         }
 
     def is_materialized(self) -> bool:
@@ -450,10 +451,6 @@ def _split_partials_per_axis(
 ) -> tuple[tuple[_Partial, ...], ...]:
     """Split the rechunking into partials that can be performed separately
     on each axis"""
-    # from dask.array.rechunk import old_to_new
-
-    # _old_to_new = old_to_new(input_chunks, output_chunks)
-
     sliced_axes = _partial_slices(old_to_new, chunked_shape)
 
     partial_axes = []
@@ -530,8 +527,6 @@ def partial_concatenate(
     from dask.array.chunk import getitem
     from dask.array.core import concatenate3
 
-    # from dask.array.rechunk import old_to_new
-
     dsk: dict[Key, Any] = {}
 
     slice_group = f"rechunk-slice-{token}"
@@ -540,8 +535,6 @@ def partial_concatenate(
     assert np.sum(partial_keepmap) == 1
 
     ndindex = np.argwhere(partial_keepmap)[0]
-
-    # _old_to_new = old_to_new(input_chunks, output_chunks)
 
     partial_per_axis = []
     for axis_index, index in enumerate(ndindex):
