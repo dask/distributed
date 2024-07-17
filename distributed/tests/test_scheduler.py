@@ -4640,31 +4640,36 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
     await c.gather(fut3)
 
 
-@gen_cluster(client=True)
-async def test_transition_failure_triggers_log_event(c, s, a, b):
+@gen_test()
+async def test_transition_failure_triggers_log_event():
     def block_on_event(input, block, executing):
         executing.set()
         block.wait()
         return input
 
-    block = Event()
-    executing = Event()
+    # Manually spin up cluster to avoid state validation on cluster shutdown in gen_cluster
+    async with Scheduler(dashboard_address=":0") as s, Worker(s.address) as w, Client(
+        s.address, asynchronous=True
+    ) as c:
+        block = Event()
+        executing = Event()
 
-    fut = c.submit(block_on_event, 0, block, executing)
-    await executing.wait()
+        fut = c.submit(block_on_event, 0, block, executing)
+        await executing.wait()
 
-    # Manually invalidate the state of the processing task
-    s.tasks[fut.key].processing_on = None
+        # Manually corrupt the state of the processing task
+        s.tasks[fut.key].processing_on = None
 
-    await block.set()
-    # vals = event["action")
-    # assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
-
-    # await async_poll_for(lambda: sum(event["action"] == "transition-failure" for _, event in s.get_events("transistions")) == 1, timeout=5)
-
-    events_failure = s.get_events("transition-failure")
-    events_trans = s.get_events("transistions")
-    await fut
+        # try:
+        await block.set()
+        await async_poll_for(
+            lambda: sum(
+                event["action"] == "transition-failure"
+                for _, event in s.get_events("transistions")
+            )
+            == 1,
+            timeout=5,
+        )
 
 
 @pytest.mark.skipif(

@@ -17,6 +17,7 @@ import textwrap
 import uuid
 import warnings
 import weakref
+from abc import abstractmethod
 from collections import defaultdict, deque
 from collections.abc import (
     Callable,
@@ -1843,6 +1844,10 @@ class SchedulerState:
                 "`distributed.scheduler.worker-saturation` must be a float > 0; got "
                 + repr(self.WORKER_SATURATION)
             )
+
+    @abstractmethod
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None:
+        ...
 
     @property
     def memory(self) -> MemoryState:
