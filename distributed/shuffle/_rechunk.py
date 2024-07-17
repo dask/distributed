@@ -361,7 +361,7 @@ class P2PRechunkLayer(Layer):
 
         from dask.array.rechunk import old_to_new
 
-        keepmap = np.zeros_like(self.keepmap)
+        keepmap = np.zeros_like(self.keepmap, dtype=bool)
         indices_to_keep = self._keys_to_indices(keys)
         _old_to_new = old_to_new(self.chunks_input, self.chunks)
 
