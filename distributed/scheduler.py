@@ -17,6 +17,7 @@ import textwrap
 import uuid
 import warnings
 import weakref
+from abc import abstractmethod
 from collections import defaultdict, deque
 from collections.abc import (
     Callable,
@@ -1842,6 +1843,10 @@ class SchedulerState:
                 + repr(self.WORKER_SATURATION)
             )
 
+    @abstractmethod
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None:
+        ...
+
     @property
     def memory(self) -> MemoryState:
         return MemoryState.sum(*(w.memory for w in self.workers.values()))
@@ -2086,6 +2091,16 @@ class SchedulerState:
             return recommendations, client_msgs, worker_msgs
         except Exception:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
+            self.log_event(
+                "transitions",
+                {
+                    "action": "scheduler-transition-failed",
+                    "key": key,
+                    "start": start,
+                    "finish": finish,
+                    "transistion_log": list(self.transition_log),
+                },
+            )
             if LOG_PDB:
                 import pdb
 
