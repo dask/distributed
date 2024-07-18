@@ -35,9 +35,12 @@ from distributed import (
     Event,
     KilledWorker,
     LocalCluster,
+    Lock,
     Nanny,
     Scheduler,
+    Variable,
     Worker,
+    worker_client,
 )
 from distributed.core import ConnectionPool, ErrorMessage, OKMessage
 from distributed.scheduler import TaskState as SchedulerTaskState
@@ -437,6 +440,50 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
     await check_worker_cleanup(a)
     await check_worker_cleanup(b, closed=True)
     await check_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1), ("", 1)],
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_erred_task_before_p2p_does_not_log_event(c, s, a, b):
+    def block_and_fail_eventually(df, lock, event):
+        with worker_client() as c:
+            with lock:
+                variable = Variable("allowed_tasks", client=c)
+                allowed_tasks = variable.get()
+                if allowed_tasks > 0:
+                    variable.set(allowed_tasks - 1)
+                    return df
+                event.wait()
+                raise RuntimeError("test error")
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    lock = Lock()
+    variable = Variable("allowed_tasks", client=c)
+
+    async with lock:
+        await variable.set(s.total_nthreads * 2 + 1)
+
+    event = Event()
+
+    df = df.map_partitions(block_and_fail_eventually, lock, event, meta=df._meta)
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = df.shuffle("x")
+        shuffle_ext = s.plugins["shuffle"]
+    out = c.compute(out)
+    await async_poll_for(lambda: shuffle_ext.active_shuffles, timeout=5)
+    await event.set()
+    with pytest.raises(RuntimeError, match="test error"):
+        await out
+
+    assert all(event["action"] != "p2p-failed" for _, event in s.get_events("p2p"))
 
 
 @gen_cluster(

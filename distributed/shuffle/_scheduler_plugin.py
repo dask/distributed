@@ -416,7 +416,11 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if finish == "erred":
             ts = self.scheduler.tasks[key]
             for active_shuffle in self.active_shuffles.values():
+                # Log once per active shuffle
                 if active_shuffle._failed:
+                    continue
+                # Log IFF a P2P task is the root cause
+                if ts.exception_blame != ts:
                     continue
                 barrier = self.scheduler.tasks[barrier_key(active_shuffle.id)]
                 if (
