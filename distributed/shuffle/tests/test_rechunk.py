@@ -233,6 +233,36 @@ async def test_cull_p2p_rechunk_independent_partitions(c, s, *ws):
 
 
 @gen_cluster(client=True)
+async def test_cull_p2p_rechunking_single_chunk(c, s, *ws):
+    a = np.random.default_rng().uniform(0, 1, 1000).reshape((10, 10, 10))
+    x = da.from_array(a, chunks=(1, 5, 1))
+    new = (5, 1, -1)
+    rechunked = rechunk(x, chunks=new, method="p2p")
+    (dsk,) = dask.optimize(rechunked)
+    culled = rechunked[:5, 1:2]
+    (dsk_culled,) = dask.optimize(culled)
+
+    # The culled graph requires only 1/2 of the input tasks
+    n_inputs = len(
+        [1 for key in dsk.dask.get_all_dependencies() if key[0].startswith("array-")]
+    )
+    assert n_inputs > 0
+    
+    n_culled_inputs = len(
+        [
+            1
+            for key in dsk_culled.dask.get_all_dependencies()
+            if key[0].startswith("array-")
+        ]
+    )
+    assert n_culled_inputs == n_inputs / 4
+    # The culled graph should also have less than 1/4 the tasks
+    assert len(dsk_culled.dask) < len(dsk.dask) / 4
+
+    assert np.all(await c.compute(culled) == a[:5, 1:2])
+
+
+@gen_cluster(client=True)
 async def test_cull_p2p_rechunk_overlapping_partitions(c, s, *ws):
     a = np.random.default_rng().uniform(0, 1, 500).reshape((10, 10, 5))
     x = da.from_array(a, chunks=(1, 5, 1))
