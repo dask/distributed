@@ -2098,7 +2098,7 @@ class SchedulerState:
                     "key": key,
                     "start": start,
                     "finish": finish,
-                    "transistion_log": self.transition_log.copy(),
+                    "transistion_log": list(self.transition_log),
                 },
             )
             if LOG_PDB:
