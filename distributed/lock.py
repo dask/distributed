@@ -1,79 +1,33 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import uuid
-from collections import defaultdict, deque
 
-from dask.utils import parse_timedelta
-
-from distributed.utils import TimeoutError, log_errors, wait_for
-from distributed.worker import get_client
+from distributed.semaphore import Semaphore
 
 logger = logging.getLogger(__name__)
 
-
-class LockExtension:
-    """An extension for the scheduler to manage Locks
-
-    This adds the following routes to the scheduler
-
-    *  lock_acquire
-    *  lock_release
-    """
-
-    def __init__(self, scheduler):
-        self.scheduler = scheduler
-        self.events = defaultdict(deque)
-        self.ids = dict()
-
-        self.scheduler.handlers.update(
-            {"lock_acquire": self.acquire, "lock_release": self.release}
-        )
-
-    @log_errors
-    async def acquire(self, name=None, id=None, timeout=None):
-        if isinstance(name, list):
-            name = tuple(name)
-        if name not in self.ids:
-            result = True
-        else:
-            while name in self.ids:
-                event = asyncio.Event()
-                self.events[name].append(event)
-                future = event.wait()
-                if timeout is not None:
-                    future = wait_for(future, timeout)
-                try:
-                    await future
-                except TimeoutError:
-                    result = False
-                    break
-                else:
-                    result = True
-                finally:
-                    event2 = self.events[name].popleft()
-                    assert event is event2
-        if result:
-            assert name not in self.ids
-            self.ids[name] = id
-        return result
-
-    @log_errors
-    def release(self, name=None, id=None):
-        if isinstance(name, list):
-            name = tuple(name)
-        if self.ids.get(name) != id:
-            raise ValueError("This lock has not yet been acquired")
-        del self.ids[name]
-        if self.events[name]:
-            self.scheduler.loop.add_callback(self.events[name][0].set)
-        else:
-            del self.events[name]
+_no_value = object()
 
 
-class Lock:
+class Lock(Semaphore):
     """Distributed Centralized Lock
+
+    .. warning::
+
+        This is using the ``distributed.Semaphore`` as a backend, which is
+        susceptible to lease overbooking. For the Lock this means that if a
+        lease is timing out, two or more instances could acquire the lock at the
+        same time. To disable lease timeouts, set
+        ``distributed.scheduler.locks.lease-timeout`` to `inf`, e.g.
+
+        .. code-block:: python
+
+            with dask.config.set({"distributed.scheduler.locks.lease-timeout": "inf"}):
+                lock = Lock("x")
+                ...
+
+        Note, that without lease timeouts, the Lock may deadlock in case of
+        cluster downscaling or worker failures.
 
     Parameters
     ----------
@@ -93,28 +47,30 @@ class Lock:
     >>> lock.release()  # doctest: +SKIP
     """
 
-    def __init__(self, name=None, client=None):
-        self._client = client
-        self.name = name or "lock-" + uuid.uuid4().hex
-        self.id = uuid.uuid4().hex
-        self._locked = False
+    def __init__(
+        self,
+        name=None,
+        client=_no_value,
+        register=True,
+        scheduler_rpc=None,
+        loop=None,
+    ):
+        if client is not _no_value:
+            import warnings
 
-    @property
-    def client(self):
-        if not self._client:
-            try:
-                self._client = get_client()
-            except ValueError:
-                pass
-        return self._client
-
-    def _verify_running(self):
-        if not self.client:
-            raise RuntimeError(
-                f"{type(self)} object not properly initialized. This can happen"
-                " if the object is being deserialized outside of the context of"
-                " a Client or Worker."
+            warnings.warn(
+                "The `client` parameter is deprecated. It is no longer necessary to pass a client to Lock.",
+                DeprecationWarning,
+                stacklevel=2,
             )
+
+        super().__init__(
+            max_leases=1,
+            name=name,
+            register=register,
+            scheduler_rpc=scheduler_rpc,
+            loop=loop,
+        )
 
     def acquire(self, blocking=True, timeout=None):
         """Acquire the lock
@@ -139,50 +95,21 @@ class Lock:
         -------
         True or False whether or not it successfully acquired the lock
         """
-        self._verify_running()
-        timeout = parse_timedelta(timeout)
-
         if not blocking:
             if timeout is not None:
                 raise ValueError("can't specify a timeout for a non-blocking call")
             timeout = 0
+        return super().acquire(timeout=timeout)
 
-        result = self.client.sync(
-            self.client.scheduler.lock_acquire,
-            name=self.name,
-            id=self.id,
-            timeout=timeout,
-        )
-        self._locked = True
-        return result
-
-    def release(self):
-        """Release the lock if already acquired"""
-        self._verify_running()
-        if not self.locked():
-            raise ValueError("Lock is not yet acquired")
-        result = self.client.sync(
-            self.client.scheduler.lock_release, name=self.name, id=self.id
-        )
-        self._locked = False
-        return result
+    async def _locked(self):
+        val = await self.scheduler.semaphore_value(name=self.name)
+        return val == 1
 
     def locked(self):
-        return self._locked
+        return self.sync(self._locked)
 
-    def __enter__(self):
-        self.acquire()
-        return self
+    def __getstate__(self):
+        return self.name
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.release()
-
-    async def __aenter__(self):
-        await self.acquire()
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.release()
-
-    def __reduce__(self):
-        return (Lock, (self.name,))
+    def __setstate__(self, state):
+        self.__init__(name=state, register=False)

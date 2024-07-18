@@ -8484,3 +8484,42 @@ async def test_scheduler_restart_exception_on_cancelled_futures(c, s, a, b):
 
     with pytest.raises(CancelledError, match="Scheduler has restarted"):
         await fut.result()
+
+
+def _release_persisted(obj):
+    return len([f.release() for f in futures_of(obj)])
+
+
+@gen_cluster(client=True)
+async def test_release_persisted_collection(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
+    arr = c.persist(da.random.random((10,), chunks=(10,)))
+
+    await wait(arr)
+
+    _release_persisted(arr)
+    while s.tasks:
+        await asyncio.sleep(0.01)
+
+    with pytest.raises(CancelledError):
+        await c.compute(arr)
+
+
+def test_release_persisted_collection_sync(c):
+    np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+    arr = da.random.random((10,), chunks=(10,)).persist()
+
+    wait(arr)
+    _release_persisted(arr)
+
+    while c.run_on_scheduler(lambda dask_scheduler: len(dask_scheduler.tasks)) > 0:
+        sleep(0.01)
+
+    with pytest.raises(CancelledError):
+        # Note: dask.compute is actually calling client.get, i.e. what we are
+        # submitting to the scheduler is different to what we are in
+        # client.compute
+        arr.compute()

@@ -102,7 +102,6 @@ from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
 from distributed.http import get_handlers
-from distributed.lock import LockExtension
 from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
@@ -180,7 +179,6 @@ DEFAULT_DATA_SIZE = parse_bytes(
 STIMULUS_ID_UNSET = "<stimulus_id unset>"
 
 DEFAULT_EXTENSIONS = {
-    "locks": LockExtension,
     "multi_locks": MultiLockExtension,
     "publish": PublishExtension,
     "replay-tasks": ReplayTaskScheduler,
@@ -4523,12 +4521,12 @@ class Scheduler(SchedulerState, ServerNode):
         dependencies: dict[Key, set[Key]],
         keys: set[Key],
     ) -> set[Key]:
-        n = 0
+        n = -1
         lost_keys = set()
         while len(dsk) != n:  # walk through new tasks, cancel any bad deps
             n = len(dsk)
             for k, deps in list(dependencies.items()):
-                if any(
+                if (k not in self.tasks and k not in dsk) or any(
                     dep not in self.tasks and dep not in dsk for dep in deps
                 ):  # bad key
                     lost_keys.add(k)
