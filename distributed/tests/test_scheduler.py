@@ -4663,8 +4663,8 @@ async def test_transition_failure_triggers_log_event():
         await block.set()
         await async_poll_for(
             lambda: sum(
-                event["action"] == "transition-failure"
-                for _, event in s.get_events("transistions")
+                event["action"] == "scheduler-transition-failed"
+                for _, event in s.get_events("transitions")
             )
             == 1,
             timeout=5,
