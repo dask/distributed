@@ -4660,7 +4660,6 @@ async def test_transition_failure_triggers_log_event():
         # Manually corrupt the state of the processing task
         s.tasks[fut.key].processing_on = None
 
-        # try:
         await block.set()
         await async_poll_for(
             lambda: sum(
