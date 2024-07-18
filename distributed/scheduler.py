@@ -2092,7 +2092,7 @@ class SchedulerState:
         except Exception:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
             self.log_event(
-                "transistions",
+                "transitions",
                 {
                     "action": "scheduler-transition-failed",
                     "key": key,
