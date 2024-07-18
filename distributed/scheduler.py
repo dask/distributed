@@ -2094,7 +2094,7 @@ class SchedulerState:
             self.log_event(
                 "transistions",
                 {
-                    "action": "transition-failure",
+                    "action": "scheduler-transition-failed",
                     "key": key,
                     "start": start,
                     "finish": finish,
