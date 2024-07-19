@@ -330,7 +330,6 @@ class Semaphore(SyncMethodMixin):
         self,
         max_leases=1,
         name=None,
-        register=True,
         scheduler_rpc=None,
         loop=None,
     ):
@@ -344,9 +343,7 @@ class Semaphore(SyncMethodMixin):
 
         self.refresh_leases = True
 
-        self._do_register = None
-        if register:
-            self._do_register = register
+        self._registered = False
 
         # this should give ample time to refresh without introducing another
         # config parameter since this *must* be smaller than the timeout anyhow
@@ -403,6 +400,8 @@ class Semaphore(SyncMethodMixin):
             )
 
     async def _register(self):
+        if self._registered:
+            return
         lease_timeout = dask.config.get("distributed.scheduler.locks.lease-timeout")
 
         if lease_timeout == "inf":
@@ -416,14 +415,14 @@ class Semaphore(SyncMethodMixin):
             lease_timeout=lease_timeout,
             operation=f"semaphore register id={self.id} name={self.name}",
         )
+        self._registered = True
 
     def register(self, **kwargs):
         return self.sync(self._register)
 
     def __await__(self):
         async def create_semaphore():
-            if self._do_register:
-                await self._register()
+            await self._register()
             return self
 
         return create_semaphore().__await__()
@@ -558,7 +557,6 @@ class Semaphore(SyncMethodMixin):
         self.__init__(
             name=name,
             max_leases=max_leases,
-            register=False,
         )
 
     def close(self):

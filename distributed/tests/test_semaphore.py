@@ -202,13 +202,8 @@ async def test_close_async(c, s, a):
         match="Closing semaphore test but there remain unreleased leases .*",
     ):
         await sem.close()
-    # After close, the semaphore is reset
-    await sem.acquire()
-    with pytest.warns(
-        RuntimeWarning,
-        match="Closing semaphore test but there remain unreleased leases .*",
-    ):
-        await sem.close()
+    with pytest.raises(RuntimeError, match="not known"):
+        await sem.acquire()
 
     sem2 = await Semaphore(name="t2", max_leases=1)
     assert await sem2.acquire()

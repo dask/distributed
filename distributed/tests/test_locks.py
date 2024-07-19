@@ -124,6 +124,24 @@ async def test_serializable(c, s, a, b):
     assert lock2.name == lock.name
 
 
+@gen_cluster(client=True)
+async def test_serializable_no_ctx(c, s, a, b):
+    def f(x, lock=None):
+        lock.acquire()
+        try:
+            assert lock.name == "x"
+            return x + 1
+        finally:
+            lock.release()
+
+    lock = Lock("x")
+    futures = c.map(f, range(10), lock=lock)
+    await c.gather(futures)
+
+    lock2 = pickle.loads(pickle.dumps(lock))
+    assert lock2.name == lock.name
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_locks(c, s):
     async with Lock("x") as l1:

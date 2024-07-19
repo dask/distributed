@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from distributed.semaphore import Semaphore
 
@@ -51,7 +52,6 @@ class Lock(Semaphore):
         self,
         name=None,
         client=_no_value,
-        register=True,
         scheduler_rpc=None,
         loop=None,
     ):
@@ -64,10 +64,10 @@ class Lock(Semaphore):
                 stacklevel=2,
             )
 
+        self.name = name or "lock-" + uuid.uuid4().hex
         super().__init__(
             max_leases=1,
             name=name,
-            register=register,
             scheduler_rpc=scheduler_rpc,
             loop=loop,
         )
@@ -112,4 +112,4 @@ class Lock(Semaphore):
         return self.name
 
     def __setstate__(self, state):
-        self.__init__(name=state, register=False)
+        self.__init__(name=state)
