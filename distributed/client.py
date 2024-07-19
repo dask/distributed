@@ -253,6 +253,11 @@ class Future(WrappedKey):
     manages future objects in the local Python process to determine what
     happens in the larger cluster.
 
+    .. note::
+
+        Users should not instantiate futures manually. This can lead to state
+        corruption and deadlocking clusters.
+
     Parameters
     ----------
     key: str, or tuple
