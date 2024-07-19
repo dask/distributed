@@ -465,8 +465,13 @@ async def test_erred_task_before_p2p_does_not_log_event(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    lock = Lock()
-    variable = Variable("allowed_tasks", client=c)
+    semaphore = Semaphore(max_leases=s.total_nthreads * 2 + 1)
+    
+    def block_and_fail_eventually(...):
+        try:
+            sem.acquire(timeout=0)
+        except TimeoutError:
+            raise RuntimeError()
 
     async with lock:
         await variable.set(s.total_nthreads * 2 + 1)
