@@ -343,7 +343,8 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 2,
         "partially_saturated": 0,
         "saturated": 0,
-        "paused_or_retiring": 0,
+        "paused": 0,
+        "retiring": 0,
     }
 
     ev = Event()
@@ -353,7 +354,8 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 1,
         "saturated": 0,
-        "paused_or_retiring": 0,
+        "paused": 0,
+        "retiring": 0,
     }
 
     y = c.submit(lambda ev: ev.wait(), ev, key="y", workers=[a.address])
@@ -365,7 +367,8 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 0,
         "saturated": 1,
-        "paused_or_retiring": 0,
+        "paused": 0,
+        "retiring": 0,
     }
 
     a.monitor.get_process_memory = lambda: 2**40
@@ -375,9 +378,21 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 0,
         "saturated": 0,
-        "paused_or_retiring": 1,
+        "paused": 1,
+        "retiring": 0,
     }
 
+    sa.status = Status.stopping
+    while sa.status != Status.stopping:
+        await asyncio.sleep(0.01)
+
+    assert await fetch_metrics() == {
+        "idle": 1,
+        "partially_saturated": 0,
+        "saturated": 0,
+        "paused": 0,
+        "retiring": 1,
+    }
     await ev.set()
 
 

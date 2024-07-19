@@ -7,6 +7,7 @@ import prometheus_client
 import toolz
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
+from distributed.core import Status
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricCollector
 from distributed.http.scheduler.prometheus.stealing import WorkStealingMetricCollector
@@ -49,9 +50,15 @@ class SchedulerMetricCollector(PrometheusCollector):
             - len(self.server.saturated),
         )
         worker_states.add_metric(["saturated"], len(self.server.saturated))
-        worker_states.add_metric(
-            ["paused_or_retiring"], len(self.server.workers) - len(self.server.running)
+        paused_workers = len(
+            [w for w in self.server.workers.values() if w.status == Status.paused]
         )
+        worker_states.add_metric(["paused"], paused_workers)
+        worker_states.add_metric(
+            ["retiring"],
+            len(self.server.workers) - paused_workers - len(self.server.running),
+        )
+
         yield worker_states
 
         if self.server.monitor.monitor_gil_contention:
