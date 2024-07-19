@@ -2822,6 +2822,8 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert tg.states["memory"] == 0
     assert tg.states["released"] == 5
     assert sum(tg.states.values()) == 5
+    assert len(tg) == 5
+    assert len(tp) == 5
     assert tg.nbytes_total == sum(
         ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg
     )
@@ -2844,6 +2846,8 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
     assert sum(tg.states.values()) == 5
+    assert len(tg) == 5
+    assert len(tp) == 5
 
     tp = s.task_prefixes["add"]
     assert tg.prefix is tp
@@ -2881,6 +2885,9 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert tg.states["forgotten"] == 4
     assert tg.states["released"] == 1
     assert sum(tg.states.values()) == 5
+    assert len(tg) == 5
+    assert len(tp) == 5
+
     assert tg.states == tp.states
     with pytest.warns(FutureWarning, match="active_states"):
         assert tp.states == tp.active_states
@@ -2895,6 +2902,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
 
     assert tg.states["forgotten"] == 5
     assert sum(tg.states.values()) == 5
+    assert len(tg) == 5
 
     assert tg.states["forgotten"] == 5
     assert tg.name not in s.task_groups
@@ -2913,6 +2921,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert all(count == 0 for count in tp.states.values())
     with pytest.warns(FutureWarning, match="active_states"):
         assert tp.states == tp.active_states
+    assert len(tp) == 0
     assert tp.duration == 0
     assert tp.nbytes_total == 0
     assert tp.types == set()

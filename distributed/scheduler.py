@@ -1000,6 +1000,9 @@ class TaskCollection:
     def _calculate_duration_us(start: float, stop: float) -> int:
         return max(round((stop - start) * 1e6), 0)
 
+    def __len__(self) -> int:
+        return sum(self.states.values())
+
 
 class TaskPrefix(TaskCollection):
     """Collection tracking all tasks within a prefix
@@ -1189,9 +1192,6 @@ class TaskGroup(TaskCollection):
             )
             + ">"
         )
-
-    def __len__(self) -> int:
-        return sum(self.states.values())
 
     def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
