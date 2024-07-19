@@ -35,12 +35,10 @@ from distributed import (
     Event,
     KilledWorker,
     LocalCluster,
-    Lock,
     Nanny,
     Scheduler,
-    Variable,
+    Semaphore,
     Worker,
-    worker_client,
 )
 from distributed.core import ConnectionPool, ErrorMessage, OKMessage
 from distributed.scheduler import TaskState as SchedulerTaskState
@@ -448,16 +446,12 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_erred_task_before_p2p_does_not_log_event(c, s, a, b):
-    def block_and_fail_eventually(df, lock, event):
-        with worker_client() as c:
-            with lock:
-                variable = Variable("allowed_tasks", client=c)
-                allowed_tasks = variable.get()
-                if allowed_tasks > 0:
-                    variable.set(allowed_tasks - 1)
-                    return df
-                event.wait()
-                raise RuntimeError("test error")
+    def block_and_fail_eventually(df, semaphore, event):
+        acquired = semaphore.acquire(timeout=0)
+        if acquired:
+            return df
+        event.wait()
+        raise RuntimeError("test error")
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -465,20 +459,10 @@ async def test_erred_task_before_p2p_does_not_log_event(c, s, a, b):
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
-    semaphore = Semaphore(max_leases=s.total_nthreads * 2 + 1)
-    
-    def block_and_fail_eventually(...):
-        try:
-            sem.acquire(timeout=0)
-        except TimeoutError:
-            raise RuntimeError()
-
-    async with lock:
-        await variable.set(s.total_nthreads * 2 + 1)
-
+    semaphore = await Semaphore(max_leases=s.total_nthreads * 2 + 1)
     event = Event()
 
-    df = df.map_partitions(block_and_fail_eventually, lock, event, meta=df._meta)
+    df = df.map_partitions(block_and_fail_eventually, semaphore, event, meta=df._meta)
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = df.shuffle("x")
         shuffle_ext = s.plugins["shuffle"]
