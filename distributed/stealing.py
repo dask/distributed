@@ -178,13 +178,13 @@ class WorkStealing(SchedulerPlugin):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        if finish == "processing":
-            ts = self.scheduler.tasks[key]
-            self.put_key_in_stealable(ts)
-        elif start == "processing":
+        if start == "processing":
             ts = self.scheduler.tasks[key]
             self.remove_key_from_stealable(ts)
             self._remove_from_in_flight(ts)
+        if finish == "processing":
+            ts = self.scheduler.tasks[key]
+            self.put_key_in_stealable(ts)
 
     def _add_to_in_flight(self, ts: TaskState, info: InFlightInfo) -> None:
         self.in_flight[ts] = info
@@ -231,10 +231,7 @@ class WorkStealing(SchedulerPlugin):
             return
 
         worker, level = result
-        try:
-            self.stealable[worker][level].remove(ts)
-        except KeyError:
-            pass
+        self.stealable[worker][level].discard(ts)
 
     def steal_time_ratio(self, ts: TaskState) -> tuple[float, int] | tuple[None, None]:
         """The compute to communication time ratio of a key
@@ -328,7 +325,7 @@ class WorkStealing(SchedulerPlugin):
                 pdb.set_trace()
             raise
 
-    async def move_task_confirm(
+    def move_task_confirm(
         self, *, key: str, state: str, stimulus_id: str, worker: str | None = None
     ) -> None:
         try:
@@ -350,8 +347,7 @@ class WorkStealing(SchedulerPlugin):
         victim = info["victim"]
         logger.debug("Confirm move %s, %s -> %s.  State: %s", key, victim, thief, state)
 
-        if self.scheduler.validate:
-            assert ts.processing_on == victim
+        assert ts.processing_on == victim
 
         try:
             _log_msg = [key, state, victim.address, thief.address, stimulus_id]

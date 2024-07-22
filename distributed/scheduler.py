@@ -569,7 +569,9 @@ class WorkerState:
         return self._hash
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, WorkerState) and other.server_id == self.server_id
+        return self is other or (
+            isinstance(other, WorkerState) and other.server_id == self.server_id
+        )
 
     @property
     def has_what(self) -> Set[TaskState]:
