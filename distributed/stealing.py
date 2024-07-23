@@ -181,7 +181,7 @@ class WorkStealing(SchedulerPlugin):
         # By first checking whether we've started in processing
         # and then checking whether we've finished in processing,
         # this logic also handles transitions that end up in the same state.
-        # Since finish is the actual end state of the task - not the desired one,
+        # Since finish is the actual end state of the task, not the desired one,
         # this could occur if a transaction decides against moving the task to the
         # desired state.
         if start == "processing":
