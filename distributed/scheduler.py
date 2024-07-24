@@ -55,7 +55,8 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.utils
 from dask.base import TokenizationError, normalize_token, tokenize
-from dask.core import get_deps, iskey, validate_key
+from dask.core import reverse_dict, validate_key
+from dask.task_spec import DependenciesMapping, convert_old_style_dsk, resolve_aliases
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
@@ -135,10 +136,8 @@ from distributed.utils_comm import (
     gather_from_workers,
     retry_operation,
     scatter_to_workers,
-    unpack_remotedata,
 )
 from distributed.variable import VariableExtension
-from distributed.worker import _normalize_task
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -775,17 +774,20 @@ class WorkerState:
                 self._dec_needs_replica(dts)
 
     def _remove_from_task_prefix_count(self, ts: TaskState) -> None:
-        count = self.task_prefix_count[ts.prefix.name] - 1
+        prefix_name = ts.prefix.name
+        count = self.task_prefix_count[prefix_name] - 1
+        tp_count = self.task_prefix_count
+        tp_count_global = self.scheduler._task_prefix_count_global
         if count:
-            self.task_prefix_count[ts.prefix.name] = count
+            tp_count[prefix_name] = count
         else:
-            del self.task_prefix_count[ts.prefix.name]
+            del tp_count[prefix_name]
 
-        count = self.scheduler._task_prefix_count_global[ts.prefix.name] - 1
+        count = tp_count_global[prefix_name] - 1
         if count:
-            self.scheduler._task_prefix_count_global[ts.prefix.name] = count
+            tp_count_global[prefix_name] = count
         else:
-            del self.scheduler._task_prefix_count_global[ts.prefix.name]
+            del tp_count_global[prefix_name]
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
@@ -3186,13 +3188,14 @@ class SchedulerState:
         for this task, `distributed.scheduler.unknown-task-duration` is used
         instead.
         """
-        duration: float = ts.prefix.duration_average
+        prefix = ts.prefix
+        duration: float = prefix.duration_average
         if duration >= 0:
             return duration
 
-        s = self.unknown_durations.get(ts.prefix.name)
+        s = self.unknown_durations.get(prefix.name)
         if s is None:
-            self.unknown_durations[ts.prefix.name] = s = set()
+            self.unknown_durations[prefix.name] = s = set()
         s.add(ts)
         return self.UNKNOWN_TASK_DURATION
 
@@ -3590,7 +3593,7 @@ class SchedulerState:
             "duration": duration,
             "stimulus_id": f"compute-task-{time()}",
             "who_has": {
-                dts.key: [ws.address for ws in dts.who_has or ()]
+                dts.key: tuple(ws.address for ws in (dts.who_has or ()))
                 for dts in ts.dependencies
             },
             "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
@@ -4626,9 +4629,10 @@ class Scheduler(SchedulerState, ServerNode):
         while len(dsk) != n:  # walk through new tasks, cancel any bad deps
             n = len(dsk)
             for k, deps in list(dependencies.items()):
-                if (k not in self.tasks and k not in dsk) or any(
+                bad_deps = tuple(
                     dep not in self.tasks and dep not in dsk for dep in deps
-                ):  # bad key
+                )
+                if (k not in self.tasks and k not in dsk) or any(bad_deps):  # bad key
                     lost_keys.add(k)
                     logger.info("User asked for computation on lost data, %s", k)
                     del dsk[k]
@@ -4645,7 +4649,7 @@ class Scheduler(SchedulerState, ServerNode):
                     done.add(k)
 
         if done:
-            dependents = dask.core.reverse_dict(dependencies)
+            dependents = reverse_dict(dependencies)
             stack = list(done)
             while stack:  # remove unnecessary dependencies
                 key = stack.pop()
@@ -4850,6 +4854,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         start = time()
         try:
+            logger.debug("Received new graph. Deserializing...")
             try:
                 graph = deserialize(graph_header, graph_frames).data
                 del graph_header, graph_frames
@@ -4869,7 +4874,14 @@ class Scheduler(SchedulerState, ServerNode):
                 _materialize_graph,
                 graph=graph,
                 global_annotations=annotations or {},
+                validate=self.validate,
             )
+
+            logger.debug("Materialization done. Got %i tasks.", len(dsk))
+            dependents = reverse_dict(dependencies)
+            dsk = resolve_aliases(dsk, keys, dependents)
+            dependencies = dict(DependenciesMapping(dsk))
+            logger.debug("Removing aliases. %i left", len(dsk))
             del graph
             if not internal_priority:
                 # Removing all non-local keys before calling order()
@@ -4881,11 +4893,13 @@ class Scheduler(SchedulerState, ServerNode):
                     for k, v in dependencies.items()
                     if k in dsk_keys
                 }
+
                 internal_priority = await offload(
                     dask.order.order, dsk=dsk, dependencies=stripped_deps
                 )
-            dsk = valmap(_normalize_task, dsk)
+            logger.debug("Ordering done.")
 
+            before = len(self.tasks)
             self._create_taskstate_from_graph(
                 dsk=dsk,
                 client=client,
@@ -4905,7 +4919,8 @@ class Scheduler(SchedulerState, ServerNode):
                 start=start,
                 stimulus_id=stimulus_id or f"update-graph-{start}",
             )
-        except RuntimeError as e:
+            logger.debug("Task state created. %i new tasks", len(self.tasks) - before)
+        except Exception as e:
             logger.error(str(e))
             err = error_message(e)
             for key in keys:
@@ -5974,7 +5989,8 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         if worker not in self.workers:
             return
-        self.validate_key(key)
+        if self.validate:
+            self.validate_key(key)
 
         r: tuple = self.stimulus_task_finished(
             key=key, worker=worker, stimulus_id=stimulus_id, **msg
@@ -7804,9 +7820,11 @@ class Scheduler(SchedulerState, ServerNode):
     def get_who_has(self, keys: Iterable[Key] | None = None) -> dict[Key, list[str]]:
         if keys is not None:
             return {
-                key: [ws.address for ws in self.tasks[key].who_has or ()]
-                if key in self.tasks
-                else []
+                key: (
+                    [ws.address for ws in self.tasks[key].who_has or ()]
+                    if key in self.tasks
+                    else []
+                )
                 for key in keys
             }
         else:
@@ -7821,9 +7839,11 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: [ts.key for ts in self.workers[w].has_what]
-                if w in self.workers
-                else []
+                w: (
+                    [ts.key for ts in self.workers[w].has_what]
+                    if w in self.workers
+                    else []
+                )
                 for w in workers
             }
         else:
@@ -9337,11 +9357,12 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 
 def _materialize_graph(
-    graph: HighLevelGraph, global_annotations: dict[str, Any]
+    graph: HighLevelGraph, global_annotations: dict[str, Any], validate: bool
 ) -> tuple[dict[Key, T_runspec], dict[Key, set[Key]], dict[str, dict[Key, Any]]]:
     dsk = ensure_dict(graph)
-    for k in dsk:
-        validate_key(k)
+    if validate:
+        for k in dsk:
+            validate_key(k)
     annotations_by_type: defaultdict[str, dict[Key, Any]] = defaultdict(dict)
     for annotations_type, value in global_annotations.items():
         annotations_by_type[annotations_type].update(
@@ -9355,33 +9376,10 @@ def _materialize_graph(
                 annotations_by_type[annot_type].update(
                     {k: (value(k) if callable(value) else value) for k in layer}
                 )
-    dependencies, _ = get_deps(dsk)
 
-    # Remove `Future` objects from graph and note any future dependencies
-    dsk2 = {}
-    fut_deps = {}
-    for k, v in dsk.items():
-        v, futs = unpack_remotedata(v, byte_keys=True)
-        if futs:
-            fut_deps[k] = futs
-
-        # Remove aliases {x: x}.
-        # FIXME: This is an artifact generated by unpack_remotedata when using persisted
-        # collections. There should be a better way to achieve that tasks are not self
-        # referencing themselves.
-        if not iskey(v) or v != k:
-            dsk2[k] = v
-
-    dsk = dsk2
-
-    # - Add in deps for any tasks that depend on futures
-    for k, futures in fut_deps.items():
-        dependencies[k].update(f.key for f in futures)
-
-    # Remove any self-dependencies (happens on test_publish_bag() and others)
-    for k, v in dependencies.items():
-        deps = set(v)
-        deps.discard(k)
-        dependencies[k] = deps
-
-    return dsk, dependencies, annotations_by_type
+    dsk2 = convert_old_style_dsk(dsk)
+    dependencies = DependenciesMapping(dsk2)
+    # FIXME: There should be no need to fully materialize and copy this but some
+    # sections in the scheduler are mutating it.
+    dependencies = {k: set(v) for k, v in dependencies.items()}
+    return dsk2, dependencies, annotations_by_type

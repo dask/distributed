@@ -123,6 +123,7 @@ import dask.config
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
+from dask.task_spec import KeyRef, Task
 from dask.typing import Key
 
 from distributed.core import PooledRPCCall
@@ -141,7 +142,6 @@ from distributed.shuffle._pickle import unpickle_bytestream
 from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
-from distributed.utils_comm import DoNotUnpack
 
 if TYPE_CHECKING:
     import numpy as np
@@ -572,19 +572,20 @@ def partial_concatenate(
         )
         if _slicing_is_necessary(ndslice, original_shape):  # type: ignore
             key = (slice_group,) + ndpartial.ix + old_global_index
-            rec_cat_arg[old_partial_index] = key
-            dsk[key] = (
+            rec_cat_arg[old_partial_index] = KeyRef(key)
+            dsk[key] = Task(
+                key,
                 getitem,
-                (input_name,) + old_global_index,
-                ndslice,
+                (
+                    KeyRef((input_name,) + old_global_index),
+                    ndslice,
+                ),
             )
         else:
-            rec_cat_arg[old_partial_index] = (input_name,) + old_global_index
+            rec_cat_arg[old_partial_index] = KeyRef((input_name,) + old_global_index)
     global_index = tuple(int(slice_.start) for slice_ in ndpartial.new)
-    dsk[(rechunk_name(token),) + global_index] = (
-        concatenate3,
-        rec_cat_arg.tolist(),
-    )
+    k = (rechunk_name(token),) + global_index
+    dsk[k] = Task(k, concatenate3, (rec_cat_arg.tolist(),))
     return dsk
 
 
@@ -655,37 +656,49 @@ def partial_rechunk(
         )
         if _slicing_is_necessary(ndslice, original_shape):  # type: ignore
             input_key = (slice_group,) + ndpartial.ix + global_index
-            dsk[input_key] = (
+            dsk[input_key] = Task(
+                input_key,
                 getitem,
-                (input_name,) + global_index,
-                ndslice,
+                (
+                    KeyRef((input_name,) + global_index),
+                    ndslice,
+                ),
             )
         else:
             input_key = (input_name,) + global_index
 
         key = (transfer_group,) + ndpartial.ix + global_index
-        transfer_keys.append(key)
-        dsk[key] = (
+        transfer_keys.append(KeyRef(key))
+        dsk[key] = Task(
+            key,
             rechunk_transfer,
-            input_key,
-            partial_token,
-            DoNotUnpack(partial_index),
-            DoNotUnpack(partial_new),
-            DoNotUnpack(partial_old),
-            disk,
+            (
+                KeyRef(input_key),
+                partial_token,
+                partial_index,
+                partial_new,
+                partial_old,
+                disk,
+            ),
         )
 
-    dsk[_barrier_key] = (shuffle_barrier, partial_token, transfer_keys)
+    dsk[_barrier_key] = Task(
+        _barrier_key, shuffle_barrier, (partial_token, transfer_keys)
+    )
 
     new_partial_offset = tuple(axis.start for axis in ndpartial.new)
     for partial_index in _partial_ndindex(ndpartial.new):
         global_index = _global_index(partial_index, new_partial_offset)
         if keepmap[global_index]:
-            dsk[(unpack_group,) + global_index] = (
+            k = (unpack_group,) + global_index
+            dsk[k] = Task(
+                k,
                 rechunk_unpack,
-                partial_token,
-                partial_index,
-                _barrier_key,
+                (
+                    partial_token,
+                    partial_index,
+                    KeyRef(_barrier_key),
+                ),
             )
     return dsk
 

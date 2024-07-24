@@ -13,6 +13,7 @@ from tlz import drop, groupby, merge
 
 import dask.config
 from dask.optimization import SubgraphCallable
+from dask.task_spec import WrappedKey  # noqa: F401
 from dask.typing import Key
 from dask.utils import is_namedtuple_instance, parse_timedelta
 
@@ -128,24 +129,6 @@ async def gather_from_workers(
                         to_gather[key].remove(address)
 
     return data, [], failed_keys, list(missing_workers)
-
-
-class WrappedKey:
-    """Interface for a key in a dask graph.
-
-    Subclasses must have .key attribute that refers to a key in a dask graph.
-
-    Sometimes we want to associate metadata to keys in a dask graph.  For
-    example we might know that that key lives on a particular machine or can
-    only be accessed in a certain way.  Schedulers may have particular needs
-    that can only be addressed by additional metadata.
-    """
-
-    def __init__(self, key):
-        self.key = key
-
-    def __repr__(self):
-        return f"{type(self).__name__}('{self.key}')"
 
 
 _round_robin_counter = [0]

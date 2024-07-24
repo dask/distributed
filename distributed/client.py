@@ -938,16 +938,19 @@ class _MapLayer(Layer):
             kwargs2 = {}
             dsk = {}
             for k, v in self.kwargs.items():
+                from dask.task_spec import Task, parse_input
+
+                vv = parse_input(v)
                 if sizeof(v) > 1e5:
-                    vv = dask.delayed(v)
-                    kwargs2[k] = vv._key
-                    dsk.update(vv.dask)
+                    kwargs2[k] = vv.ref()
+                    dsk[vv.key] = vv
                 else:
-                    kwargs2[k] = v
+                    kwargs2[k] = vv
 
                 dsk.update(
                     {
-                        key: (apply, self.func, (tuple, list(args)), kwargs2)
+                        key: Task(key, self.func, args, kwargs2)
+                        # (apply, self.func, (tuple, list(args)), kwargs2)
                         for key, args in zip(self._keys, zip(*self.iterables))
                     }
                 )
@@ -4461,7 +4464,7 @@ class Client(SyncMethodMixin):
         self,
         filename: str = "dask-cluster-dump",
         write_from_scheduler: bool | None = None,
-        exclude: Collection[str] = ("run_spec",),
+        exclude: Collection[str] = (),
         format: Literal["msgpack", "yaml"] = "msgpack",
         **storage_options,
     ):
