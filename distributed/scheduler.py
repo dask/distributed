@@ -3601,8 +3601,6 @@ class Scheduler(SchedulerState, ServerNode):
     def __init__(
         self,
         loop=None,
-        delete_interval="500ms",
-        synchronize_worker_interval="60s",
         services=None,
         service_kwargs=None,
         allowed_failures=None,
@@ -3651,10 +3649,6 @@ class Scheduler(SchedulerState, ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.proc = psutil.Process()
-        self.delete_interval = parse_timedelta(delete_interval, default="ms")
-        self.synchronize_worker_interval = parse_timedelta(
-            synchronize_worker_interval, default="ms"
-        )
         self.service_specs = services or {}
         self.service_kwargs = service_kwargs or {}
         self.services = {}
