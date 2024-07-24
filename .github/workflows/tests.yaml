@@ -162,7 +162,7 @@ jobs:
           # Increase this value to reset cache if
           # continuous_integration/environment-${{ matrix.environment }}.yaml has not
           # changed. See also same variable in .pre-commit-config.yaml
-          CACHE_NUMBER: 2
+          CACHE_NUMBER: 0
         id: cache
 
       - name: Update environment

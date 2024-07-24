@@ -37,6 +37,8 @@ from typing import (
     cast,
 )
 
+from dask._task_spec import DataNode, Task
+
 if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
@@ -52,7 +54,6 @@ from dask.optimization import SubgraphCallable
 from dask.tokenize import tokenize
 from dask.typing import Key, NoDefault, no_default
 from dask.utils import (
-    apply,
     ensure_dict,
     format_bytes,
     funcname,
@@ -73,6 +74,8 @@ except ImportError:
     single_key = first
 from tornado import gen
 from tornado.ioloop import IOLoop
+
+from dask._task_spec import TaskRef
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -123,7 +126,6 @@ from distributed.utils import (
     thread_state,
 )
 from distributed.utils_comm import (
-    WrappedKey,
     gather_from_workers,
     pack_data,
     retry_operation,
@@ -250,7 +252,7 @@ def _del_global_client(c: Client) -> None:
             pass
 
 
-class Future(WrappedKey):
+class Future(TaskRef):
     """A remotely running computation
 
     A Future is a local proxy to a result running on a remote worker.  A user
@@ -598,6 +600,9 @@ class Future(WrappedKey):
         except RuntimeError:  # closed event loop
             pass
 
+    def __str__(self):
+        return repr(self)
+
     def __repr__(self):
         if self.type:
             return (
@@ -615,6 +620,9 @@ class Future(WrappedKey):
 
     def __await__(self):
         return self.result().__await__()
+
+    def __hash__(self):
+        return hash(self._id)
 
 
 class FutureState:
@@ -928,15 +936,15 @@ class _MapLayer(Layer):
             dsk = {}
             for k, v in self.kwargs.items():
                 if sizeof(v) > 1e5:
-                    vv = dask.delayed(v)
-                    kwargs2[k] = vv._key
-                    dsk.update(vv.dask)
+                    vv = DataNode(k, v)
+                    kwargs2[k] = vv.ref()
+                    dsk[vv.key] = vv
                 else:
                     kwargs2[k] = v
 
                 dsk.update(
                     {
-                        key: (apply, self.func, (tuple, list(args)), kwargs2)
+                        key: Task(key, self.func, *args, **kwargs2)
                         for key, args in zip(self._keys, zip(*self.iterables))
                     }
                 )
@@ -2158,10 +2166,14 @@ class Client(SyncMethodMixin):
         if isinstance(workers, (str, Number)):
             workers = [workers]
 
-        if kwargs:
-            dsk = {key: (apply, func, list(args), kwargs)}
-        else:
-            dsk = {key: (func,) + tuple(args)}
+        dsk = {
+            key: Task(
+                key,
+                func,
+                *args,
+                **kwargs,
+            )
+        }
         futures = self._graph_to_futures(
             dsk,
             [key],
@@ -4460,7 +4472,7 @@ class Client(SyncMethodMixin):
         self,
         filename: str = "dask-cluster-dump",
         write_from_scheduler: bool | None = None,
-        exclude: Collection[str] = ("run_spec",),
+        exclude: Collection[str] = (),
         format: Literal["msgpack", "yaml"] = "msgpack",
         **storage_options,
     ):
@@ -6092,7 +6104,7 @@ def futures_of(o, client=None):
             stack.extend(x.values())
         elif type(x) is SubgraphCallable:
             stack.extend(x.dsk.values())
-        elif isinstance(x, WrappedKey):
+        elif isinstance(x, TaskRef):
             if x not in seen:
                 seen.add(x)
                 futures.append(x)

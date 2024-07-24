@@ -53,7 +53,7 @@ dependencies:
   # Temporary fix for https://github.com/pypa/setuptools/issues/4496
   - setuptools < 71
   - pip:
-      - git+https://github.com/dask/dask
+      - git+https://github.com/fjetter/dask@task_spec_class
       - git+https://github.com/dask-contrib/dask-expr
       - git+https://github.com/dask/zict
       - git+https://github.com/dask/crick  # Only tested here
