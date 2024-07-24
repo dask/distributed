@@ -12,6 +12,7 @@ from typing import Any, TypeVar
 from tlz import drop, groupby, merge
 
 import dask.config
+from dask._task_spec import TaskRef
 from dask.optimization import SubgraphCallable
 from dask.typing import Key
 from dask.utils import is_namedtuple_instance, parse_timedelta
@@ -20,6 +21,10 @@ from distributed.core import ConnectionPool, rpc
 from distributed.utils import All
 
 logger = logging.getLogger(__name__)
+
+
+# Backwards compat
+WrappedKey = TaskRef
 
 
 async def gather_from_workers(
@@ -130,24 +135,6 @@ async def gather_from_workers(
     return data, [], failed_keys, list(missing_workers)
 
 
-class WrappedKey:
-    """Interface for a key in a dask graph.
-
-    Subclasses must have .key attribute that refers to a key in a dask graph.
-
-    Sometimes we want to associate metadata to keys in a dask graph.  For
-    example we might know that that key lives on a particular machine or can
-    only be accessed in a certain way.  Schedulers may have particular needs
-    that can only be addressed by additional metadata.
-    """
-
-    def __init__(self, key):
-        self.key = key
-
-    def __repr__(self):
-        return f"{type(self).__name__}('{self.key}')"
-
-
 _round_robin_counter = [0]
 
 
@@ -202,7 +189,7 @@ def _namedtuple_packing(o: Any, handler: Callable[..., Any]) -> Any:
 
 
 def _unpack_remotedata_inner(
-    o: Any, byte_keys: bool, found_futures: set[WrappedKey]
+    o: Any, byte_keys: bool, found_futures: set[TaskRef]
 ) -> Any:
     """Inner implementation of `unpack_remotedata` that adds found wrapped keys to `found_futures`"""
 
@@ -212,7 +199,7 @@ def _unpack_remotedata_inner(
             return o
         if type(o[0]) is SubgraphCallable:
             # Unpack futures within the arguments of the subgraph callable
-            futures: set[WrappedKey] = set()
+            futures: set[TaskRef] = set()
             args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])
             found_futures.update(futures)
 
@@ -261,7 +248,7 @@ def _unpack_remotedata_inner(
             }
         else:
             return o
-    elif issubclass(typ, WrappedKey):  # TODO use type is Future
+    elif issubclass(typ, TaskRef):  # TODO use type is Future
         k = o.key
         found_futures.add(o)
         return k
@@ -277,33 +264,33 @@ class DoNotUnpack(tuple):
 
 
 def unpack_remotedata(o: Any, byte_keys: bool = False) -> tuple[Any, set]:
-    """Unpack WrappedKey objects from collection
+    """Unpack TaskRef objects from collection
 
-    Returns original collection and set of all found WrappedKey objects
+    Returns original collection and set of all found TaskRef objects
 
     Examples
     --------
-    >>> rd = WrappedKey('mykey')
+    >>> rd = TaskRef('mykey')
     >>> unpack_remotedata(1)
     (1, set())
     >>> unpack_remotedata(())
     ((), set())
     >>> unpack_remotedata(rd)
-    ('mykey', {WrappedKey('mykey')})
+    ('mykey', {TaskRef('mykey')})
     >>> unpack_remotedata([1, rd])
-    ([1, 'mykey'], {WrappedKey('mykey')})
+    ([1, 'mykey'], {TaskRef('mykey')})
     >>> unpack_remotedata({1: rd})
-    ({1: 'mykey'}, {WrappedKey('mykey')})
+    ({1: 'mykey'}, {TaskRef('mykey')})
     >>> unpack_remotedata({1: [rd]})
-    ({1: ['mykey']}, {WrappedKey('mykey')})
+    ({1: ['mykey']}, {TaskRef('mykey')})
 
     Use the ``byte_keys=True`` keyword to force string keys
 
-    >>> rd = WrappedKey(('x', 1))
+    >>> rd = TaskRef(('x', 1))
     >>> unpack_remotedata(rd, byte_keys=True)
-    ("('x', 1)", {WrappedKey('('x', 1)')})
+    ("('x', 1)", {TaskRef('('x', 1)')})
     """
-    found_futures: set[WrappedKey] = set()
+    found_futures: set[TaskRef] = set()
     return _unpack_remotedata_inner(o, byte_keys, found_futures), found_futures
 
 

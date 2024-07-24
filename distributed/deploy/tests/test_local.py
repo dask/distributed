@@ -1066,7 +1066,11 @@ async def test_threads_per_worker_set_to_0():
         Warning, match="Setting `threads_per_worker` to 0 has been deprecated."
     ):
         async with LocalCluster(
-            n_workers=2, processes=False, threads_per_worker=0, asynchronous=True
+            n_workers=2,
+            processes=False,
+            threads_per_worker=0,
+            asynchronous=True,
+            dashboard_address=":0",
         ) as cluster:
             assert len(cluster.workers) == 2
             assert all(w.state.nthreads < CPU_COUNT for w in cluster.workers.values())
@@ -1170,7 +1174,10 @@ async def test_local_cluster_redundant_kwarg(nanny):
 @gen_test()
 async def test_cluster_info_sync():
     async with LocalCluster(
-        processes=False, asynchronous=True, scheduler_sync_interval="1ms"
+        processes=False,
+        asynchronous=True,
+        scheduler_sync_interval="1ms",
+        dashboard_address=":0",
     ) as cluster:
         assert cluster._cluster_info["name"] == cluster.name
 
@@ -1197,7 +1204,10 @@ async def test_cluster_info_sync():
 @gen_test()
 async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
     async with LocalCluster(
-        processes=False, asynchronous=True, scheduler_sync_interval="1ms"
+        processes=False,
+        asynchronous=True,
+        scheduler_sync_interval="1ms",
+        dashboard_address=":0",
     ) as cluster:
         assert cluster._cluster_info["name"] == cluster.name
 
@@ -1235,7 +1245,9 @@ async def test_cluster_info_sync_is_robust_to_network_blips(monkeypatch):
 @gen_test()
 async def test_cluster_host_used_throughout_cluster(host, use_nanny):
     """Ensure that the `host` kwarg is propagated through scheduler, nanny, and workers"""
-    async with LocalCluster(host=host, asynchronous=True) as cluster:
+    async with LocalCluster(
+        host=host, asynchronous=True, dashboard_address=":0"
+    ) as cluster:
         url = urlparse(cluster.scheduler_address)
         assert url.hostname == "127.0.0.1"
         for worker in cluster.workers.values():
@@ -1249,7 +1261,9 @@ async def test_cluster_host_used_throughout_cluster(host, use_nanny):
 
 @gen_test()
 async def test_connect_to_closed_cluster():
-    async with LocalCluster(processes=False, asynchronous=True) as cluster:
+    async with LocalCluster(
+        processes=False, asynchronous=True, dashboard_address=":0"
+    ) as cluster:
         async with Client(cluster, asynchronous=True) as c1:
             assert await c1.submit(inc, 1) == 2
 

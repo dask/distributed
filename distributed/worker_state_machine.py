@@ -751,7 +751,7 @@ class ComputeTaskEvent(StateMachineEvent):
         if isinstance(self.run_spec, ToPickle):
             # FIXME Sometimes the protocol is not unpacking this
             # E.g. distributed/tests/test_client.py::test_async_with
-            self.run_spec = self.run_spec.data  # type: ignore[unreachable]
+            self.run_spec = self.run_spec.data
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         return StateMachineEvent._to_dict(self._clean(), exclude=exclude)

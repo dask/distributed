@@ -36,7 +36,7 @@ if WINDOWS:
 
 @gen_test()
 async def test_jupyter_server():
-    async with Scheduler(jupyter=True) as s:
+    async with Scheduler(jupyter=True, dashboard_address=":0") as s:
         http_client = AsyncHTTPClient()
         response = await http_client.fetch(
             f"http://localhost:{s.http_server.port}/jupyter/api/status"
@@ -66,7 +66,7 @@ def test_jupyter_cli(loop):
 @gen_test()
 async def test_jupyter_idle_timeout():
     "An active Jupyter session should prevent idle timeout"
-    async with Scheduler(jupyter=True, idle_timeout=0.2) as s:
+    async with Scheduler(jupyter=True, idle_timeout=0.2, dashboard_address=":0") as s:
         web_app = s._jupyter_server_application.web_app
 
         # Jupyter offers a place for extensions to provide updates on their last-active
@@ -93,7 +93,7 @@ async def test_jupyter_idle_timeout():
 @gen_test()
 async def test_jupyter_idle_timeout_returned():
     "`check_idle` should return the last Jupyter idle time. Used in dask-kubernetes."
-    async with Scheduler(jupyter=True) as s:
+    async with Scheduler(jupyter=True, dashboard_address=":0") as s:
         web_app = s._jupyter_server_application.web_app
         extension_last_activty = web_app.settings["last_activity_times"]
 
