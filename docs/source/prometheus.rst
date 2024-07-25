@@ -49,6 +49,13 @@ dask_scheduler_gil_contention_seconds_total
        ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
 
+dask_scheduler_gc_collection_seconds_total
+    Total time spent on garbage dask_scheduler_gc_collection_seconds_total
+
+    .. note::
+        Due to measurement overhead, this metric only measures
+        time spent on garbage collection for generation=2
+
 dask_scheduler_workers
     Number of workers known by scheduler
 dask_scheduler_workers_added_total
@@ -158,6 +165,13 @@ dask_worker_gil_contention_seconds_total
        Requires ``gilknocker`` to be installed, and
        ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
+
+dask_scheduler_gc_collection_seconds_total
+    Total time spent on garbage dask_scheduler_gc_collection_seconds_total
+
+    .. note::
+        Due to measurement overhead, this metric only measures
+        time spent on garbage collection for generation=2
 
 dask_worker_latency_seconds
     Latency of worker connection

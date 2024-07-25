@@ -48,14 +48,20 @@ def test_fractional_timer():
 
     timer = RandomTimer()
     ft = FractionalTimer(n_samples=N, timer=timer)
+    assert ft.duration_total == 0
     for _ in range(N):
         ft.start_timing()
         ft.stop_timing()
+    expected_total = sum(ft._durations)
+    assert ft.duration_total == pytest.approx(expected_total / ft.MULT)
     assert len(timer.timings) == N * 2
     assert ft.running_fraction is None
+    assert ft.duration_total > 0
 
     ft.start_timing()
     ft.stop_timing()
+    expected_total += ft._durations[-1]
+    assert ft.duration_total == pytest.approx(expected_total / ft.MULT)
     assert len(timer.timings) == (N + 1) * 2
     assert ft.running_fraction is not None
     check_fraction(timer, ft)
@@ -83,7 +89,7 @@ def enable_gc_diagnosis_and_log(diag, level="INFO"):
             gc.enable()
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 def test_gc_diagnosis_cpu_time():
     diag = GCDiagnosis(warn_over_frac=0.75)
     diag.N_SAMPLES = 3  # shorten tests
