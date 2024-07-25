@@ -3600,6 +3600,8 @@ class Scheduler(SchedulerState, ServerNode):
 
     _client_connections_added_total: int
     _client_connections_removed_total: int
+    _workers_added_total: int
+    _workers_removed_total: int
 
     def __init__(
         self,
@@ -3967,6 +3969,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         self._client_connections_added_total = 0
         self._client_connections_removed_total = 0
+        self._workers_added_total = 0
+        self._workers_removed_total = 0
 
     ##################
     # Administration #
@@ -4433,6 +4437,7 @@ class Scheduler(SchedulerState, ServerNode):
             server_id=server_id,
             scheduler=self,
         )
+        self._workers_added_total += 1
         if ws.status == Status.running:
             self.running.add(ws)
 
@@ -5315,6 +5320,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.idle_task_count.discard(ws)
         self.saturated.discard(ws)
         del self.workers[address]
+        self._workers_removed_total += 1
         ws.status = Status.closed
         self.running.discard(ws)
 
