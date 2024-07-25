@@ -31,6 +31,18 @@ class SchedulerMetricCollector(PrometheusCollector):
             value=len([k for k in self.server.clients if k != "fire-and-forget"]),
         )
 
+        yield CounterMetricFamily(
+            self.build_name("client_connections_added"),
+            "Total number of client connections added",
+            value=self.server._client_connections_added_total,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("client_connections_removed"),
+            "Total number of client connections removed",
+            value=self.server._client_connections_removed_total,
+        )
+
         yield GaugeMetricFamily(
             self.build_name("desired_workers"),
             "Number of workers scheduler needs for task graph",

@@ -3598,6 +3598,9 @@ class Scheduler(SchedulerState, ServerNode):
     _no_workers_since: float | None  # Note: not None iff there are pending tasks
     no_workers_timeout: float | None
 
+    _client_connections_added_total: int
+    _client_connections_removed_total: int
+
     def __init__(
         self,
         loop=None,
@@ -3961,6 +3964,9 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
+
+        self._client_connections_added_total = 0
+        self._client_connections_removed_total = 0
 
     ##################
     # Administration #
@@ -5770,6 +5776,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
         self.clients[client] = ClientState(client, versions=versions)
+        self._client_connections_added_total += 1
 
         for plugin in list(self.plugins.values()):
             try:
@@ -5825,7 +5832,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
             del self.clients[client]
-
+            self._client_connections_removed_total += 1
             for plugin in list(self.plugins.values()):
                 try:
                     plugin.remove_client(scheduler=self, client=client)

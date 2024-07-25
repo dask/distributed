@@ -24,6 +24,18 @@ The scheduler exposes the following metrics about itself:
 
 dask_scheduler_clients
     Number of clients connected
+dask_scheduler_client_connections_added_total
+    Total number of client connections added to the scheduler
+
+    .. note::
+        This metric does *not* count distinct clients. If a client disconnects
+        and reconnects later on, it will be counted twice.
+dask_scheduler_client_connections_removed_total
+    Total number of client connections removed from the scheduler
+
+    .. note::
+        This metric does *not* count distinct clients. If a client disconnects, 
+        then reconnects and disconnects again, it will be counted twice.
 dask_scheduler_desired_workers
     Number of workers scheduler needs for task graph
 dask_scheduler_gil_contention_seconds_total
