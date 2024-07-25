@@ -457,7 +457,7 @@ async def test_worker_time_to_live(c, s, a, b):
     assert s.worker_ttl == 0.5
     assert set(s.workers) == {a.address, b.address}
     assert all(
-        event["action"] != "worker-ttl-timeout"
+        event["action"] != "worker-ttl-timed-out"
         for _, event in s.get_events("scheduler")
     )
 
@@ -470,7 +470,7 @@ async def test_worker_time_to_live(c, s, a, b):
     events = [
         event
         for _, event in s.get_events("scheduler")
-        if event["action"] == "worker-ttl-timeout"
+        if event["action"] == "worker-ttl-timed-out"
     ]
     assert len(events) == 1
     # This event includes the actual TTL that we applied, i.e, 10 * heartbeat.
