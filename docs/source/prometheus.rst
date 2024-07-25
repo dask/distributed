@@ -39,6 +39,10 @@ dask_scheduler_gil_contention_seconds_total
 
 dask_scheduler_workers
     Number of workers known by scheduler
+dask_scheduler_workers_added_total
+    Total numbers of workers added to the scheduler
+dask_scheduler_workers_removed_total
+    Total number of workers removed from the scheduler
 dask_scheduler_last_time_total
     Cumulative SystemMonitor time
 dask_scheduler_tasks

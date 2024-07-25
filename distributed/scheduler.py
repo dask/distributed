@@ -3598,6 +3598,9 @@ class Scheduler(SchedulerState, ServerNode):
     _no_workers_since: float | None  # Note: not None iff there are pending tasks
     no_workers_timeout: float | None
 
+    _workers_added_total: int
+    _workers_removed_total: int
+
     def __init__(
         self,
         loop=None,
@@ -3961,6 +3964,9 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
+
+        self._workers_added_total = 0
+        self._workers_removed_total = 0
 
     ##################
     # Administration #
@@ -4427,6 +4433,7 @@ class Scheduler(SchedulerState, ServerNode):
             server_id=server_id,
             scheduler=self,
         )
+        self._workers_added_total += 1
         if ws.status == Status.running:
             self.running.add(ws)
 
@@ -5309,6 +5316,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.idle_task_count.discard(ws)
         self.saturated.discard(ws)
         del self.workers[address]
+        self._workers_removed_total += 1
         ws.status = Status.closed
         self.running.discard(ws)
 

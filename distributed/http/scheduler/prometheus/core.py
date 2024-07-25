@@ -61,6 +61,18 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         yield worker_states
 
+        yield CounterMetricFamily(
+            self.build_name("workers_added"),
+            "Total number of workers added",
+            value=self.server._workers_added_total,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("workers_removed"),
+            "Total number of workers removed",
+            value=self.server._workers_removed_total,
+        )
+
         if self.server.monitor.monitor_gil_contention:
             yield CounterMetricFamily(
                 self.build_name("gil_contention"),
