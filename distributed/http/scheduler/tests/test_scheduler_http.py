@@ -321,8 +321,6 @@ async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    config={"distributed.worker.memory.monitor-interval": "10ms"},
-    timeout=3,
     nthreads=[],
 )
 async def test_prometheus_collect_worker_totals(c, s):
