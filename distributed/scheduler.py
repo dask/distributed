@@ -8491,6 +8491,14 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
         if to_restart:
+            self.log_event(
+                "scheduler",
+                {
+                    "action": "worker-ttl-timeout",
+                    "workers": to_restart.copy(),
+                    "ttl": ttl,
+                },
+            )
             await self.restart_workers(
                 to_restart,
                 wait_for_workers=False,
