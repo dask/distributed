@@ -166,7 +166,7 @@ dask_worker_gil_contention_seconds_total
        ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
 
-dask_scheduler_gc_collection_seconds_total
+dask_worker_gc_collection_seconds_total
     Total time spent on garbage dask_scheduler_gc_collection_seconds_total
 
     .. note::
