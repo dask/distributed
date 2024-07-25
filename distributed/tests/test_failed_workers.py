@@ -475,7 +475,7 @@ async def test_worker_time_to_live(c, s, a, b):
     assert len(events) == 1
     # This event includes the actual TTL that we applied, i.e, 10 * heartbeat.
     assert events[0] == {
-        "action": "worker-ttl-timeout",
+        "action": "worker-ttl-timed-out",
         "workers": [a.address],
         "ttl": 5.0,
     }
