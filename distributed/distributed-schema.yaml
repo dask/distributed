@@ -91,6 +91,17 @@ properties:
 
               Works in conjunction with idle-timeout.
 
+          unrunnable-task-ttl:
+            type:
+            - string
+            - "null"
+            description: |
+              Time to live for unrunnable tasks.
+
+              If task is unrunnable for longer than this, it fails. A task is considered unrunnable, if
+              it has no pending dependencies, and the task has restrictions that are not satisfied by 
+              any available worker or no workers are running at all.
+
           work-stealing:
             type: boolean
             description: |
