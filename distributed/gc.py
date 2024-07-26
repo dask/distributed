@@ -13,7 +13,7 @@ from distributed.metrics import thread_time
 from distributed.utils import RateLimiterFilter
 
 logger = _logger = logging.getLogger(__name__)
-logger.addFilter(RateLimiterFilter("full garbage collections took"))
+logger.addFilter(RateLimiterFilter("full garbage collections took", rate="60s"))
 
 
 class ThrottledGC:
