@@ -8,8 +8,8 @@ import re
 
 import pytest
 
+from distributed.gc import FractionalTimer, GCDiagnosis, disable_gc_diagnosis
 from distributed.metrics import thread_time
-from distributed.utils_perf import FractionalTimer, GCDiagnosis, disable_gc_diagnosis
 from distributed.utils_test import captured_logger, run_for
 
 

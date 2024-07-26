@@ -101,6 +101,7 @@ from distributed.core import (
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
+from distributed.gc import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.http import get_handlers
 from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
@@ -136,7 +137,6 @@ from distributed.utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
-from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
 from distributed.worker import _normalize_task
 

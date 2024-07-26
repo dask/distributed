@@ -23,7 +23,7 @@ class ThrottledGC:
     collect() does nothing when repeated calls are so costly and so frequent
     that the thread would spend more than max_in_gc_frac doing GC.
 
-    warn_if_longer is a duration in seconds (10s by default) that can be used
+    warn_if_longer is a duration in seconds (1s by default) that can be used
     to log a warning level message whenever an actual call to gc.collect()
     lasts too long.
     """
@@ -141,8 +141,8 @@ class GCDiagnosis:
 
     N_SAMPLES = 30
 
-    def __init__(self, warn_over_frac=0.1, info_over_rss_win=10 * 1e6):
-        self._warn_over_frac = warn_over_frac
+    def __init__(self, info_over_frac=0.1, info_over_rss_win=10 * 1e6):
+        self._info_over_frac = info_over_frac
         self._info_over_rss_win = info_over_rss_win
         self._enabled = False
 
@@ -186,22 +186,27 @@ class GCDiagnosis:
         assert phase == "stop"
         self._fractional_timer.stop_timing()
         frac = self._fractional_timer.running_fraction
-        if frac is not None and frac >= self._warn_over_frac:
-            logger.warning(
-                "full garbage collections took %d%% CPU time "
-                "recently (threshold: %d%%)",
-                100 * frac,
-                100 * self._warn_over_frac,
-            )
+        level = (
+            logging.INFO
+            if frac is not None and frac >= self._info_over_frac
+            else logging.DEBUG
+        )
+        logger.log(
+            level,
+            "full garbage collections took %d%% CPU time " "recently (threshold: %d%%)",
+            100 * frac,
+            100 * self._info_over_frac,
+        )
         rss_saved = self._gc_rss_before - rss
-        if rss_saved >= self._info_over_rss_win:
-            logger.info(
-                "full garbage collection released %s "
-                "from %d reference cycles (threshold: %s)",
-                format_bytes(rss_saved),
-                info["collected"],
-                format_bytes(self._info_over_rss_win),
-            )
+        level = logging.INFO if rss_saved >= self._info_over_rss_win else logging.DEBUG
+        logger.log(
+            level,
+            "full garbage collection released %s "
+            "from %d reference cycles (threshold: %s)",
+            format_bytes(rss_saved),
+            info["collected"],
+            format_bytes(self._info_over_rss_win),
+        )
         if info["uncollectable"] > 0:
             # This should ideally never happen on Python 3, but who knows?
             logger.warning(
