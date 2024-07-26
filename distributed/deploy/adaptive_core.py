@@ -87,6 +87,7 @@ class AdaptiveCore:
     plan: set[WorkerState]
     requested: set[WorkerState]
     observed: set[WorkerState]
+    observed_name_mapped: dict[str, str]
     close_counts: defaultdict[WorkerState, int]
     _adapting: bool
     log: deque[tuple[float, dict]]
@@ -130,6 +131,7 @@ class AdaptiveCore:
             self.plan = set()
             self.requested = set()
             self.observed = set()
+            self.observed_name_mapped = {}
         except Exception:
             pass
 
@@ -181,7 +183,7 @@ class AdaptiveCore:
         """
         plan = self.plan
         requested = self.requested
-        observed = self.observed
+        observed = self.observed_name_mapped
 
         if target == len(plan):
             self.close_counts.clear()
@@ -192,14 +194,16 @@ class AdaptiveCore:
             return {"status": "up", "n": target}
 
         # target < len(plan)
-        not_yet_arrived = requested - observed
+        not_yet_arrived = requested - observed.keys()
         to_close = set()
         if not_yet_arrived:
             to_close.update(toolz.take(len(plan) - target, not_yet_arrived))
 
         if target < len(plan) - len(to_close):
             L = await self.workers_to_close(target=target)
-            to_close.update(L)
+            to_close.update(
+                [key for key, value in observed.items() for name in L if value == name]
+            )
 
         firmly_close = set()
         for w in to_close:
