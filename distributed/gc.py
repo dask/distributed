@@ -10,8 +10,10 @@ import psutil
 from dask.utils import format_bytes
 
 from distributed.metrics import thread_time
+from distributed.utils import RateLimiterFilter
 
 logger = _logger = logging.getLogger(__name__)
+logger.addFilter(RateLimiterFilter("full garbage collections took"))
 
 
 class ThrottledGC:
@@ -186,17 +188,15 @@ class GCDiagnosis:
         assert phase == "stop"
         self._fractional_timer.stop_timing()
         frac = self._fractional_timer.running_fraction
-        level = (
-            logging.INFO
-            if frac is not None and frac >= self._info_over_frac
-            else logging.DEBUG
-        )
-        logger.log(
-            level,
-            "full garbage collections took %d%% CPU time " "recently (threshold: %d%%)",
-            100 * frac,
-            100 * self._info_over_frac,
-        )
+        if frac is not None:
+            level = logging.INFO if frac >= self._info_over_frac else logging.DEBUG
+            logger.log(
+                level,
+                "full garbage collections took %d%% CPU time "
+                "recently (threshold: %d%%)",
+                100 * frac,
+                100 * self._info_over_frac,
+            )
         rss_saved = self._gc_rss_before - rss
         level = logging.INFO if rss_saved >= self._info_over_rss_win else logging.DEBUG
         logger.log(
