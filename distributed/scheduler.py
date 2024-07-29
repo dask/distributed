@@ -4447,6 +4447,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._workers_added_total += 1
         if ws.status == Status.running:
             self.running.add(ws)
+            self._refresh_queued_without_workers_since()
 
         dh = self.host_info.get(host)
         if dh is None:
@@ -5403,6 +5404,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", event_msg)
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
+        self._refresh_queued_without_workers_since()
 
         awaitables = []
         for plugin in list(self.plugins.values()):
@@ -5984,6 +5986,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle.pop(ws.address, None)
             self.idle_task_count.discard(ws)
             self.saturated.discard(ws)
+        self._refresh_queued_without_workers_since()
 
     def handle_request_refresh_who_has(
         self, keys: Iterable[Key], worker: str, stimulus_id: str
@@ -8655,16 +8658,25 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.key,
             )
 
-    def _check_queued_without_workers_ttl(
-        self, timestamp: float, recommendations: Recs, stimulus_id: str
+    def _refresh_queued_without_workers_since(
+        self, timestamp: float | None = None
     ) -> None:
-        assert self.unrunnable_task_ttl
         if not self.queued or self.running:
             self._queued_without_workers_since = None
             return
 
         if not self._queued_without_workers_since:
-            self._queued_without_workers_since = timestamp
+            self._queued_without_workers_since = timestamp or monotonic()
+            return
+
+    def _check_queued_without_workers_ttl(
+        self, timestamp: float, recommendations: Recs, stimulus_id: str
+    ) -> None:
+        assert self.unrunnable_task_ttl
+
+        self._refresh_queued_without_workers_since(timestamp)
+
+        if self._queued_without_workers_since is None:
             return
 
         if timestamp <= self._queued_without_workers_since + self.unrunnable_task_ttl:
