@@ -3597,7 +3597,6 @@ class Scheduler(SchedulerState, ServerNode):
     idle_timeout: float | None
     _no_workers_since: float | None  # Note: not None iff there are pending tasks
     no_workers_timeout: float | None
-    unrunnable_task_ttl: float | None
     _client_connections_added_total: int
     _client_connections_removed_total: int
     _workers_added_total: int
@@ -3676,10 +3675,6 @@ class Scheduler(SchedulerState, ServerNode):
             dask.config.get("distributed.scheduler.no-workers-timeout")
         )
         self._no_workers_since = None
-        self.unrunnable_task_ttl = parse_timedelta(
-            dask.config.get("distributed.scheduler.unrunnable-task-ttl")
-        )
-        self._queued_without_workers_since = None
 
         self.time_started = self.idle_since  # compatibility for dask-gateway
         self._replica_lock = RLock()
@@ -3955,11 +3950,8 @@ class Scheduler(SchedulerState, ServerNode):
         pc = PeriodicCallback(self.check_idle, 250)
         self.periodic_callbacks["idle-timeout"] = pc
 
-        pc = PeriodicCallback(self._check_no_workers, 250)
+        pc = PeriodicCallback(self._check_no_workers_timeout, 250)
         self.periodic_callbacks["no-workers-timeout"] = pc
-
-        pc = PeriodicCallback(self._check_unrunnable_task_ttl, 250)
-        self.periodic_callbacks["unrunnable-task-ttl"] = pc
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS.copy()
@@ -4447,7 +4439,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._workers_added_total += 1
         if ws.status == Status.running:
             self.running.add(ws)
-            self._refresh_queued_without_workers_since()
+            self._refresh_no_workers_since()
 
         dh = self.host_info.get(host)
         if dh is None:
@@ -5404,7 +5396,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", event_msg)
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
-        self._refresh_queued_without_workers_since()
+        self._refresh_no_workers_since()
 
         awaitables = []
         for plugin in list(self.plugins.values()):
@@ -5986,7 +5978,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle.pop(ws.address, None)
             self.idle_task_count.discard(ws)
             self.saturated.discard(ws)
-        self._refresh_queued_without_workers_since()
+        self._refresh_no_workers_since()
 
     def handle_request_refresh_who_has(
         self, keys: Iterable[Key], worker: str, stimulus_id: str
@@ -8567,68 +8559,33 @@ class Scheduler(SchedulerState, ServerNode):
                 self._ongoing_background_tasks.call_soon(self.close)
         return self.idle_since
 
-    def _check_no_workers(self) -> None:
-        """Shut down the scheduler if there have been tasks ready to run which have
-        nowhere to run for `distributed.scheduler.no-workers-timeout`, and there
-        aren't other tasks running.
-        """
-        if self.status in (Status.closing, Status.closed):
-            return  # pragma: nocover
-
-        if (
-            (not self.queued and not self.unrunnable)
-            or (self.queued and self.workers)
-            or any(ws.processing for ws in self.workers.values())
-        ):
-            self._no_workers_since = None
-            return
-
-        # 1. There are queued or unrunnable tasks and no workers at all
-        # 2. There are unrunnable tasks and no workers satisfy their restrictions
-        # (Only rootish tasks can be queued, and rootish tasks can't have restrictions)
-
-        if not self._no_workers_since:
-            self._no_workers_since = time()
-            return
-
-        if (
-            self.no_workers_timeout
-            and time() > self._no_workers_since + self.no_workers_timeout
-        ):
-            logger.info(
-                "Tasks have been without any workers to run them for %s; "
-                "shutting scheduler down",
-                format_time(self.no_workers_timeout),
-            )
-            self._ongoing_background_tasks.call_soon(self.close)
-
-    def _check_unrunnable_task_ttl(self) -> None:
+    def _check_no_workers_timeout(self) -> None:
         if (
             self.status in (Status.closing, Status.closed)
-            or self.unrunnable_task_ttl is None
+            or self.no_workers_timeout is None
         ):
             return
 
         now = monotonic()
-        stimulus_id = f"check-unrunnable-task-ttl-{time()}"
+        stimulus_id = f"check-no-workers-timeout-{time()}"
 
         recommendations: Recs = {}
 
-        self._check_no_worker_ttl(
+        self._check_no_worker_timeout(
             now, recommendations=recommendations, stimulus_id=stimulus_id
         )
-        self._check_queued_without_workers_ttl(
+        self._check_pending_without_workers_timeout(
             now, recommendations=recommendations, stimulus_id=stimulus_id
         )
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
-    def _check_no_worker_ttl(
+    def _check_no_worker_timeout(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
     ) -> None:
-        assert self.unrunnable_task_ttl
+        assert self.no_workers_timeout
         timed_out = []
         for ts, unrunnable_since in self.unrunnable.items():
-            if timestamp <= unrunnable_since + self.unrunnable_task_ttl:
+            if timestamp <= unrunnable_since + self.no_workers_timeout:
                 break
             timed_out.append(ts)
         if not timed_out:
@@ -8641,7 +8598,7 @@ class Scheduler(SchedulerState, ServerNode):
                     host_restrictions=(ts.host_restrictions or set()).copy(),
                     worker_restrictions=(ts.worker_restrictions or set()).copy(),
                     resource_restrictions=(ts.resource_restrictions or {}).copy(),
-                    timeout=self.unrunnable_task_ttl,
+                    timeout=self.no_workers_timeout,
                 ),
             )
             r = self.transition(
@@ -8658,35 +8615,33 @@ class Scheduler(SchedulerState, ServerNode):
                 ts.key,
             )
 
-    def _refresh_queued_without_workers_since(
-        self, timestamp: float | None = None
-    ) -> None:
+    def _refresh_no_workers_since(self, timestamp: float | None = None) -> None:
         if not self.queued or self.running:
-            self._queued_without_workers_since = None
+            self._no_workers_since = None
             return
 
-        if not self._queued_without_workers_since:
-            self._queued_without_workers_since = timestamp or monotonic()
+        if not self._no_workers_since:
+            self._no_workers_since = timestamp or monotonic()
             return
 
-    def _check_queued_without_workers_ttl(
+    def _check_pending_without_workers_timeout(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
     ) -> None:
-        assert self.unrunnable_task_ttl
+        assert self.no_workers_timeout
 
-        self._refresh_queued_without_workers_since(timestamp)
+        self._refresh_no_workers_since(timestamp)
 
-        if self._queued_without_workers_since is None:
+        if self._no_workers_since is None:
             return
 
-        if timestamp <= self._queued_without_workers_since + self.unrunnable_task_ttl:
+        if timestamp <= self._no_workers_since + self.no_workers_timeout:
             return
 
         for ts in self.queued:
             e = pickle.dumps(
                 NoWorkersError(
                     task=ts.key,
-                    timeout=self.unrunnable_task_ttl,
+                    timeout=self.no_workers_timeout,
                 ),
             )
             r = self.transition(

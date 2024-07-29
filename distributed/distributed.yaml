@@ -18,8 +18,7 @@ distributed:
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
     idle-timeout: null        # Shut down after this duration, like "1h" or "30 minutes"
-    no-workers-timeout: null  # Shut down if there are tasks but no workers to process them
-    unrunnable-task-ttl: null # Time to live for unrunnable tasks. If a task is unrunnable for longer than this, it fails. 
+    no-workers-timeout: null  # Time to live for tasks in an unrunnable state. If a task remains unrunnable for longer than this, it fails.
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
     worker-saturation: 1.1  # Send this fraction of nthreads root tasks to workers
