@@ -130,6 +130,7 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_prefix_state_totals",
         "dask_scheduler_tick_count",
         "dask_scheduler_tick_duration_maximum_seconds",
+        "dask_scheduler_gc_collection_seconds",
     }
 
     try:

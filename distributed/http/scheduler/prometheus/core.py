@@ -13,6 +13,7 @@ from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricColle
 from distributed.http.scheduler.prometheus.stealing import WorkStealingMetricCollector
 from distributed.http.utils import RequestHandler
 from distributed.scheduler import ALL_TASK_STATES, Scheduler
+from distributed.utils_perf import gc_collect_duration
 
 
 class SchedulerMetricCollector(PrometheusCollector):
@@ -92,6 +93,13 @@ class SchedulerMetricCollector(PrometheusCollector):
                 value=self.server.monitor.cumulative_gil_contention,
                 unit="seconds",
             )
+
+        yield CounterMetricFamily(
+            self.build_name("gc_collection"),
+            "Total time spent on garbage collection",
+            value=gc_collect_duration(),
+            unit="seconds",
+        )
 
         yield CounterMetricFamily(
             self.build_name("last_time"),
