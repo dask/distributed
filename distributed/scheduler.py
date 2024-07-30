@@ -2204,6 +2204,7 @@ class SchedulerState:
         key: Key,
         stimulus_id: str,
         *,
+        # TODO: Which ones can actually be None?
         cause: Key | None = None,
         exception: Serialized | None = None,
         traceback: Serialized | None = None,
@@ -2211,8 +2212,6 @@ class SchedulerState:
         traceback_text: str | None = None,
     ) -> RecsMsgs:
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
@@ -2224,70 +2223,22 @@ class SchedulerState:
 
         if not ts.erred_on:
             ts.erred_on = set()
-        if exception is not None:
-            ts.exception = exception
-            ts.exception_text = exception_text
-        if traceback is not None:
-            ts.traceback = traceback
-            ts.traceback_text = traceback_text
-        if cause is not None:
-            failing_ts = self.tasks[cause]
-            ts.exception_blame = failing_ts
-        else:
-            failing_ts = ts.exception_blame  # type: ignore
 
-        self.erred_tasks.appendleft(
-            ErredTask(
-                ts.key,
-                time(),
-                ts.erred_on.copy(),
-                exception_text or "",
-                traceback_text or "",
-            )
+        return self._propagate_erred(
+            ts,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
         )
-
-        for dts in ts.waiters or set():
-            dts.exception_blame = failing_ts
-            recommendations[dts.key] = "erred"
-
-        for dts in ts.dependencies:
-            if dts.waiters:
-                dts.waiters.discard(ts)
-            if not dts.waiters and not dts.who_wants:
-                recommendations[dts.key] = "released"
-
-        ts.waiters = None
-
-        ts.state = "erred"
-
-        report_msg = {
-            "op": "task-erred",
-            "key": key,
-            "exception": failing_ts.exception,
-            "traceback": failing_ts.traceback,
-        }
-
-        for cs in ts.who_wants or ():
-            client_msgs[cs.client_key] = [report_msg]
-
-        cs = self.clients["fire-and-forget"]
-        if ts in cs.wants_what:
-            self._client_releases_keys(
-                cs=cs,
-                keys=[key],
-                recommendations=recommendations,
-            )
-
-        if self.validate:
-            assert not ts.processing_on
-
-        return recommendations, client_msgs, {}
 
     def _transition_queued_erred(
         self,
         key: Key,
         stimulus_id: str,
         *,
+        # TODO: Which ones can actually be None?
         cause: Key | None = None,
         exception: Serialized | None = None,
         traceback: Serialized | None = None,
@@ -2295,8 +2246,6 @@ class SchedulerState:
         traceback_text: str | None = None,
     ) -> RecsMsgs:
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
 
         if self.validate:
             assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
@@ -2308,64 +2257,15 @@ class SchedulerState:
 
         if not ts.erred_on:
             ts.erred_on = set()
-        if exception is not None:
-            ts.exception = exception
-            ts.exception_text = exception_text
-        if traceback is not None:
-            ts.traceback = traceback
-            ts.traceback_text = traceback_text
-        if cause is not None:
-            failing_ts = self.tasks[cause]
-            ts.exception_blame = failing_ts
-        else:
-            failing_ts = ts.exception_blame  # type: ignore
 
-        self.erred_tasks.appendleft(
-            ErredTask(
-                ts.key,
-                time(),
-                ts.erred_on.copy(),
-                exception_text or "",
-                traceback_text or "",
-            )
+        return self._propagate_erred(
+            ts,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
         )
-
-        for dts in ts.waiters or set():
-            dts.exception_blame = failing_ts
-            recommendations[dts.key] = "erred"
-
-        for dts in ts.dependencies:
-            if dts.waiters:
-                dts.waiters.discard(ts)
-            if not dts.waiters and not dts.who_wants:
-                recommendations[dts.key] = "released"
-
-        ts.waiters = None
-
-        ts.state = "erred"
-
-        report_msg = {
-            "op": "task-erred",
-            "key": key,
-            "exception": failing_ts.exception,
-            "traceback": failing_ts.traceback,
-        }
-
-        for cs in ts.who_wants or ():
-            client_msgs[cs.client_key] = [report_msg]
-
-        cs = self.clients["fire-and-forget"]
-        if ts in cs.wants_what:
-            self._client_releases_keys(
-                cs=cs,
-                keys=[key],
-                recommendations=recommendations,
-            )
-
-        if self.validate:
-            assert not ts.processing_on
-
-        return recommendations, client_msgs, {}
 
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
@@ -2898,8 +2798,6 @@ class SchedulerState:
         Recommendations, client messages and worker messages to process
         """
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
 
         if self.validate:
             assert cause or ts.exception_blame
@@ -2917,6 +2815,37 @@ class SchedulerState:
         if not ts.erred_on:
             ts.erred_on = set()
         ts.erred_on.add(worker)
+
+        if self.validate:
+            assert not ts.processing_on
+
+        return self._propagate_erred(
+            ts,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
+        )
+
+    def _propagate_erred(
+        self,
+        ts: TaskState,
+        *,
+        cause: Key | None = None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+    ) -> RecsMsgs:
+        assert ts.erred_on
+
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+
+        ts.state = "erred"
+        key = ts.key
+
         if exception is not None:
             ts.exception = exception
             ts.exception_text = exception_text
@@ -2951,8 +2880,6 @@ class SchedulerState:
 
         ts.waiters = None
 
-        ts.state = "erred"
-
         report_msg = {
             "op": "task-erred",
             "key": key,
@@ -2969,9 +2896,6 @@ class SchedulerState:
                 keys=[key],
                 recommendations=recommendations,
             )
-
-        if self.validate:
-            assert not ts.processing_on
 
         return recommendations, client_msgs, {}
 
@@ -8749,7 +8673,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._check_unrunnable_task_timeouts(
             now, recommendations=recommendations, stimulus_id=stimulus_id
         )
-        self._check_queued_without_workers_timeouts(
+        self._check_queued_task_timeouts(
             now, recommendations=recommendations, stimulus_id=stimulus_id
         )
         self.transitions(recommendations, stimulus_id=stimulus_id)
@@ -8800,7 +8724,7 @@ class Scheduler(SchedulerState, ServerNode):
             no_workers, recommendations, stimulus_id
         )
 
-    def _check_queued_without_workers_timeouts(
+    def _check_queued_task_timeouts(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
     ) -> None:
         assert self.no_workers_timeout
