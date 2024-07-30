@@ -81,7 +81,7 @@ properties:
             - string
             - "null"
             description: |
-              Time to live for tasks in an unrunnable state.
+              Timeout for tasks in an unrunnable state.
 
               If task remains unrunnable for longer than this, it fails. A task is considered unrunnable IFF
               it has no pending dependencies, and the task has restrictions that are not satisfied by 
