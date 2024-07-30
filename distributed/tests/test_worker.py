@@ -171,9 +171,9 @@ async def test_worker_bad_args(c, s, a, b):
 
     tb = await y._traceback()
     assert any("1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line)
-    assert "Compute Failed" in hdlr.messages["warning"][0]
-    assert y.key in hdlr.messages["warning"][0]
-    assert "executing" in hdlr.messages["warning"][0]
+    assert "Compute Failed" in hdlr.messages["error"][0]
+    assert y.key in hdlr.messages["error"][0]
+    assert "executing" in hdlr.messages["error"][0]
     logger.setLevel(old_level)
 
     # Now we check that both workers are still alive.

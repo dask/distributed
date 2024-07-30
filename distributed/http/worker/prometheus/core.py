@@ -10,6 +10,7 @@ from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metri
 
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
+from distributed.utils_perf import gc_collect_duration
 from distributed.worker import Worker
 
 logger = logging.getLogger("distributed.prometheus.worker")
@@ -67,6 +68,13 @@ class WorkerMetricCollector(PrometheusCollector):
                 value=self.server.monitor.cumulative_gil_contention,
                 unit="seconds",
             )
+
+        yield CounterMetricFamily(
+            self.build_name("gc_collection"),
+            "Total time spent on garbage collection",
+            value=gc_collect_duration(),
+            unit="seconds",
+        )
 
         yield GaugeMetricFamily(
             self.build_name("threads"),

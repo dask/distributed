@@ -2341,7 +2341,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if ts.state in ("executing", "long-running", "resumed"):
-                logger.warning(
+                logger.error(
                     "Compute Failed\n"
                     "Key:       %s\n"
                     "State:     %s\n"
