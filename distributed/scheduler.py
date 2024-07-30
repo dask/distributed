@@ -2918,6 +2918,7 @@ class SchedulerState:
 
         if not ts.erred_on:
             ts.erred_on = set()
+        ts.erred_on.add(worker)
         if exception is not None:
             ts.exception = exception
             ts.exception_text = exception_text
