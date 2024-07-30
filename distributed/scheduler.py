@@ -8665,17 +8665,24 @@ class Scheduler(SchedulerState, ServerNode):
 
         self._refresh_no_workers_since(now)
 
-        self._check_unrunnable_task_timeouts(
+        affected = self._check_unrunnable_task_timeouts(
             now, recommendations=recommendations, stimulus_id=stimulus_id
         )
-        self._check_queued_task_timeouts(
-            now, recommendations=recommendations, stimulus_id=stimulus_id
+
+        affected.update(
+            self._check_queued_task_timeouts(
+                now, recommendations=recommendations, stimulus_id=stimulus_id
+            )
         )
         self.transitions(recommendations, stimulus_id=stimulus_id)
+        self.log_event(
+            "scheduler",
+            {"action": "tasks-exceeded-no-workers-timeout", "keys": affected},
+        )
 
     def _check_unrunnable_task_timeouts(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
-    ) -> None:
+    ) -> set[Key]:
         assert self.no_workers_timeout
         unsatisfied = []
         no_workers = []
@@ -8690,7 +8697,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 no_workers.append(ts)
         if not unsatisfied and not no_workers:
-            return
+            return set()
 
         for ts in unsatisfied:
             e = pickle.dumps(
@@ -8718,22 +8725,23 @@ class Scheduler(SchedulerState, ServerNode):
         self._fail_tasks_after_no_workers_timeout(
             no_workers, recommendations, stimulus_id
         )
+        return {ts.key for ts in concat(unsatisfied, no_workers)}
 
     def _check_queued_task_timeouts(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
-    ) -> None:
+    ) -> set[Key]:
         assert self.no_workers_timeout
 
         if self._no_workers_since is None:
-            return
+            return set()
 
         if timestamp <= self._no_workers_since + self.no_workers_timeout:
-            return
-
-        # TODO: Avoid copy?
+            return set()
+        affected = list(self.queued)
         self._fail_tasks_after_no_workers_timeout(
-            list(self.queued), recommendations, stimulus_id
+            affected, recommendations, stimulus_id
         )
+        return {ts.key for ts in affected}
 
     def _fail_tasks_after_no_workers_timeout(
         self, timed_out: Iterable[TaskState], recommendations: Recs, stimulus_id: str
