@@ -8843,7 +8843,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
 
     def _refresh_no_workers_since(self, timestamp: float | None = None) -> None:
-        if not self.queued or self.running:
+        if self.running or not (self.queued or self.unrunnable):
             self._no_workers_since = None
             return
 

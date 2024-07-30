@@ -2484,7 +2484,9 @@ async def test_no_workers_timeout_without_workers(c, s):
     await asyncio.sleep(0.2)
 
     assert s.status == Status.running
-    with pytest.raises(NoWorkersError):
+    with pytest.raises(
+        NoWorkersError if QUEUING_ON_BY_DEFAULT else UnsatisfiedRestrictionsError
+    ):
         await future
 
 
