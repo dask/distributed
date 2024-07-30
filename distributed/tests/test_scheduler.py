@@ -2115,7 +2115,7 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     await ev2.set()
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, clean_kwargs={"processes": False, "threads": False}
 )
@@ -2468,7 +2468,7 @@ async def test_no_workers_timeout_disabled(c, s):
         await future
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[],
@@ -2488,7 +2488,7 @@ async def test_no_workers_timeout_without_workers(c, s):
         await future
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     config={"distributed.scheduler.no-workers-timeout": "100ms"},
@@ -2538,17 +2538,16 @@ async def test_no_workers_timeout_processing(c, s, a, b):
     await wait_for_state("y", "no-worker", s)
 
     # Scheduler won't shut down for as long as f1 is running
-    s._check_no_workers()
+    s._check_no_workers_timeout()
     await asyncio.sleep(0.2)
-    s._check_no_workers()
+    s._check_no_workers_timeout()
     await asyncio.sleep(0.2)
     assert s.status == Status.running
 
     await ev.set()
     await x
-
-    while s.status != Status.closed:
-        await asyncio.sleep(0.01)
+    with pytest.raises(UnsatisfiedRestrictionsError):
+        await y
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
