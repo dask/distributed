@@ -2462,10 +2462,13 @@ async def test_no_workers_timeout_disabled(c, s):
     s._check_no_workers_timeout()
     await asyncio.sleep(0.2)
 
-    assert s.status == Status.running
-
     async with Worker(s.address):
         await future
+
+    assert all(
+        event["action"] != "no-workers-timeout-exceeded"
+        for _, event in s.get_events("scheduler")
+    )
 
 
 @pytest.mark.slow
@@ -2483,11 +2486,18 @@ async def test_no_workers_timeout_without_workers(c, s):
     s._check_no_workers_timeout()
     await asyncio.sleep(0.2)
 
-    assert s.status == Status.running
     with pytest.raises(
         NoWorkerError if QUEUING_ON_BY_DEFAULT else NoSuitableWorkerError
     ):
         await future
+
+    events = [
+        event
+        for _, event in s.get_events("scheduler")
+        if event["action"] == "no-workers-timeout-exceeded"
+    ]
+    assert len(events) == 1
+    assert events[0]["keys"] == {"x"}
 
 
 @pytest.mark.slow
@@ -2502,6 +2512,14 @@ async def test_no_workers_timeout_bad_restrictions(c, s, a, b):
     future = c.submit(inc, 1, key="x", workers=["127.0.0.2:1234"])
     with pytest.raises(NoSuitableWorkerError):
         await future
+
+    events = [
+        event
+        for _, event in s.get_events("scheduler")
+        if event["action"] == "no-workers-timeout-exceeded"
+    ]
+    assert len(events) == 1
+    assert events[0]["keys"] == {"x"}
 
 
 @gen_cluster(
@@ -2521,9 +2539,13 @@ async def test_no_workers_timeout_queued(c, s, a):
     s._check_no_workers_timeout()
     await asyncio.sleep(0.2)
 
-    assert s.status == Status.running
     await ev.set()
     await c.gather(futures)
+
+    assert all(
+        event["action"] != "no-workers-timeout-exceeded"
+        for _, event in s.get_events("scheduler")
+    )
 
 
 @pytest.mark.slow
@@ -2544,12 +2566,20 @@ async def test_no_workers_timeout_processing(c, s, a, b):
     await asyncio.sleep(0.2)
     s._check_no_workers_timeout()
     await asyncio.sleep(0.2)
-    assert s.status == Status.running
+
+    with pytest.raises(NoSuitableWorkerError):
+        await y
+
+    events = [
+        event
+        for _, event in s.get_events("scheduler")
+        if event["action"] == "no-workers-timeout-exceeded"
+    ]
+    assert len(events) == 1
+    assert events[0]["keys"] == {"y"}
 
     await ev.set()
     await x
-    with pytest.raises(NoSuitableWorkerError):
-        await y
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})

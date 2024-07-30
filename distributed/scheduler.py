@@ -8675,10 +8675,11 @@ class Scheduler(SchedulerState, ServerNode):
             )
         )
         self.transitions(recommendations, stimulus_id=stimulus_id)
-        self.log_event(
-            "scheduler",
-            {"action": "tasks-exceeded-no-workers-timeout", "keys": affected},
-        )
+        if affected:
+            self.log_event(
+                "scheduler",
+                {"action": "no-workers-timeout-exceeded", "keys": affected},
+            )
 
     def _check_unrunnable_task_timeouts(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
@@ -8725,7 +8726,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._fail_tasks_after_no_workers_timeout(
             no_workers, recommendations, stimulus_id
         )
-        return {ts.key for ts in concat(unsatisfied, no_workers)}
+        return {ts.key for ts in concat([unsatisfied, no_workers])}
 
     def _check_queued_task_timeouts(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
