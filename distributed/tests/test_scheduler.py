@@ -50,7 +50,7 @@ from distributed.protocol.serialize import ToPickle
 from distributed.scheduler import (
     KilledWorker,
     MemoryState,
-    NoSuitableWorkerError,
+    NoValidWorkerError,
     NoWorkerError,
     Scheduler,
     WorkerState,
@@ -2486,9 +2486,7 @@ async def test_no_workers_timeout_without_workers(c, s):
     s._check_no_workers()
     await asyncio.sleep(0.2)
 
-    with pytest.raises(
-        NoWorkerError if QUEUING_ON_BY_DEFAULT else NoSuitableWorkerError
-    ):
+    with pytest.raises(NoWorkerError if QUEUING_ON_BY_DEFAULT else NoValidWorkerError):
         await future
 
     events = [
@@ -2510,7 +2508,7 @@ async def test_no_workers_timeout_bad_restrictions(c, s, a, b):
     task restrictions
     """
     future = c.submit(inc, 1, key="x", workers=["127.0.0.2:1234"])
-    with pytest.raises(NoSuitableWorkerError):
+    with pytest.raises(NoValidWorkerError):
         await future
 
     events = [
@@ -2567,7 +2565,7 @@ async def test_no_workers_timeout_processing(c, s, a, b):
     s._check_no_workers()
     await asyncio.sleep(0.2)
 
-    with pytest.raises(NoSuitableWorkerError):
+    with pytest.raises(NoValidWorkerError):
         await y
 
     events = [

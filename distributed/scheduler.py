@@ -8702,7 +8702,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         for ts in unsatisfied:
             e = pickle.dumps(
-                NoSuitableWorkerError(
+                NoValidWorkerError(
                     task=ts.key,
                     host_restrictions=(ts.host_restrictions or set()).copy(),
                     worker_restrictions=(ts.worker_restrictions or set()).copy(),
@@ -9181,7 +9181,7 @@ class KilledWorker(Exception):
         )
 
 
-class NoSuitableWorkerError(Exception):
+class NoValidWorkerError(Exception):
     def __init__(
         self,
         task: Key,
@@ -9217,7 +9217,7 @@ class NoSuitableWorkerError(Exception):
     def __str__(self) -> str:
         return (
             f"Attempted to run task {self.task!r} but timed out after {format_time(self.timeout)} "
-            "waiting for a suitable worker.\n\nRestrictions:\n"
+            "waiting for a valid worker matching all restrictions.\n\nRestrictions:\n"
             "host_restrictions={self.host_restrictions!s}\n"
             "worker_restrictions={self.worker_restrictions!s}\n"
             "resource_restrictions={self.resource_restrictions!s}\n"
