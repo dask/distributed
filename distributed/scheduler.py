@@ -8775,7 +8775,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         for ts in unsatisfied:
             e = pickle.dumps(
-                UnsatisfiedRestrictionsError(
+                NoSuitableWorkerError(
                     task=ts.key,
                     host_restrictions=(ts.host_restrictions or set()).copy(),
                     worker_restrictions=(ts.worker_restrictions or set()).copy(),
@@ -8823,7 +8823,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         for ts in timed_out:
             e = pickle.dumps(
-                NoWorkersError(
+                NoWorkerError(
                     task=ts.key,
                     timeout=self.no_workers_timeout,
                 ),
@@ -9253,7 +9253,7 @@ class KilledWorker(Exception):
         )
 
 
-class UnsatisfiedRestrictionsError(Exception):
+class NoSuitableWorkerError(Exception):
     def __init__(
         self,
         task: Key,
@@ -9296,7 +9296,7 @@ class UnsatisfiedRestrictionsError(Exception):
         )
 
 
-class NoWorkersError(Exception):
+class NoWorkerError(Exception):
     def __init__(self, task: Key, timeout: float):
         super().__init__(task, timeout)
 
