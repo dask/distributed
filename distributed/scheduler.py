@@ -4039,7 +4039,7 @@ class Scheduler(SchedulerState, ServerNode):
         pc = PeriodicCallback(self.check_idle, 250)
         self.periodic_callbacks["idle-timeout"] = pc
 
-        pc = PeriodicCallback(self._check_no_workers_timeout, 250)
+        pc = PeriodicCallback(self._check_no_workers, 250)
         self.periodic_callbacks["no-workers-timeout"] = pc
 
         if extensions is None:
@@ -8651,7 +8651,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self._ongoing_background_tasks.call_soon(self.close)
         return self.idle_since
 
-    def _check_no_workers_timeout(self) -> None:
+    def _check_no_workers(self) -> None:
         if (
             self.status in (Status.closing, Status.closed)
             or self.no_workers_timeout is None
