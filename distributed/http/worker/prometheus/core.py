@@ -8,9 +8,9 @@ from typing import ClassVar
 import prometheus_client
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metric
 
+from distributed.gc import gc_collect_duration
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
-from distributed.utils_perf import gc_collect_duration
 from distributed.worker import Worker
 
 logger = logging.getLogger("distributed.prometheus.worker")

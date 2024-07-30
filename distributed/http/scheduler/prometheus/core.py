@@ -8,12 +8,12 @@ import toolz
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
 from distributed.core import Status
+from distributed.gc import gc_collect_duration
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricCollector
 from distributed.http.scheduler.prometheus.stealing import WorkStealingMetricCollector
 from distributed.http.utils import RequestHandler
 from distributed.scheduler import ALL_TASK_STATES, Scheduler
-from distributed.utils_perf import gc_collect_duration
 
 
 class SchedulerMetricCollector(PrometheusCollector):
