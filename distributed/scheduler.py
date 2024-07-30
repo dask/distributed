@@ -2199,6 +2199,92 @@ class SchedulerState:
 
         return {}, {}, {}
 
+    def _transition_no_worker_erred(
+        self,
+        key: Key,
+        stimulus_id: str,
+        *,
+        cause: Key | None = None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+    ) -> RecsMsgs:
+        ts = self.tasks[key]
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+
+        if self.validate:
+            assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
+            assert cause
+            assert ts in self.unrunnable
+            assert not ts.processing_on
+            assert not ts.who_has
+            assert not ts.waiting_on
+
+        self.unrunnable.pop(ts)
+
+        if not ts.erred_on:
+            ts.erred_on = set()
+        if exception is not None:
+            ts.exception = exception
+            ts.exception_text = exception_text
+        if traceback is not None:
+            ts.traceback = traceback
+            ts.traceback_text = traceback_text
+        if cause is not None:
+            failing_ts = self.tasks[cause]
+            ts.exception_blame = failing_ts
+        else:
+            failing_ts = ts.exception_blame  # type: ignore
+
+        self.erred_tasks.appendleft(
+            ErredTask(
+                ts.key,
+                time(),
+                ts.erred_on.copy(),
+                exception_text or "",
+                traceback_text or "",
+            )
+        )
+
+        for dts in ts.waiters or set():
+            dts.exception_blame = failing_ts
+            recommendations[dts.key] = "erred"
+
+        for dts in ts.dependencies:
+            if dts.waiters:
+                dts.waiters.discard(ts)
+            if not dts.waiters and not dts.who_wants:
+                recommendations[dts.key] = "released"
+
+        ts.waiters = None
+
+        ts.state = "erred"
+
+        report_msg = {
+            "op": "task-erred",
+            "key": key,
+            "exception": failing_ts.exception,
+            "traceback": failing_ts.traceback,
+        }
+
+        for cs in ts.who_wants or ():
+            client_msgs[cs.client_key] = [report_msg]
+
+        cs = self.clients["fire-and-forget"]
+        if ts in cs.wants_what:
+            self._client_releases_keys(
+                cs=cs,
+                keys=[key],
+                recommendations=recommendations,
+            )
+
+        if self.validate:
+            assert not ts.processing_on
+
+        return recommendations, client_msgs, {}
+
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
     ) -> WorkerState | None:
@@ -2748,7 +2834,6 @@ class SchedulerState:
 
         if not ts.erred_on:
             ts.erred_on = set()
-        ts.erred_on.add(worker)
         if exception is not None:
             ts.exception = exception
             ts.exception_text = exception_text
@@ -2968,6 +3053,7 @@ class SchedulerState:
         ("processing", "erred"): _transition_processing_erred,
         ("no-worker", "released"): _transition_no_worker_released,
         ("no-worker", "processing"): _transition_no_worker_processing,
+        ("no-worker", "erred"): _transition_no_worker_erred,
         ("released", "forgotten"): _transition_released_forgotten,
         ("memory", "forgotten"): _transition_memory_forgotten,
         ("erred", "released"): _transition_erred_released,
@@ -5326,6 +5412,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: Recs = {}
 
+        timestamp = monotonic()
         processing_keys = {ts.key for ts in ws.processing}
         for ts in list(ws.processing):
             k = ts.key
@@ -5396,7 +5483,9 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", event_msg)
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
-        self._refresh_no_workers_since()
+        # Make sure that the timestamp has been collected before tasks were transitioned to no-worker
+        # to ensure a meaningful error message.
+        self._refresh_no_workers_since(timestamp=timestamp)
 
         awaitables = []
         for plugin in list(self.plugins.values()):
@@ -8583,15 +8672,22 @@ class Scheduler(SchedulerState, ServerNode):
         self, timestamp: float, recommendations: Recs, stimulus_id: str
     ) -> None:
         assert self.no_workers_timeout
-        timed_out = []
+        unsatisfied = []
+        no_workers = []
         for ts, unrunnable_since in self.unrunnable.items():
             if timestamp <= unrunnable_since + self.no_workers_timeout:
                 break
-            timed_out.append(ts)
-        if not timed_out:
+            if (
+                self._no_workers_since is None
+                or self._no_workers_since > unrunnable_since
+            ):
+                unsatisfied.append(ts)
+            else:
+                no_workers.append(ts)
+        if not unsatisfied and not no_workers:
             return
 
-        for ts in timed_out:
+        for ts in unsatisfied:
             e = pickle.dumps(
                 UnsatisfiedRestrictionsError(
                     task=ts.key,
@@ -8614,15 +8710,9 @@ class Scheduler(SchedulerState, ServerNode):
                 "for its restrictions to become satisfied.",
                 ts.key,
             )
-
-    def _refresh_no_workers_since(self, timestamp: float | None = None) -> None:
-        if not self.queued or self.running:
-            self._no_workers_since = None
-            return
-
-        if not self._no_workers_since:
-            self._no_workers_since = timestamp or monotonic()
-            return
+        self._fail_tasks_after_no_workers_timeout(
+            no_workers, recommendations, stimulus_id
+        )
 
     def _check_pending_without_workers_timeout(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
@@ -8637,7 +8727,16 @@ class Scheduler(SchedulerState, ServerNode):
         if timestamp <= self._no_workers_since + self.no_workers_timeout:
             return
 
-        for ts in self.queued:
+        self._fail_tasks_after_no_workers_timeout(
+            self.queued, recommendations, stimulus_id
+        )
+
+    def _fail_tasks_after_no_workers_timeout(
+        self, timed_out: Iterable[TaskState], recommendations: Recs, stimulus_id: str
+    ) -> None:
+        assert self.no_workers_timeout
+
+        for ts in timed_out:
             e = pickle.dumps(
                 NoWorkersError(
                     task=ts.key,
@@ -8657,6 +8756,15 @@ class Scheduler(SchedulerState, ServerNode):
                 "without any running workers.",
                 ts.key,
             )
+
+    def _refresh_no_workers_since(self, timestamp: float | None = None) -> None:
+        if not self.queued or self.running:
+            self._no_workers_since = None
+            return
+
+        if not self._no_workers_since:
+            self._no_workers_since = timestamp or monotonic()
+            return
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
