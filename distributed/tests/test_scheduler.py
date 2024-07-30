@@ -2457,9 +2457,9 @@ async def test_no_workers_timeout_disabled(c, s):
     future = c.submit(inc, 1, key="x")
     await wait_for_state("x", ("queued", "no-worker"), s)
 
-    s._check_no_workers_timeout()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
-    s._check_no_workers_timeout()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
 
     async with Worker(s.address):
@@ -2481,9 +2481,9 @@ async def test_no_workers_timeout_without_workers(c, s):
     """Trip no-workers-timeout when there are no workers available"""
     future = c.submit(inc, 1, key="x")
     await wait_for_state("x", ("queued", "no-worker"), s)
-    s._check_no_workers_timeout()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
-    s._check_no_workers_timeout()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
 
     with pytest.raises(
@@ -2534,9 +2534,9 @@ async def test_no_workers_timeout_queued(c, s, a):
     await async_poll_for(lambda: len(s.tasks) == 3 and a.state.tasks, timeout=5)
     assert s.queued or math.isinf(s.WORKER_SATURATION)
 
-    s._check_no_workers_timeout()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
-    s._check_no_workers_timeout()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
 
     await ev.set()
@@ -2562,9 +2562,9 @@ async def test_no_workers_timeout_processing(c, s, a, b):
     await wait_for_state("y", "no-worker", s)
 
     # Scheduler won't shut down for as long as f1 is running
-    s._check_no_workers_timeout()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
-    s._check_no_workers_timeout()
+    s._check_no_workers()
     await asyncio.sleep(0.2)
 
     with pytest.raises(NoSuitableWorkerError):
