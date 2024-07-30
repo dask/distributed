@@ -2219,8 +2219,6 @@ class SchedulerState:
             assert cause
             assert ts in self.unrunnable
             assert not ts.processing_on
-            assert not ts.who_has
-            assert not ts.waiting_on
 
         self.unrunnable.pop(ts)
 
@@ -8746,15 +8744,17 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: Recs = {}
 
-        self._check_no_worker_timeout(
+        self._refresh_no_workers_since(now)
+
+        self._check_unrunnable_task_timeouts(
             now, recommendations=recommendations, stimulus_id=stimulus_id
         )
-        self._check_pending_without_workers_timeout(
+        self._check_queued_without_workers_timeouts(
             now, recommendations=recommendations, stimulus_id=stimulus_id
         )
         self.transitions(recommendations, stimulus_id=stimulus_id)
 
-    def _check_no_worker_timeout(
+    def _check_unrunnable_task_timeouts(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
     ) -> None:
         assert self.no_workers_timeout
@@ -8765,7 +8765,7 @@ class Scheduler(SchedulerState, ServerNode):
                 break
             if (
                 self._no_workers_since is None
-                or self._no_workers_since > unrunnable_since
+                or self._no_workers_since >= unrunnable_since
             ):
                 unsatisfied.append(ts)
             else:
@@ -8800,12 +8800,10 @@ class Scheduler(SchedulerState, ServerNode):
             no_workers, recommendations, stimulus_id
         )
 
-    def _check_pending_without_workers_timeout(
+    def _check_queued_without_workers_timeouts(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
     ) -> None:
         assert self.no_workers_timeout
-
-        self._refresh_no_workers_since(timestamp)
 
         if self._no_workers_since is None:
             return
