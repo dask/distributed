@@ -2221,9 +2221,6 @@ class SchedulerState:
 
         self.unrunnable.pop(ts)
 
-        if not ts.erred_on:
-            ts.erred_on = set()
-
         return self._propagate_erred(
             ts,
             cause=cause,
@@ -2254,9 +2251,6 @@ class SchedulerState:
             assert not ts.processing_on
 
         self.queued.remove(ts)
-
-        if not ts.erred_on:
-            ts.erred_on = set()
 
         return self._propagate_erred(
             ts,
@@ -2812,15 +2806,12 @@ class SchedulerState:
 
         self._exit_processing_common(ts)
 
-        if not ts.erred_on:
-            ts.erred_on = set()
-        ts.erred_on.add(worker)
-
         if self.validate:
             assert not ts.processing_on
 
         return self._propagate_erred(
             ts,
+            worker=worker,
             cause=cause,
             exception=exception,
             traceback=traceback,
@@ -2832,19 +2823,23 @@ class SchedulerState:
         self,
         ts: TaskState,
         *,
+        worker: str | None = None,
         cause: Key | None = None,
         exception: Serialized | None = None,
         traceback: Serialized | None = None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
     ) -> RecsMsgs:
-        assert ts.erred_on
-
         recommendations: Recs = {}
         client_msgs: Msgs = {}
 
         ts.state = "erred"
         key = ts.key
+
+        if not ts.erred_on:
+            ts.erred_on = set()
+        if worker is not None:
+            ts.erred_on.add(worker)
 
         if exception is not None:
             ts.exception = exception
