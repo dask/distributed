@@ -5,7 +5,7 @@ import math
 from collections import defaultdict, deque
 from collections.abc import Iterable
 from datetime import timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import tlz as toolz
 from tornado.ioloop import IOLoop
@@ -17,10 +17,19 @@ from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
 
 if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
+
     from distributed.scheduler import WorkerState
 
-
 logger = logging.getLogger(__name__)
+
+
+AdaptiveStateState: TypeAlias = Literal[
+    "starting",
+    "running",
+    "stopped",
+    "inactive",
+]
 
 
 class AdaptiveCore:
@@ -89,6 +98,8 @@ class AdaptiveCore:
     observed: set[WorkerState]
     close_counts: defaultdict[WorkerState, int]
     _adapting: bool
+    #: Whether this adaptive strategy is periodically adapting
+    _state: AdaptiveStateState
     log: deque[tuple[float, dict]]
 
     def __init__(
@@ -107,12 +118,6 @@ class AdaptiveCore:
         self.interval = parse_timedelta(interval, "seconds")
         self.periodic_callback = None
 
-        def f():
-            try:
-                self.periodic_callback.start()
-            except AttributeError:
-                pass
-
         if self.interval:
             import weakref
 
@@ -124,8 +129,10 @@ class AdaptiveCore:
                     await core.adapt()
 
             self.periodic_callback = PeriodicCallback(_adapt, self.interval * 1000)
-            self.loop.add_callback(f)
-
+            self.loop.add_callback(self._start)
+            self._state = "starting"
+        else:
+            self._state = "inactive"
         try:
             self.plan = set()
             self.requested = set()
@@ -140,12 +147,34 @@ class AdaptiveCore:
             maxlen=dask.config.get("distributed.admin.low-level-log-length")
         )
 
-    def stop(self) -> None:
-        logger.info("Adaptive stop")
+    def _start(self) -> None:
+        if self._state != "starting":
+            return
 
-        if self.periodic_callback:
+        assert self.periodic_callback is not None
+        self.periodic_callback.start()
+        self._state = "running"
+        logger.info(
+            "Adaptive scaling started: minimum=%s maximum=%s",
+            self.minimum,
+            self.maximum,
+        )
+
+    def stop(self) -> None:
+        if self._state in ("inactive", "stopped"):
+            return
+
+        if self._state == "running":
+            assert self.periodic_callback is not None
             self.periodic_callback.stop()
-            self.periodic_callback = None
+            logger.info(
+                "Adaptive scaling stopped: minimum=%s maximum=%s",
+                self.minimum,
+                self.maximum,
+            )
+
+        self.periodic_callback = None
+        self._state = "stopped"
 
     async def target(self) -> int:
         """The target number of workers that should exist"""
