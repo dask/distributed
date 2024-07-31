@@ -129,8 +129,8 @@ class AdaptiveCore:
                     await core.adapt()
 
             self.periodic_callback = PeriodicCallback(_adapt, self.interval * 1000)
-            self.loop.add_callback(self._start)
             self._state = "starting"
+            self.loop.add_callback(self._start)
         else:
             self._state = "inactive"
         try:
