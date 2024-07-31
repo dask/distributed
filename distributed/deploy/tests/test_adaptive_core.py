@@ -104,11 +104,12 @@ async def test_adapt_oserror_safe_target():
             raise OSError()
 
     with captured_logger("distributed.deploy.adaptive_core") as log:
-        adapt = BadAdaptive(minimum=1, maximum=4)
-        await adapt.adapt()
+        adapt = BadAdaptive(minimum=1, maximum=4, interval="10ms")
+        while adapt._state != "stopped":
+            await asyncio.sleep(0.01)
     text = log.getvalue()
     assert "Adaptive stopping due to error" in text
-    assert "Adaptive stop" in text
+    assert "Adaptive scaling stopped" in text
     assert not adapt._adapting
     assert not adapt.periodic_callback
 
@@ -145,6 +146,18 @@ async def test_adapt_oserror_scale():
     assert adapt.periodic_callback
     assert adapt.periodic_callback.is_running()
     adapt.stop()
+
+
+@gen_test()
+async def test_adaptive_logs_stopping_once():
+    with captured_logger("distributed.deploy.adaptive_core") as log:
+        adapt = MyAdaptive(interval="100ms")
+        while not adapt.periodic_callback.is_running():
+            await asyncio.sleep(0.01)
+        adapt.stop()
+        adapt.stop()
+    lines = log.getvalue().splitlines()
+    assert sum("Adaptive scaling stopped" in line for line in lines) == 1
 
 
 @gen_test()
