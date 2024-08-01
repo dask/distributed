@@ -5,13 +5,13 @@ channels:
 dependencies:
   - python=3.10
   - click=8.0
-  - cloudpickle=1.5.0
-  - cytoolz=0.10.1
+  - cloudpickle=2.0.0
+  - cytoolz=0.11.2
   - jinja2=2.10.3
   - locket=1.0.0
   - msgpack-python=1.0.0
   - packaging=20.0
-  - psutil=5.7.2
+  - psutil=5.8.0
   - pyyaml=5.4.1
   - sortedcontainers=2.0.5
   - tblib=1.6.0
