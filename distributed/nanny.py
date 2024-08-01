@@ -477,13 +477,14 @@ class Nanny(ServerNode):
 
         self.plugins[name] = plugin
 
-        logger.info("Starting Nanny plugin %s" % name)
+        logger.info("Starting Nanny plugin %s", name)
         if hasattr(plugin, "setup"):
             try:
                 result = plugin.setup(nanny=self)
                 if isawaitable(result):
                     result = await result
             except Exception as e:
+                logger.exception("Worker plugin %s failed to setup", name)
                 return error_message(e)
         if getattr(plugin, "restart", False):
             await self.restart(reason=f"nanny-plugin-{name}-restart")
