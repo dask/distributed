@@ -451,3 +451,31 @@ async def test_plugin_with_broken_setup_on_new_worker_logs(c, s):
     logs = caplog.getvalue()
     assert "TestPlugin1 failed to setup" in logs
     assert "test error" in logs
+
+
+class BrokenTeardownPlugin(WorkerPlugin):
+    def teardown(self, worker):
+        raise RuntimeError("test error")
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_unregister_worker_plugin_with_broken_teardown_raises(c, s, a):
+    await c.register_plugin(BrokenTeardownPlugin(), name="TestPlugin1")
+    with pytest.raises(RuntimeError, match="test error"):
+        with captured_logger("distributed.worker", level=logging.ERROR) as caplog:
+            await c.unregister_worker_plugin("TestPlugin1")
+    logs = caplog.getvalue()
+    assert "TestPlugin1 failed to teardown" in logs
+    assert "test error" in logs
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_plugin_with_broken_teardown_logs_on_close(c, s):
+    await c.register_plugin(BrokenTeardownPlugin(), name="TestPlugin1")
+
+    with captured_logger("distributed.worker", level=logging.ERROR) as caplog:
+        async with Worker(s.address):
+            pass
+    logs = caplog.getvalue()
+    assert "TestPlugin1 failed to teardown" in logs
+    assert "test error" in logs
