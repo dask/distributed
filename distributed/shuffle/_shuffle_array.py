@@ -32,7 +32,6 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import unpickle_bytestream
 from distributed.shuffle._rechunk import rechunk_unpack
 from distributed.shuffle._shuffle import shuffle_barrier
-from distributed.utils_comm import DoNotUnpack
 
 
 def shuffle_name(token: str) -> str:
@@ -67,7 +66,6 @@ def _p2p_shuffle(  # type: ignore[no-untyped-def]
     )
     chunk_lengths = [len(c) for c in chunks]
     chunk_lengths[axis] = len(np.unique(result[1, :]))
-    chunk_lengths_not_unpack = DoNotUnpack(chunk_lengths)
 
     transfer_keys = []
     suffixes = count()
@@ -79,7 +77,6 @@ def _p2p_shuffle(  # type: ignore[no-untyped-def]
             continue
 
         chunk_indexer[0, :] -= chunk_boundaries[i]
-        chunk_indexer_not_unpack = DoNotUnpack(chunk_indexer)
 
         for chunk_tuple in chunk_tuples:
             key = (transfer_group,) + (next(suffixes),)
@@ -88,9 +85,9 @@ def _p2p_shuffle(  # type: ignore[no-untyped-def]
                 shuffle_transfer,
                 (in_name,) + convert_key(chunk_tuple, i, axis),
                 token,
-                chunk_indexer_not_unpack,
-                DoNotUnpack(chunk_tuple),
-                chunk_lengths_not_unpack,
+                chunk_indexer,
+                chunk_tuple,
+                chunk_lengths,
                 axis,
                 convert_key(chunk_tuple, i, axis),
                 disk,
