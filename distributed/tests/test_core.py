@@ -22,6 +22,7 @@ from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend, TCPListener
 from distributed.core import (
     ConnectionPool,
+    RPCClosed,
     Server,
     Status,
     _expects_comm,
@@ -921,6 +922,20 @@ async def test_rpc_serialization():
         async with rpc(server.address, serializers=["msgpack", "pickle"]) as r:
             result = await r.echo(x=to_serialize(inc))
             assert result == {"result": inc}
+
+
+@gen_test()
+async def test_rpc_closed_exception():
+    async with Server({"echo": echo_serialize}) as server:
+        await server.listen("tcp://")
+
+        async with rpc(server.address, serializers=["msgpack"]) as r:
+            r.status = Status.closed
+            with pytest.raises(
+                RPCClosed,
+                match="Exception while trying to call remote method .* before comm was established.",
+            ):
+                await r.__getattr__("foo")()
 
 
 @gen_cluster()
