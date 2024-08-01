@@ -518,7 +518,6 @@ class _InstallNannyPlugin(NannyPlugin):
             await Semaphore(
                 max_leases=1,
                 name=socket.gethostname(),
-                register=True,
                 scheduler_rpc=nanny.scheduler,
                 loop=nanny.loop,
             )

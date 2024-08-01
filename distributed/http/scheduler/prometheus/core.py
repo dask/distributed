@@ -8,6 +8,7 @@ import toolz
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
 from distributed.core import Status
+from distributed.gc import gc_collect_duration
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricCollector
 from distributed.http.scheduler.prometheus.stealing import WorkStealingMetricCollector
@@ -29,6 +30,18 @@ class SchedulerMetricCollector(PrometheusCollector):
             self.build_name("clients"),
             "Number of clients connected",
             value=len([k for k in self.server.clients if k != "fire-and-forget"]),
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("client_connections_added"),
+            "Total number of client connections added",
+            value=self.server._client_connections_added_total,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("client_connections_removed"),
+            "Total number of client connections removed",
+            value=self.server._client_connections_removed_total,
         )
 
         yield GaugeMetricFamily(
@@ -61,6 +74,18 @@ class SchedulerMetricCollector(PrometheusCollector):
 
         yield worker_states
 
+        yield CounterMetricFamily(
+            self.build_name("workers_added"),
+            "Total number of workers added",
+            value=self.server._workers_added_total,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("workers_removed"),
+            "Total number of workers removed",
+            value=self.server._workers_removed_total,
+        )
+
         if self.server.monitor.monitor_gil_contention:
             yield CounterMetricFamily(
                 self.build_name("gil_contention"),
@@ -68,6 +93,13 @@ class SchedulerMetricCollector(PrometheusCollector):
                 value=self.server.monitor.cumulative_gil_contention,
                 unit="seconds",
             )
+
+        yield CounterMetricFamily(
+            self.build_name("gc_collection"),
+            "Total time spent on garbage collection",
+            value=gc_collect_duration(),
+            unit="seconds",
+        )
 
         yield CounterMetricFamily(
             self.build_name("last_time"),

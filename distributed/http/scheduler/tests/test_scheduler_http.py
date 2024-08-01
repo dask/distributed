@@ -13,7 +13,7 @@ import dask.config
 from dask.sizeof import sizeof
 
 from distributed import Event, Lock, Scheduler
-from distributed.client import wait
+from distributed.client import Client, wait
 from distributed.core import Status
 from distributed.utils import is_valid_xml, url_escape
 from distributed.utils_test import (
@@ -28,6 +28,7 @@ from distributed.utils_test import (
     slowinc,
     wait_for_state,
 )
+from distributed.worker import Worker
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
@@ -112,8 +113,12 @@ async def test_prometheus(c, s, a, b):
 
     expected_metrics = {
         "dask_scheduler_clients",
+        "dask_scheduler_client_connections_added",
+        "dask_scheduler_client_connections_removed",
         "dask_scheduler_desired_workers",
         "dask_scheduler_workers",
+        "dask_scheduler_workers_added",
+        "dask_scheduler_workers_removed",
         "dask_scheduler_last_time",
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
@@ -125,6 +130,7 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_prefix_state_totals",
         "dask_scheduler_tick_count",
         "dask_scheduler_tick_duration_maximum_seconds",
+        "dask_scheduler_gc_collection_seconds",
     }
 
     try:
@@ -157,6 +163,71 @@ async def test_metrics_when_prometheus_client_not_installed(prometheus_not_avail
     async with Scheduler(dashboard_address=":0") as s:
         body = await fetch_metrics_body(s.http_server.port)
         assert "Prometheus metrics are not available" in body
+
+
+@gen_cluster(
+    nthreads=[],
+)
+async def test_prometheus_collect_client_connections_totals(s):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family
+            for family in text_string_to_metric_families(txt)
+            if family.name
+            in (
+                "dask_scheduler_client_connections_added",
+                "dask_scheduler_client_connections_removed",
+            )
+        }
+        return {
+            name: [sample.value for sample in family.samples]
+            for name, family in families.items()
+        }
+
+    assert await fetch_metrics() == {
+        "dask_scheduler_client_connections_added": [0],
+        "dask_scheduler_client_connections_removed": [0],
+    }
+    async with Client(s.address, asynchronous=True):
+        assert await fetch_metrics() == {
+            "dask_scheduler_client_connections_added": [1],
+            "dask_scheduler_client_connections_removed": [0],
+        }
+
+        async with Client(s.address, asynchronous=True):
+            assert await fetch_metrics() == {
+                "dask_scheduler_client_connections_added": [2],
+                "dask_scheduler_client_connections_removed": [0],
+            }
+
+        assert await fetch_metrics() == {
+            "dask_scheduler_client_connections_added": [2],
+            "dask_scheduler_client_connections_removed": [1],
+        }
+
+        async with Client(s.address, asynchronous=True):
+            assert await fetch_metrics() == {
+                "dask_scheduler_client_connections_added": [3],
+                "dask_scheduler_client_connections_removed": [1],
+            }
+
+        assert await fetch_metrics() == {
+            "dask_scheduler_client_connections_added": [3],
+            "dask_scheduler_client_connections_removed": [2],
+        }
+
+    assert await fetch_metrics() == {
+        "dask_scheduler_client_connections_added": [3],
+        "dask_scheduler_client_connections_removed": [3],
+    }
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
@@ -314,6 +385,69 @@ async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
 
     prefix_state_counts = await fetch_metrics()
     assert prefix_state_counts.get(("div", "erred")) == 1
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+)
+async def test_prometheus_collect_worker_totals(c, s):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family
+            for family in text_string_to_metric_families(txt)
+            if family.name
+            in ("dask_scheduler_workers_added", "dask_scheduler_workers_removed")
+        }
+        return {
+            name: [sample.value for sample in family.samples]
+            for name, family in families.items()
+        }
+
+    assert await fetch_metrics() == {
+        "dask_scheduler_workers_added": [0],
+        "dask_scheduler_workers_removed": [0],
+    }
+    async with Worker(s.address):
+        assert await fetch_metrics() == {
+            "dask_scheduler_workers_added": [1],
+            "dask_scheduler_workers_removed": [0],
+        }
+
+        async with Worker(s.address):
+            assert await fetch_metrics() == {
+                "dask_scheduler_workers_added": [2],
+                "dask_scheduler_workers_removed": [0],
+            }
+
+        assert await fetch_metrics() == {
+            "dask_scheduler_workers_added": [2],
+            "dask_scheduler_workers_removed": [1],
+        }
+
+        async with Worker(s.address):
+            assert await fetch_metrics() == {
+                "dask_scheduler_workers_added": [3],
+                "dask_scheduler_workers_removed": [1],
+            }
+
+        assert await fetch_metrics() == {
+            "dask_scheduler_workers_added": [3],
+            "dask_scheduler_workers_removed": [2],
+        }
+
+    assert await fetch_metrics() == {
+        "dask_scheduler_workers_added": [3],
+        "dask_scheduler_workers_removed": [3],
+    }
 
 
 @gen_cluster(

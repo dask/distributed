@@ -83,6 +83,7 @@ from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
+from distributed.gc import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.http import get_handlers
 from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
@@ -114,7 +115,6 @@ from distributed.utils import (
     wait_for,
 )
 from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
-from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.versions import get_versions
 from distributed.worker_memory import (
     DeprecatedMemoryManagerAttribute,
@@ -2341,7 +2341,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if ts.state in ("executing", "long-running", "resumed"):
-                logger.warning(
+                logger.error(
                     "Compute Failed\n"
                     "Key:       %s\n"
                     "State:     %s\n"

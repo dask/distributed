@@ -2660,25 +2660,6 @@ async def test_futures_of_cancelled_raises(c, s, a, b):
         await c.gather(c.map(add, [1], y=x))
 
 
-@pytest.mark.skip
-@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_dont_delete_recomputed_results(c, s, w):
-    x = c.submit(inc, 1)  # compute first time
-    await wait([x])
-    x.__del__()  # trigger garbage collection
-    await asyncio.sleep(0)
-    xx = c.submit(inc, 1)  # compute second time
-
-    start = time()
-    while xx.key not in w.data:  # data shows up
-        await asyncio.sleep(0.01)
-        assert time() < start + 1
-
-    while time() < start + (s.delete_interval + 100) / 1000:  # and stays
-        assert xx.key in w.data
-        await asyncio.sleep(0.01)
-
-
 @pytest.mark.skip(reason="Use fast random selection now")
 @gen_cluster(client=True)
 async def test_balance_tasks_by_stacks(c, s, a, b):

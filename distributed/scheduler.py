@@ -101,6 +101,7 @@ from distributed.core import (
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
+from distributed.gc import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.http import get_handlers
 from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
@@ -136,7 +137,6 @@ from distributed.utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
-from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
 from distributed.worker import _normalize_task
 
@@ -569,7 +569,9 @@ class WorkerState:
         return self._hash
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, WorkerState) and other.server_id == self.server_id
+        return self is other or (
+            isinstance(other, WorkerState) and other.server_id == self.server_id
+        )
 
     @property
     def has_what(self) -> Set[TaskState]:
@@ -3596,11 +3598,14 @@ class Scheduler(SchedulerState, ServerNode):
     _no_workers_since: float | None  # Note: not None iff there are pending tasks
     no_workers_timeout: float | None
 
+    _client_connections_added_total: int
+    _client_connections_removed_total: int
+    _workers_added_total: int
+    _workers_removed_total: int
+
     def __init__(
         self,
         loop=None,
-        delete_interval="500ms",
-        synchronize_worker_interval="60s",
         services=None,
         service_kwargs=None,
         allowed_failures=None,
@@ -3649,10 +3654,6 @@ class Scheduler(SchedulerState, ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.proc = psutil.Process()
-        self.delete_interval = parse_timedelta(delete_interval, default="ms")
-        self.synchronize_worker_interval = parse_timedelta(
-            synchronize_worker_interval, default="ms"
-        )
         self.service_specs = services or {}
         self.service_kwargs = service_kwargs or {}
         self.services = {}
@@ -3959,6 +3960,11 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
+
+        self._client_connections_added_total = 0
+        self._client_connections_removed_total = 0
+        self._workers_added_total = 0
+        self._workers_removed_total = 0
 
     ##################
     # Administration #
@@ -4425,6 +4431,7 @@ class Scheduler(SchedulerState, ServerNode):
             server_id=server_id,
             scheduler=self,
         )
+        self._workers_added_total += 1
         if ws.status == Status.running:
             self.running.add(ws)
 
@@ -5307,6 +5314,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.idle_task_count.discard(ws)
         self.saturated.discard(ws)
         del self.workers[address]
+        self._workers_removed_total += 1
         ws.status = Status.closed
         self.running.discard(ws)
 
@@ -5768,6 +5776,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
         self.clients[client] = ClientState(client, versions=versions)
+        self._client_connections_added_total += 1
 
         for plugin in list(self.plugins.values()):
             try:
@@ -5823,7 +5832,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
             del self.clients[client]
-
+            self._client_connections_removed_total += 1
             for plugin in list(self.plugins.values()):
                 try:
                     plugin.remove_client(scheduler=self, client=client)
@@ -8489,6 +8498,14 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
         if to_restart:
+            self.log_event(
+                "scheduler",
+                {
+                    "action": "worker-ttl-timed-out",
+                    "workers": to_restart.copy(),
+                    "ttl": ttl,
+                },
+            )
             await self.restart_workers(
                 to_restart,
                 wait_for_workers=False,
