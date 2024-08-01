@@ -1,7 +1,6 @@
 name: dask-distributed
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - python=3.10
   - click=8.0
@@ -9,7 +8,7 @@ dependencies:
   - cytoolz=0.11.2
   - jinja2=2.10.3
   - locket=1.0.0
-  - msgpack-python=1.0.0
+  - msgpack-python=1.0.2
   - packaging=20.0
   - psutil=5.8.0
   - pyyaml=5.4.1
