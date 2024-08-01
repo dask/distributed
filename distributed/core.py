@@ -1174,11 +1174,11 @@ class rpc:
             except (RPCClosed, CommClosedError) as e:
                 if comm:
                     raise type(e)(
-                        f"Exception while trying to call remote method {key!r} before comm was established."
+                        f"Exception while trying to call remote method {key!r} using comm {comm!r}."
                     ) from e
                 else:
                     raise type(e)(
-                        f"Exception while trying to call remote method {key!r} using comm {comm!r}."
+                        f"Exception while trying to call remote method {key!r} before comm was established."
                     ) from e
 
             self.comms[comm] = True  # mark as open
