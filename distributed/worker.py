@@ -1225,16 +1225,12 @@ class Worker(BaseWorker, ServerNode):
         self.batched_stream.start(comm)
         self.status = Status.running
 
-        plugins_msgs = await asyncio.gather(
+        await asyncio.gather(
             *(
-                self.plugin_add(name=name, plugin=plugin, catch_errors=False)
+                self.plugin_add(name=name, plugin=plugin)
                 for name, plugin in response["worker-plugins"].items()
             ),
-            return_exceptions=True,
         )
-        plugins_exceptions = [msg for msg in plugins_msgs if isinstance(msg, Exception)]
-        for exc in plugins_exceptions:
-            logger.exception(exc, exc_info=exc)
 
         logger.info("        Registered to: %26s", self.scheduler.address)
         logger.info("-" * 49)
@@ -1898,7 +1894,7 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     result = await result
         except Exception as e:
-            # logger.exception("Worker plugin %s failed to teardown", name)
+            logger.exception("Worker plugin %s failed to teardown", name)
             return error_message(e)
 
         return {"status": "OK"}
