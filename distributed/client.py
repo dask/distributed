@@ -5410,9 +5410,6 @@ class Client(SyncMethodMixin):
         for response in responses.values():
             if response["status"] == "error":
                 _, exc, tb = clean_exception(**response)
-                # exc = exc.with_traceback(tb)
-                # exc = response["exception"]
-                # tb = response["traceback"]
                 raise exc.with_traceback(tb)
         return responses
 
