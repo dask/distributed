@@ -2925,9 +2925,13 @@ class SchedulerState:
 
         if self.validate:
             self._validate_ready(ts)
+            assert ts not in self.unrunnable
 
         ts.state = "no-worker"
         self.unrunnable[ts] = monotonic()
+
+        if self.validate:
+            validate_unrunnable(self.unrunnable)
 
         return {}, {}, {}
 
@@ -5731,6 +5735,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def validate_state(self, allow_overlap: bool = False) -> None:
         validate_state(self.tasks, self.workers, self.clients)
+        validate_unrunnable(self.unrunnable)
 
         if not (set(self.workers) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
@@ -8689,6 +8694,8 @@ class Scheduler(SchedulerState, ServerNode):
         no_workers = []
         for ts, unrunnable_since in self.unrunnable.items():
             if timestamp <= unrunnable_since + self.no_workers_timeout:
+                # unrunnable is insertion-ordered, which means that unrunnable_since will
+                # be monotonically increasing in this loop.
                 break
             if (
                 self._no_workers_since is None
@@ -9085,6 +9092,25 @@ def validate_task_state(ts: TaskState) -> None:
             assert ts.processing_on
             assert ts in ts.processing_on.actors
         assert ts.state != "queued"
+
+
+def validate_unrunnable(unrunnable: dict[TaskState, float]) -> None:
+    prev_unrunnable_since: float | None = None
+    prev_ts: TaskState | None = None
+    for ts, unrunnable_since in unrunnable.items():
+        assert ts.state == "no-worker"
+        if prev_ts is not None:
+            assert prev_unrunnable_since is not None
+            # Ensure that unrunnable_since is monotonically increasing when iterating over unrunnable.
+            # _check_no_workers relies on this.
+            assert prev_unrunnable_since <= unrunnable_since, (
+                prev_ts,
+                ts,
+                prev_unrunnable_since,
+                unrunnable_since,
+            )
+        prev_ts = ts
+        prev_unrunnable_since = unrunnable_since
 
 
 def validate_worker_state(ws: WorkerState) -> None:
