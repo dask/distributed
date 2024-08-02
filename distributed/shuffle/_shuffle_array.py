@@ -157,16 +157,17 @@ class ArrayShuffleSpec(ShuffleSpec[NDIndex]):
     def output_partitions(self) -> Generator[NDIndex, None, None]:
         yield from product(*(range(c) for c in self.chunk_lengths))
 
+    @property
+    def positions(self) -> list[int]:
+        return [1] + np.cumprod(self.chunk_lengths).tolist()
+
     def pick_worker(self, partition: NDIndex, workers: Sequence[str]) -> str:
         npartitions = 1
         for c in self.chunk_lengths:
             npartitions *= c
         ix = 0
         for dim, pos in enumerate(partition):
-            if dim > 0:
-                ix += self.chunk_lengths[dim - 1] * pos
-            else:
-                ix += pos
+            ix += self.positions[dim] * pos
         i = len(workers) * ix // npartitions
         return workers[i]
 
