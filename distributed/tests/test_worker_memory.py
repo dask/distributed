@@ -538,7 +538,7 @@ async def test_pause_executor_manual(c, s, a):
     z = c.submit(inc, 2, key="z")
     while "z" not in s.tasks or s.tasks["z"].state != "no-worker":
         await asyncio.sleep(0.01)
-    assert s.unrunnable == {s.tasks["z"]}
+    assert s.unrunnable.keys() == {s.tasks["z"]}
 
     # Test that a task that already started when the worker paused can complete
     # and its output can be retrieved. Also test that the now free slot won't be
@@ -605,7 +605,7 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
         z = c.submit(inc, 2, key="z")
         while "z" not in s.tasks or s.tasks["z"].state != "no-worker":
             await asyncio.sleep(0.01)
-        assert s.unrunnable == {s.tasks["z"]}
+        assert s.unrunnable.keys() == {s.tasks["z"]}
 
         # Test that a task that already started when the worker paused can complete
         # and its output can be retrieved. Also test that the now free slot won't be

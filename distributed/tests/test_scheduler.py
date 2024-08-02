@@ -47,7 +47,14 @@ from distributed.metrics import time
 from distributed.protocol import serialize
 from distributed.protocol.pickle import dumps, loads
 from distributed.protocol.serialize import ToPickle
-from distributed.scheduler import KilledWorker, MemoryState, Scheduler, WorkerState
+from distributed.scheduler import (
+    KilledWorker,
+    MemoryState,
+    NoValidWorkerError,
+    NoWorkerError,
+    Scheduler,
+    WorkerState,
+)
 from distributed.utils import TimeoutError, wait_for
 from distributed.utils_test import (
     NO_AMM,
@@ -2108,7 +2115,7 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     await ev2.set()
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, clean_kwargs={"processes": False, "threads": False}
 )
@@ -2445,7 +2452,7 @@ async def test_idle_timeout_no_workers(c, s):
     nthreads=[],
     config={"distributed.scheduler.no-workers-timeout": None},
 )
-async def test_no_workers_timeout_disabled(c, s, a, b):
+async def test_no_workers_timeout_disabled(c, s):
     """no-workers-timeout has been disabled"""
     future = c.submit(inc, 1, key="x")
     await wait_for_state("x", ("queued", "no-worker"), s)
@@ -2455,7 +2462,13 @@ async def test_no_workers_timeout_disabled(c, s, a, b):
     s._check_no_workers()
     await asyncio.sleep(0.2)
 
-    assert s.status == Status.running
+    async with Worker(s.address):
+        await future
+
+    assert all(
+        event["action"] != "no-workers-timeout-exceeded"
+        for _, event in s.get_events("scheduler")
+    )
 
 
 @pytest.mark.slow
@@ -2466,17 +2479,23 @@ async def test_no_workers_timeout_disabled(c, s, a, b):
 )
 async def test_no_workers_timeout_without_workers(c, s):
     """Trip no-workers-timeout when there are no workers available"""
-    # Don't trip scheduler shutdown when there are no tasks
+    future = c.submit(inc, 1, key="x")
+    await wait_for_state("x", ("queued", "no-worker"), s)
     s._check_no_workers()
     await asyncio.sleep(0.2)
     s._check_no_workers()
     await asyncio.sleep(0.2)
 
-    assert s.status == Status.running
+    with pytest.raises(NoWorkerError if QUEUING_ON_BY_DEFAULT else NoValidWorkerError):
+        await future
 
-    future = c.submit(inc, 1)
-    while s.status != Status.closed:
-        await asyncio.sleep(0.01)
+    events = [
+        event
+        for _, event in s.get_events("scheduler")
+        if event["action"] == "no-workers-timeout-exceeded"
+    ]
+    assert len(events) == 1
+    assert events[0]["keys"] == {"x"}
 
 
 @pytest.mark.slow
@@ -2489,8 +2508,16 @@ async def test_no_workers_timeout_bad_restrictions(c, s, a, b):
     task restrictions
     """
     future = c.submit(inc, 1, key="x", workers=["127.0.0.2:1234"])
-    while s.status != Status.closed:
-        await asyncio.sleep(0.01)
+    with pytest.raises(NoValidWorkerError):
+        await future
+
+    events = [
+        event
+        for _, event in s.get_events("scheduler")
+        if event["action"] == "no-workers-timeout-exceeded"
+    ]
+    assert len(events) == 1
+    assert events[0]["keys"] == {"x"}
 
 
 @gen_cluster(
@@ -2510,8 +2537,13 @@ async def test_no_workers_timeout_queued(c, s, a):
     s._check_no_workers()
     await asyncio.sleep(0.2)
 
-    assert s.status == Status.running
     await ev.set()
+    await c.gather(futures)
+
+    assert all(
+        event["action"] != "no-workers-timeout-exceeded"
+        for _, event in s.get_events("scheduler")
+    )
 
 
 @pytest.mark.slow
@@ -2532,13 +2564,20 @@ async def test_no_workers_timeout_processing(c, s, a, b):
     await asyncio.sleep(0.2)
     s._check_no_workers()
     await asyncio.sleep(0.2)
-    assert s.status == Status.running
+
+    with pytest.raises(NoValidWorkerError):
+        await y
+
+    events = [
+        event
+        for _, event in s.get_events("scheduler")
+        if event["action"] == "no-workers-timeout-exceeded"
+    ]
+    assert len(events) == 1
+    assert events[0]["keys"] == {"y"}
 
     await ev.set()
     await x
-
-    while s.status != Status.closed:
-        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
