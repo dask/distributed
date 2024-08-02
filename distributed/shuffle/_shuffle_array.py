@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Generator, Hashable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from itertools import count, product
+from itertools import product
 from pathlib import Path
 from typing import Any, Callable
 
@@ -68,7 +68,6 @@ def _p2p_shuffle(  # type: ignore[no-untyped-def]
     chunk_lengths[axis] = len(np.unique(result[1, :]))
 
     transfer_keys = []
-    suffixes = count()
 
     for i, (start, stop) in enumerate(zip(chunk_boundaries[:-1], chunk_boundaries[1:])):
         chunk_indexer = sorted_indexer[:, start:stop].copy()
@@ -79,7 +78,7 @@ def _p2p_shuffle(  # type: ignore[no-untyped-def]
         chunk_indexer[0, :] -= chunk_boundaries[i]
 
         for chunk_tuple in chunk_tuples:
-            key = (transfer_group,) + (next(suffixes),)
+            key = (transfer_group,) + convert_key(chunk_tuple, i, axis)
             transfer_keys.append(key)
             dsk[key] = (
                 shuffle_transfer,
