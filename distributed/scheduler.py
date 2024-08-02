@@ -2100,7 +2100,7 @@ class SchedulerState:
                     "key": key,
                     "start": start,
                     "finish": finish,
-                    "transistion_log": list(self.transition_log),
+                    "transition_log": list(self.transition_log),
                 },
             )
             if LOG_PDB:
