@@ -3597,6 +3597,8 @@ class Scheduler(SchedulerState, ServerNode):
     idle_timeout: float | None
     _no_workers_since: float | None  # Note: not None iff there are pending tasks
     no_workers_timeout: float | None
+    _no_clients_since: float
+    no_clients_timeout: float | None
 
     _client_connections_added_total: int
     _client_connections_removed_total: int
@@ -3615,6 +3617,7 @@ class Scheduler(SchedulerState, ServerNode):
         security=None,
         worker_ttl=None,
         idle_timeout=None,
+        no_clients_timeout=None,
         interface=None,
         host=None,
         port=0,
@@ -3670,6 +3673,11 @@ class Scheduler(SchedulerState, ServerNode):
             dask.config.get("distributed.scheduler.no-workers-timeout")
         )
         self._no_workers_since = None
+        self.no_clients_timeout = parse_timedelta(
+            no_clients_timeout
+            or dask.config.get("distributed.scheduler.no-clients-timeout")
+        )
+        self._no_clients_since = time()
 
         self.time_started = self.idle_since  # compatibility for dask-gateway
         self._replica_lock = RLock()
@@ -3947,6 +3955,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         pc = PeriodicCallback(self._check_no_workers, 250)
         self.periodic_callbacks["no-workers-timeout"] = pc
+
+        pc = PeriodicCallback(self._check_no_clients, 250)
+        self.periodic_callbacks["no-clients-timeout"] = pc
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS.copy()
@@ -8550,6 +8561,36 @@ class Scheduler(SchedulerState, ServerNode):
                 )
                 self._ongoing_background_tasks.call_soon(self.close)
         return self.idle_since
+
+    def _check_no_clients(self) -> None:
+        """Shut down the schedule if there are no running tasks / no tasks ready to
+        run, and there hasn't been any client connection for
+        `distributed.scheduler.no-workers-timeout`."""
+        if self.status in (Status.closing, Status.closed):
+            return  # pragma: nocover
+
+        if (
+            self.queued
+            or self.unrunnable
+            or any(ws.processing for ws in self.workers.values())
+        ):
+            return
+
+        if self.jupyter:
+            self._no_clients_since = max(
+                self._no_clients_since,
+                self._jupyter_server_application.web_app.last_activity().timestamp(),
+            )
+        if self.clients:
+            clients_hb = max(c.last_seen for c in self.clients.values())
+            self._no_clients_since = max(self._no_clients_since, clients_hb)
+
+        if (
+            self.no_clients_timeout
+            and time() > self._no_clients_since + self.no_clients_timeout
+        ):
+            logger.info("No tasks and no client heartbeat; shutting scheduler down")
+            self._ongoing_background_tasks.call_soon(self.close)
 
     def _check_no_workers(self) -> None:
         """Shut down the scheduler if there have been tasks ready to run which have

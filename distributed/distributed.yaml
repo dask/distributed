@@ -20,6 +20,7 @@ distributed:
     events-cleanup-delay: 1h
     idle-timeout: null       # Shut down after this duration, like "1h" or "30 minutes"
     no-workers-timeout: null # Shut down if there are tasks but no workers to process them
+    no-clients-timeout: null # Shut down after this duration of client inactivity, similar to idle-timeout
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
     worker-saturation: 1.1  # Send this fraction of nthreads root tasks to workers
