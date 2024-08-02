@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import mmap
 import os
 from collections import defaultdict
@@ -157,7 +158,7 @@ class ArrayShuffleSpec(ShuffleSpec[NDIndex]):
     def output_partitions(self) -> Generator[NDIndex, None, None]:
         yield from product(*(range(c) for c in self.chunk_lengths))
 
-    @property
+    @functools.cached_property
     def positions(self) -> list[int]:
         return [1] + np.cumprod(self.chunk_lengths).tolist()
 
