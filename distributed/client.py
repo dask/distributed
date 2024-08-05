@@ -3362,7 +3362,9 @@ class Client(SyncMethodMixin):
                 warnings.warn(
                     f"Sending large graph of size {format_bytes(pickled_size)}.\n"
                     "This may cause some slowdown.\n"
-                    "Consider scattering data ahead of time and using futures."
+                    "Consider loading the data with Dask directly\n or using futures or "
+                    "delayed objects to embed the data into the graph without repetition.\n"
+                    "See also https://docs.dask.org/en/stable/best-practices.html#load-data-with-dask for more information."
                 )
 
             computations = self._get_computation_code(
