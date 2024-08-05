@@ -3363,7 +3363,7 @@ class Client(SyncMethodMixin):
                     f"Sending large graph of size {format_bytes(pickled_size)}.\n"
                     "This may cause some slowdown.\n"
                     "Consider loading the data with Dask directly\n or using futures or "
-                    "delayed objects to embed the data into the grah without repetition.\n"
+                    "delayed objects to embed the data into the graph without repetition.\n"
                     "See also https://docs.dask.org/en/stable/best-practices.html#load-data-with-dask for more information."
                 )
 
