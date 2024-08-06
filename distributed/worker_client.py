@@ -53,6 +53,14 @@ def worker_client(timeout=None, separate_thread=True):
 
     worker = get_worker()
     client = get_client(timeout=timeout)
+    worker.log_event(
+        worker.address,
+        {
+            "action": "worker-client",
+            "timeout": timeout,
+            "separate_thread": separate_thread,
+        },
+    )
     with contextlib.ExitStack() as stack:
         if separate_thread:
             try:

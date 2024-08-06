@@ -363,3 +363,31 @@ async def test_secede_does_not_claim_worker(c, s, a, b):
     assert len(res) == 2
     assert res[a.address] > 25
     assert res[b.address] > 25
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_log_event(c, s, a):
+    # Run a task that spawns a worker client
+    def f(x):
+        with worker_client(timeout=10, separate_thread=True) as wc:
+            x = wc.submit(inc, x)
+            y = wc.submit(double, x)
+            result = x.result() + y.result()
+            return result
+
+    future = c.submit(f, 1)
+    result = await future
+    assert result == 6
+
+    # Ensure a corresponding event is logged
+    events = [
+        event
+        for _, event in s.get_events(a.address)
+        if event["action"] == "worker-client"
+    ]
+    assert len(events) == 1
+    assert events[0] == {
+        "action": "worker-client",
+        "timeout": 10,
+        "separate_thread": True,
+    }
