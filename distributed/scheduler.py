@@ -4884,6 +4884,7 @@ class Scheduler(SchedulerState, ServerNode):
                 internal_priority = await offload(
                     dask.order.order, dsk=dsk, dependencies=stripped_deps
                 )
+            dsk = valmap(_normalize_task, dsk)
 
             self._create_taskstate_from_graph(
                 dsk=dsk,
@@ -9383,5 +9384,4 @@ def _materialize_graph(
         deps.discard(k)
         dependencies[k] = deps
 
-    dsk = valmap(_normalize_task, dsk)
     return dsk, dependencies, annotations_by_type

@@ -2889,8 +2889,6 @@ def _normalize_task(task: Any) -> T_runspec:
             return task[1], task[2], task[3] if len(task) == 4 else {}
         elif not any(map(_maybe_complex, task[1:])):
             return task[0], task[1:], {}
-    else:
-        return task
 
     return execute_task, (task,), {}
 
