@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-14]
         environment: [mindeps, "3.9", "3.10", "3.11", "3.12"]
         label: [default]
         extra_packages: [null]
@@ -34,13 +34,13 @@ jobs:
 
         exclude:
           # MacOS CI does not have any hosts available; run it on 3.12 only
-          - os: macos-latest
+          - os: macos-14
             environment: mindeps
-          - os: macos-latest
+          - os: macos-14
             environment: "3.9"
-          - os: macos-latest
+          - os: macos-14
             environment: "3.10"
-          - os: macos-latest
+          - os: macos-14
             environment: "3.11"
 
           - os: windows-latest
