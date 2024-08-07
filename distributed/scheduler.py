@@ -670,9 +670,7 @@ class WorkerState:
         )
         ws._occupancy_cache = self.occupancy
 
-        ws.executing = {
-            ts.key: duration for ts, duration in self.executing.items()  # type: ignore
-        }
+        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}
         return ws
 
     def __repr__(self) -> str:
