@@ -103,7 +103,7 @@ from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
 from distributed.gc import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.http import get_handlers
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
@@ -1681,8 +1681,8 @@ class SchedulerState:
     #: Tasks in the "queued" state, ordered by priority
     queued: HeapSet[TaskState]
 
-    #: Tasks in the "no-worker" state
-    unrunnable: set[TaskState]
+    #: Tasks in the "no-worker" state with the (monotonic) time when they became unrunnable
+    unrunnable: dict[TaskState, float]
 
     #: Subset of tasks that exist in memory on more than one worker
     replicated_tasks: set[TaskState]
@@ -1755,7 +1755,7 @@ class SchedulerState:
         host_info: dict[str, dict[str, Any]],
         resources: dict[str, dict[str, float]],
         tasks: dict[Key, TaskState],
-        unrunnable: set[TaskState],
+        unrunnable: dict[TaskState, float],
         queued: HeapSet[TaskState],
         validate: bool,
         plugins: Iterable[SchedulerPlugin] = (),
@@ -2100,7 +2100,7 @@ class SchedulerState:
                     "key": key,
                     "start": start,
                     "finish": finish,
-                    "transistion_log": list(self.transition_log),
+                    "transition_log": list(self.transition_log),
                 },
             )
             if LOG_PDB:
@@ -2193,11 +2193,73 @@ class SchedulerState:
             assert ts in self.unrunnable
 
         if ws := self.decide_worker_non_rootish(ts):
-            self.unrunnable.discard(ts)
+            self.unrunnable.pop(ts, None)
             return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
         # If no worker, task just stays in `no-worker`
 
         return {}, {}, {}
+
+    def _transition_no_worker_erred(
+        self,
+        key: Key,
+        stimulus_id: str,
+        *,
+        # TODO: Which ones can actually be None?
+        cause: Key | None = None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+    ) -> RecsMsgs:
+        ts = self.tasks[key]
+
+        if self.validate:
+            assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
+            assert cause
+            assert ts in self.unrunnable
+            assert not ts.processing_on
+
+        self.unrunnable.pop(ts)
+
+        return self._propagate_erred(
+            ts,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
+        )
+
+    def _transition_queued_erred(
+        self,
+        key: Key,
+        stimulus_id: str,
+        *,
+        # TODO: Which ones can actually be None?
+        cause: Key | None = None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+    ) -> RecsMsgs:
+        ts = self.tasks[key]
+
+        if self.validate:
+            assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
+            assert cause
+            assert ts in self.queued
+            assert not ts.processing_on
+
+        self.queued.remove(ts)
+
+        return self._propagate_erred(
+            ts,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
+        )
 
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
@@ -2730,8 +2792,6 @@ class SchedulerState:
         Recommendations, client messages and worker messages to process
         """
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
 
         if self.validate:
             assert cause or ts.exception_blame
@@ -2746,9 +2806,41 @@ class SchedulerState:
 
         self._exit_processing_common(ts)
 
+        if self.validate:
+            assert not ts.processing_on
+
+        return self._propagate_erred(
+            ts,
+            worker=worker,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
+        )
+
+    def _propagate_erred(
+        self,
+        ts: TaskState,
+        *,
+        worker: str | None = None,
+        cause: Key | None = None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+    ) -> RecsMsgs:
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+
+        ts.state = "erred"
+        key = ts.key
+
         if not ts.erred_on:
             ts.erred_on = set()
-        ts.erred_on.add(worker)
+        if worker is not None:
+            ts.erred_on.add(worker)
+
         if exception is not None:
             ts.exception = exception
             ts.exception_text = exception_text
@@ -2783,8 +2875,6 @@ class SchedulerState:
 
         ts.waiters = None
 
-        ts.state = "erred"
-
         report_msg = {
             "op": "task-erred",
             "key": key,
@@ -2802,9 +2892,6 @@ class SchedulerState:
                 recommendations=recommendations,
             )
 
-        if self.validate:
-            assert not ts.processing_on
-
         return recommendations, client_msgs, {}
 
     def _transition_no_worker_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
@@ -2815,7 +2902,7 @@ class SchedulerState:
             assert not ts.who_has
             assert not ts.waiting_on
 
-        self.unrunnable.remove(ts)
+        self.unrunnable.pop(ts)
 
         recommendations: Recs = {}
         self._propagate_released(ts, recommendations)
@@ -2838,9 +2925,13 @@ class SchedulerState:
 
         if self.validate:
             self._validate_ready(ts)
+            assert ts not in self.unrunnable
 
         ts.state = "no-worker"
-        self.unrunnable.add(ts)
+        self.unrunnable[ts] = monotonic()
+
+        if self.validate:
+            validate_unrunnable(self.unrunnable)
 
         return {}, {}, {}
 
@@ -2873,7 +2964,7 @@ class SchedulerState:
     def _remove_key(self, key: Key) -> None:
         ts = self.tasks.pop(key)
         assert ts.state == "forgotten"
-        self.unrunnable.discard(ts)
+        self.unrunnable.pop(ts, None)
         for cs in ts.who_wants or ():
             cs.wants_what.remove(ts)
         ts.who_wants = None
@@ -2963,11 +3054,13 @@ class SchedulerState:
         ("waiting", "memory"): _transition_waiting_memory,
         ("queued", "released"): _transition_queued_released,
         ("queued", "processing"): _transition_queued_processing,
+        ("queued", "erred"): _transition_queued_erred,
         ("processing", "released"): _transition_processing_released,
         ("processing", "memory"): _transition_processing_memory,
         ("processing", "erred"): _transition_processing_erred,
         ("no-worker", "released"): _transition_no_worker_released,
         ("no-worker", "processing"): _transition_no_worker_processing,
+        ("no-worker", "erred"): _transition_no_worker_erred,
         ("released", "forgotten"): _transition_released_forgotten,
         ("memory", "forgotten"): _transition_memory_forgotten,
         ("erred", "released"): _transition_erred_released,
@@ -3597,7 +3690,6 @@ class Scheduler(SchedulerState, ServerNode):
     idle_timeout: float | None
     _no_workers_since: float | None  # Note: not None iff there are pending tasks
     no_workers_timeout: float | None
-
     _client_connections_added_total: int
     _client_connections_removed_total: int
     _workers_added_total: int
@@ -3794,7 +3886,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.generation = 0
         self._last_client = None
         self._last_time = 0
-        unrunnable = set()
+        unrunnable = {}
         queued = HeapSet(key=operator.attrgetter("priority"))
 
         self.datasets = {}
@@ -4434,6 +4526,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._workers_added_total += 1
         if ws.status == Status.running:
             self.running.add(ws)
+            self._refresh_no_workers_since()
 
         dh = self.host_info.get(host)
         if dh is None:
@@ -4791,6 +4884,7 @@ class Scheduler(SchedulerState, ServerNode):
                 internal_priority = await offload(
                     dask.order.order, dsk=dsk, dependencies=stripped_deps
                 )
+            dsk = valmap(_normalize_task, dsk)
 
             self._create_taskstate_from_graph(
                 dsk=dsk,
@@ -5320,6 +5414,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: Recs = {}
 
+        timestamp = monotonic()
         processing_keys = {ts.key for ts in ws.processing}
         for ts in list(ws.processing):
             k = ts.key
@@ -5390,6 +5485,9 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", event_msg)
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
+        # Make sure that the timestamp has been collected before tasks were transitioned to no-worker
+        # to ensure a meaningful error message.
+        self._refresh_no_workers_since(timestamp=timestamp)
 
         awaitables = []
         for plugin in list(self.plugins.values()):
@@ -5632,6 +5730,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def validate_state(self, allow_overlap: bool = False) -> None:
         validate_state(self.tasks, self.workers, self.clients)
+        validate_unrunnable(self.unrunnable)
 
         if not (set(self.workers) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
@@ -5971,6 +6070,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle.pop(ws.address, None)
             self.idle_task_count.discard(ws)
             self.saturated.discard(ws)
+        self._refresh_no_workers_since()
 
     def handle_request_refresh_who_has(
         self, keys: Iterable[Key], worker: str, stimulus_id: str
@@ -8552,39 +8652,134 @@ class Scheduler(SchedulerState, ServerNode):
         return self.idle_since
 
     def _check_no_workers(self) -> None:
-        """Shut down the scheduler if there have been tasks ready to run which have
-        nowhere to run for `distributed.scheduler.no-workers-timeout`, and there
-        aren't other tasks running.
-        """
-        if self.status in (Status.closing, Status.closed):
-            return  # pragma: nocover
-
         if (
-            (not self.queued and not self.unrunnable)
-            or (self.queued and self.workers)
-            or any(ws.processing for ws in self.workers.values())
+            self.status in (Status.closing, Status.closed)
+            or self.no_workers_timeout is None
         ):
+            return
+
+        now = monotonic()
+        stimulus_id = f"check-no-workers-timeout-{time()}"
+
+        recommendations: Recs = {}
+
+        self._refresh_no_workers_since(now)
+
+        affected = self._check_unrunnable_task_timeouts(
+            now, recommendations=recommendations, stimulus_id=stimulus_id
+        )
+
+        affected.update(
+            self._check_queued_task_timeouts(
+                now, recommendations=recommendations, stimulus_id=stimulus_id
+            )
+        )
+        self.transitions(recommendations, stimulus_id=stimulus_id)
+        if affected:
+            self.log_event(
+                "scheduler",
+                {"action": "no-workers-timeout-exceeded", "keys": affected},
+            )
+
+    def _check_unrunnable_task_timeouts(
+        self, timestamp: float, recommendations: Recs, stimulus_id: str
+    ) -> set[Key]:
+        assert self.no_workers_timeout
+        unsatisfied = []
+        no_workers = []
+        for ts, unrunnable_since in self.unrunnable.items():
+            if timestamp <= unrunnable_since + self.no_workers_timeout:
+                # unrunnable is insertion-ordered, which means that unrunnable_since will
+                # be monotonically increasing in this loop.
+                break
+            if (
+                self._no_workers_since is None
+                or self._no_workers_since >= unrunnable_since
+            ):
+                unsatisfied.append(ts)
+            else:
+                no_workers.append(ts)
+        if not unsatisfied and not no_workers:
+            return set()
+
+        for ts in unsatisfied:
+            e = pickle.dumps(
+                NoValidWorkerError(
+                    task=ts.key,
+                    host_restrictions=(ts.host_restrictions or set()).copy(),
+                    worker_restrictions=(ts.worker_restrictions or set()).copy(),
+                    resource_restrictions=(ts.resource_restrictions or {}).copy(),
+                    timeout=self.no_workers_timeout,
+                ),
+            )
+            r = self.transition(
+                ts.key,
+                "erred",
+                exception=e,
+                cause=ts.key,
+                stimulus_id=stimulus_id,
+            )
+            recommendations.update(r)
+            logger.error(
+                "Task %s marked as failed because it timed out waiting "
+                "for its restrictions to become satisfied.",
+                ts.key,
+            )
+        self._fail_tasks_after_no_workers_timeout(
+            no_workers, recommendations, stimulus_id
+        )
+        return {ts.key for ts in concat([unsatisfied, no_workers])}
+
+    def _check_queued_task_timeouts(
+        self, timestamp: float, recommendations: Recs, stimulus_id: str
+    ) -> set[Key]:
+        assert self.no_workers_timeout
+
+        if self._no_workers_since is None:
+            return set()
+
+        if timestamp <= self._no_workers_since + self.no_workers_timeout:
+            return set()
+        affected = list(self.queued)
+        self._fail_tasks_after_no_workers_timeout(
+            affected, recommendations, stimulus_id
+        )
+        return {ts.key for ts in affected}
+
+    def _fail_tasks_after_no_workers_timeout(
+        self, timed_out: Iterable[TaskState], recommendations: Recs, stimulus_id: str
+    ) -> None:
+        assert self.no_workers_timeout
+
+        for ts in timed_out:
+            e = pickle.dumps(
+                NoWorkerError(
+                    task=ts.key,
+                    timeout=self.no_workers_timeout,
+                ),
+            )
+            r = self.transition(
+                ts.key,
+                "erred",
+                exception=e,
+                cause=ts.key,
+                stimulus_id=stimulus_id,
+            )
+            recommendations.update(r)
+            logger.error(
+                "Task %s marked as failed because it timed out waiting "
+                "without any running workers.",
+                ts.key,
+            )
+
+    def _refresh_no_workers_since(self, timestamp: float | None = None) -> None:
+        if self.running or not (self.queued or self.unrunnable):
             self._no_workers_since = None
             return
 
-        # 1. There are queued or unrunnable tasks and no workers at all
-        # 2. There are unrunnable tasks and no workers satisfy their restrictions
-        # (Only rootish tasks can be queued, and rootish tasks can't have restrictions)
-
         if not self._no_workers_since:
-            self._no_workers_since = time()
+            self._no_workers_since = timestamp or monotonic()
             return
-
-        if (
-            self.no_workers_timeout
-            and time() > self._no_workers_since + self.no_workers_timeout
-        ):
-            logger.info(
-                "Tasks have been without any workers to run them for %s; "
-                "shutting scheduler down",
-                format_time(self.no_workers_timeout),
-            )
-            self._ongoing_background_tasks.call_soon(self.close)
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
@@ -8607,7 +8802,7 @@ class Scheduler(SchedulerState, ServerNode):
         target_duration = parse_timedelta(target_duration)
 
         # CPU
-        queued = take(100, concat([self.queued, self.unrunnable]))
+        queued = take(100, concat([self.queued, self.unrunnable.keys()]))
         queued_occupancy = 0
         for ts in queued:
             if ts.prefix.duration_average == -1:
@@ -8894,6 +9089,25 @@ def validate_task_state(ts: TaskState) -> None:
         assert ts.state != "queued"
 
 
+def validate_unrunnable(unrunnable: dict[TaskState, float]) -> None:
+    prev_unrunnable_since: float | None = None
+    prev_ts: TaskState | None = None
+    for ts, unrunnable_since in unrunnable.items():
+        assert ts.state == "no-worker"
+        if prev_ts is not None:
+            assert prev_unrunnable_since is not None
+            # Ensure that unrunnable_since is monotonically increasing when iterating over unrunnable.
+            # _check_no_workers relies on this.
+            assert prev_unrunnable_since <= unrunnable_since, (
+                prev_ts,
+                ts,
+                prev_unrunnable_since,
+                unrunnable_since,
+            )
+        prev_ts = ts
+        prev_unrunnable_since = unrunnable_since
+
+
 def validate_worker_state(ws: WorkerState) -> None:
     for ts in ws.has_what or ():
         assert ts.who_has
@@ -8985,6 +9199,68 @@ class KilledWorker(Exception):
             f"The last worker that attempt to run the task was {self.last_worker.address}. "
             "Inspecting worker logs is often a good next step to diagnose what went wrong. "
             "For more information see https://distributed.dask.org/en/stable/killed.html."
+        )
+
+
+class NoValidWorkerError(Exception):
+    def __init__(
+        self,
+        task: Key,
+        host_restrictions: set[str],
+        worker_restrictions: set[str],
+        resource_restrictions: dict[str, float],
+        timeout: float,
+    ):
+        super().__init__(
+            task, host_restrictions, worker_restrictions, resource_restrictions, timeout
+        )
+
+    @property
+    def task(self) -> Key:
+        return self.args[0]
+
+    @property
+    def host_restrictions(self) -> Any:
+        return self.args[1]
+
+    @property
+    def worker_restrictions(self) -> Any:
+        return self.args[2]
+
+    @property
+    def resource_restrictions(self) -> Any:
+        return self.args[3]
+
+    @property
+    def timeout(self) -> float:
+        return self.args[4]
+
+    def __str__(self) -> str:
+        return (
+            f"Attempted to run task {self.task!r} but timed out after {format_time(self.timeout)} "
+            "waiting for a valid worker matching all restrictions.\n\nRestrictions:\n"
+            "host_restrictions={self.host_restrictions!s}\n"
+            "worker_restrictions={self.worker_restrictions!s}\n"
+            "resource_restrictions={self.resource_restrictions!s}\n"
+        )
+
+
+class NoWorkerError(Exception):
+    def __init__(self, task: Key, timeout: float):
+        super().__init__(task, timeout)
+
+    @property
+    def task(self) -> Key:
+        return self.args[0]
+
+    @property
+    def timeout(self) -> float:
+        return self.args[1]
+
+    def __str__(self) -> str:
+        return (
+            f"Attempted to run task {self.task!r} but timed out after {format_time(self.timeout)} "
+            "waiting without any running workers."
         )
 
 
@@ -9108,5 +9384,4 @@ def _materialize_graph(
         deps.discard(k)
         dependencies[k] = deps
 
-    dsk = valmap(_normalize_task, dsk)
     return dsk, dependencies, annotations_by_type
