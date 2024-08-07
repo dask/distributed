@@ -71,8 +71,11 @@ def _p2p_shuffle(  # type: ignore[no-untyped-def]
     transfer_keys = []
 
     for i, (start, stop) in enumerate(zip(chunk_boundaries[:-1], chunk_boundaries[1:])):
+        start = np.searchsorted(sorted_indexer[0, :], start)
+        stop = np.searchsorted(sorted_indexer[0, :], stop)
+
         chunk_indexer = sorted_indexer[:, start:stop].copy()
-        if len(chunk_indexer) == 0:
+        if chunk_indexer.shape[1] == 0:
             # skip output chunks that don't get any data
             continue
 
