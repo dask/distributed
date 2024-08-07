@@ -477,13 +477,14 @@ class Nanny(ServerNode):
 
         self.plugins[name] = plugin
 
-        logger.info("Starting Nanny plugin %s" % name)
+        logger.info("Starting Nanny plugin %s", name)
         if hasattr(plugin, "setup"):
             try:
                 result = plugin.setup(nanny=self)
                 if isawaitable(result):
                     result = await result
             except Exception as e:
+                logger.exception("Nanny plugin %s failed to setup", name)
                 return error_message(e)
         if getattr(plugin, "restart", False):
             await self.restart(reason=f"nanny-plugin-{name}-restart")
@@ -500,6 +501,7 @@ class Nanny(ServerNode):
                 if isawaitable(result):
                     result = await result
         except Exception as e:
+            logger.exception("Nanny plugin %s failed to teardown", name)
             msg = error_message(e)
             return msg
 
@@ -610,13 +612,7 @@ class Nanny(ServerNode):
 
         await self.preloads.teardown()
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
 
         self.stop()
         if self.process is not None:

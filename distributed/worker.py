@@ -1229,7 +1229,7 @@ class Worker(BaseWorker, ServerNode):
             *(
                 self.plugin_add(name=name, plugin=plugin)
                 for name, plugin in response["worker-plugins"].items()
-            )
+            ),
         )
 
         logger.info("        Registered to: %26s", self.scheduler.address)
@@ -1560,12 +1560,7 @@ class Worker(BaseWorker, ServerNode):
         # Cancel async instructions
         await BaseWorker.close(self, timeout=timeout)
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
@@ -1870,13 +1865,14 @@ class Worker(BaseWorker, ServerNode):
 
         self.plugins[name] = plugin
 
-        logger.info("Starting Worker plugin %s" % name)
+        logger.info("Starting Worker plugin %s", name)
         if hasattr(plugin, "setup"):
             try:
                 result = plugin.setup(worker=self)
                 if isawaitable(result):
                     result = await result
             except Exception as e:
+                logger.exception("Worker plugin %s failed to setup", name)
                 if not catch_errors:
                     raise
                 return error_message(e)
@@ -1893,6 +1889,7 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     result = await result
         except Exception as e:
+            logger.exception("Worker plugin %s failed to teardown", name)
             return error_message(e)
 
         return {"status": "OK"}
