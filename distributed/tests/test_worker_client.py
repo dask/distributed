@@ -380,14 +380,11 @@ async def test_log_event(c, s, a):
     assert result == 6
 
     # Ensure a corresponding event is logged
-    events = [
-        event
-        for _, event in s.get_events(a.address)
-        if event["action"] == "worker-client"
-    ]
+    events = [msg for topic, msg in s.get_events().items() if topic == "worker-client"]
     assert len(events) == 1
-    assert events[0] == {
-        "action": "worker-client",
+    assert events[0][0][1] == {
+        "worker": a.address,
         "timeout": 10,
         "separate_thread": True,
+        "client": c.id,
     }

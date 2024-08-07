@@ -54,9 +54,9 @@ def worker_client(timeout=None, separate_thread=True):
     worker = get_worker()
     client = get_client(timeout=timeout)
     worker.log_event(
-        worker.address,
+        "worker-client",
         {
-            "action": "worker-client",
+            "client": client.id,
             "timeout": timeout,
             "separate_thread": separate_thread,
         },
