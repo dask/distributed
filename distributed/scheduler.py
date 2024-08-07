@@ -775,17 +775,20 @@ class WorkerState:
                 self._dec_needs_replica(dts)
 
     def _remove_from_task_prefix_count(self, ts: TaskState) -> None:
-        count = self.task_prefix_count[ts.prefix.name] - 1
+        prefix_name = ts.prefix.name
+        count = self.task_prefix_count[prefix_name] - 1
+        tp_count = self.task_prefix_count
+        tp_count_global = self.scheduler._task_prefix_count_global
         if count:
-            self.task_prefix_count[ts.prefix.name] = count
+            tp_count[prefix_name] = count
         else:
-            del self.task_prefix_count[ts.prefix.name]
+            del tp_count[prefix_name]
 
-        count = self.scheduler._task_prefix_count_global[ts.prefix.name] - 1
+        count = tp_count_global[prefix_name] - 1
         if count:
-            self.scheduler._task_prefix_count_global[ts.prefix.name] = count
+            tp_count_global[prefix_name] = count
         else:
-            del self.scheduler._task_prefix_count_global[ts.prefix.name]
+            del tp_count_global[prefix_name]
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
