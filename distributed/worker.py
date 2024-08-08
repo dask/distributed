@@ -2610,7 +2610,7 @@ class Worker(BaseWorker, ServerNode):
                 assert self._client.status == "running"
 
         self.log_event(
-            "worker-client",
+            "worker-get-client",
             {
                 "client": self._client.id,
                 "timeout": timeout,
