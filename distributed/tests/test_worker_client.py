@@ -413,3 +413,6 @@ async def test_log_event_implicit(c, s, a):
         "timeout": 5,
         "client": c.id,
     }
+    # Do not log a `worker-client` since this client was created implicitly
+    events = [msg for topic, msg in s.get_events().items() if topic == "worker-client"]
+    assert len(events) == 0
