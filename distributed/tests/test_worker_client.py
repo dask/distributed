@@ -385,6 +385,28 @@ async def test_log_event(c, s, a):
     assert events[0][0][1] == {
         "worker": a.address,
         "timeout": 10,
-        "separate_thread": True,
+        "client": c.id,
+    }
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_log_event_implicit(c, s, a):
+    # Run a task that spawns a worker client
+    def f(x):
+        x = delayed(inc)(x)
+        y = delayed(double)(x)
+        result = x.compute() + y.compute()
+        return result
+
+    future = c.submit(f, 1)
+    result = await future
+    assert result == 6
+
+    # Ensure a corresponding event is logged
+    events = [msg for topic, msg in s.get_events().items() if topic == "worker-client"]
+    assert len(events) == 1
+    assert events[0][0][1] == {
+        "worker": a.address,
+        "timeout": 5,
         "client": c.id,
     }

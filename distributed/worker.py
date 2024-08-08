@@ -2609,6 +2609,14 @@ class Worker(BaseWorker, ServerNode):
             if not asynchronous:
                 assert self._client.status == "running"
 
+        self.log_event(
+            "worker-client",
+            {
+                "client": self._client.id,
+                "timeout": timeout,
+            },
+        )
+
         return self._client
 
     def get_current_task(self) -> Key:
