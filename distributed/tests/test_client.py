@@ -6891,8 +6891,8 @@ async def test_performance_report(c, s, a, b, local):
 
 
 @pytest.mark.skipif(
-    sys.version_info >= (3, 10),
-    reason="On Py3.10+ semaphore._loop is not bound until .acquire() blocks",
+    True,
+    reason="semaphore._loop is not bound until .acquire() blocks",
 )
 @gen_cluster(nthreads=[])
 async def test_client_gather_semaphore_loop(s):
@@ -6911,8 +6911,8 @@ async def test_as_completed_condition_loop(c, s, a, b):
 
 
 @pytest.mark.skipif(
-    sys.version_info >= (3, 10),
-    reason="On Py3.10+ semaphore._loop is not bound until .acquire() blocks",
+    True,
+    reason="semaphore._loop is not bound until .acquire() blocks",
 )
 def test_client_connectionpool_semaphore_loop(s, a, b, loop):
     with Client(s["address"], loop=loop) as c:

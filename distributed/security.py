@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import os
 import ssl
-import sys
 import tempfile
 import warnings
 
@@ -13,7 +12,7 @@ from dask.widgets import get_template
 __all__ = ("Security",)
 
 
-if sys.version_info >= (3, 10) or ssl.OPENSSL_VERSION_INFO >= (1, 1, 0, 7):
+if ssl.OPENSSL_VERSION_INFO >= (1, 1, 0, 7):
     # The OP_NO_SSL* and OP_NO_TLS* become deprecated in favor of
     # 'SSLContext.minimum_version' from Python 3.7 onwards, however
     # this attribute is not available unless the ssl module is compiled
