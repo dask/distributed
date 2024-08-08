@@ -4869,6 +4869,7 @@ class Scheduler(SchedulerState, ServerNode):
                 _materialize_graph,
                 graph=graph,
                 global_annotations=annotations or {},
+                validate=self.validate,
             )
             del graph
             if not internal_priority:
@@ -9337,11 +9338,12 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 
 def _materialize_graph(
-    graph: HighLevelGraph, global_annotations: dict[str, Any]
+    graph: HighLevelGraph, global_annotations: dict[str, Any], validate: bool
 ) -> tuple[dict[Key, T_runspec], dict[Key, set[Key]], dict[str, dict[Key, Any]]]:
     dsk = ensure_dict(graph)
-    for k in dsk:
-        validate_key(k)
+    if validate:
+        for k in dsk:
+            validate_key(k)
     annotations_by_type: defaultdict[str, dict[Key, Any]] = defaultdict(dict)
     for annotations_type, value in global_annotations.items():
         annotations_by_type[annotations_type].update(
