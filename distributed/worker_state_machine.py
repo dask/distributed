@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import random
-import sys
 import warnings
 import weakref
 from collections import Counter, defaultdict, deque
@@ -199,12 +198,7 @@ def _default_data_size() -> int:
     return parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 
 
-# Note: can't specify __slots__ manually to enable slots in Python <3.10 in a @dataclass
-# that defines any default values
-DC_SLOTS = {"slots": True} if sys.version_info >= (3, 10) else {}
-
-
-@dataclass(repr=False, eq=False, **DC_SLOTS)
+@dataclass(repr=False, eq=False, slots=True)
 class TaskState:
     """Holds volatile state relating to an individual Dask task.
 
