@@ -399,20 +399,21 @@ class P2PRechunkLayer(Layer):
         chunked_shape = tuple(len(axis) for axis in self.chunks)
 
         for ndpartial in _split_partials(_old_to_new, chunked_shape):
-            output_count = np.sum(self.keepmap[ndpartial.new])
+            partial_keepmap = self.keepmap[ndpartial.new]
+            output_count = np.sum(partial_keepmap)
             if output_count == 0:
                 continue
             elif output_count == 1:
                 # Single output chunk
-                # TODO: Create new partial that contains ONLY the relevant chunk
+                ndindex = np.argwhere(partial_keepmap)[0]
+                ndpartial = _truncate_partial(ndindex, ndpartial, _old_to_new)
+
                 dsk.update(
                     partial_concatenate(
                         input_name=self.name_input,
                         input_chunks=self.chunks_input,
                         ndpartial=ndpartial,
                         token=self.token,
-                        keepmap=self.keepmap,
-                        old_to_new=_old_to_new,
                     )
                 )
             else:
@@ -516,8 +517,6 @@ def partial_concatenate(
     input_chunks: ChunkedAxes,
     ndpartial: _NDPartial,
     token: str,
-    keepmap: np.ndarray,
-    old_to_new: list[Any],
 ) -> dict[Key, Any]:
     import numpy as np
 
@@ -527,31 +526,6 @@ def partial_concatenate(
     dsk: dict[Key, Any] = {}
 
     slice_group = f"rechunk-slice-{token}"
-
-    partial_keepmap = keepmap[ndpartial.new]
-    assert np.sum(partial_keepmap) == 1
-
-    ndindex = np.argwhere(partial_keepmap)[0]
-
-    partial_per_axis = []
-    for axis_index, index in enumerate(ndindex):
-        slc = slice(
-            ndpartial.new[axis_index].start + index,
-            ndpartial.new[axis_index].start + index + 1,
-        )
-        first_old_chunk, first_old_slice = old_to_new[axis_index][slc.start][0]
-        last_old_chunk, last_old_slice = old_to_new[axis_index][slc.stop - 1][-1]
-        partial_per_axis.append(
-            _Partial(
-                old=slice(first_old_chunk, last_old_chunk + 1),
-                new=slc,
-                left_start=first_old_slice.start,
-                right_stop=last_old_slice.stop,
-            )
-        )
-
-    old, new, left_starts, right_stops = zip(*partial_per_axis)
-    ndpartial = _NDPartial(old, new, left_starts, right_stops, ndpartial.ix)
 
     old_offset = tuple(slice_.start for slice_ in ndpartial.old)
 
@@ -586,6 +560,32 @@ def partial_concatenate(
         rec_cat_arg.tolist(),
     )
     return dsk
+
+
+def _truncate_partial(
+    ndindex: NDIndex,
+    ndpartial: _NDPartial,
+    old_to_new: list[Any],
+) -> _NDPartial:
+    partial_per_axis = []
+    for axis_index, index in enumerate(ndindex):
+        slc = slice(
+            ndpartial.new[axis_index].start + index,
+            ndpartial.new[axis_index].start + index + 1,
+        )
+        first_old_chunk, first_old_slice = old_to_new[axis_index][slc.start][0]
+        last_old_chunk, last_old_slice = old_to_new[axis_index][slc.stop - 1][-1]
+        partial_per_axis.append(
+            _Partial(
+                old=slice(first_old_chunk, last_old_chunk + 1),
+                new=slc,
+                left_start=first_old_slice.start,
+                right_stop=last_old_slice.stop,
+            )
+        )
+
+    old, new, left_starts, right_stops = zip(*partial_per_axis)
+    return _NDPartial(old, new, left_starts, right_stops, ndpartial.ix)
 
 
 def _compute_partial_old_chunks(
