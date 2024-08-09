@@ -405,7 +405,8 @@ class P2PRechunkLayer(Layer):
                 continue
             elif output_count == 1:
                 # Single output chunk
-                ndpartial = _truncate_partial(ndpartial, _old_to_new, partial_keepmap)
+                ndindex = np.argwhere(partial_keepmap)[0]
+                ndpartial = _truncate_partial(ndindex, ndpartial, _old_to_new)
 
                 dsk.update(
                     partial_concatenate(
@@ -562,10 +563,10 @@ def partial_concatenate(
 
 
 def _truncate_partial(
-    ndpartial: _NDPartial, old_to_new: list[Any], partial_keepmap: np.ndarray
+    ndindex: NDIndex,
+    ndpartial: _NDPartial,
+    old_to_new: list[Any],
 ) -> _NDPartial:
-    ndindex = np.argwhere(partial_keepmap)[0]
-
     partial_per_axis = []
     for axis_index, index in enumerate(ndindex):
         slc = slice(
