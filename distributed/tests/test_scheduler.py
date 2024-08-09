@@ -29,7 +29,6 @@ from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import parse_timedelta, tmpfile, typename
 
 from distributed import (
-    CancelledError,
     Client,
     Event,
     Future,
@@ -4170,16 +4169,15 @@ async def test_transition_counter(c, s, a):
     assert a.state.transition_counter > 1
 
 
-@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_transition_counter_max_scheduler(c, s, a, b):
     # This is set by @gen_cluster; it's False in production
     assert s.transition_counter_max > 0
     s.transition_counter_max = 1
     with captured_logger("distributed.scheduler") as logger:
-        with pytest.raises(CancelledError):
+        with pytest.raises(AssertionError):
             await c.submit(inc, 2)
-    assert s.transition_counter > 1
+    assert s.transition_counter == 1
     with pytest.raises(AssertionError):
         s.validate_state()
     assert "transition_counter_max" in logger.getvalue()

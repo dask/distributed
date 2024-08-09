@@ -66,7 +66,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import istask
 from dask.utils import ensure_bytes as _ensure_bytes
 from dask.utils import key_split
 from dask.utils import parse_timedelta as _parse_timedelta
@@ -970,17 +969,6 @@ def truncate_exception(e, n=10000):
             return Exception("Long error message", type(e), str(e)[:n])
     else:
         return e
-
-
-def _maybe_complex(task):
-    """Possibly contains a nested task"""
-    return (
-        istask(task)
-        or type(task) is list
-        and any(map(_maybe_complex, task))
-        or type(task) is dict
-        and any(map(_maybe_complex, task.values()))
-    )
 
 
 def seek_delimiter(file, delimiter, blocksize):
