@@ -1178,7 +1178,7 @@ async def test_steal_worker_dies_same_ip(c, s, w0, w1):
     wsB = s.workers[w1.address]
 
     steal.move_task_request(victim_ts, wsA, wsB)
-    len_before = len(s.events["stealing"])
+    len_before = len(s.get_events("stealing"))
     with freeze_batched_send(w0.batched_stream):
         while not any(
             isinstance(event, StealRequestEvent) for event in w0.state.stimulus_log
@@ -1208,7 +1208,7 @@ async def test_steal_worker_dies_same_ip(c, s, w0, w1):
             assert hash(wsB2) != hash(wsB)
 
     # Wait for the steal response to arrive
-    while len_before == len(s.events["stealing"]):
+    while len_before == len(s.get_events("stealing")):
         await asyncio.sleep(0.1)
 
     assert victim_ts.processing_on != wsB
@@ -1875,5 +1875,5 @@ async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
     results = [dask.delayed(lambda *args: None)(root, i) for i in range(1000)]
     futs = c.compute(results)
     await c.gather(futs)
-    events = s.events["stealing"]
+    events = s.get_events("stealing")
     assert len(events) == 0

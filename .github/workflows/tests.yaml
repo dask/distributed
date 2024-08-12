@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.9", "3.10", "3.11", "3.12"]
+        environment: [mindeps, "3.10", "3.11", "3.12"]
         label: [default]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
@@ -36,8 +36,6 @@ jobs:
           # MacOS CI does not have any hosts available; run it on 3.12 only
           - os: macos-latest
             environment: mindeps
-          - os: macos-latest
-            environment: "3.9"
           - os: macos-latest
             environment: "3.10"
           - os: macos-latest
@@ -49,21 +47,21 @@ jobs:
         include:
           # Set distributed.scheduler.worker-saturation: .inf
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_queue
             partition: "ci1"
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_queue
             partition: "not ci1"
 
           # Set dataframe.query-planning: false
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_expr
             partition: "ci1"
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_expr
             partition: "not ci1"
 
@@ -83,12 +81,12 @@ jobs:
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=1.3, pyarrow=7, pyarrow-hotfix]
+            extra_packages: [numpy=1.21, pandas=2.0, pyarrow=7, pyarrow-hotfix]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=1.3, pyarrow=7, pyarrow-hotfix]
+            extra_packages: [numpy=1.21, pandas=2.0, pyarrow=7, pyarrow-hotfix]
             partition: "not ci1"
 
           - os: ubuntu-latest
@@ -120,7 +118,7 @@ jobs:
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v4.1.2
+        uses: actions/checkout@v4.1.3
         with:
           fetch-depth: 0
 
@@ -159,7 +157,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CONDA }}/envs
-          key: conda-${{ matrix.os }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
+          key: conda-${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
         env:
           # Increase this value to reset cache if
           # continuous_integration/environment-${{ matrix.environment }}.yaml has not

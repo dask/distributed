@@ -97,6 +97,7 @@ def _initialize_logging_old_style(config: dict[Any, Any]) -> None:
     loggers: dict[str, str | int] = {  # default values
         "distributed": "info",
         "distributed.client": "warning",
+        "distributed.gc": "warning",
         "bokeh": "error",
         "tornado": "critical",
         "tornado.application": "error",

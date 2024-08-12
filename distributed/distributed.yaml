@@ -3,6 +3,7 @@ distributed:
   # logging:
   #   distributed: info
   #   distributed.client: warning
+  #   distributed.gc: warning
   #   bokeh: error
   #   # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
   #   tornado: critical
@@ -18,7 +19,7 @@ distributed:
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
     idle-timeout: null       # Shut down after this duration, like "1h" or "30 minutes"
-    no-workers-timeout: null # Shut down if there are tasks but no workers to process them
+    no-workers-timeout: null # If a task remains unrunnable for longer than this, it fails.
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
     worker-saturation: 1.1  # Send this fraction of nthreads root tasks to workers

@@ -40,10 +40,10 @@ from dask.utils import format_bytes, parse_bytes, parse_timedelta
 from distributed import system
 from distributed.compatibility import WINDOWS, PeriodicCallback
 from distributed.core import Status
+from distributed.gc import ThrottledGC
 from distributed.metrics import context_meter, monotonic
 from distributed.spill import ManualEvictProto, SpillBuffer
 from distributed.utils import RateLimiterFilter, has_arg, log_errors
-from distributed.utils_perf import ThrottledGC
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -417,12 +417,19 @@ class NannyMemoryManager:
             return
 
         if self._last_terminated_pid != process.pid:
-            nanny_logger.warning(
+            msg = (
                 f"Worker {nanny.worker_address} (pid={process.pid}) exceeded "
                 f"{self.memory_terminate_fraction * 100:.0f}% memory budget. "
-                "Restarting...",
+                f"Restarting..."
             )
+            nanny_logger.warning(msg)
             self._last_terminated_pid = process.pid
+            event = {
+                "worker": nanny.worker_address,
+                "pid": process.pid,
+                "rss": memory,
+            }
+            nanny.log_event("worker-restart-memory", event)
             process.terminate()
         else:
             # We already sent SIGTERM to the worker, but the process is still alive

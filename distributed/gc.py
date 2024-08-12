@@ -4,14 +4,17 @@ import gc
 import logging
 import threading
 from collections import deque
+from typing import Callable, Final
 
 import psutil
 
 from dask.utils import format_bytes
 
 from distributed.metrics import thread_time
+from distributed.utils import RateLimiterFilter
 
 logger = _logger = logging.getLogger(__name__)
+logger.addFilter(RateLimiterFilter("full garbage collections took", rate="60s"))
 
 
 class ThrottledGC:
@@ -23,7 +26,7 @@ class ThrottledGC:
     collect() does nothing when repeated calls are so costly and so frequent
     that the thread would spend more than max_in_gc_frac doing GC.
 
-    warn_if_longer is a duration in seconds (10s by default) that can be used
+    warn_if_longer is a duration in seconds (1s by default) that can be used
     to log a warning level message whenever an actual call to gc.collect()
     lasts too long.
     """
@@ -76,9 +79,18 @@ class FractionalTimer:
     elapsed time.
     """
 
-    MULT = 1e9  # convert to nanoseconds
+    MULT: Final[float] = 1e9  # convert to nanoseconds
 
-    def __init__(self, n_samples, timer=thread_time):
+    _timer: Callable[[], float]
+    _n_samples: int
+    _start_stops: deque[tuple[float, float]]
+    _durations: deque[int]
+    _cur_start: float | None
+    _running_sum: int | None
+    _running_fraction: float | None
+    _duration_total: int
+
+    def __init__(self, n_samples: int, timer: Callable[[], float] = thread_time):
         self._timer = timer
         self._n_samples = n_samples
         self._start_stops = deque()
@@ -86,8 +98,9 @@ class FractionalTimer:
         self._cur_start = None
         self._running_sum = None
         self._running_fraction = None
+        self._duration_total = 0
 
-    def _add_measurement(self, start, stop):
+    def _add_measurement(self, start: float, stop: float) -> None:
         start_stops = self._start_stops
         durations = self._durations
         if stop < start or (start_stops and start < start_stops[-1][1]):
@@ -98,6 +111,7 @@ class FractionalTimer:
         duration = int((stop - start) * self.MULT)
         start_stops.append((start, stop))
         durations.append(duration)
+        self._duration_total += duration
 
         n = len(durations)
         assert n == len(start_stops)
@@ -114,11 +128,11 @@ class FractionalTimer:
                         self._running_sum / (stop - old_stop) / self.MULT
                     )
 
-    def start_timing(self):
+    def start_timing(self) -> None:
         assert self._cur_start is None
         self._cur_start = self._timer()
 
-    def stop_timing(self):
+    def stop_timing(self) -> None:
         stop = self._timer()
         start = self._cur_start
         self._cur_start = None
@@ -126,7 +140,14 @@ class FractionalTimer:
         self._add_measurement(start, stop)
 
     @property
-    def running_fraction(self):
+    def duration_total(self) -> float:
+        current_duration = 0.0
+        if self._cur_start is not None:
+            current_duration = self._timer() - self._cur_start
+        return self._duration_total / self.MULT + current_duration
+
+    @property
+    def running_fraction(self) -> float | None:
         return self._running_fraction
 
 
@@ -141,10 +162,11 @@ class GCDiagnosis:
 
     N_SAMPLES = 30
 
-    def __init__(self, warn_over_frac=0.1, info_over_rss_win=10 * 1e6):
-        self._warn_over_frac = warn_over_frac
+    def __init__(self, info_over_frac=0.1, info_over_rss_win=10 * 1e6):
+        self._info_over_frac = info_over_frac
         self._info_over_rss_win = info_over_rss_win
         self._enabled = False
+        self._fractional_timer = None
 
     def enable(self):
         assert not self._enabled
@@ -186,22 +208,25 @@ class GCDiagnosis:
         assert phase == "stop"
         self._fractional_timer.stop_timing()
         frac = self._fractional_timer.running_fraction
-        if frac is not None and frac >= self._warn_over_frac:
-            logger.warning(
+        if frac is not None:
+            level = logging.INFO if frac >= self._info_over_frac else logging.DEBUG
+            logger.log(
+                level,
                 "full garbage collections took %d%% CPU time "
                 "recently (threshold: %d%%)",
                 100 * frac,
-                100 * self._warn_over_frac,
+                100 * self._info_over_frac,
             )
         rss_saved = self._gc_rss_before - rss
-        if rss_saved >= self._info_over_rss_win:
-            logger.info(
-                "full garbage collection released %s "
-                "from %d reference cycles (threshold: %s)",
-                format_bytes(rss_saved),
-                info["collected"],
-                format_bytes(self._info_over_rss_win),
-            )
+        level = logging.INFO if rss_saved >= self._info_over_rss_win else logging.DEBUG
+        logger.log(
+            level,
+            "full garbage collection released %s "
+            "from %d reference cycles (threshold: %s)",
+            format_bytes(rss_saved),
+            info["collected"],
+            format_bytes(self._info_over_rss_win),
+        )
         if info["uncollectable"] > 0:
             # This should ideally never happen on Python 3, but who knows?
             logger.warning(
@@ -244,3 +269,9 @@ def disable_gc_diagnosis(force=False):
                 _gc_diagnosis_users = 0
             else:
                 assert _gc_diagnosis.enabled
+
+
+def gc_collect_duration() -> float:
+    if _gc_diagnosis._fractional_timer is None:
+        return 0
+    return _gc_diagnosis._fractional_timer.duration_total

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from distributed import Nanny, NannyPlugin
 from distributed.protocol.pickle import dumps
-from distributed.utils_test import gen_cluster
+from distributed.utils_test import captured_logger, gen_cluster
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
@@ -160,3 +162,58 @@ async def test_register_plugin_with_idempotent_keyword_is_deprecated(c, s, a):
         await c.register_plugin(second, idempotent=True)
     assert "idempotentplugin" in a.plugins
     assert a.plugins["idempotentplugin"].instance == "first"
+
+
+class BrokenSetupPlugin(NannyPlugin):
+    def setup(self, nanny):
+        raise RuntimeError("test error")
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_register_plugin_with_broken_setup_to_existing_nannies_raises(c, s, a):
+    with pytest.raises(RuntimeError, match="test error"):
+        with captured_logger("distributed.nanny", level=logging.ERROR) as caplog:
+            await c.register_plugin(BrokenSetupPlugin(), name="TestPlugin1")
+    logs = caplog.getvalue()
+    assert "TestPlugin1 failed to setup" in logs
+    assert "test error" in logs
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_plugin_with_broken_setup_on_new_nanny_logs(c, s):
+    await c.register_plugin(BrokenSetupPlugin(), name="TestPlugin1")
+
+    with captured_logger("distributed.nanny", level=logging.ERROR) as caplog:
+        async with Nanny(s.address):
+            pass
+    logs = caplog.getvalue()
+    assert "TestPlugin1 failed to setup" in logs
+    assert "test error" in logs
+
+
+class BrokenTeardownPlugin(NannyPlugin):
+    def teardown(self, nanny):
+        raise RuntimeError("test error")
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_unregister_nanny_plugin_with_broken_teardown_raises(c, s, a):
+    await c.register_plugin(BrokenTeardownPlugin(), name="TestPlugin1")
+    with pytest.raises(RuntimeError, match="test error"):
+        with captured_logger("distributed.nanny", level=logging.ERROR) as caplog:
+            await c.unregister_worker_plugin("TestPlugin1", nanny=True)
+    logs = caplog.getvalue()
+    assert "TestPlugin1 failed to teardown" in logs
+    assert "test error" in logs
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_nanny_plugin_with_broken_teardown_logs_on_close(c, s):
+    await c.register_plugin(BrokenTeardownPlugin(), name="TestPlugin1")
+
+    with captured_logger("distributed.nanny", level=logging.ERROR) as caplog:
+        async with Nanny(s.address):
+            pass
+    logs = caplog.getvalue()
+    assert "TestPlugin1 failed to teardown" in logs
+    assert "test error" in logs

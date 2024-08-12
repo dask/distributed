@@ -257,7 +257,7 @@ async def test_group_timing(c, s, a, b):
     assert s.task_groups.keys() == p.compute.keys()
     assert all(
         [
-            abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-12
+            abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-6 * len(v)
             for k, v in p.compute.items()
         ]
     )

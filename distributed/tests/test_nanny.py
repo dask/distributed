@@ -22,7 +22,7 @@ from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import CommClosedError, Status, error_message
+from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.diagnostics.plugin import NannyPlugin, WorkerPlugin
 from distributed.metrics import time
@@ -554,7 +554,7 @@ async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
         ) as n:
             await n.process.stopped.wait()
             # Check that the scheduler has been notified about the closed worker
-            assert "remove-worker" in str(s.events)
+            assert "remove-worker" in str(s.get_events())
 
 
 class BrokenWorker(worker.Worker):
@@ -660,6 +660,12 @@ async def test_restart_memory(c, s, n):
     while not s.workers:
         await asyncio.sleep(0.1)
 
+    msgs = s.get_events("worker-restart-memory")
+    assert len(msgs)
+    msg = msgs[0][1]
+    assert isinstance(msg, dict)
+    assert {"worker", "pid", "rss"}.issubset(set(msg))
+
 
 class BlockClose(WorkerPlugin):
     def __init__(self, close_happened):
@@ -740,7 +746,9 @@ async def test_malloc_trim_threshold(c, s, a):
     This test may start failing in a future Python version if CPython switches to
     using mimalloc by default. If it does, a thorough benchmarking exercise is needed.
     """
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     arr = da.random.random(2**29 // 8, chunks="512 kiB")  # 0.5 GiB
     arr = arr.persist()
     await wait(arr)
@@ -790,36 +798,6 @@ async def test_worker_inherits_temp_config(c, s):
         async with Nanny(s.address):
             out = await c.submit(lambda: dask.config.get("test123"))
             assert out == 123
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_log_event(c, s):
-    async with Nanny(s.address) as n:
-        n.log_event("test-topic1", "foo")
-
-        class C:
-            pass
-
-        with pytest.raises(TypeError, match="msgpack"):
-            n.log_event("test-topic2", C())
-        n.log_event("test-topic3", "bar")
-        n.log_event("test-topic4", error_message(Exception()))
-
-        # Worker unaffected
-        assert await c.submit(lambda x: x + 1, 1) == 2
-
-    assert [msg[1] for msg in s.get_events("test-topic1")] == ["foo"]
-    assert [msg[1] for msg in s.get_events("test-topic3")] == ["bar"]
-    # assertion reversed for mock.ANY.__eq__(Serialized())
-    assert [
-        {
-            "status": "error",
-            "exception": mock.ANY,
-            "traceback": mock.ANY,
-            "exception_text": "Exception()",
-            "traceback_text": "",
-        },
-    ] == [msg[1] for msg in s.get_events("test-topic4")]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)

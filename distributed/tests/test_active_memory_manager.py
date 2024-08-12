@@ -1084,7 +1084,6 @@ async def test_RetireWorker_new_keys_arrive_after_all_keys_moved_away(c, s, a, b
 @gen_cluster(
     client=True,
     config={
-        "distributed.scheduler.worker-ttl": "500ms",
         "distributed.scheduler.active-memory-manager.start": True,
         "distributed.scheduler.active-memory-manager.interval": 0.05,
         "distributed.scheduler.active-memory-manager.measure": "managed",
@@ -1279,6 +1278,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
 
 
 async def tensordot_stress(c, s):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
     rng = da.random.RandomState(0)

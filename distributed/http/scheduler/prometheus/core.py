@@ -7,6 +7,8 @@ import prometheus_client
 import toolz
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
+from distributed.core import Status
+from distributed.gc import gc_collect_duration
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.scheduler.prometheus.semaphore import SemaphoreMetricCollector
 from distributed.http.scheduler.prometheus.stealing import WorkStealingMetricCollector
@@ -22,10 +24,24 @@ class SchedulerMetricCollector(PrometheusCollector):
         self.subsystem = "scheduler"
 
     def collect(self) -> Iterator[GaugeMetricFamily | CounterMetricFamily]:
+        self.server.monitor.update()
+
         yield GaugeMetricFamily(
             self.build_name("clients"),
             "Number of clients connected",
             value=len([k for k in self.server.clients if k != "fire-and-forget"]),
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("client_connections_added"),
+            "Total number of client connections added",
+            value=self.server._client_connections_added_total,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("client_connections_removed"),
+            "Total number of client connections removed",
+            value=self.server._client_connections_removed_total,
         )
 
         yield GaugeMetricFamily(
@@ -47,10 +63,28 @@ class SchedulerMetricCollector(PrometheusCollector):
             - len(self.server.saturated),
         )
         worker_states.add_metric(["saturated"], len(self.server.saturated))
-        worker_states.add_metric(
-            ["paused_or_retiring"], len(self.server.workers) - len(self.server.running)
+        paused_workers = len(
+            [w for w in self.server.workers.values() if w.status == Status.paused]
         )
+        worker_states.add_metric(["paused"], paused_workers)
+        worker_states.add_metric(
+            ["retiring"],
+            len(self.server.workers) - paused_workers - len(self.server.running),
+        )
+
         yield worker_states
+
+        yield CounterMetricFamily(
+            self.build_name("workers_added"),
+            "Total number of workers added",
+            value=self.server._workers_added_total,
+        )
+
+        yield CounterMetricFamily(
+            self.build_name("workers_removed"),
+            "Total number of workers removed",
+            value=self.server._workers_removed_total,
+        )
 
         if self.server.monitor.monitor_gil_contention:
             yield CounterMetricFamily(
@@ -59,6 +93,13 @@ class SchedulerMetricCollector(PrometheusCollector):
                 value=self.server.monitor.cumulative_gil_contention,
                 unit="seconds",
             )
+
+        yield CounterMetricFamily(
+            self.build_name("gc_collection"),
+            "Total time spent on garbage collection",
+            value=gc_collect_duration(),
+            unit="seconds",
+        )
 
         yield CounterMetricFamily(
             self.build_name("last_time"),
@@ -101,6 +142,12 @@ class SchedulerMetricCollector(PrometheusCollector):
             if state != "forgotten":
                 tasks.add_metric([state], task_counter.get(state, 0.0))
         yield tasks
+
+        yield GaugeMetricFamily(
+            self.build_name("task_groups"),
+            "Number of task groups known by scheduler",
+            value=len(self.server.task_groups),
+        )
 
         time_spent_compute_tasks = CounterMetricFamily(
             self.build_name("tasks_compute"),

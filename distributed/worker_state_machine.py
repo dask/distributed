@@ -336,7 +336,7 @@ class TaskState:
         -----
         This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
         When a task references another task, just print the task repr. All tasks
-        should neatly appear under Worker.tasks. This also prevents a RecursionError
+        should neatly appear under Worker.state.tasks. This also prevents a RecursionError
         during particularly heavy loads, which have been observed to happen whenever
         there's an acyclic dependency chain of ~200+ tasks.
         """
