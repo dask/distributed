@@ -670,9 +670,7 @@ class WorkerState:
         )
         ws._occupancy_cache = self.occupancy
 
-        ws.executing = {
-            ts.key: duration for ts, duration in self.executing.items()  # type: ignore
-        }
+        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}
         return ws
 
     def __repr__(self) -> str:
@@ -5595,8 +5593,8 @@ class Scheduler(SchedulerState, ServerNode):
         for k in keys:
             ts = self.tasks.get(k)
             if ts is None:
-                # For publish, queues etc.
-                ts = self.new_task(k, None, "released")
+                warnings.warn(f"Client desires key {k!r} but key is unknown.")
+                continue
             if ts.who_wants is None:
                 ts.who_wants = set()
             ts.who_wants.add(cs)
@@ -9345,7 +9343,7 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 def _materialize_graph(
     graph: HighLevelGraph, global_annotations: dict[str, Any], validate: bool
 ) -> tuple[dict[Key, T_runspec], dict[Key, set[Key]], dict[str, dict[Key, Any]]]:
-    dsk = ensure_dict(graph)
+    dsk: dict = ensure_dict(graph)
     if validate:
         for k in dsk:
             validate_key(k)

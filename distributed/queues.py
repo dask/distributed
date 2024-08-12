@@ -8,7 +8,7 @@ from collections import defaultdict
 from dask.utils import parse_timedelta
 
 from distributed.client import Future
-from distributed.utils import wait_for
+from distributed.utils import Deadline, wait_for
 from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -67,15 +67,22 @@ class QueueExtension:
                 self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
 
     async def put(self, name=None, key=None, data=None, client=None, timeout=None):
+        deadline = Deadline.after(timeout)
         if key is not None:
+            while key not in self.scheduler.tasks:
+                await asyncio.sleep(0.01)
+                if deadline.expired:
+                    raise TimeoutError(f"Task {key} unknown to scheudler.")
+
             record = {"type": "Future", "value": key}
             self.future_refcount[name, key] += 1
             self.scheduler.client_desires_keys(keys=[key], client="queue-%s" % name)
         else:
             record = {"type": "msgpack", "value": data}
-        await wait_for(self.queues[name].put(record), timeout=timeout)
+        await wait_for(self.queues[name].put(record), timeout=deadline.remaining)
 
     def future_release(self, name=None, key=None, client=None):
+        self.scheduler.client_desires_keys(keys=[key], client=client)
         self.future_refcount[name, key] -= 1
         if self.future_refcount[name, key] == 0:
             self.scheduler.client_releases_keys(keys=[key], client="queue-%s" % name)
@@ -265,7 +272,7 @@ class Queue:
 
         def process(d):
             if d["type"] == "Future":
-                value = Future(d["value"], self.client, inform=True, state=d["state"])
+                value = Future(d["value"], self.client, state=d["state"])
                 if d["state"] == "erred":
                     value._state.set_error(d["exception"], d["traceback"])
                 self.client._send_to_scheduler(

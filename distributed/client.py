@@ -297,12 +297,14 @@ class Future(WrappedKey):
     # Make sure this stays unique even across multiple processes or hosts
     _uid = uuid.uuid4().hex
 
-    def __init__(self, key, client=None, inform=True, state=None, _id=None):
+    def __init__(self, key, client=None, inform=None, state=None, _id=None):
         self.key = key
         self._cleared = False
         self._client = client
         self._id = _id or (Future._uid, next(Future._counter))
         self._input_state = state
+        if inform:
+            raise RuntimeError("Futures should not be informed")
         self._inform = inform
         self._state = None
         self._bind_late()
@@ -312,13 +314,11 @@ class Future(WrappedKey):
         self._bind_late()
         return self._client
 
+    def bind_client(self, client):
+        self._client = client
+        self._bind_late()
+
     def _bind_late(self):
-        if not self._client:
-            try:
-                client = get_client()
-            except ValueError:
-                client = None
-            self._client = client
         if self._client and not self._state:
             self._client._inc_ref(self.key)
             self._generation = self._client.generation
@@ -327,15 +327,6 @@ class Future(WrappedKey):
                 self._state = self._client.futures[self.key]
             else:
                 self._state = self._client.futures[self.key] = FutureState(self.key)
-
-            if self._inform:
-                self._client._send_to_scheduler(
-                    {
-                        "op": "client-desires-keys",
-                        "keys": [self.key],
-                        "client": self._client.id,
-                    }
-                )
 
             if self._input_state is not None:
                 try:
@@ -588,13 +579,8 @@ class Future(WrappedKey):
             except TypeError:  # pragma: no cover
                 pass  # Shutting down, add_callback may be None
 
-    @staticmethod
-    def make_future(key, id):
-        # Can't use kwargs in pickle __reduce__ methods
-        return Future(key=key, _id=id)
-
     def __reduce__(self) -> str | tuple[Any, ...]:
-        return Future.make_future, (self.key, self._id)
+        return Future, (self.key,)
 
     def __dask_tokenize__(self):
         return (type(self).__name__, self.key, self._id)
@@ -2969,12 +2955,14 @@ class Client(SyncMethodMixin):
     async def _get_dataset(self, name, default=no_default):
         with self.as_current():
             out = await self.scheduler.publish_get(name=name, client=self.id)
-
         if out is None:
             if default is no_default:
                 raise KeyError(f"Dataset '{name}' not found")
             else:
                 return default
+        for fut in futures_of(out["data"]):
+            fut.bind_client(self)
+        self._inform_scheduler_of_futures()
         return out["data"]
 
     def get_dataset(self, name, default=no_default, **kwargs):
@@ -3299,6 +3287,14 @@ class Client(SyncMethodMixin):
                     break
 
         return tuple(reversed(code))
+
+    def _inform_scheduler_of_futures(self):
+        self._send_to_scheduler(
+            {
+                "op": "client-desires-keys",
+                "keys": list(self.refcount),
+            }
+        )
 
     def _graph_to_futures(
         self,
@@ -6092,7 +6088,7 @@ def futures_of(o, client=None):
             stack.extend(x.values())
         elif type(x) is SubgraphCallable:
             stack.extend(x.dsk.values())
-        elif isinstance(x, Future):
+        elif isinstance(x, WrappedKey):
             if x not in seen:
                 seen.add(x)
                 futures.append(x)

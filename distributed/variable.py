@@ -12,7 +12,7 @@ from dask.utils import parse_timedelta
 
 from distributed.client import Future
 from distributed.metrics import time
-from distributed.utils import TimeoutError, log_errors, wait_for
+from distributed.utils import Deadline, TimeoutError, log_errors, wait_for
 from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -39,12 +39,19 @@ class VariableExtension:
             {"variable_set": self.set, "variable_get": self.get}
         )
 
-        self.scheduler.stream_handlers["variable-future-release"] = self.future_release
+        self.scheduler.stream_handlers[
+            "variable-future-received-confirm"
+        ] = self.future_received_confirm
         self.scheduler.stream_handlers["variable_delete"] = self.delete
 
-    async def set(self, name=None, key=None, data=None, client=None):
+    async def set(self, name=None, key=None, data=None, client=None, timeout=None):
+        deadline = Deadline.after(parse_timedelta(timeout))
         if key is not None:
             record = {"type": "Future", "value": key}
+            while key not in self.scheduler.tasks:
+                await asyncio.sleep(0.01)
+                if deadline.expired:
+                    raise TimeoutError(f"Task {key} unknown to scheudler.")
             self.scheduler.client_desires_keys(keys=[key], client="variable-%s" % name)
         else:
             record = {"type": "msgpack", "value": data}
@@ -68,7 +75,10 @@ class VariableExtension:
         self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
         del self.waiting[key, name]
 
-    async def future_release(self, name=None, key=None, token=None, client=None):
+    async def future_received_confirm(
+        self, name=None, key=None, token=None, client=None
+    ):
+        self.scheduler.client_desires_keys([key], client)
         self.waiting[key, name].remove(token)
         if not self.waiting[key, name]:
             async with self.waiting_conditions[name]:
@@ -182,13 +192,17 @@ class Variable:
                 " a Client or Worker."
             )
 
-    async def _set(self, value):
+    async def _set(self, value, timeout):
         if isinstance(value, Future):
-            await self.client.scheduler.variable_set(key=value.key, name=self.name)
+            await self.client.scheduler.variable_set(
+                key=value.key, name=self.name, timeout=timeout
+            )
         else:
-            await self.client.scheduler.variable_set(data=value, name=self.name)
+            await self.client.scheduler.variable_set(
+                data=value, name=self.name, timeout=timeout
+            )
 
-    def set(self, value, **kwargs):
+    def set(self, value, timeout="30 s", **kwargs):
         """Set the value of this variable
 
         Parameters
@@ -197,19 +211,19 @@ class Variable:
             Must be either a Future or a msgpack-encodable value
         """
         self._verify_running()
-        return self.client.sync(self._set, value, **kwargs)
+        return self.client.sync(self._set, value, timeout=timeout, **kwargs)
 
     async def _get(self, timeout=None):
         d = await self.client.scheduler.variable_get(
             timeout=timeout, name=self.name, client=self.client.id
         )
         if d["type"] == "Future":
-            value = Future(d["value"], self.client, inform=True, state=d["state"])
+            value = Future(d["value"], self.client, inform=False, state=d["state"])
             if d["state"] == "erred":
                 value._state.set_error(d["exception"], d["traceback"])
             self.client._send_to_scheduler(
                 {
-                    "op": "variable-future-release",
+                    "op": "variable-future-received-confirm",
                     "name": self.name,
                     "key": d["value"],
                     "token": d["token"],

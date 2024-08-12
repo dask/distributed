@@ -102,7 +102,6 @@ from distributed.utils_test import (
     dec,
     div,
     double,
-    ensure_no_new_clients,
     gen_cluster,
     gen_test,
     get_cert,
@@ -2636,27 +2635,36 @@ def test_futures_of_class():
     assert futures_of([da.Array]) == []
 
 
+@pytest.mark.filterwarnings("ignore:.*key is unknown")
 @gen_cluster(client=True)
 async def test_futures_of_cancelled_raises(c, s, a, b):
     x = c.submit(inc, 1)
-    await c.cancel([x])
+    while x.key not in s.tasks:
+        await asyncio.sleep(0.01)
+    await c.cancel([x], reason="testreason")
 
-    with pytest.raises(CancelledError):
+    # Note: The scheduler currently doesn't remember the reason but rather
+    # forgets the task immediately. The reason is currently. only raised if the
+    # client checks on it. Therefore, we expect an unknown reason and definitely
+    # not a scheduler disconnected which would otherwise indicate a bug, e.g. an
+    # AssertionError during transitioning.
+    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
         await x
     while x.key in s.tasks:
         await asyncio.sleep(0.01)
-    with pytest.raises(CancelledError):
+
+    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
         get_obj = c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False)
         gather_obj = c.gather(get_obj)
         await gather_obj
 
-    with pytest.raises(CancelledError):
+    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
         await c.submit(inc, x)
 
-    with pytest.raises(CancelledError):
+    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
         await c.submit(add, 1, y=x)
 
-    with pytest.raises(CancelledError):
+    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
         await c.gather(c.map(add, [1], y=x))
 
 
@@ -3025,14 +3033,6 @@ async def test_rebalance_unprepared(c, s, a, b):
     # block until all futures are completed before invoking Scheduler.rebalance().
     await c.rebalance(futures)
     s.validate_state()
-
-
-@gen_cluster(client=True, config=NO_AMM)
-async def test_rebalance_raises_on_explicit_missing_data(c, s, a, b):
-    """rebalance() raises KeyError if explicitly listed futures disappear"""
-    f = Future("x", client=c, state="memory")
-    with pytest.raises(KeyError, match="Could not rebalance keys:"):
-        await c.rebalance(futures=[f])
 
 
 @gen_cluster(client=True)
@@ -4139,51 +4139,6 @@ async def test_scatter_compute_store_lose_processing(c, s, a, b):
 
     assert y.status == "cancelled"
     assert z.status == "cancelled"
-
-
-@gen_cluster()
-async def test_serialize_future(s, a, b):
-    async with (
-        Client(s.address, asynchronous=True) as c1,
-        Client(s.address, asynchronous=True) as c2,
-    ):
-        future = c1.submit(lambda: 1)
-        result = await future
-
-        for ci in (c1, c2):
-            with ensure_no_new_clients():
-                with ci.as_current():
-                    future2 = pickle.loads(pickle.dumps(future))
-                    assert future2.client is ci
-                    assert future2.key in ci.futures
-                    result2 = await future2
-                    assert result == result2
-                with temp_default_client(ci):
-                    future2 = pickle.loads(pickle.dumps(future))
-
-
-@gen_cluster()
-async def test_serialize_future_without_client(s, a, b):
-    # Do not use a ctx manager to avoid having this being set as a current and/or default client
-    c1 = await Client(s.address, asynchronous=True, set_as_default=False)
-    try:
-        with ensure_no_new_clients():
-
-            def do_stuff():
-                return 1
-
-            future = c1.submit(do_stuff)
-            pickled = pickle.dumps(future)
-            unpickled_fut = pickle.loads(pickled)
-
-        with pytest.raises(RuntimeError):
-            await unpickled_fut
-
-        with c1.as_current():
-            unpickled_fut_ctx = pickle.loads(pickled)
-            assert await unpickled_fut_ctx == 1
-    finally:
-        await c1.close()
 
 
 @gen_cluster()
@@ -5825,27 +5780,6 @@ async def test_client_with_name(s, a, b):
 
     text = sio.getvalue()
     assert "foo" in text
-
-
-@gen_cluster(client=True)
-async def test_future_defaults_to_default_client(c, s, a, b):
-    x = c.submit(inc, 1)
-    await wait(x)
-
-    future = Future(x.key)
-    assert future.client is c
-
-
-@gen_cluster(client=True)
-async def test_future_auto_inform(c, s, a, b):
-    x = c.submit(inc, 1)
-    await wait(x)
-
-    async with Client(s.address, asynchronous=True) as client:
-        future = Future(x.key, client)
-
-        while future.status != "finished":
-            await asyncio.sleep(0.01)
 
 
 def test_client_async_before_loop_starts(cleanup):
