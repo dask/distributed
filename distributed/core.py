@@ -424,10 +424,10 @@ class Server:
         return {"status": "OK", "nbytes": len(data)}
 
     def _shift_counters(self):
-        for counter in self.counters.values():
+        for counter in list(self.counters.values()):
             counter.shift()
         if self.digests is not None:
-            for digest in self.digests.values():
+            for digest in list(self.digests.values()):
                 digest.shift()
 
     @property
