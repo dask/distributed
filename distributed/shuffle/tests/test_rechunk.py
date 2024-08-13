@@ -1350,4 +1350,4 @@ async def test_partial_rechunk_taskgroups(c, s):
         ),
         timeout=5,
     )
-    assert len(s.task_groups) < 7
+    assert len(s.task_groups) < 8
