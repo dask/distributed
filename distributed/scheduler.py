@@ -3849,7 +3849,7 @@ class Scheduler(SchedulerState, ServerNode):
                     """Shut down the server."""
                     self.log.info("Shutting down on /api/shutdown request.")
 
-                    await scheduler.close(reason="shutdown requested via Jupyter")
+                    await scheduler.close(reason="jupyter-requested-shutdown")
 
             j = ServerApp.instance(
                 config=Config(
