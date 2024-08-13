@@ -4274,7 +4274,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None, reason=""):
+    async def close(self, fast=None, close_workers=None, reason="unknown"):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4291,6 +4291,10 @@ class Scheduler(SchedulerState, ServerNode):
             await self.finished()
             return
 
+        self.status = Status.closing
+        logger.info("Closing scheduler. Reason: %s", reason)
+        setproctitle("dask scheduler [closing]")
+
         async def log_errors(func):
             try:
                 await func()
@@ -4300,10 +4304,6 @@ class Scheduler(SchedulerState, ServerNode):
         await asyncio.gather(
             *[log_errors(plugin.before_close) for plugin in list(self.plugins.values())]
         )
-
-        self.status = Status.closing
-        logger.info("Scheduler closing due to %s...", reason or "unknown reason")
-        setproctitle("dask scheduler [closing]")
 
         await self.preloads.teardown()
 
@@ -8652,7 +8652,9 @@ class Scheduler(SchedulerState, ServerNode):
                     "Scheduler closing after being idle for %s",
                     format_time(self.idle_timeout),
                 )
-                self._ongoing_background_tasks.call_soon(self.close)
+                self._ongoing_background_tasks.call_soon(
+                    self.close, reason="idle-timeout-exceeded"
+                )
         return self.idle_since
 
     def _check_no_workers(self) -> None:
