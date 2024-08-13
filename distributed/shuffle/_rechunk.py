@@ -570,14 +570,6 @@ def _global_index(partial_index: NDIndex, partial_offset: NDIndex) -> NDIndex:
     return tuple(index + offset for index, offset in zip(partial_index, partial_offset))
 
 
-def _slicing_is_necessary(slice: NDSlice, shape: tuple[int | None, ...]) -> bool:
-    """Return True if applying the slice alters the shape, False otherwise."""
-    return not all(
-        slc.start == 0 and (size is None and slc.stop is None or slc.stop == size)
-        for slc, size in zip(slice, shape)
-    )
-
-
 def partial_concatenate(
     input_name: str,
     input_chunks: ChunkedAxes,
@@ -632,6 +624,14 @@ def partial_concatenate(
         rec_cat_arg.tolist(),
     )
     return dsk
+
+
+def _slicing_is_necessary(slice: NDSlice, shape: tuple[int | None, ...]) -> bool:
+    """Return True if applying the slice alters the shape, False otherwise."""
+    return not all(
+        slc.start == 0 and (size is None and slc.stop is None or slc.stop == size)
+        for slc, size in zip(slice, shape)
+    )
 
 
 def partial_rechunk(
