@@ -660,7 +660,7 @@ def partial_rechunk(
 
     partial_old = tuple(
         chunk_axis[partial_axis]
-        for partial_axis, chunk_axis in zip(ndpartial.old, chunks)
+        for partial_axis, chunk_axis in zip(ndpartial.old, input_chunks)
     )
     partial_new: ChunkedAxes = tuple(
         chunks[axis_index][ndpartial.new[axis_index]] for axis_index in range(ndim)
