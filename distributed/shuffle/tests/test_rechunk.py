@@ -31,6 +31,7 @@ from distributed.shuffle._rechunk import (
     ArrayRechunkRun,
     ArrayRechunkSpec,
     Split,
+    _prechunk_for_partials,
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
@@ -1351,3 +1352,38 @@ async def test_partial_rechunk_taskgroups(c, s):
         timeout=5,
     )
     assert len(s.task_groups) < 8
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2),), ((2, 2),), ((2, 2),)],
+        [((2, 2),), ((4,),), ((2, 2),)],
+        [((2, 2),), ((1, 1, 1, 1),), ((2, 2),)],
+        [((2, 2, 2),), ((1, 2, 2, 1),), ((1, 1, 1, 1, 2),)],
+        [((1, np.nan),), ((1, np.nan),), ((1, np.nan),)],
+    ],
+)
+def test_prechunk_for_partials_1d(old, new, expected):
+    actual = _prechunk_for_partials(old, new)
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2), (3, 3)), ((2, 2), (3, 3)), ((2, 2), (3, 3))],
+        [((2, 2), (3, 3)), ((4,), (3, 3)), ((2, 2), (3, 3))],
+        [((2, 2), (3, 3)), ((1, 1, 1, 1), (3, 3)), ((2, 2), (3, 3))],
+        [
+            ((2, 2, 2), (3, 3, 3)),
+            ((1, 2, 2, 1), (2, 3, 4)),
+            ((1, 1, 1, 1, 2), (2, 1, 2, 1, 3)),
+        ],
+        [((1, np.nan), (3, 3)), ((1, np.nan), (2, 2, 2)), ((1, np.nan), (2, 1, 3))],
+        [((4,), (1, 1, 1)), ((1, 1, 1, 1), (3,)), ((4,), (1, 1, 1))],
+    ],
+)
+def test_prechunk_for_partials_2d(old, new, expected):
+    actual = _prechunk_for_partials(old, new)
+    assert actual == expected
