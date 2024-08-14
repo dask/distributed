@@ -848,7 +848,8 @@ async def test_rechunk_avoid_needless_chunking(c, s, *ws):
     x = da.ones(16, chunks=2)
     y = x.rechunk(8, method="p2p")
     dsk = y.__dask_graph__()
-    assert len(dsk) <= 8 + 2
+    # 8 inputs, 2 concatenations of small inputs, 2 outputs
+    assert len(dsk) <= 8 + 2 + 2
 
 
 @pytest.mark.parametrize(
@@ -1365,7 +1366,7 @@ async def test_partial_rechunk_taskgroups(c, s):
     ],
 )
 def test_prechunk_for_partials_1d(old, new, expected):
-    actual = _prechunk_for_partials(old, new)
+    actual = _prechunk_for_partials(old, new, np.dtype(np.int16))
     assert actual == expected
 
 
@@ -1385,5 +1386,5 @@ def test_prechunk_for_partials_1d(old, new, expected):
     ],
 )
 def test_prechunk_for_partials_2d(old, new, expected):
-    actual = _prechunk_for_partials(old, new)
+    actual = _prechunk_for_partials(old, new, np.dtype(np.int16))
     assert actual == expected

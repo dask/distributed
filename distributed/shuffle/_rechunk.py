@@ -96,6 +96,7 @@ the same output brick.
 
 from __future__ import annotations
 
+import math
 import mmap
 import os
 from collections import defaultdict
@@ -111,7 +112,7 @@ from collections.abc import (
 )
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from itertools import product
+from itertools import chain, product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
@@ -124,6 +125,7 @@ from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.typing import Key
+from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
 from distributed.metrics import context_meter
@@ -220,7 +222,7 @@ def rechunk_p2p(
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
     from dask.array.core import new_da_object
 
-    prechunked = _prechunk_for_partials(x.chunks, chunks)
+    prechunked = _prechunk_for_partials(x.chunks, chunks, x.dtype)
     if prechunked != x.chunks:
         x = cast(
             "da.Array",
@@ -433,8 +435,10 @@ class P2PRechunkLayer(Layer):
 
 
 def _prechunk_for_partials(
-    old_chunks: ChunkedAxes, new_chunks: ChunkedAxes
+    old_chunks: ChunkedAxes, new_chunks: ChunkedAxes, dtype: np.dtype
 ) -> ChunkedAxes:
+    import numpy as np
+
     from dask.array.rechunk import old_to_new
 
     _old_to_new = old_to_new(old_chunks, new_chunks)
@@ -448,6 +452,7 @@ def _prechunk_for_partials(
         old_axis = old_chunks[axis_index]
         split_axis = []
         for slice_ in slices:
+            partial_chunks = []
             first_new_chunk = slice_.start
             first_old_chunk, first_old_slice = old_to_new_axis[first_new_chunk][0]
             last_new_chunk = slice_.stop - 1
@@ -473,22 +478,76 @@ def _prechunk_for_partials(
                     assert first_old_slice.start == 0
                     chunk_size = last_old_slice.stop
 
-                split_axis.append(chunk_size)
+                split_axis.append([chunk_size])
                 continue
 
-            split_axis.append(first_chunk_size - first_old_slice.start)
+            partial_chunks.append(first_chunk_size - first_old_slice.start)
 
-            split_axis.extend(old_axis[first_old_chunk + 1 : last_old_chunk])
+            partial_chunks.extend(old_axis[first_old_chunk + 1 : last_old_chunk])
 
             if last_old_slice.stop is not None:
                 chunk_size = last_old_slice.stop
             else:
                 chunk_size = last_chunk_size
 
-            split_axis.append(chunk_size)
+            partial_chunks.append(chunk_size)
+            split_axis.append(partial_chunks)
 
         split_axes.append(split_axis)
-    return tuple(tuple(axis) for axis in split_axes)
+
+    has_nans = (any(math.isnan(y) for y in x) for x in old_chunks)
+
+    if len(new_chunks) <= 1 or not all(new_chunks) or any(has_nans):
+        return tuple(tuple(chain(*axis)) for axis in split_axes)
+
+    if dtype is None or dtype.hasobject or dtype.itemsize == 0:
+        return tuple(tuple(chain(*axis)) for axis in split_axes)
+
+    # TODO: Incorporate block_size_limit from dask.array.rechunk(..., block_size_limit=...)
+    block_size_limit = dask.config.get("array.chunk-size")
+    if isinstance(block_size_limit, str):
+        block_size_limit = parse_bytes(block_size_limit)
+
+    # Make it a number of elements
+    block_size_limit //= dtype.itemsize
+
+    # We verified earlier that we do not have any NaNs
+    largest_old_block = _largest_block_size(old_chunks)  # type: ignore[arg-type]
+    largest_new_block = _largest_block_size(new_chunks)  # type: ignore[arg-type]
+    block_size_limit = max([block_size_limit, largest_old_block, largest_new_block])
+
+    max_chunk_sizes = tuple(max(chain(*axis)) for axis in split_axes)
+
+    block_reduction_ratio = tuple(
+        sum(len(partial) for partial in split_axis) / len(new_axis)
+        for split_axis, new_axis in zip(split_axes, new_chunks)
+    )
+
+    ascending = np.argsort(block_reduction_ratio)
+
+    concatenated_axes: list[list[float]] = [[] for _ in ascending]
+
+    for axis_index in ascending:
+        concatenated_axis = concatenated_axes[axis_index]
+        multiplier = math.prod(
+            max_chunk_sizes[:axis_index] + max_chunk_sizes[axis_index + 1 :]
+        )
+        axis_limit = block_size_limit // multiplier
+
+        for partial in split_axes[axis_index]:
+            current = partial[0]
+            for chunk in partial[1:]:
+                if (current + chunk) > axis_limit:
+                    concatenated_axis.append(current)
+                    current = chunk
+                else:
+                    current += chunk
+            concatenated_axis.append(current)
+    return tuple(tuple(axis) for axis in concatenated_axes)
+
+
+def _largest_block_size(chunks: tuple[tuple[int, ...], ...]) -> int:
+    return math.prod(map(max, chunks))
 
 
 def _split_partials(
