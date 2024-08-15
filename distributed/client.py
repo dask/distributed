@@ -17,7 +17,15 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
+from collections.abc import (
+    Awaitable,
+    Collection,
+    Coroutine,
+    Generator,
+    Iterable,
+    Iterator,
+    Sequence,
+)
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -34,6 +42,7 @@ from typing import (
     Literal,
     NamedTuple,
     TypedDict,
+    TypeVar,
     cast,
 )
 
@@ -130,6 +139,9 @@ from distributed.utils_comm import (
     unpack_remotedata,
 )
 from distributed.worker import get_client, get_worker, secede
+
+if TYPE_CHECKING:
+    from distributed.actor import ActorFuture, EagerActorFuture
 
 logger = logging.getLogger(__name__)
 
@@ -5984,6 +5996,71 @@ class as_completed:
 
 def AsCompleted(*args, **kwargs):
     raise Exception("This has moved to as_completed")
+
+
+_T = TypeVar("_T")
+
+
+def results_in_order(
+    futures: Iterable[Future | ActorFuture | EagerActorFuture],
+) -> Generator[Any, None, None]:
+    """
+    Return results of futures in the order of the given iterable
+
+    Parameters
+    ----------
+    futures: Iterable of futures
+        An Iterable of Future objects to be iterated over in the order
+        given
+
+    Examples
+    --------
+    >>> x, y, z = client.map(inc, [1, 2, 3])  # doctest: +SKIP
+    >>> for result in results_in_order([x, y, z]):  # doctest: +SKIP
+    ...     print(result)  # doctest: +SKIP
+    2
+    3
+    4
+    """
+    from distributed.actor import ActorFuture, EagerActorFuture
+
+    futures_list = list(futures)
+
+    for f in futures_list:
+        if isinstance(f, Future):
+            loop = f.client.loop
+            break
+        if isinstance(f, ActorFuture):
+            loop = f._io_loop
+            break
+        if isinstance(f, EagerActorFuture):
+            continue
+        raise TypeError(f"Input must be a future, got {type(f)!r}")
+    else:  # empty input or all EagerActorFuture
+        for f in futures_list:
+            yield f.result()
+        return
+
+    try:
+        asyncio_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        if loop.asyncio_loop is asyncio_loop:
+            raise RuntimeError(
+                "Got asynchronous Future running on current event loop "
+                "these must be awaited"
+            )
+
+    async def wrap_awaitable(v: Awaitable[_T]) -> _T:
+        return await v
+
+    async def schedule_tasks() -> list[asyncio.Task[Any]]:
+        return [asyncio.create_task(wrap_awaitable(f)) for f in futures_list]
+
+    tasks = sync(loop, schedule_tasks)
+    for task in tasks:
+        yield sync(loop, wrap_awaitable, task)
 
 
 def default_client(c=None):
