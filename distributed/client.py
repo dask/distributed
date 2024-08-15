@@ -297,15 +297,12 @@ class Future(WrappedKey):
     # Make sure this stays unique even across multiple processes or hosts
     _uid = uuid.uuid4().hex
 
-    def __init__(self, key, client=None, inform=None, state=None, _id=None):
+    def __init__(self, key, client=None, state=None, _id=None):
         self.key = key
         self._cleared = False
         self._client = client
         self._id = _id or (Future._uid, next(Future._counter))
         self._input_state = state
-        if inform:
-            raise RuntimeError("Futures should not be informed")
-        self._inform = inform
         self._state = None
         self._bind_late()
 
@@ -2147,7 +2144,7 @@ class Client(SyncMethodMixin):
 
         with self._refcount_lock:
             if key in self.futures:
-                return Future(key, self, inform=False)
+                return Future(key, self)
 
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
@@ -2647,7 +2644,7 @@ class Client(SyncMethodMixin):
                     timeout=timeout,
                 )
 
-        out = {k: Future(k, self, inform=False) for k in data}
+        out = {k: Future(k, self) for k in data}
         for key, typ in types.items():
             self.futures[key].finish(type=typ)
 
@@ -3344,7 +3341,7 @@ class Client(SyncMethodMixin):
                 validate_key(key)
 
             # Create futures before sending graph (helps avoid contention)
-            futures = {key: Future(key, self, inform=False) for key in keyset}
+            futures = {key: Future(key, self) for key in keyset}
             # Circular import
             from distributed.protocol import serialize
             from distributed.protocol.serialize import ToPickle
@@ -3503,7 +3500,7 @@ class Client(SyncMethodMixin):
                     if not changed:
                         changed = True
                         dsk = ensure_dict(dsk)
-                    dsk[key] = Future(key, self, inform=False)
+                    dsk[key] = Future(key, self)
 
         if changed:
             dsk, _ = dask.optimization.cull(dsk, keys)

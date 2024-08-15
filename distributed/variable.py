@@ -218,7 +218,7 @@ class Variable:
             timeout=timeout, name=self.name, client=self.client.id
         )
         if d["type"] == "Future":
-            value = Future(d["value"], self.client, inform=False, state=d["state"])
+            value = Future(d["value"], self.client, state=d["state"])
             if d["state"] == "erred":
                 value._state.set_error(d["exception"], d["traceback"])
             self.client._send_to_scheduler(
