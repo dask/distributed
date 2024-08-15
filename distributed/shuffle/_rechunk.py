@@ -205,7 +205,6 @@ def rechunk_name(token: str) -> str:
     return f"rechunk-p2p-{token}"
 
 
-# FIXME: Pass these parameters on the dask/dask side
 def rechunk_p2p(
     x: da.Array,
     chunks: ChunkedAxes,
