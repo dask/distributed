@@ -2635,7 +2635,6 @@ def test_futures_of_class():
     assert futures_of([da.Array]) == []
 
 
-@pytest.mark.filterwarnings("ignore:.*key is unknown")
 @gen_cluster(client=True)
 async def test_futures_of_cancelled_raises(c, s, a, b):
     x = c.submit(inc, 1)
