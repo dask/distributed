@@ -44,7 +44,7 @@ rapids-logger "Install distributed"
 python -m pip install -e .
 
 rapids-logger "Install dask"
-python -m pip install git+https://github.com/dask/dask
+python -m pip install git+https://github.com/hendrikmakait/dask@prechunk-p2p-rechunk
 
 rapids-logger "Check Python versions"
 python --version
