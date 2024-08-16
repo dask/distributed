@@ -67,7 +67,7 @@ WorkerDataParameter: TypeAlias = Union[
 ]
 
 worker_logger = logging.getLogger("distributed.worker.memory")
-worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high"))
+worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high", rate="300s"))
 nanny_logger = logging.getLogger("distributed.nanny.memory")
 
 
