@@ -47,8 +47,11 @@ dependencies:
   # Temporary fix for https://github.com/pypa/setuptools/issues/4496
   - setuptools < 71
   - pip:
-      - git+https://github.com/dask/dask
-      - git+https://github.com/dask-contrib/dask-expr
+      # TODO: Undo
+      - git+https://github.com/dask/dask.git@numpy-124
+      - git+https://github.com/jrbourbeau/dask-expr.git@pyarrow-14
+      # - git+https://github.com/dask/dask
+      # - git+https://github.com/dask-contrib/dask-expr
       - git+https://github.com/dask/zict
       # Revert after https://github.com/dask/distributed/issues/8614 is fixed
       # - git+https://github.com/dask/s3fs
