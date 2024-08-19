@@ -48,7 +48,7 @@ dependencies:
   - setuptools < 71
   - pip:
       # TODO: Undo
-      - git+https://github.com/dask/dask.git@numpy-124
+      - git+https://github.com/jrbourbeau/dask.git@numpy-124
       - git+https://github.com/jrbourbeau/dask-expr.git@pyarrow-14
       # - git+https://github.com/dask/dask
       # - git+https://github.com/dask-contrib/dask-expr
