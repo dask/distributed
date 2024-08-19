@@ -15,7 +15,6 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop
 
 import dask
@@ -73,13 +72,8 @@ from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
     import pyarrow as pa
-
-    PYARROW_GE_12 = parse_version(pa.__version__).release >= (12,)
-    PYARROW_GE_14 = parse_version(pa.__version__).release >= (14,)
 except ImportError:
     pa = None
-    PYARROW_GE_12 = False
-    PYARROW_GE_14 = False
 
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
@@ -1145,6 +1139,9 @@ def test_processing_chain(tmp_path, drop_column):
         ),
         f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
         f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
+        # Extension types
+        f"col{next(counter)}": pd.period_range("2022-01-01", periods=100, freq="D"),
+        f"col{next(counter)}": pd.interval_range(start=0, end=100, freq=1),
         # FIXME: PyArrow does not support sparse data:
         #        https://issues.apache.org/jira/browse/ARROW-8679
         # f"col{next(counter)}": pd.array(
@@ -1157,17 +1154,6 @@ def test_processing_chain(tmp_path, drop_column):
         #     [Stub(i) for i in range(100)], dtype="object"
         # ),
     }
-
-    if PYARROW_GE_12:
-        columns.update(
-            {
-                # Extension types
-                f"col{next(counter)}": pd.period_range(
-                    "2022-01-01", periods=100, freq="D"
-                ),
-                f"col{next(counter)}": pd.interval_range(start=0, end=100, freq=1),
-            }
-        )
 
     columns.update(
         {
@@ -2502,18 +2488,11 @@ async def test_reconcile_partitions(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
 
-    if PYARROW_GE_14:
-        result, expected = c.compute([ddf, out])
-        result = await result
-        expected = await expected
-        dd.assert_eq(result, expected)
-        del result
-    else:
-        with raises_with_cause(
-            RuntimeError, r"shuffling \w+ failed", pa.ArrowInvalid, "incompatible types"
-        ):
-            await c.compute(out)
-        await c.close()
+    result, expected = c.compute([ddf, out])
+    result = await result
+    expected = await expected
+    dd.assert_eq(result, expected)
+    del result
     del out
 
     await assert_worker_cleanup(a)
@@ -2536,7 +2515,7 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
     with raises_with_cause(
         RuntimeError,
         r"(shuffling \w*|shuffle_barrier) failed",
-        pa.ArrowTypeError if PYARROW_GE_14 else pa.ArrowInvalid,
+        pa.ArrowTypeError,
         "incompatible types",
     ):
         await c.compute(out)

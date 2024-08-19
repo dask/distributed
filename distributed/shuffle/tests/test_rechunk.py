@@ -6,7 +6,6 @@ import random
 import warnings
 
 import pytest
-from packaging.version import parse as parse_version
 
 np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
@@ -35,8 +34,6 @@ from distributed.shuffle._rechunk import (
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils_test import async_poll_for, gen_cluster, gen_test
-
-NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 
 
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
@@ -174,7 +171,7 @@ async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk)
         np.testing.assert_array_equal(
             concatenate3(old_cs.tolist()),
             concatenate3(all_chunks.tolist()),
-            **({"strict": True} if NUMPY_GE_124 else {}),
+            strict=True,
         )
 
 
