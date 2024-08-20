@@ -20,6 +20,7 @@ import traceback
 import warnings
 import weakref
 import xml.etree.ElementTree
+from asyncio import Event as LateLoopEvent
 from asyncio import TimeoutError
 from collections import deque
 from collections.abc import (
@@ -439,36 +440,6 @@ def sync(
         raise error
     else:
         return result
-
-
-if sys.version_info >= (3, 10):
-    from asyncio import Event as LateLoopEvent
-else:
-    # In python 3.10 asyncio.Lock and other primitives no longer support
-    # passing a loop kwarg to bind to a loop running in another thread
-    # e.g. calling from Client(asynchronous=False). Instead the loop is bound
-    # as late as possible: when calling any methods that wait on or wake
-    # Future instances. See: https://bugs.python.org/issue42392
-    class LateLoopEvent:
-        _event: asyncio.Event | None
-
-        def __init__(self) -> None:
-            self._event = None
-
-        def set(self) -> None:
-            if self._event is None:
-                self._event = asyncio.Event()
-
-            self._event.set()
-
-        def is_set(self) -> bool:
-            return self._event is not None and self._event.is_set()
-
-        async def wait(self) -> bool:
-            if self._event is None:
-                self._event = asyncio.Event()
-
-            return await self._event.wait()
 
 
 class _CollectErrorThread:
