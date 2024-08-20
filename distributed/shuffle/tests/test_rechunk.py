@@ -31,6 +31,7 @@ from distributed.shuffle._rechunk import (
     ArrayRechunkRun,
     ArrayRechunkSpec,
     Split,
+    _calculate_prechunking,
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
@@ -188,17 +189,19 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     --------
     dask.array.tests.test_rechunk.test_rechunk_1d
     """
-    a = np.random.default_rng().uniform(0, 1, 30)
-    x = da.from_array(a, chunks=((10,) * 3,))
-    new = ((6,) * 5,)
+    a = np.random.default_rng().uniform(0, 1, 100).reshape((10, 10))
+    x = da.from_array(a, chunks=(10, 1))
+    new = ((1,) * 10, (10,))
     config = {"array.rechunk.method": config_value} if config_value is not None else {}
     with dask.config.set(config):
         x2 = rechunk(x, chunks=new, method=keyword)
     expected_algorithm = keyword if keyword is not None else config_value
     if expected_algorithm == "p2p":
-        assert all(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+        assert all(key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
     else:
-        assert not any(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+        assert not any(
+            key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__()
+        )
 
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
@@ -1315,30 +1318,17 @@ async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
 async def test_partial_rechunk_taskgroups(c, s):
     """Regression test for https://github.com/dask/distributed/issues/8656"""
     arr = da.random.random(
-        (10, 10, 10),
+        (10, 10),
         chunks=(
-            (
-                2,
-                2,
-                2,
-                2,
-                2,
-            ),
-        )
-        * 3,
+            (1,) * 10,
+            (2,) * 5,
+        ),
     )
     arr = arr.rechunk(
         (
-            (
-                1,
-                2,
-                2,
-                2,
-                2,
-                1,
-            ),
-        )
-        * 3,
+            (2,) * 5,
+            (1,) * 10,
+        ),
         method="p2p",
     )
 
@@ -1350,4 +1340,39 @@ async def test_partial_rechunk_taskgroups(c, s):
         ),
         timeout=5,
     )
-    assert len(s.task_groups) < 7
+    assert len(s.task_groups) < 6
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2),), ((2, 2),), ((2, 2),)],
+        [((2, 2),), ((4,),), ((2, 2),)],
+        [((2, 2),), ((1, 1, 1, 1),), ((2, 2),)],
+        [((2, 2, 2),), ((1, 2, 2, 1),), ((1, 1, 1, 1, 1, 1),)],
+        [((1, np.nan),), ((1, np.nan),), ((1, np.nan),)],
+    ],
+)
+def test_calculate_prechunking_1d(old, new, expected):
+    actual = _calculate_prechunking(old, new)
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2), (3, 3)), ((2, 2), (3, 3)), ((2, 2), (3, 3))],
+        [((2, 2), (3, 3)), ((4,), (3, 3)), ((2, 2), (3, 3))],
+        [((2, 2), (3, 3)), ((1, 1, 1, 1), (3, 3)), ((2, 2), (3, 3))],
+        [
+            ((2, 2, 2), (3, 3, 3)),
+            ((1, 2, 2, 1), (2, 3, 4)),
+            ((1, 1, 1, 1, 1, 1), (2, 1, 2, 1, 3)),
+        ],
+        [((1, np.nan), (3, 3)), ((1, np.nan), (2, 2, 2)), ((1, np.nan), (2, 1, 1, 2))],
+        [((4,), (1, 1, 1)), ((1, 1, 1, 1), (3,)), ((4,), (1, 1, 1))],
+    ],
+)
+def test_calculate_prechunking_2d(old, new, expected):
+    actual = _calculate_prechunking(old, new)
+    assert actual == expected
