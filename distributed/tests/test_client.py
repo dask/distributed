@@ -6890,16 +6890,6 @@ async def test_performance_report(c, s, a, b, local):
     assert "cdn.bokeh.org" in data
 
 
-@pytest.mark.skipif(
-    True,
-    reason="semaphore._loop is not bound until .acquire() blocks",
-)
-@gen_cluster(nthreads=[])
-async def test_client_gather_semaphore_loop(s):
-    async with Client(s.address, asynchronous=True) as c:
-        assert c._gather_semaphore._loop is c.loop.asyncio_loop
-
-
 @gen_cluster(client=True)
 async def test_as_completed_condition_loop(c, s, a, b):
     seq = c.map(inc, range(5))
@@ -6908,15 +6898,6 @@ async def test_as_completed_condition_loop(c, s, a, b):
     async for _ in ac:
         pass
     assert ac.condition._loop == c.loop.asyncio_loop
-
-
-@pytest.mark.skipif(
-    True,
-    reason="semaphore._loop is not bound until .acquire() blocks",
-)
-def test_client_connectionpool_semaphore_loop(s, a, b, loop):
-    with Client(s["address"], loop=loop) as c:
-        assert c.rpc.semaphore._loop is loop.asyncio_loop
 
 
 @pytest.mark.slow
