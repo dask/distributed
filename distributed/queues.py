@@ -72,7 +72,7 @@ class QueueExtension:
             while key not in self.scheduler.tasks:
                 await asyncio.sleep(0.01)
                 if deadline.expired:
-                    raise TimeoutError(f"Task {key} unknown to scheudler.")
+                    raise TimeoutError(f"Task {key} unknown to scheduler.")
 
             record = {"type": "Future", "value": key}
             self.future_refcount[name, key] += 1
