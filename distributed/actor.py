@@ -77,7 +77,7 @@ class Actor(WrappedKey):
         if not self._client:
             try:
                 self._client = get_client()
-                self._future = Future(self._key, inform=False)
+                self._future = Future(self._key, self._client)
                 # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
