@@ -8437,3 +8437,41 @@ def test_release_persisted_collection_sync(c):
         # submitting to the scheduler is different to what we are in
         # client.compute
         arr.compute()
+
+
+@pytest.mark.slow()
+@pytest.mark.parametrize("do_wait", [True, False])
+def test_persisted_collection_submitted(c, do_wait):
+    # Note: sending collections like this should be considered an anti-pattern
+    # but it is possible. As long as the user ensures the futures stay alive
+    # this is fine but the cluster will not take over this responsibility. The
+    # client will not unpack the collection when using submit and will therefore
+    # not handle the dependencies in any way.
+    # See also https://github.com/dask/distributed/issues/7498
+    da = pytest.importorskip("dask.array")
+    x = da.arange(10, chunks=(5,)).persist()
+    if do_wait:
+        wait(x)
+
+    def f(x):
+        assert isinstance(x, da.Array)
+        return x.sum().compute()
+
+    future = c.submit(f, x)
+    result = future.result()
+    assert result == sum(range(10))
+    del x, future, result
+
+    # Now we delete the persisted collection before computing the result
+    y = da.arange(10, chunks=(4,)).persist()
+    if do_wait:
+        wait(y)
+    future = c.submit(f, y)
+    del y
+    with pytest.raises(FutureCancelledError):
+        future.result()
+    del future
+
+    future = c.submit(f, da.arange(10, chunks=(4,)).persist())
+    with pytest.raises(FutureCancelledError):
+        future.result()

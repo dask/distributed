@@ -4632,7 +4632,7 @@ class Scheduler(SchedulerState, ServerNode):
                 ):  # bad key
                     lost_keys.add(k)
                     logger.info("User asked for computation on lost data, %s", k)
-                    del dsk[k]
+                    dsk.pop(k, None)
                     del dependencies[k]
                     if k in keys:
                         keys.remove(k)

@@ -163,6 +163,9 @@ class FutureCancelledError(CancelledError):
             result = "\n".join([result, self.msg])
         return result
 
+    def __reduce__(self):
+        return self.__class__, (self.key, self.reason, self.msg)
+
 
 class FuturesCancelledError(CancelledError):
     error_groups: list[CancelledFuturesGroup]
