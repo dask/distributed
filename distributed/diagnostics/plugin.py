@@ -442,6 +442,9 @@ class InstallPlugin(SchedulerPlugin):
         self.name = f"{self.__class__.__name__}-{uuid.uuid4()}"
 
     async def start(self, scheduler: Scheduler) -> None:
+        from distributed.core import clean_exception
+        from distributed.protocol.serialize import Serialized, deserialize
+
         self._scheduler = scheduler
 
         if InstallPlugin._lock is None:
@@ -452,7 +455,7 @@ class InstallPlugin(SchedulerPlugin):
 
             if self.restart_workers:
                 nanny_plugin = _InstallNannyPlugin(self._install_fn, self.name)
-                await scheduler.register_nanny_plugin(
+                responses = await scheduler.register_nanny_plugin(
                     comm=None,
                     plugin=dumps(nanny_plugin),
                     name=self.name,
@@ -460,12 +463,21 @@ class InstallPlugin(SchedulerPlugin):
                 )
             else:
                 worker_plugin = _InstallWorkerPlugin(self._install_fn, self.name)
-                await scheduler.register_worker_plugin(
+                responses = await scheduler.register_worker_plugin(
                     comm=None,
                     plugin=dumps(worker_plugin),
                     name=self.name,
                     idempotent=True,
                 )
+            for response in responses.values():
+                if response["status"] == "error":
+                    response = {  # type: ignore[unreachable]
+                        k: deserialize(v.header, v.frames)
+                        for k, v in response.items()
+                        if isinstance(v, Serialized)
+                    }
+                    _, exc, tb = clean_exception(**response)
+                    raise exc.with_traceback(tb)
 
     async def close(self) -> None:
         assert InstallPlugin._lock is not None
@@ -563,7 +575,6 @@ class _InstallWorkerPlugin(WorkerPlugin):
             await Semaphore(
                 max_leases=1,
                 name=socket.gethostname(),
-                register=True,
                 scheduler_rpc=worker.scheduler,
                 loop=worker.loop,
             )

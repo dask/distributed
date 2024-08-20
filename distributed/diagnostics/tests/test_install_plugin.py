@@ -141,6 +141,21 @@ async def test_conda_install_fails_on_returncode(c, s, a, b):
 
 
 @pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_package_install_on_worker(c, s, a):
+    (addr,) = s.workers
+
+    await c.register_plugin(InstallPlugin(lambda: None, restart_workers=False))
+
+
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_package_install_on_nanny(c, s, a):
+    (addr,) = s.workers
+    await c.register_plugin(InstallPlugin(lambda: None, restart_workers=False))
+
+
+@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
 async def test_package_install_restarts_on_nanny(c, s, a):
     (addr,) = s.workers
