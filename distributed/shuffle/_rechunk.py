@@ -471,18 +471,17 @@ def _calculate_prechunking(
                 if first_old_slice.start != 0:
                     chunk_size -= first_old_slice.start
                 partial_chunks.append(chunk_size)
-                continue
-
-            partial_chunks.append(first_chunk_size - first_old_slice.start)
-
-            partial_chunks.extend(old_axis[first_old_chunk + 1 : last_old_chunk])
-
-            if last_old_slice.stop is not None:
-                chunk_size = last_old_slice.stop
             else:
-                chunk_size = last_chunk_size
+                partial_chunks.append(first_chunk_size - first_old_slice.start)
 
-            partial_chunks.append(chunk_size)
+                partial_chunks.extend(old_axis[first_old_chunk + 1 : last_old_chunk])
+
+                if last_old_slice.stop is not None:
+                    chunk_size = last_old_slice.stop
+                else:
+                    chunk_size = last_chunk_size
+
+                partial_chunks.append(chunk_size)
             split_axis.append(partial_chunks)
             partial_chunks = []
         if partial_chunks:
