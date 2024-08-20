@@ -458,21 +458,13 @@ def _prechunk_for_partials(
 
             if first_old_chunk == last_old_chunk:
                 chunk_size = first_chunk_size
-                if first_old_slice.start != 0:
-                    # Due to how partials are calculated, there should never be a chunk
-                    # that we slice from both the left and the right.
-                    assert (
-                        last_old_slice.stop is None
-                        or last_old_slice.stop == last_chunk_size
-                    )
-                    chunk_size -= first_old_slice.start
                 if (
                     last_old_slice.stop is not None
                     and last_old_slice.stop != last_chunk_size
                 ):
-                    assert first_old_slice.start == 0
                     chunk_size = last_old_slice.stop
-
+                if first_old_slice.start != 0:
+                    chunk_size -= first_old_slice.start
                 split_axis.append(chunk_size)
                 continue
 
@@ -536,22 +528,23 @@ def _slice_new_chunks_into_partials(
 
     for axis_index, old_to_new_axis in enumerate(old_to_new):
         # Two consecutive output chunks A and B belong to the same partial rechunk
-        # if B is fully included in the right-most input chunk of A, i.e.,
-        # separating A and B would not allow us to cull more input tasks.
+        # if A and B share the same input chunks, i.e., separating A and B would not
+        # allow us to cull more input tasks.
 
         # Index of the last input chunk of this partial rechunk
-        last_old_chunk: int | None = None
+        first_old_chunk: int | None = None
         partial_splits = [0]
         recipe: list[tuple[int, slice]]
         for new_chunk_index, recipe in enumerate(old_to_new_axis):
             if len(recipe) == 0:
                 continue
-            current_last_old_chunk, old_slice = recipe[-1]
-            if last_old_chunk is None:
-                last_old_chunk = current_last_old_chunk
-            elif last_old_chunk != current_last_old_chunk:
+            current_first_old_chunk, _ = recipe[0]
+            current_last_old_chunk, _ = recipe[-1]
+            if first_old_chunk is None:
+                first_old_chunk = current_first_old_chunk
+            elif first_old_chunk != current_last_old_chunk:
                 partial_splits.append(new_chunk_index)
-                last_old_chunk = current_last_old_chunk
+                first_old_chunk = current_first_old_chunk
         partial_splits.append(chunk_shape[axis_index])
         sliced_axes.append(
             tuple(slice(a, b) for a, b in toolz.sliding_window(2, partial_splits))
