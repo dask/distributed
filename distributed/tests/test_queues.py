@@ -341,5 +341,5 @@ async def test_set_cancelled_future(c, s):
     q = Queue("x")
     # FIXME: This is a TimeoutError but pytest doesn't appear to recognize it as
     # such
-    with pytest.raises(Exception, match="unknown to scheudler"):
+    with pytest.raises(Exception, match="unknown to scheduler"):
         await q.put(x, timeout="100ms")
