@@ -4,7 +4,7 @@ channels:
 dependencies:
   - python=3.10
   - click=8.0
-  - cloudpickle=2.0.0
+  - cloudpickle=3.0.0
   - cytoolz=0.11.2
   - jinja2=2.10.3
   - locket=1.0.0

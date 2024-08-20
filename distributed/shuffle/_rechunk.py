@@ -222,7 +222,7 @@ def rechunk_p2p(
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
     from dask.array.core import new_da_object
 
-    prechunked = _prechunk_for_partials(x.chunks, chunks, x.dtype)
+    prechunked = _calculate_prechunking(x.chunks, chunks, x.dtype)
     if prechunked != x.chunks:
         x = cast(
             "da.Array",
@@ -434,7 +434,7 @@ class P2PRechunkLayer(Layer):
         return dsk
 
 
-def _prechunk_for_partials(
+def _calculate_prechunking(
     old_chunks: ChunkedAxes, new_chunks: ChunkedAxes, dtype: np.dtype
 ) -> ChunkedAxes:
     import numpy as np
@@ -595,22 +595,23 @@ def _slice_new_chunks_into_partials(
 
     for axis_index, old_to_new_axis in enumerate(old_to_new):
         # Two consecutive output chunks A and B belong to the same partial rechunk
-        # if B is fully included in the right-most input chunk of A, i.e.,
-        # separating A and B would not allow us to cull more input tasks.
+        # if A and B share the same input chunks, i.e., separating A and B would not
+        # allow us to cull more input tasks.
 
         # Index of the last input chunk of this partial rechunk
-        last_old_chunk: int | None = None
+        first_old_chunk: int | None = None
         partial_splits = [0]
         recipe: list[tuple[int, slice]]
         for new_chunk_index, recipe in enumerate(old_to_new_axis):
             if len(recipe) == 0:
                 continue
-            current_last_old_chunk, old_slice = recipe[-1]
-            if last_old_chunk is None:
-                last_old_chunk = current_last_old_chunk
-            elif last_old_chunk != current_last_old_chunk:
+            current_first_old_chunk, _ = recipe[0]
+            current_last_old_chunk, _ = recipe[-1]
+            if first_old_chunk is None:
+                first_old_chunk = current_first_old_chunk
+            elif first_old_chunk != current_last_old_chunk:
                 partial_splits.append(new_chunk_index)
-                last_old_chunk = current_last_old_chunk
+                first_old_chunk = current_first_old_chunk
         partial_splits.append(chunk_shape[axis_index])
         sliced_axes.append(
             tuple(slice(a, b) for a, b in toolz.sliding_window(2, partial_splits))
