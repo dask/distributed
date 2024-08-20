@@ -451,8 +451,8 @@ def _calculate_prechunking(
         old_to_new_axis = _old_to_new[axis_index]
         old_axis = old_chunks[axis_index]
         split_axis = []
+        partial_chunks = []
         for slice_ in slices:
-            partial_chunks = []
             first_new_chunk = slice_.start
             first_old_chunk, first_old_slice = old_to_new_axis[first_new_chunk][0]
             last_new_chunk = slice_.stop - 1
@@ -484,7 +484,9 @@ def _calculate_prechunking(
 
             partial_chunks.append(chunk_size)
             split_axis.append(partial_chunks)
-
+            partial_chunks = []
+        if partial_chunks:
+            split_axis.append(partial_chunks)
         split_axes.append(split_axis)
 
     has_nans = (any(math.isnan(y) for y in x) for x in old_chunks)

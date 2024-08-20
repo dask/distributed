@@ -1355,7 +1355,7 @@ async def test_partial_rechunk_taskgroups(c, s):
     ],
 )
 def test_calculate_prechunking_1d(old, new, expected):
-    actual = _calculate_prechunking(old, new)
+    actual = _calculate_prechunking(old, new, np.dtype)
     assert actual == expected
 
 
@@ -1375,5 +1375,5 @@ def test_calculate_prechunking_1d(old, new, expected):
     ],
 )
 def test_calculate_prechunking_2d(old, new, expected):
-    actual = _calculate_prechunking(old, new)
+    actual = _calculate_prechunking(old, new, np.dtype(np.int16))
     assert actual == expected
