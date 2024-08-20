@@ -463,22 +463,14 @@ def _calculate_prechunking(
 
             if first_old_chunk == last_old_chunk:
                 chunk_size = first_chunk_size
-                if first_old_slice.start != 0:
-                    # Due to how partials are calculated, there should never be a chunk
-                    # that we slice from both the left and the right.
-                    assert (
-                        last_old_slice.stop is None
-                        or last_old_slice.stop == last_chunk_size
-                    )
-                    chunk_size -= first_old_slice.start
                 if (
                     last_old_slice.stop is not None
                     and last_old_slice.stop != last_chunk_size
                 ):
-                    assert first_old_slice.start == 0
                     chunk_size = last_old_slice.stop
-
-                split_axis.append([chunk_size])
+                if first_old_slice.start != 0:
+                    chunk_size -= first_old_slice.start
+                partial_chunks.append(chunk_size)
                 continue
 
             partial_chunks.append(first_chunk_size - first_old_slice.start)
