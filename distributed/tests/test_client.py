@@ -8441,7 +8441,7 @@ def test_release_persisted_collection_sync(c):
 
 @pytest.mark.slow()
 @pytest.mark.parametrize("do_wait", [True, False])
-def test_persisted_collection_submitted(c, do_wait):
+def test_worker_clients_do_not_claim_ownership_of_serialize_futures(c, do_wait):
     # Note: sending collections like this should be considered an anti-pattern
     # but it is possible. As long as the user ensures the futures stay alive
     # this is fine but the cluster will not take over this responsibility. The
