@@ -220,7 +220,7 @@ def rechunk_p2p(
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
     from dask.array.core import new_da_object
 
-    prechunked = _prechunk_for_partials(x.chunks, chunks)
+    prechunked = _calculate_prechunking(x.chunks, chunks)
     if prechunked != x.chunks:
         x = cast(
             "da.Array",
@@ -432,7 +432,7 @@ class P2PRechunkLayer(Layer):
         return dsk
 
 
-def _prechunk_for_partials(
+def _calculate_prechunking(
     old_chunks: ChunkedAxes, new_chunks: ChunkedAxes
 ) -> ChunkedAxes:
     from dask.array.rechunk import old_to_new

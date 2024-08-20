@@ -31,7 +31,7 @@ from distributed.shuffle._rechunk import (
     ArrayRechunkRun,
     ArrayRechunkSpec,
     Split,
-    _prechunk_for_partials,
+    _calculate_prechunking,
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
@@ -1353,8 +1353,8 @@ async def test_partial_rechunk_taskgroups(c, s):
         [((1, np.nan),), ((1, np.nan),), ((1, np.nan),)],
     ],
 )
-def test_prechunk_for_partials_1d(old, new, expected):
-    actual = _prechunk_for_partials(old, new)
+def test_calculate_prechunking_1d(old, new, expected):
+    actual = _calculate_prechunking(old, new)
     assert actual == expected
 
 
@@ -1373,6 +1373,6 @@ def test_prechunk_for_partials_1d(old, new, expected):
         [((4,), (1, 1, 1)), ((1, 1, 1, 1), (3,)), ((4,), (1, 1, 1))],
     ],
 )
-def test_prechunk_for_partials_2d(old, new, expected):
-    actual = _prechunk_for_partials(old, new)
+def test_calculate_prechunking_2d(old, new, expected):
+    actual = _calculate_prechunking(old, new)
     assert actual == expected
