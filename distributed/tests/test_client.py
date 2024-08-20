@@ -8448,7 +8448,7 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(c, do_wait):
     # client will not unpack the collection when using submit and will therefore
     # not handle the dependencies in any way.
     # See also https://github.com/dask/distributed/issues/7498
-    da = pytest.importorskip("dask.array")
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(10, chunks=(5,)).persist()
     if do_wait:
         wait(x)
