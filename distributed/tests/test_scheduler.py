@@ -32,7 +32,6 @@ from distributed import (
     CancelledError,
     Client,
     Event,
-    Future,
     Lock,
     Nanny,
     SchedulerPlugin,
@@ -2394,7 +2393,7 @@ async def test_idle_timeout(c, s, a, b):
     _idle_since = s.check_idle()
     assert _idle_since == s.idle_since
 
-    with captured_logger("distributed.scheduler") as logs:
+    with captured_logger("distributed.scheduler") as caplog:
         start = time()
         while s.status != Status.closed:
             await asyncio.sleep(0.01)
@@ -2405,9 +2404,11 @@ async def test_idle_timeout(c, s, a, b):
             await asyncio.sleep(0.01)
             assert time() < start + 1
 
-    assert "idle" in logs.getvalue()
-    assert "500" in logs.getvalue()
-    assert "ms" in logs.getvalue()
+    logs = caplog.getvalue()
+    assert "idle" in logs
+    assert "500" in logs
+    assert "ms" in logs
+    assert "idle-timeout-exceeded" in logs
     assert s.idle_since > beginning
     pc.stop()
 
@@ -4850,25 +4851,6 @@ async def test_tell_workers_when_peers_have_left(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_client_desires_keys_creates_ts(c, s, a, b):
-    """A TaskState object is created by client_desires_keys, and
-    is only later submitted with submit/compute by a different client
-
-    See also
-    --------
-    test_scheduler.py::test_scatter_creates_ts
-    test_spans.py::test_client_desires_keys_creates_ts
-    """
-    x = Future(key="x")
-    await wait_for_state("x", "released", s)
-    assert s.tasks["x"].run_spec is None
-    async with Client(s.address, asynchronous=True) as c2:
-        c2.submit(inc, 1, key="x")
-        assert await x == 2
-    assert s.tasks["x"].run_spec is not None
-
-
-@gen_cluster(client=True)
 async def test_scatter_creates_ts(c, s, a, b):
     """A TaskState object is created by scatter, and only later becomes runnable
 
@@ -5270,3 +5252,20 @@ async def test_stimulus_from_erred_task(c, s, a):
         logger.getvalue()
         == "Task f marked as failed because 1 workers died while trying to run it\n"
     )
+
+
+@gen_cluster(client=True)
+async def test_concurrent_close_requests(c, s, *workers):
+    class BeforeCloseCounterPlugin(SchedulerPlugin):
+        async def start(self, scheduler):
+            self.call_count = 0
+
+        async def before_close(self):
+            self.call_count += 1
+
+    await c.register_plugin(BeforeCloseCounterPlugin(), name="before_close")
+    with captured_logger("distributed.scheduler", level=logging.INFO) as caplog:
+        await asyncio.gather(*[s.close(reason="test-reason") for _ in range(5)])
+    assert s.plugins["before_close"].call_count == 1
+    lines = caplog.getvalue().split("\n")
+    assert sum("Closing scheduler" in line for line in lines) == 1

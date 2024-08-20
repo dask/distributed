@@ -363,3 +363,56 @@ async def test_secede_does_not_claim_worker(c, s, a, b):
     assert len(res) == 2
     assert res[a.address] > 25
     assert res[b.address] > 25
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_log_event(c, s, a):
+    # Run a task that spawns a worker client
+    def f(x):
+        with worker_client(timeout=10, separate_thread=True) as wc:
+            x = wc.submit(inc, x)
+            y = wc.submit(double, x)
+            result = x.result() + y.result()
+            return result
+
+    future = c.submit(f, 1)
+    result = await future
+    assert result == 6
+
+    # Ensure a corresponding event is logged
+    for topic in ["worker-get-client", "worker-client"]:
+        events = [msg for t, msg in s.get_events().items() if t == topic]
+        assert len(events) == 1
+        assert events[0][0][1] == {
+            "worker": a.address,
+            "timeout": 10,
+            "client": c.id,
+        }
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_log_event_implicit(c, s, a):
+    # Run a task that spawns a worker client
+    def f(x):
+        x = delayed(inc)(x)
+        y = delayed(double)(x)
+        result = x.compute() + y.compute()
+        return result
+
+    future = c.submit(f, 1)
+    result = await future
+    assert result == 6
+
+    # Ensure a corresponding event is logged
+    events = [
+        msg for topic, msg in s.get_events().items() if topic == "worker-get-client"
+    ]
+    assert len(events) == 1
+    assert events[0][0][1] == {
+        "worker": a.address,
+        "timeout": 5,
+        "client": c.id,
+    }
+    # Do not log a `worker-client` since this client was created implicitly
+    events = [msg for topic, msg in s.get_events().items() if topic == "worker-client"]
+    assert len(events) == 0

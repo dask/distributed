@@ -3003,7 +3003,7 @@ async def test_log_remove_worker(c, s, a, b):
     events = {topic: [ev for _, ev in evs] for topic, evs in s.get_events().items()}
     for evs in events.values():
         for ev in evs:
-            if ev["action"] == "retire-workers":
+            if ev.get("action", None) == "retire-workers":
                 for k in ("retired", "could-not-retire"):
                     ev[k] = {addr: "snip" for addr in ev[k]}
             if "stimulus_id" in ev:  # Strip timestamp
@@ -3083,6 +3083,7 @@ async def test_log_remove_worker(c, s, a, b):
                 "worker": b.address,
             },
         ],
+        "worker-get-client": [{"client": c.id, "timeout": 5, "worker": b.address}],
     }
 
 

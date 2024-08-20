@@ -146,8 +146,8 @@ def test_shutsdown_cleanly(requires_default_ports):
         stderr = subprocess_fut.result().stderr
         assert "Traceback" not in stderr
         assert (
-            "distributed.scheduler - INFO - Scheduler closing due to shutdown "
-            "requested via Jupyter...\n" in stderr
+            "distributed.scheduler - INFO - Closing scheduler. Reason: jupyter-requested-shutdown"
+            in stderr
         )
         assert "Shutting down on /api/shutdown request.\n" in stderr
         assert (

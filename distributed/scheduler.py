@@ -670,9 +670,7 @@ class WorkerState:
         )
         ws._occupancy_cache = self.occupancy
 
-        ws.executing = {
-            ts.key: duration for ts, duration in self.executing.items()  # type: ignore
-        }
+        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}  # type: ignore
         return ws
 
     def __repr__(self) -> str:
@@ -775,17 +773,20 @@ class WorkerState:
                 self._dec_needs_replica(dts)
 
     def _remove_from_task_prefix_count(self, ts: TaskState) -> None:
-        count = self.task_prefix_count[ts.prefix.name] - 1
+        prefix_name = ts.prefix.name
+        count = self.task_prefix_count[prefix_name] - 1
+        tp_count = self.task_prefix_count
+        tp_count_global = self.scheduler._task_prefix_count_global
         if count:
-            self.task_prefix_count[ts.prefix.name] = count
+            tp_count[prefix_name] = count
         else:
-            del self.task_prefix_count[ts.prefix.name]
+            del tp_count[prefix_name]
 
-        count = self.scheduler._task_prefix_count_global[ts.prefix.name] - 1
+        count = tp_count_global[prefix_name] - 1
         if count:
-            self.scheduler._task_prefix_count_global[ts.prefix.name] = count
+            tp_count_global[prefix_name] = count
         else:
-            del self.scheduler._task_prefix_count_global[ts.prefix.name]
+            del tp_count_global[prefix_name]
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
@@ -3846,7 +3847,7 @@ class Scheduler(SchedulerState, ServerNode):
                     """Shut down the server."""
                     self.log.info("Shutting down on /api/shutdown request.")
 
-                    await scheduler.close(reason="shutdown requested via Jupyter")
+                    await scheduler.close(reason="jupyter-requested-shutdown")
 
             j = ServerApp.instance(
                 config=Config(
@@ -4271,7 +4272,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None, reason=""):
+    async def close(self, fast=None, close_workers=None, reason="unknown"):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4288,6 +4289,10 @@ class Scheduler(SchedulerState, ServerNode):
             await self.finished()
             return
 
+        self.status = Status.closing
+        logger.info("Closing scheduler. Reason: %s", reason)
+        setproctitle("dask scheduler [closing]")
+
         async def log_errors(func):
             try:
                 await func()
@@ -4297,10 +4302,6 @@ class Scheduler(SchedulerState, ServerNode):
         await asyncio.gather(
             *[log_errors(plugin.before_close) for plugin in list(self.plugins.values())]
         )
-
-        self.status = Status.closing
-        logger.info("Scheduler closing due to %s...", reason or "unknown reason")
-        setproctitle("dask scheduler [closing]")
 
         await self.preloads.teardown()
 
@@ -4631,7 +4632,7 @@ class Scheduler(SchedulerState, ServerNode):
                 ):  # bad key
                     lost_keys.add(k)
                     logger.info("User asked for computation on lost data, %s", k)
-                    del dsk[k]
+                    dsk.pop(k, None)
                     del dependencies[k]
                     if k in keys:
                         keys.remove(k)
@@ -4869,6 +4870,7 @@ class Scheduler(SchedulerState, ServerNode):
                 _materialize_graph,
                 graph=graph,
                 global_annotations=annotations or {},
+                validate=self.validate,
             )
             del graph
             if not internal_priority:
@@ -5591,8 +5593,8 @@ class Scheduler(SchedulerState, ServerNode):
         for k in keys:
             ts = self.tasks.get(k)
             if ts is None:
-                # For publish, queues etc.
-                ts = self.new_task(k, None, "released")
+                warnings.warn(f"Client desires key {k!r} but key is unknown.")
+                continue
             if ts.who_wants is None:
                 ts.who_wants = set()
             ts.who_wants.add(cs)
@@ -8648,7 +8650,9 @@ class Scheduler(SchedulerState, ServerNode):
                     "Scheduler closing after being idle for %s",
                     format_time(self.idle_timeout),
                 )
-                self._ongoing_background_tasks.call_soon(self.close)
+                self._ongoing_background_tasks.call_soon(
+                    self.close, reason="idle-timeout-exceeded"
+                )
         return self.idle_since
 
     def _check_no_workers(self) -> None:
@@ -9337,11 +9341,12 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 
 def _materialize_graph(
-    graph: HighLevelGraph, global_annotations: dict[str, Any]
+    graph: HighLevelGraph, global_annotations: dict[str, Any], validate: bool
 ) -> tuple[dict[Key, T_runspec], dict[Key, set[Key]], dict[str, dict[Key, Any]]]:
-    dsk = ensure_dict(graph)
-    for k in dsk:
-        validate_key(k)
+    dsk: dict = ensure_dict(graph)
+    if validate:
+        for k in dsk:
+            validate_key(k)
     annotations_by_type: defaultdict[str, dict[Key, Any]] = defaultdict(dict)
     for annotations_type, value in global_annotations.items():
         annotations_by_type[annotations_type].update(
