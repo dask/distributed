@@ -69,24 +69,24 @@ jobs:
           - os: ubuntu-latest
             environment: mindeps
             label: numpy
-            extra_packages: [numpy=1.21]
+            extra_packages: [numpy=1.24]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: numpy
-            extra_packages: [numpy=1.21]
+            extra_packages: [numpy=1.24]
             partition: "not ci1"
 
           # dask.dataframe P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=2.0, pyarrow=7, pyarrow-hotfix]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=2.0, pyarrow=7, pyarrow-hotfix]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
             partition: "not ci1"
 
           - os: ubuntu-latest
