@@ -1410,3 +1410,21 @@ def test_calculate_prechunking_does_not_concatenate_object_type():
     with dask.config.set({"array.chunk-size": "100 B"}):
         actual = _calculate_prechunking(old, new, np.dtype(object))
     assert actual == old
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2), (3, 3)), ((4,), (3, 3)), ((2, 2), (3, 3))],
+        [
+            ((2, 2, 2), (3, 3, 3)),
+            ((1, 2, 2, 1), (2, 3, 4)),
+            ((1, 1, 1, 1, 1, 1), (2, 1, 2, 1, 3)),
+        ],
+        [((4,), (1, 1, 1)), ((1, 1, 1, 1), (3,)), ((4,), (1, 1, 1))],
+    ],
+)
+def test_calculate_prechunking_splitting(old, new, expected):
+    # _calculate_prechunking does not concatenate on object
+    actual = _calculate_prechunking(old, new, np.dtype(object))
+    assert actual == expected
