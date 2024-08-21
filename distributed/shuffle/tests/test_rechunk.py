@@ -1377,3 +1377,36 @@ def test_calculate_prechunking_1d(old, new, expected):
 def test_calculate_prechunking_2d(old, new, expected):
     actual = _calculate_prechunking(old, new, np.dtype(np.int16))
     assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ["chunk_size", "expected"],
+    [
+        ("1 B", ((10,), (1,) * 10)),
+        ("20 B", ((10,), (1,) * 10)),
+        ("40 B", ((10,), (2, 2, 1, 2, 2, 1))),
+        ("100 B", ((10,), (5, 5))),
+    ],
+)
+def test_calculate_prechunking_concatenation(chunk_size, expected):
+    old = ((10,), (1,) * 10)
+    new = ((2,) * 5, (5, 5))
+    with dask.config.set({"array.chunk-size": chunk_size}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16))
+    assert actual == expected
+
+
+def test_calculate_prechunking_does_not_concatenate_object_type():
+    old = ((10,), (1,) * 10)
+    new = ((2,) * 5, (5, 5))
+
+    # Ensure that int dtypes get concatenated
+    new = ((2,) * 5, (5, 5))
+    with dask.config.set({"array.chunk-size": "100 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16))
+    assert actual == ((10,), (5, 5))
+
+    # Ensure object dtype chunks do not get concatenated
+    with dask.config.set({"array.chunk-size": "100 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(object))
+    assert actual == old
