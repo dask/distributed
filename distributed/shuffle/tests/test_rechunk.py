@@ -1355,7 +1355,7 @@ async def test_partial_rechunk_taskgroups(c, s):
     ],
 )
 def test_calculate_prechunking_1d(old, new, expected):
-    actual = _calculate_prechunking(old, new, np.dtype)
+    actual = _calculate_prechunking(old, new, np.dtype, None)
     assert actual == expected
 
 
@@ -1375,7 +1375,7 @@ def test_calculate_prechunking_1d(old, new, expected):
     ],
 )
 def test_calculate_prechunking_2d(old, new, expected):
-    actual = _calculate_prechunking(old, new, np.dtype(np.int16))
+    actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
     assert actual == expected
 
 
@@ -1416,7 +1416,7 @@ def test_calculate_prechunking_2d(old, new, expected):
                 (1, 1, 1, 1),
             ),
             ((1, 1, 1, 1), (2, 2), (4,)),
-            ((2, 2), (1, 1, 1, 1), (4,)),
+            ((2, 2), (2, 2), (2, 2)),
         ),
         (
             (
@@ -1428,13 +1428,13 @@ def test_calculate_prechunking_2d(old, new, expected):
                 ),
             ),
             ((2, 2), (4,), (1, 1, 1, 1)),
-            ((1, 1, 1, 1), (4,), (2, 2)),
+            ((2, 2), (2, 2), (2, 2)),
         ),
     ],
 )
 def test_calculate_prechunking_3d(old, new, expected):
     with dask.config.set({"array.chunk-size": "16 B"}):
-        actual = _calculate_prechunking(old, new, np.dtype(np.int16))
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
     assert actual == expected
 
 
@@ -1451,7 +1451,7 @@ def test_calculate_prechunking_concatenation(chunk_size, expected):
     old = ((10,), (1,) * 10)
     new = ((2,) * 5, (5, 5))
     with dask.config.set({"array.chunk-size": chunk_size}):
-        actual = _calculate_prechunking(old, new, np.dtype(np.int16))
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
     assert actual == expected
 
 
@@ -1462,12 +1462,12 @@ def test_calculate_prechunking_does_not_concatenate_object_type():
     # Ensure that int dtypes get concatenated
     new = ((2,) * 5, (5, 5))
     with dask.config.set({"array.chunk-size": "100 B"}):
-        actual = _calculate_prechunking(old, new, np.dtype(np.int16))
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
     assert actual == ((10,), (5, 5))
 
     # Ensure object dtype chunks do not get concatenated
     with dask.config.set({"array.chunk-size": "100 B"}):
-        actual = _calculate_prechunking(old, new, np.dtype(object))
+        actual = _calculate_prechunking(old, new, np.dtype(object), None)
     assert actual == old
 
 
@@ -1485,5 +1485,5 @@ def test_calculate_prechunking_does_not_concatenate_object_type():
 )
 def test_calculate_prechunking_splitting(old, new, expected):
     # _calculate_prechunking does not concatenate on object
-    actual = _calculate_prechunking(old, new, np.dtype(object))
+    actual = _calculate_prechunking(old, new, np.dtype(object), None)
     assert actual == expected

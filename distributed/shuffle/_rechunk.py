@@ -222,7 +222,7 @@ def rechunk_p2p(
         return da.empty(x.shape, chunks=chunks, dtype=x.dtype)
     from dask.array.core import new_da_object
 
-    prechunked = _calculate_prechunking(x.chunks, chunks, x.dtype)
+    prechunked = _calculate_prechunking(x.chunks, chunks, x.dtype, block_size_limit)
     if prechunked != x.chunks:
         x = cast(
             "da.Array",
@@ -435,11 +435,133 @@ class P2PRechunkLayer(Layer):
 
 
 def _calculate_prechunking(
-    old_chunks: ChunkedAxes, new_chunks: ChunkedAxes, dtype: np.dtype
+    old_chunks: ChunkedAxes,
+    new_chunks: ChunkedAxes,
+    dtype: np.dtype,
+    block_size_limit: int | None,
 ) -> ChunkedAxes:
-    # TODO: Explain WTF we're doing here
+    """Calculate how to perform the pre-rechunking step
+
+    During the pre-rechunking step, we
+      1. Split input chunks along partial boundaries to make partials completely independent of one another
+      2. Merge small chunks within partials to reduce the number of transfer tasks and corresponding overhead
+    """
+    split_axes = _split_chunks_along_partial_boundaries(old_chunks, new_chunks)
+
+    # We can only determine how to concatenate chunks if we can calculate block sizes.
+    has_nans = (any(math.isnan(y) for y in x) for x in old_chunks)
+
+    if len(new_chunks) <= 1 or not all(new_chunks) or any(has_nans):
+        return tuple(tuple(chain(*axis)) for axis in split_axes)
+
+    if dtype is None or dtype.hasobject or dtype.itemsize == 0:
+        return tuple(tuple(chain(*axis)) for axis in split_axes)
+
+    # We made sure that there are no NaNs in split_axes above
+    return _concatenate_small_chunks(
+        split_axes, old_chunks, new_chunks, dtype, block_size_limit  # type: ignore[arg-type]
+    )
+
+
+def _concatenate_small_chunks(
+    split_axes: list[list[list[int]]],
+    old_chunks: ChunkedAxes,
+    new_chunks: ChunkedAxes,
+    dtype: np.dtype,
+    block_size_limit: int | None,
+) -> ChunkedAxes:
+    """Concatenate small chunks within partials.
+
+    By concatenating chunks within partials, we reduce the number of P2P transfer tasks and their
+    corresponding overhead.
+    """
     import numpy as np
 
+    block_size_limit = block_size_limit or dask.config.get("array.chunk-size")
+
+    if isinstance(block_size_limit, str):
+        block_size_limit = parse_bytes(block_size_limit)
+
+    # Make it a number of elements
+    block_size_limit //= dtype.itemsize
+
+    # We verified earlier that we do not have any NaNs
+    largest_old_block = _largest_block_size(old_chunks)  # type: ignore[arg-type]
+    largest_new_block = _largest_block_size(new_chunks)  # type: ignore[arg-type]
+    block_size_limit = max([block_size_limit, largest_old_block, largest_new_block])
+
+    old_largest_width = [max(chain(*axis)) for axis in split_axes]
+    new_largest_width = [max(c) for c in new_chunks]
+
+    graph_size_effect = {
+        dim: len(new_axis) / sum(len(partial) for partial in split_axis)
+        for dim, (split_axis, new_axis) in enumerate(zip(split_axes, new_chunks))
+    }
+
+    ndim = len(old_chunks)
+
+    block_size_effect = {
+        dim: new_largest_width[dim] / (old_largest_width[dim] or 1)
+        for dim in range(ndim)
+    }
+
+    # Our goal is to reduce the number of nodes in the rechunk graph
+    # by concatenating some adjacent chunks, so consider dimensions where we can
+    # reduce the # of chunks
+    candidates = [dim for dim in range(ndim) if graph_size_effect[dim] <= 1.0]
+
+    # Concatenating along each dimension reduces the graph size by a certain factor
+    # and increases memory largest block size by a certain factor.
+    # We want to optimize the graph size while staying below the given
+    # block_size_limit.  This is in effect a knapsack problem, except with
+    # multiplicative values and weights.  Just use a greedy algorithm
+    # by trying dimensions in decreasing value / weight order.
+    def key(k: int) -> float:
+        gse = graph_size_effect[k]
+        bse = block_size_effect[k]
+        if bse == 1:
+            bse = 1 + 1e-9
+        return (np.log(gse) / np.log(bse)) if bse > 0 else 0
+
+    sorted_candidates = sorted(candidates, key=key)
+
+    concatenated_axes: list[list[int]] = [[] for i in range(ndim)]
+
+    # Sim all the axes that are no candidates
+    for i in range(ndim):
+        if i in candidates:
+            continue
+        concatenated_axes[i] = list(chain(*split_axes[i]))
+
+    # We want to concatenate chunks
+    for axis_index in sorted_candidates:
+        concatenated_axis = concatenated_axes[axis_index]
+        multiplier = math.prod(
+            old_largest_width[:axis_index] + old_largest_width[axis_index + 1 :]
+        )
+        axis_limit = block_size_limit // multiplier
+
+        for partial in split_axes[axis_index]:
+            current = partial[0]
+            for chunk in partial[1:]:
+                if (current + chunk) > axis_limit:
+                    concatenated_axis.append(current)
+                    current = chunk
+                else:
+                    current += chunk
+            concatenated_axis.append(current)
+        old_largest_width[axis_index] = max(concatenated_axis)
+    return tuple(tuple(axis) for axis in concatenated_axes)
+
+
+def _split_chunks_along_partial_boundaries(
+    old_chunks: ChunkedAxes, new_chunks: ChunkedAxes
+) -> list[list[list[float]]]:
+    """Split the old chunks along the boundaries of partials, i.e., groups of new chunks that share the same inputs.
+
+    By splitting along the boundaries before rechunkin their input tasks become disjunct and each partial conceptually
+    operates on an independent sub-array.
+    """
     from dask.array.rechunk import old_to_new
 
     _old_to_new = old_to_new(old_chunks, new_chunks)
@@ -448,7 +570,8 @@ def _calculate_prechunking(
 
     split_axes = []
 
-    # TODO: What's happening in this loop?
+    # Along each axis, we want to figure out how we have to split input chunks in order to make
+    # partials disjunct. We then group the resulting input chunks per partial before returning.
     for axis_index, slices in enumerate(partials):
         old_to_new_axis = _old_to_new[axis_index]
         old_axis = old_chunks[axis_index]
@@ -489,66 +612,7 @@ def _calculate_prechunking(
         if partial_chunks:
             split_axis.append(partial_chunks)
         split_axes.append(split_axis)
-
-    # TODO: Split here?
-    has_nans = (any(math.isnan(y) for y in x) for x in old_chunks)
-
-    if len(new_chunks) <= 1 or not all(new_chunks) or any(has_nans):
-        return tuple(tuple(chain(*axis)) for axis in split_axes)
-
-    if dtype is None or dtype.hasobject or dtype.itemsize == 0:
-        return tuple(tuple(chain(*axis)) for axis in split_axes)
-
-    # TODO: Incorporate block_size_limit from dask.array.rechunk(..., block_size_limit=...)
-    block_size_limit = dask.config.get("array.chunk-size")
-    if isinstance(block_size_limit, str):
-        block_size_limit = parse_bytes(block_size_limit)
-
-    # Make it a number of elements
-    block_size_limit //= dtype.itemsize
-
-    # We verified earlier that we do not have any NaNs
-    largest_old_block = _largest_block_size(old_chunks)  # type: ignore[arg-type]
-    largest_new_block = _largest_block_size(new_chunks)  # type: ignore[arg-type]
-    block_size_limit = max([block_size_limit, largest_old_block, largest_new_block])
-
-    max_chunk_sizes = [max(chain(*axis)) for axis in split_axes]
-
-    # On average, how many input chunks do we have per output chunk on each axis?
-    # The higher this value, the more input chunks we concatenate during rechunking.
-    # We should prioritize dimensions with a high chunk_reduction_effect during
-    # pre-concatenation.
-    chunk_reduction_effect = [
-        sum(len(partial) for partial in split_axis) / len(new_axis)
-        for split_axis, new_axis in zip(split_axes, new_chunks)
-    ]
-
-    # Sort descending going from highest to lowest effect
-    prioritized_dimensions = np.argsort(-np.array(chunk_reduction_effect))
-
-    ndim = len(old_chunks)
-
-    concatenated_axes: list[list[float]] = [[] for _ in range(ndim)]
-
-    # TODO: Explain this
-    for axis_index in prioritized_dimensions:
-        concatenated_axis = concatenated_axes[axis_index]
-        multiplier = math.prod(
-            max_chunk_sizes[:axis_index] + max_chunk_sizes[axis_index + 1 :]
-        )
-        axis_limit = block_size_limit // multiplier
-
-        for partial in split_axes[axis_index]:
-            current = partial[0]
-            for chunk in partial[1:]:
-                if (current + chunk) > axis_limit:
-                    concatenated_axis.append(current)
-                    current = chunk
-                else:
-                    current += chunk
-            concatenated_axis.append(current)
-        max_chunk_sizes[axis_index] = max(concatenated_axis)
-    return tuple(tuple(axis) for axis in concatenated_axes)
+    return split_axes
 
 
 def _largest_block_size(chunks: tuple[tuple[int, ...], ...]) -> int:
