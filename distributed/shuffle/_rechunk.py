@@ -437,6 +437,7 @@ class P2PRechunkLayer(Layer):
 def _calculate_prechunking(
     old_chunks: ChunkedAxes, new_chunks: ChunkedAxes, dtype: np.dtype
 ) -> ChunkedAxes:
+    # TODO: Explain WTF we're doing here
     import numpy as np
 
     from dask.array.rechunk import old_to_new
@@ -447,6 +448,7 @@ def _calculate_prechunking(
 
     split_axes = []
 
+    # TODO: What's happening in this loop?
     for axis_index, slices in enumerate(partials):
         old_to_new_axis = _old_to_new[axis_index]
         old_axis = old_chunks[axis_index]
@@ -488,6 +490,7 @@ def _calculate_prechunking(
             split_axis.append(partial_chunks)
         split_axes.append(split_axis)
 
+    # TODO: Split here?
     has_nans = (any(math.isnan(y) for y in x) for x in old_chunks)
 
     if len(new_chunks) <= 1 or not all(new_chunks) or any(has_nans):
@@ -509,18 +512,26 @@ def _calculate_prechunking(
     largest_new_block = _largest_block_size(new_chunks)  # type: ignore[arg-type]
     block_size_limit = max([block_size_limit, largest_old_block, largest_new_block])
 
-    max_chunk_sizes = tuple(max(chain(*axis)) for axis in split_axes)
+    max_chunk_sizes = [max(chain(*axis)) for axis in split_axes]
 
-    block_reduction_ratio = tuple(
+    # On average, how many input chunks do we have per output chunk on each axis?
+    # The higher this value, the more input chunks we concatenate during rechunking.
+    # We should prioritize dimensions with a high chunk_reduction_effect during
+    # pre-concatenation.
+    chunk_reduction_effect = [
         sum(len(partial) for partial in split_axis) / len(new_axis)
         for split_axis, new_axis in zip(split_axes, new_chunks)
-    )
+    ]
 
-    ascending = np.argsort(block_reduction_ratio)
+    # Sort descending going from highest to lowest effect
+    prioritized_dimensions = np.argsort(-np.array(chunk_reduction_effect))
 
-    concatenated_axes: list[list[float]] = [[] for _ in ascending]
+    ndim = len(old_chunks)
 
-    for axis_index in ascending:
+    concatenated_axes: list[list[float]] = [[] for _ in range(ndim)]
+
+    # TODO: Explain this
+    for axis_index in prioritized_dimensions:
         concatenated_axis = concatenated_axes[axis_index]
         multiplier = math.prod(
             max_chunk_sizes[:axis_index] + max_chunk_sizes[axis_index + 1 :]
@@ -536,6 +547,7 @@ def _calculate_prechunking(
                 else:
                     current += chunk
             concatenated_axis.append(current)
+        max_chunk_sizes[axis_index] = max(concatenated_axis)
     return tuple(tuple(axis) for axis in concatenated_axes)
 
 

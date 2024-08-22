@@ -1380,6 +1380,65 @@ def test_calculate_prechunking_2d(old, new, expected):
 
 
 @pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        (
+            (
+                (
+                    2,
+                    2,
+                ),
+                (1, 1, 1, 1),
+                (1, 1, 1, 1),
+            ),
+            ((1, 1, 1, 1), (4,), (2, 2)),
+            ((2, 2), (4,), (1, 1, 1, 1)),
+        ),
+        (
+            (
+                (
+                    2,
+                    2,
+                ),
+                (1, 1, 1, 1),
+                (1, 1, 1, 1),
+            ),
+            ((1, 1, 1, 1), (2, 2), (2, 2)),
+            ((2, 2), (2, 2), (2, 2)),
+        ),
+        (
+            (
+                (
+                    2,
+                    2,
+                ),
+                (1, 1, 1, 1),
+                (1, 1, 1, 1),
+            ),
+            ((1, 1, 1, 1), (2, 2), (4,)),
+            ((2, 2), (1, 1, 1, 1), (4,)),
+        ),
+        (
+            (
+                (1, 1, 1, 1),
+                (1, 1, 1, 1),
+                (
+                    2,
+                    2,
+                ),
+            ),
+            ((2, 2), (4,), (1, 1, 1, 1)),
+            ((1, 1, 1, 1), (4,), (2, 2)),
+        ),
+    ],
+)
+def test_calculate_prechunking_3d(old, new, expected):
+    with dask.config.set({"array.chunk-size": "16 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16))
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
     ["chunk_size", "expected"],
     [
         ("1 B", ((10,), (1,) * 10)),
