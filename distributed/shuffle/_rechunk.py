@@ -474,6 +474,9 @@ def _concatenate_small_chunks(
 
     By concatenating chunks within partials, we reduce the number of P2P transfer tasks and their
     corresponding overhead.
+
+    The algorithm used in this function is very similar to :func:`dask.array.rechunk.find_merge_rechunk`,
+    the main difference is that we have to make sure only to merge chunks within partials.
     """
     import numpy as np
 
