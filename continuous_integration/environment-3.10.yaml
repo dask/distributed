@@ -58,5 +58,5 @@ dependencies:
       # - git+https://github.com/dask/s3fs
       # - git+https://github.com/fsspec/filesystem_spec
       - keras
-      - pytorch  # Only tested here (using pip due to lack of Windows conda-forge builds)
+      - torch  # Only tested here (using pip due to lack of Windows conda-forge builds)
       - torchvision  # Only tested here (using pip due to lack of Windows conda-forge builds)
