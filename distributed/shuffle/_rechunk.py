@@ -497,7 +497,7 @@ def _concatenate_small_chunks(
     new_largest_width = [max(c) for c in new_chunks]
 
     graph_size_effect = {
-        dim: len(new_axis) / sum(map(len, split_axis)
+        dim: len(new_axis) / sum(map(len, split_axis))
         for dim, (split_axis, new_axis) in enumerate(zip(split_axes, new_chunks))
     }
 
