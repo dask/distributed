@@ -847,7 +847,8 @@ async def test_rechunk_avoid_needless_chunking(c, s, *ws):
     x = da.ones(16, chunks=2)
     y = x.rechunk(8, method="p2p")
     dsk = y.__dask_graph__()
-    assert len(dsk) <= 8 + 2
+    # 8 inputs, 2 concatenations of small inputs, 2 outputs
+    assert len(dsk) <= 8 + 2 + 2
 
 
 @pytest.mark.parametrize(
@@ -1337,7 +1338,7 @@ async def test_partial_rechunk_taskgroups(c, s):
         ),
         timeout=5,
     )
-    assert len(s.task_groups) < 6
+    assert len(s.task_groups) < 7
 
 
 @pytest.mark.parametrize(
@@ -1351,7 +1352,7 @@ async def test_partial_rechunk_taskgroups(c, s):
     ],
 )
 def test_calculate_prechunking_1d(old, new, expected):
-    actual = _calculate_prechunking(old, new)
+    actual = _calculate_prechunking(old, new, np.dtype, None)
     assert actual == expected
 
 
@@ -1359,17 +1360,99 @@ def test_calculate_prechunking_1d(old, new, expected):
     ["old", "new", "expected"],
     [
         [((2, 2), (3, 3)), ((2, 2), (3, 3)), ((2, 2), (3, 3))],
-        [((2, 2), (3, 3)), ((4,), (3, 3)), ((2, 2), (3, 3))],
+        [((2, 2), (3, 3)), ((4,), (3, 3)), ((4,), (3, 3))],
         [((2, 2), (3, 3)), ((1, 1, 1, 1), (3, 3)), ((2, 2), (3, 3))],
+        [
+            ((2, 2, 2), (3, 3, 3)),
+            ((1, 2, 2, 1), (2, 3, 4)),
+            ((1, 2, 2, 1), (2, 3, 4)),
+        ],
+        [((1, np.nan), (3, 3)), ((1, np.nan), (2, 2, 2)), ((1, np.nan), (2, 1, 1, 2))],
+        [((4,), (1, 1, 1)), ((1, 1, 1, 1), (3,)), ((4,), (3,))],
+    ],
+)
+def test_calculate_prechunking_2d(old, new, expected):
+    actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        (
+            ((2, 2), (1, 1, 1, 1), (1, 1, 1, 1)),
+            ((1, 1, 1, 1), (4,), (2, 2)),
+            ((2, 2), (4,), (1, 1, 1, 1)),
+        ),
+        (
+            ((2, 2), (1, 1, 1, 1), (1, 1, 1, 1)),
+            ((1, 1, 1, 1), (2, 2), (2, 2)),
+            ((2, 2), (2, 2), (2, 2)),
+        ),
+        (
+            ((2, 2), (1, 1, 1, 1), (1, 1, 1, 1)),
+            ((1, 1, 1, 1), (2, 2), (4,)),
+            ((2, 2), (2, 2), (2, 2)),
+        ),
+        (
+            ((1, 1, 1, 1), (1, 1, 1, 1), (2, 2)),
+            ((2, 2), (4,), (1, 1, 1, 1)),
+            ((2, 2), (2, 2), (2, 2)),
+        ),
+    ],
+)
+def test_calculate_prechunking_3d(old, new, expected):
+    with dask.config.set({"array.chunk-size": "16 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ["chunk_size", "expected"],
+    [
+        ("1 B", ((10,), (1,) * 10)),
+        ("20 B", ((10,), (1,) * 10)),
+        ("40 B", ((10,), (2, 2, 1, 2, 2, 1))),
+        ("100 B", ((10,), (5, 5))),
+    ],
+)
+def test_calculate_prechunking_concatenation(chunk_size, expected):
+    old = ((10,), (1,) * 10)
+    new = ((2,) * 5, (5, 5))
+    with dask.config.set({"array.chunk-size": chunk_size}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
+    assert actual == expected
+
+
+def test_calculate_prechunking_does_not_concatenate_object_type():
+    old = ((10,), (1,) * 10)
+    new = ((2,) * 5, (5, 5))
+
+    # Ensure that int dtypes get concatenated
+    new = ((2,) * 5, (5, 5))
+    with dask.config.set({"array.chunk-size": "100 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
+    assert actual == ((10,), (5, 5))
+
+    # Ensure object dtype chunks do not get concatenated
+    with dask.config.set({"array.chunk-size": "100 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(object), None)
+    assert actual == old
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2), (3, 3)), ((4,), (3, 3)), ((2, 2), (3, 3))],
         [
             ((2, 2, 2), (3, 3, 3)),
             ((1, 2, 2, 1), (2, 3, 4)),
             ((1, 1, 1, 1, 1, 1), (2, 1, 2, 1, 3)),
         ],
-        [((1, np.nan), (3, 3)), ((1, np.nan), (2, 2, 2)), ((1, np.nan), (2, 1, 1, 2))],
         [((4,), (1, 1, 1)), ((1, 1, 1, 1), (3,)), ((4,), (1, 1, 1))],
     ],
 )
-def test_calculate_prechunking_2d(old, new, expected):
-    actual = _calculate_prechunking(old, new)
+def test_calculate_prechunking_splitting(old, new, expected):
+    # _calculate_prechunking does not concatenate on object
+    actual = _calculate_prechunking(old, new, np.dtype(object), None)
     assert actual == expected
