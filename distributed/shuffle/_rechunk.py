@@ -496,6 +496,8 @@ def _concatenate_small_chunks(
     old_largest_width = [max(chain(*axis)) for axis in split_axes]
     new_largest_width = [max(c) for c in new_chunks]
 
+    # This represents how much each dimension increases (>1) or reduces (<1)
+    # the graph size during rechunking
     graph_size_effect = {
         dim: len(new_axis) / sum(map(len, split_axis))
         for dim, (split_axis, new_axis) in enumerate(zip(split_axes, new_chunks))
@@ -503,6 +505,8 @@ def _concatenate_small_chunks(
 
     ndim = len(old_chunks)
 
+    # This represents how much each dimension increases (>1) or reduces (<1) the
+    # largest block size during rechunking
     block_size_effect = {
         dim: new_largest_width[dim] / (old_largest_width[dim] or 1)
         for dim in range(ndim)
