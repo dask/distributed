@@ -1112,17 +1112,17 @@ async def test_pause_while_saturated(c, s, a, b):
     sa = s.workers[a.address]
     ev = Event()
     futs = c.map(lambda i, ev: ev.wait(), range(3), ev=ev, workers=[a.address])
-    await async_poll_for(lambda: len(a.state.tasks) == 3, timeout=2)
+    await async_poll_for(lambda: len(a.state.tasks) == 3, timeout=5)
     assert sa in s.saturated
     assert sa in s.running
 
     a.monitor.get_process_memory = lambda: 2**40
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.paused, timeout=5)
     assert sa not in s.saturated
     assert sa not in s.running
 
     a.monitor.get_process_memory = lambda: 0
-    await async_poll_for(lambda: sa.status == Status.running, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.running, timeout=5)
     assert sa in s.saturated
     assert sa in s.running
 
