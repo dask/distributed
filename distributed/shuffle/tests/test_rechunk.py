@@ -177,7 +177,7 @@ async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk)
 
 
 @pytest.mark.parametrize("config_value", ["tasks", "p2p", None])
-@pytest.mark.parametrize("keyword", ["tasks", "p2p", None])
+@pytest.mark.parametrize("keyword", ["tasks", "p2p"])
 @gen_cluster(client=True)
 async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     """Try rechunking a random 1d matrix
@@ -193,6 +193,35 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     with dask.config.set(config):
         x2 = rechunk(x, chunks=new, method=keyword)
     expected_algorithm = keyword if keyword is not None else config_value
+    if expected_algorithm == "p2p":
+        assert all(key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+    else:
+        assert not any(
+            key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__()
+        )
+
+    assert x2.chunks == new
+    assert np.all(await c.compute(x2) == a)
+
+
+@pytest.mark.parametrize(
+    ["new", "expected_algorithm"],
+    [
+        # All-to-all rechunking defaults to P2P
+        (((1,) * 100, (100,)), "p2p"),
+        # Localized rechunking defaults to tasks
+        (((50, 50), (2,) * 50), "tasks"),
+        # Less local rechunking first defaults to tasks,
+        (((25, 25, 25, 25), (4,) * 25), "tasks"),
+        # then switches to p2p
+        (((10,) * 10, (10,) * 10), "p2p"),
+    ],
+)
+@gen_cluster(client=True)
+async def test_rechunk_heuristic(c, s, a, b, new, expected_algorithm):
+    a = np.random.default_rng().uniform(0, 1, 10000).reshape((100, 100))
+    x = da.from_array(a, chunks=(100, 1))
+    x2 = rechunk(x, chunks=new)
     if expected_algorithm == "p2p":
         assert all(key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
     else:
