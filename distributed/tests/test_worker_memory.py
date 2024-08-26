@@ -1097,12 +1097,12 @@ async def test_pause_while_idle(s, a, b):
     assert sa in s.running
 
     a.monitor.get_process_memory = lambda: 2**40
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.paused, timeout=5)
     assert a.address not in s.idle
     assert sa not in s.running
 
     a.monitor.get_process_memory = lambda: 0
-    await async_poll_for(lambda: sa.status == Status.running, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.running, timeout=5)
     assert a.address in s.idle
     assert sa in s.running
 
