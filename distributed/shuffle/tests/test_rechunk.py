@@ -177,7 +177,7 @@ async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk)
 
 
 @pytest.mark.parametrize("config_value", ["tasks", "p2p", None])
-@pytest.mark.parametrize("keyword", ["tasks", "p2p"])
+@pytest.mark.parametrize("keyword", ["tasks", "p2p", None])
 @gen_cluster(client=True)
 async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     """Try rechunking a random 1d matrix
@@ -195,10 +195,13 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     expected_algorithm = keyword if keyword is not None else config_value
     if expected_algorithm == "p2p":
         assert all(key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
-    else:
+    elif expected_algorithm == "tasks":
         assert not any(
             key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__()
         )
+    # Neither is specified, so we choose the best one (see test_rechunk_heuristic for a full test of the heuristic)
+    else:
+        assert all(key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
 
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
