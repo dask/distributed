@@ -370,7 +370,13 @@ class P2PRechunkLayer(Layer):
         indices_to_keep = self._keys_to_indices(keys)
         _old_to_new = old_to_new(self.chunks_input, self.chunks)
 
-        culled_deps: defaultdict[Key, set[Key]] = defaultdict(set)
+        # Pre-allocate old block references, to allow reuse and reduce the
+        # graph's memory footprint a bit.
+        old_blocks = np.empty([len(c) for c in self.chunks_input], dtype="O")
+        for ndindex in np.ndindex(old_blocks.shape):
+            old_blocks[ndindex] = (self.name_input,) + ndindex
+
+        culled_deps: dict[Key, set[Key]] = {}
         for nindex in indices_to_keep:
             old_indices_per_axis = []
             keepmap[nindex] = True
@@ -378,8 +384,10 @@ class P2PRechunkLayer(Layer):
                 old_indices_per_axis.append(
                     [old_chunk_index for old_chunk_index, _ in new_axis[index]]
                 )
-            for old_nindex in product(*old_indices_per_axis):
-                culled_deps[(self.name,) + nindex].add((self.name_input,) + old_nindex)
+            culled_deps_for_nindex = {
+                old_blocks[old_nindex] for old_nindex in product(*old_indices_per_axis)
+            }
+            culled_deps[(self.name,) + nindex] = culled_deps_for_nindex
 
         # Protect against mutations later on with frozenset
         frozen_deps = {
