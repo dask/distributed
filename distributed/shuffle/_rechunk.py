@@ -376,7 +376,9 @@ class P2PRechunkLayer(Layer):
         for ndindex in np.ndindex(old_blocks.shape):
             old_blocks[ndindex] = (self.name_input,) + ndindex
 
-        culled_deps: dict[Key, set[Key]] = {}
+        keys_for_indices: dict[frozenset[tuple[int, ...]], frozenset[Key]] = {}
+
+        culled_deps: dict[Key, frozenset[Key]] = {}
         for nindex in indices_to_keep:
             old_indices_per_axis = []
             keepmap[nindex] = True
@@ -384,22 +386,19 @@ class P2PRechunkLayer(Layer):
                 old_indices_per_axis.append(
                     [old_chunk_index for old_chunk_index, _ in new_axis[index]]
                 )
-            culled_deps_for_nindex = {
-                old_blocks[old_nindex] for old_nindex in product(*old_indices_per_axis)
-            }
-            culled_deps[(self.name,) + nindex] = culled_deps_for_nindex
+            indices = frozenset(product(*old_indices_per_axis))
+            if indices not in keys_for_indices:
+                keys_for_indices[indices] = frozenset(
+                    old_blocks[index] for index in indices
+                )
 
-        # Protect against mutations later on with frozenset
-        frozen_deps = {
-            output_task: frozenset(input_tasks)
-            for output_task, input_tasks in culled_deps.items()
-        }
+            culled_deps[(self.name,) + nindex] = keys_for_indices[indices]
 
         if np.array_equal(keepmap, self.keepmap):
-            return self, frozen_deps
+            return self, culled_deps
         else:
             culled_layer = self._cull(keepmap)
-            return culled_layer, frozen_deps
+            return culled_layer, culled_deps
 
     def _construct_graph(self) -> _T_LowLevelGraph:
         import numpy as np
