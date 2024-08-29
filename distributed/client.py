@@ -37,11 +37,6 @@ from typing import (
     cast,
 )
 
-from dask._task_spec import DataNode, Task
-
-if TYPE_CHECKING:
-    from typing_extensions import TypeAlias
-
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 
@@ -75,7 +70,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from dask._task_spec import TaskRef
+from dask._task_spec import DataNode, Task, TaskRef
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -133,6 +128,9 @@ from distributed.utils_comm import (
     unpack_remotedata,
 )
 from distributed.worker import get_client, get_worker, secede
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
 
 logger = logging.getLogger(__name__)
 
