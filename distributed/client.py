@@ -3386,7 +3386,7 @@ class Client(SyncMethodMixin):
                     "op": "update-graph",
                     "graph_header": header,
                     "graph_frames": frames,
-                    "keys": list(keys),
+                    "keys": set(keys),
                     "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
