@@ -5029,7 +5029,7 @@ class Scheduler(SchedulerState, ServerNode):
         computation: Computation,
     ) -> tuple:
         # Get or create task states
-        runnable = set()
+        runnable = list()
         new_tasks = []
         stack = list(keys)
         touched_keys = set()
@@ -5114,7 +5114,7 @@ class Scheduler(SchedulerState, ServerNode):
                         )
 
             if ts.run_spec:
-                runnable.add(ts)
+                runnable.append(ts)
             touched_keys.add(k)
             touched_tasks.append(ts)
             stack.extend(dependencies.get(k, ()))
