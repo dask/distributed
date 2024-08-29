@@ -370,29 +370,21 @@ class P2PRechunkLayer(Layer):
         indices_to_keep = self._keys_to_indices(keys)
         _old_to_new = old_to_new(self.chunks_input, self.chunks)
 
-        # Pre-allocate old block references, to allow reuse and reduce the
-        # graph's memory footprint a bit.
-        old_blocks = np.empty([len(c) for c in self.chunks_input], dtype="O")
-        for ndindex in np.ndindex(old_blocks.shape):
-            old_blocks[ndindex] = (self.name_input,) + ndindex
+        for ndindex in indices_to_keep:
+            keepmap[ndindex] = True
 
-        keys_for_indices: dict[frozenset[tuple[int, ...]], frozenset[Key]] = {}
+        culled_deps = {}
+        for ndpartial in _split_partials(_old_to_new):
+            if not np.any(keepmap[ndpartial.new]):
+                continue
 
-        culled_deps: dict[Key, frozenset[Key]] = {}
-        for nindex in indices_to_keep:
-            old_indices_per_axis = []
-            keepmap[nindex] = True
-            for index, new_axis in zip(nindex, _old_to_new):
-                old_indices_per_axis.append(
-                    [old_chunk_index for old_chunk_index, _ in new_axis[index]]
-                )
-            indices = frozenset(product(*old_indices_per_axis))
-            if indices not in keys_for_indices:
-                keys_for_indices[indices] = frozenset(
-                    old_blocks[index] for index in indices
-                )
+            deps = frozenset(
+                (self.name_input,) + ndindex
+                for ndindex in _ndindices_of_slice(ndpartial.old)
+            )
 
-            culled_deps[(self.name,) + nindex] = keys_for_indices[indices]
+            for ndindex in _ndindices_of_slice(ndpartial.new):
+                culled_deps[(self.name,) + ndindex] = deps
 
         if np.array_equal(keepmap, self.keepmap):
             return self, culled_deps
@@ -702,14 +694,12 @@ def _slice_new_chunks_into_partials(
     return tuple(sliced_axes)
 
 
-def _partial_ndindex(ndslice: NDSlice) -> np.ndindex:
-    import numpy as np
-
-    return np.ndindex(tuple(slice.stop - slice.start for slice in ndslice))
+def _ndindices_of_slice(ndslice: NDSlice) -> Iterator[NDIndex]:
+    return product(*(range(slc.start, slc.stop) for slc in ndslice))
 
 
-def _global_index(partial_index: NDIndex, partial_offset: NDIndex) -> NDIndex:
-    return tuple(index + offset for index, offset in zip(partial_index, partial_offset))
+def _partial_index(global_index: NDIndex, partial_offset: NDIndex) -> NDIndex:
+    return tuple(index - offset for index, offset in zip(global_index, partial_offset))
 
 
 def partial_concatenate(
@@ -809,8 +799,8 @@ def partial_rechunk(
     )
 
     transfer_keys = []
-    for partial_index in _partial_ndindex(ndpartial.old):
-        global_index = _global_index(partial_index, old_partial_offset)
+    for global_index in _ndindices_of_slice(ndpartial.old):
+        partial_index = _partial_index(global_index, old_partial_offset)
 
         input_key = (input_name,) + global_index
 
@@ -829,8 +819,8 @@ def partial_rechunk(
     dsk[_barrier_key] = (shuffle_barrier, partial_token, transfer_keys)
 
     new_partial_offset = tuple(axis.start for axis in ndpartial.new)
-    for partial_index in _partial_ndindex(ndpartial.new):
-        global_index = _global_index(partial_index, new_partial_offset)
+    for global_index in _ndindices_of_slice(ndpartial.new):
+        partial_index = _partial_index(global_index, new_partial_offset)
         if keepmap[global_index]:
             dsk[(unpack_group,) + global_index] = (
                 rechunk_unpack,
