@@ -374,10 +374,14 @@ class P2PRechunkLayer(Layer):
             keepmap[ndindex] = True
 
         culled_deps = {}
+        # Identify the individual partial rechunks
         for ndpartial in _split_partials(_old_to_new):
+            # Cull partials for which we do not keep any output tasks
             if not np.any(keepmap[ndpartial.new]):
                 continue
 
+            # Within partials, we have all-to-all communication.
+            # Thus, all output tasks share the same input tasks.
             deps = frozenset(
                 (self.name_input,) + ndindex
                 for ndindex in _ndindices_of_slice(ndpartial.old)
