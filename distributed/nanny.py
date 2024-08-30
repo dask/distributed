@@ -745,19 +745,22 @@ class WorkerProcess:
         os.environ.update(self.pre_spawn_env)
 
         try:
-            await self.process.start()
-        except OSError:
-            logger.exception("Nanny failed to start process", exc_info=True)
-            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
-            await self.process.terminate()
-            self.status = Status.failed
-        try:
-            msg = await self._wait_until_connected(uid)
-        except Exception:
-            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
-            await self.process.terminate()
-            self.status = Status.failed
-            raise
+            try:
+                await self.process.start()
+            except OSError:
+                # This can only happen if the actual process creation failed, e.g.
+                # multiprocessing.Process.start failed. This is not tested!
+                logger.exception("Nanny failed to start process", exc_info=True)
+                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+                await self.process.terminate()
+                self.status = Status.failed
+            try:
+                msg = await self._wait_until_connected(uid)
+            except Exception:
+                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+                await self.process.terminate()
+                self.status = Status.failed
+                raise
         finally:
             self.running.set()
         if not msg:
@@ -766,6 +769,7 @@ class WorkerProcess:
         self.worker_dir = msg["dir"]
         assert self.worker_address
         self.status = Status.running
+        self.running.set()
 
         return self.status
 
@@ -831,11 +835,6 @@ class WorkerProcess:
         """
         deadline = time() + timeout
 
-        if self.status == Status.stopped:
-            return
-        if self.status == Status.stopping:
-            await self.stopped.wait()
-            return
         # If the process is not properly up it will not watch the closing queue
         # and we may end up leaking this process
         # Therefore wait for it to be properly started before killing it
@@ -843,10 +842,16 @@ class WorkerProcess:
             await self.running.wait()
 
         assert self.status in (
+            Status.stopping,
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
             Status.closing_gracefully,
         ), self.status
+        if self.status == Status.stopped:
+            return
+        if self.status == Status.stopping:
+            await self.stopped.wait()
+            return
         self.status = Status.stopping
         logger.info("Nanny asking worker to close. Reason: %s", reason)
 

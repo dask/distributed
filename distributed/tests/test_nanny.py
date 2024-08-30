@@ -583,6 +583,37 @@ async def test_worker_start_exception(s):
 
 
 @gen_cluster(nthreads=[])
+async def test_worker_start_exception_while_killing(s):
+    nanny = Nanny(s.address, worker_class=BrokenWorker)
+
+    async def try_to_kill_nanny():
+        while not nanny.process or nanny.process.status not in (
+            Status.starting,  # this is what we want
+            # Status.failed # we might've missed it already
+        ):
+            await asyncio.sleep(0)
+        await nanny.kill()
+
+    kill_task = asyncio.create_task(try_to_kill_nanny())
+    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
+        with raises_with_cause(
+            RuntimeError,
+            "Nanny failed to start",
+            RuntimeError,
+            "BrokenWorker failed to start",
+        ):
+            async with nanny:
+                pass
+    await kill_task
+    assert nanny.status == Status.failed
+    # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
+    assert nanny.process is None
+    assert "Restarting worker" not in logs.getvalue()
+    # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
+    assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
+
+
+@gen_cluster(nthreads=[])
 async def test_failure_during_worker_initialization(s):
     with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
         with pytest.raises(RuntimeError):
