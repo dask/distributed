@@ -758,13 +758,14 @@ class WorkerProcess:
             await self.process.terminate()
             self.status = Status.failed
             raise
+        finally:
+            self.running.set()
         if not msg:
             return self.status
         self.worker_address = msg["address"]
         self.worker_dir = msg["dir"]
         assert self.worker_address
         self.status = Status.running
-        self.running.set()
 
         return self.status
 
