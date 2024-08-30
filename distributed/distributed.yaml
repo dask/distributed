@@ -290,6 +290,8 @@ distributed:
         - xarray
         - xgboost
         - xdist
+        - __channelexec__  # more xdist
+        - execnet  # more xdist
       ignore-files:
         - runpy\.py  # `python -m pytest` (or other module) shell command
         - pytest  # `pytest` shell command
