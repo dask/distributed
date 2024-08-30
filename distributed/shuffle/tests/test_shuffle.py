@@ -620,7 +620,7 @@ async def test_restarting_does_not_deadlock(c, s):
         expected = await c.compute(df)
 
         async with (
-            Nanny(s.address) as b,
+            Worker(s.address) as b,
             wait_until_worker_has_tasks(
                 "shuffle-transfer", b.worker_address, 1, s
             ) as event,
@@ -632,9 +632,7 @@ async def test_restarting_does_not_deadlock(c, s):
             await event.wait()
             a.status = Status.paused
             await async_poll_for(lambda: len(s.running) == 1, timeout=5)
-            b.close_gracefully()
-            await b.process.process.kill()
-
+            b.batched_stream.close()
             await async_poll_for(lambda: not s.running, timeout=5)
 
             a.status = Status.running
