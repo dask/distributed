@@ -4626,41 +4626,28 @@ class Scheduler(SchedulerState, ServerNode):
         dependencies: dict[Key, set[Key]],
         keys: set[Key],
     ) -> set[Key]:
-        lost_dependencies = set()
-        work = set(keys)
-        seen: set[Key] = set()
-        wpop = work.pop
-        wupdate = work.update
-        sadd = seen.add
-        while work:
-            k = wpop()
-            if k in seen:
-                continue
-            sadd(k)
-            if k not in dsk:
-                if k not in self.tasks:
-                    lost_dependencies.add(k)
-                    logger.info("User asked for computation on lost data, %s", k)
-                    dependencies.pop(k, None)
-                    keys.discard(k)
-                continue
-            wupdate(dsk[k].dependencies)
         lost_keys = set()
-        if lost_dependencies:
-            dependents = reverse_dict(dependencies)
-            work.clear()
-            seen.clear()
-            wupdate(lost_dependencies)
+        seen: set[Key] = set()
+        sadd = seen.add
+        for k in list(keys):
+            work = {k}
+            wpop = work.pop
+            wupdate = work.update
             while work:
-                k = work.pop()
-                if k in seen:
+                d = wpop()
+                if d in seen:
                     continue
-                sadd(k)
-                if k in keys:
-                    keys.remove(k)
-                    lost_keys.add(k)
-                wupdate(dependents.get(k, ()))
-        return lost_keys | lost_dependencies
+                sadd(d)
+                if d not in dsk:
+                    if d not in self.tasks:
+                        lost_keys.add(d)
+                        lost_keys.add(k)
+                        logger.info("User asked for computation on lost data, %s", k)
+                        dependencies.pop(d, None)
+                        keys.discard(k)
+                    continue
+                wupdate(dsk[d].dependencies)
+        return lost_keys
 
     def _remove_done_tasks(
         self, dsk: dict[Key, GraphNode], dependencies: dict[Key, set[Key]]
