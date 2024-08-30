@@ -4660,7 +4660,7 @@ class Scheduler(SchedulerState, ServerNode):
                     keys.remove(k)
                     lost_keys.add(k)
                 wupdate(dependents.get(k, ()))
-        return lost_keys
+        return lost_keys | lost_dependencies
 
     def _remove_done_tasks(
         self, dsk: dict[Key, GraphNode], dependencies: dict[Key, set[Key]]
