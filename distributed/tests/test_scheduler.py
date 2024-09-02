@@ -1238,16 +1238,14 @@ async def test_restart_no_wait_for_workers(c, s, a, b):
     await b.finished()
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_restart_some_nannies_some_not(c, s, a, b):
     original_addrs = set(s.workers)
     async with Worker(s.address, nthreads=1) as w:
         await c.wait_for_workers(3)
 
-        # FIXME how to make this not always take 20s if the nannies do restart quickly?
         with pytest.raises(TimeoutError, match=r"The 1 worker\(s\) not using Nannies"):
-            await c.restart(timeout="20s")
+            await c.restart()
 
         assert w.status == Status.closed
 

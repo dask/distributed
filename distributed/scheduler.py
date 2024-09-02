@@ -6583,7 +6583,9 @@ class Scheduler(SchedulerState, ServerNode):
         # NOTE: if new (unrelated) workers join while we're waiting, we may return
         # before our shut-down workers have come back up. That's fine; workers are
         # interchangeable.
-        while not deadline.expired and len(self.workers) < n_workers:
+        while not deadline.expired and len(self.workers) < n_workers - len(
+            no_nanny_workers
+        ):
             await asyncio.sleep(0.2)
 
         if len(self.workers) >= n_workers:
@@ -7806,9 +7808,11 @@ class Scheduler(SchedulerState, ServerNode):
     def get_who_has(self, keys: Iterable[Key] | None = None) -> dict[Key, list[str]]:
         if keys is not None:
             return {
-                key: [ws.address for ws in self.tasks[key].who_has or ()]
-                if key in self.tasks
-                else []
+                key: (
+                    [ws.address for ws in self.tasks[key].who_has or ()]
+                    if key in self.tasks
+                    else []
+                )
                 for key in keys
             }
         else:
@@ -7823,9 +7827,11 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: [ts.key for ts in self.workers[w].has_what]
-                if w in self.workers
-                else []
+                w: (
+                    [ts.key for ts in self.workers[w].has_what]
+                    if w in self.workers
+                    else []
+                )
                 for w in workers
             }
         else:
