@@ -95,8 +95,7 @@ def unpack_frames(
     *,
     remainder: bool = False,
     partial: Literal[False] = False,
-) -> list[memoryview]:
-    ...
+) -> list[memoryview]: ...
 
 
 @overload
@@ -105,8 +104,7 @@ def unpack_frames(
     *,
     remainder: bool = False,
     partial: Literal[True],
-) -> tuple[list[memoryview], list[int]]:
-    ...
+) -> tuple[list[memoryview], list[int]]: ...
 
 
 def unpack_frames(b, *, remainder=False, partial=False):

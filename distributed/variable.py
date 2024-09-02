@@ -39,9 +39,9 @@ class VariableExtension:
             {"variable_set": self.set, "variable_get": self.get}
         )
 
-        self.scheduler.stream_handlers[
-            "variable-future-received-confirm"
-        ] = self.future_received_confirm
+        self.scheduler.stream_handlers["variable-future-received-confirm"] = (
+            self.future_received_confirm
+        )
         self.scheduler.stream_handlers["variable_delete"] = self.delete
 
     async def set(self, name=None, key=None, data=None, client=None, timeout=None):

@@ -71,8 +71,11 @@ def _fetch_memray_profile(
 def memray_workers(
     directory: str | pathlib.Path = "memray-profiles",
     workers: int | None | list[str] = None,
-    report_args: Sequence[str]
-    | Literal[False] = ("flamegraph", "--temporal", "--leaks"),
+    report_args: Sequence[str] | Literal[False] = (
+        "flamegraph",
+        "--temporal",
+        "--leaks",
+    ),
     fetch_reports_parallel: bool | int = True,
     **memray_kwargs: Any,
 ) -> Iterator[None]:
@@ -183,8 +186,11 @@ def memray_workers(
 @contextlib.contextmanager
 def memray_scheduler(
     directory: str | pathlib.Path = "memray-profiles",
-    report_args: Sequence[str]
-    | Literal[False] = ("flamegraph", "--temporal", "--leaks"),
+    report_args: Sequence[str] | Literal[False] = (
+        "flamegraph",
+        "--temporal",
+        "--leaks",
+    ),
     **memray_kwargs: Any,
 ) -> Iterator[None]:
     """Generate a Memray profile on the Scheduler and download the generated report.

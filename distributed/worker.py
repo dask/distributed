@@ -1870,7 +1870,7 @@ class Worker(BaseWorker, ServerNode):
             try:
                 result = plugin.setup(worker=self)
                 if isawaitable(result):
-                    result = await result
+                    await result
             except Exception as e:
                 logger.exception("Worker plugin %s failed to setup", name)
                 if not catch_errors:
@@ -1887,7 +1887,7 @@ class Worker(BaseWorker, ServerNode):
             if hasattr(plugin, "teardown"):
                 result = plugin.teardown(worker=self)
                 if isawaitable(result):
-                    result = await result
+                    await result
         except Exception as e:
             logger.exception("Worker plugin %s failed to teardown", name)
             return error_message(e)
@@ -3011,7 +3011,7 @@ def apply_function_simple(
             # Any other `BaseException` types would ultimately be ignored by asyncio if
             # raised here, after messing up the worker state machine along their way.
             raise
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
             # aren't a reason to shut down the whole system (since we allow the
             # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
@@ -3056,7 +3056,7 @@ async def apply_function_async(
             # Any other `BaseException` types would ultimately be ignored by asyncio if
             # raised here, after messing up the worker state machine along their way.
             raise
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_
             # a reason to shut down the worker.
             # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they

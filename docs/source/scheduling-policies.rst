@@ -242,7 +242,7 @@ There are two downsides to this queueing:
 2. For embarrassingly-parallel workloads like a ``client.map``, there can be a minor
    increase in overhead per task, because each time a task finishes, a
    scheduler<->worker roundtrip message is required before the next task starts. In most
-   cases, this overhead is not even measureable and not something to worry about.
+   cases, this overhead is not even measurable and not something to worry about.
 
    This will only matter if you have very fast tasks, or a very slow network—that is, if
    your task runtime is the same order of magnitude as your network latency. For

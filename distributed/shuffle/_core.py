@@ -447,7 +447,7 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
 
     @property
     @abc.abstractmethod
-    def output_partitions(self) -> Generator[_T_partition_id, None, None]:
+    def output_partitions(self) -> Generator[_T_partition_id]:
         """Output partitions"""
 
     @abc.abstractmethod

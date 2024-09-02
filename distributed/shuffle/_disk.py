@@ -78,7 +78,7 @@ class ReadWriteLock:
                 self._condition.notify_all()
 
     @contextmanager
-    def write(self) -> Generator[None, None, None]:
+    def write(self) -> Generator[None]:
         self.acquire_write()
         try:
             yield
@@ -86,7 +86,7 @@ class ReadWriteLock:
             self.release_write()
 
     @contextmanager
-    def read(self) -> Generator[None, None, None]:
+    def read(self) -> Generator[None]:
         self.acquire_read()
         try:
             yield

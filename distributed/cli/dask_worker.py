@@ -406,9 +406,11 @@ def main(  # type: ignore[no-untyped-def]
                 host=host,
                 dashboard=dashboard,
                 dashboard_address=dashboard_address,
-                name=name
-                if n_workers == 1 or name is None or name == ""
-                else str(name) + "-" + str(i),
+                name=(
+                    name
+                    if n_workers == 1 or name is None or name == ""
+                    else str(name) + "-" + str(i)
+                ),
                 **kwargs,
                 **port_kwargs_i,
             )

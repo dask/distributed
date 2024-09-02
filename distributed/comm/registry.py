@@ -7,8 +7,7 @@ from typing import Protocol
 
 
 class _EntryPoints(Protocol):
-    def __call__(self, **kwargs: str) -> Iterable[importlib.metadata.EntryPoint]:
-        ...
+    def __call__(self, **kwargs: str) -> Iterable[importlib.metadata.EntryPoint]: ...
 
 
 _entry_points: _EntryPoints = importlib.metadata.entry_points  # type: ignore[assignment]

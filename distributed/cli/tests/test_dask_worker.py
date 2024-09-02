@@ -610,8 +610,9 @@ async def test_set_lifetime_stagger_via_env_var(c, s):
     env = os.environ.copy()
     env["DASK_DISTRIBUTED__WORKER__LIFETIME__DURATION"] = "10 seconds"
     env["DASK_DISTRIBUTED__WORKER__LIFETIME__STAGGER"] = "2 seconds"
-    with popen(["dask", "worker", s.address], env=env), popen(
-        ["dask", "worker", s.address], env=env
+    with (
+        popen(["dask", "worker", s.address], env=env),
+        popen(["dask", "worker", s.address], env=env),
     ):
         await c.wait_for_workers(2)
         [lifetime1, lifetime2] = (
