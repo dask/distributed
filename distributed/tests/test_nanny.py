@@ -609,10 +609,7 @@ async def test_worker_start_exception_while_killing(s):
     nanny = Nanny(s.address, worker_class=BrokenWorker)
 
     async def try_to_kill_nanny():
-        while not nanny.process or nanny.process.status not in (
-            Status.starting,  # this is what we want
-            # Status.failed # we might've missed it already
-        ):
+        while not nanny.process or nanny.process.status != Status.starting:
             await asyncio.sleep(0)
         await nanny.kill()
 
