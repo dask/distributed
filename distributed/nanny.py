@@ -843,6 +843,7 @@ class WorkerProcess:
 
         assert self.status in (
             Status.stopping,
+            Status.stopped,
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
             Status.closing_gracefully,
