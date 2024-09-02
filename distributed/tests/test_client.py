@@ -3811,7 +3811,7 @@ class UnhandledExceptions(Exception):
 
 
 @contextmanager
-def catch_unhandled_exceptions() -> Generator[None, None, None]:
+def catch_unhandled_exceptions() -> Generator[None]:
     loop = asyncio.get_running_loop()
     ctxs: list[dict[str, Any]] = []
 
@@ -6939,8 +6939,7 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_register_worker_plugin_instance_required(c, s, a, b):
-    class MyPlugin(WorkerPlugin):
-        ...
+    class MyPlugin(WorkerPlugin): ...
 
     with pytest.raises(TypeError, match="instance"):
         await c.register_plugin(MyPlugin)

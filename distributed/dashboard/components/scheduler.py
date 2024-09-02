@@ -3923,9 +3923,11 @@ class Contention(DashboardComponent):
 
         # Format event loop as time and GIL (if configured) as %
         self.data["text"] = [
-            f"{x * 100:.1f}%"
-            if i % 2 and s.monitor.monitor_gil_contention
-            else format_time(x)
+            (
+                f"{x * 100:.1f}%"
+                if i % 2 and s.monitor.monitor_gil_contention
+                else format_time(x)
+            )
             for i, x in enumerate(self.data["values"])
         ]
         update(self.source, self.data)

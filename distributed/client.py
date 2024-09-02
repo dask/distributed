@@ -133,9 +133,9 @@ from distributed.worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
-_global_clients: weakref.WeakValueDictionary[
-    int, Client
-] = weakref.WeakValueDictionary()
+_global_clients: weakref.WeakValueDictionary[int, Client] = (
+    weakref.WeakValueDictionary()
+)
 _global_client_index = [0]
 
 _current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
@@ -483,6 +483,7 @@ class Future(WrappedKey):
                 fn(fut)
             except BaseException:
                 logger.exception("Error in callback %s of %s:", fn, fut)
+                raise
 
         self.client.loop.add_callback(
             done_callback, self, partial(cls._cb_executor.submit, execute_callback)
@@ -3873,13 +3874,13 @@ class Client(SyncMethodMixin):
         name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
         worker_addrs = [name_to_addr.get(w, w) for w in workers]
 
-        out: dict[
-            str, Literal["OK", "removed", "timed out"]
-        ] = await self.scheduler.restart_workers(
-            workers=worker_addrs,
-            timeout=timeout,
-            on_error="raise" if raise_for_error else "return",
-            stimulus_id=f"client-restart-workers-{time()}",
+        out: dict[str, Literal["OK", "removed", "timed out"]] = (
+            await self.scheduler.restart_workers(
+                workers=worker_addrs,
+                timeout=timeout,
+                on_error="raise" if raise_for_error else "return",
+                stimulus_id=f"client-restart-workers-{time()}",
+            )
         )
         # Map keys back to original `workers` input names/addresses
         out = {w: out[w_addr] for w, w_addr in zip(workers, worker_addrs)}

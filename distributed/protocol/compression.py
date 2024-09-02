@@ -3,6 +3,7 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
+
 from __future__ import annotations
 
 import zlib

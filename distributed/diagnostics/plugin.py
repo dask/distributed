@@ -526,13 +526,11 @@ class _InstallNannyPlugin(NannyPlugin):
     async def setup(self, nanny):
         from distributed.semaphore import Semaphore
 
-        async with (
-            await Semaphore(
-                max_leases=1,
-                name=socket.gethostname(),
-                scheduler_rpc=nanny.scheduler,
-                loop=nanny.loop,
-            )
+        async with await Semaphore(
+            max_leases=1,
+            name=socket.gethostname(),
+            scheduler_rpc=nanny.scheduler,
+            loop=nanny.loop,
         ):
             self._install_fn()
 
@@ -571,13 +569,11 @@ class _InstallWorkerPlugin(WorkerPlugin):
     async def setup(self, worker):
         from distributed.semaphore import Semaphore
 
-        async with (
-            await Semaphore(
-                max_leases=1,
-                name=socket.gethostname(),
-                scheduler_rpc=worker.scheduler,
-                loop=worker.loop,
-            )
+        async with await Semaphore(
+            max_leases=1,
+            name=socket.gethostname(),
+            scheduler_rpc=worker.scheduler,
+            loop=worker.loop,
         ):
             self._install_fn()
 
