@@ -450,6 +450,7 @@ async def test_base_exception_in_task(c, s, a, sync, exc_type):
         # Prevent test failure from killing the whole pytest process
         traceback.print_exc()
         pytest.fail(f"BaseException propagated back to test: {e!r}. See stdout.")
+        raise
 
     # Nanny restarts it
     await c.wait_for_workers(1)
@@ -663,9 +664,12 @@ async def test_close_on_disconnect(s, w):
 
 @gen_cluster(nthreads=[])
 async def test_memory_limit_auto(s):
-    async with Worker(s.address, nthreads=1) as a, Worker(
-        s.address, nthreads=2
-    ) as b, Worker(s.address, nthreads=100) as c, Worker(s.address, nthreads=200) as d:
+    async with (
+        Worker(s.address, nthreads=1) as a,
+        Worker(s.address, nthreads=2) as b,
+        Worker(s.address, nthreads=100) as c,
+        Worker(s.address, nthreads=200) as d,
+    ):
         assert isinstance(a.memory_manager.memory_limit, Number)
         assert isinstance(b.memory_manager.memory_limit, Number)
 
@@ -1768,11 +1772,10 @@ async def test_heartbeat_missing_real_cluster(s, a):
 
     assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
 
-    with captured_logger(
-        "distributed.worker", level=logging.WARNING
-    ) as wlogger, captured_logger(
-        "distributed.scheduler", level=logging.WARNING
-    ) as slogger:
+    with (
+        captured_logger("distributed.worker", level=logging.WARNING) as wlogger,
+        captured_logger("distributed.scheduler", level=logging.WARNING) as slogger,
+    ):
         with freeze_batched_send(s.stream_comms[a.address]):
             await s.remove_worker(a.address, stimulus_id="foo")
             assert not s.workers

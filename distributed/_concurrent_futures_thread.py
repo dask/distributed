@@ -31,9 +31,9 @@ from concurrent.futures import _base
 # workers to exit when their work queues are empty and then waits until the
 # threads finish.
 
-_threads_queues: weakref.WeakKeyDictionary[
-    threading.Thread, queue.Queue
-] = weakref.WeakKeyDictionary()
+_threads_queues: weakref.WeakKeyDictionary[threading.Thread, queue.Queue] = (
+    weakref.WeakKeyDictionary()
+)
 _shutdown = False
 
 

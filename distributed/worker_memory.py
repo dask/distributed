@@ -18,6 +18,7 @@ See also:
   Worker.
 - :mod:`distributed.active_memory_manager`, which runs on the scheduler side
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -229,9 +230,11 @@ class WorkerMemoryManager:
                     "Process memory: %s -- Worker memory limit: %s",
                     int(frac * 100),
                     format_bytes(memory),
-                    format_bytes(self.memory_limit)
-                    if self.memory_limit is not None
-                    else "None",
+                    (
+                        format_bytes(self.memory_limit)
+                        if self.memory_limit is not None
+                        else "None"
+                    ),
                 )
                 worker.status = Status.paused
         elif worker.status == Status.paused:
@@ -240,9 +243,11 @@ class WorkerMemoryManager:
                 "Process memory: %s -- Worker memory limit: %s",
                 int(frac * 100),
                 format_bytes(memory),
-                format_bytes(self.memory_limit)
-                if self.memory_limit is not None
-                else "None",
+                (
+                    format_bytes(self.memory_limit)
+                    if self.memory_limit is not None
+                    else "None"
+                ),
             )
             worker.status = Status.running
 
@@ -449,9 +454,11 @@ class NannyMemoryManager:
             nanny_logger.warning(
                 f"Worker {nanny.worker_address} (pid={process.pid}) is slow to %s",
                 # On Windows, kill() is an alias to terminate()
-                "terminate; trying again"
-                if WINDOWS
-                else "accept SIGTERM; sending SIGKILL",
+                (
+                    "terminate; trying again"
+                    if WINDOWS
+                    else "accept SIGTERM; sending SIGKILL"
+                ),
             )
             process.kill()
 
@@ -540,4 +547,4 @@ class DeprecatedMemoryMonitor:
             # This is triggered by Sphinx
             return None  # pragma: nocover
         _warn_deprecated(instance, "memory_monitor")
-        return partial(instance.memory_manager.memory_monitor, instance)
+        return partial(instance.memory_manager.memory_monitor, instance)  # type: ignore

@@ -3177,11 +3177,13 @@ class FlakyConnectionPool(ConnectionPool):
 async def test_gather_failing_can_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
     rpc = await FlakyConnectionPool(failing_connections=1)
-    with mock.patch.object(s, "rpc", rpc), dask.config.set(
-        {"distributed.comm.retry.count": 1}
-    ), captured_handler(
-        logging.getLogger("distributed").handlers[0]
-    ) as distributed_log:
+    with (
+        mock.patch.object(s, "rpc", rpc),
+        dask.config.set({"distributed.comm.retry.count": 1}),
+        captured_handler(
+            logging.getLogger("distributed").handlers[0]
+        ) as distributed_log,
+    ):
         res = await s.gather(keys=["x"])
     assert re.match(
         r"\A\d+-\d+-\d+ \d+:\d+:\d+,\d+ - distributed.utils_comm - INFO - "
@@ -4697,9 +4699,11 @@ async def test_transition_failure_triggers_log_event():
         return input
 
     # Manually spin up cluster to avoid state validation on cluster shutdown in gen_cluster
-    async with Scheduler(dashboard_address=":0") as s, Worker(s.address) as w, Client(
-        s.address, asynchronous=True
-    ) as c:
+    async with (
+        Scheduler(dashboard_address=":0") as s,
+        Worker(s.address) as w,
+        Client(s.address, asynchronous=True) as c,
+    ):
         block = Event()
         executing = Event()
 

@@ -415,7 +415,7 @@ class MultiWorker(Worker, ProcessInterface):
 
     __repr__ = __str__
 
-    async def start(self):
+    async def start_unsafe(self):
         await asyncio.gather(*self.workers)
 
     async def close(self):

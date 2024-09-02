@@ -41,6 +41,7 @@ Known issues
   unreliable. On Linux, this can be improved by reducing the MALLOC_TRIM glibc setting
   (see distributed.yaml).
 """
+
 from __future__ import annotations
 
 import gc

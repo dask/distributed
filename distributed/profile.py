@@ -24,6 +24,7 @@ We represent this tree as a nested dictionary with the following form:
                    'children': {...}}}
     }
 """
+
 from __future__ import annotations
 
 import bisect

@@ -40,9 +40,10 @@ def test_worker_preload_file(loop):
         with open(path, "w") as f:
             f.write(PRELOAD_TEXT)
 
-        with cluster(worker_kwargs={"preload": [path]}) as (s, workers), Client(
-            s["address"], loop=loop
-        ) as c:
+        with (
+            cluster(worker_kwargs={"preload": [path]}) as (s, workers),
+            Client(s["address"], loop=loop) as c,
+        ):
             assert c.run(check_worker) == {
                 worker["address"]: worker["address"] for worker in workers
             }
@@ -108,10 +109,13 @@ def test_worker_preload_module(loop):
         with open(path, "w") as f:
             f.write(PRELOAD_TEXT)
 
-        with cluster(worker_kwargs={"preload": ["worker_info"]}) as (
-            s,
-            workers,
-        ), Client(s["address"], loop=loop) as c:
+        with (
+            cluster(worker_kwargs={"preload": ["worker_info"]}) as (
+                s,
+                workers,
+            ),
+            Client(s["address"], loop=loop) as c,
+        ):
             assert c.run(check_worker) == {
                 worker["address"]: worker["address"] for worker in workers
             }
@@ -170,14 +174,17 @@ backends["foo"] = TCPBackend()
 
 @gen_test()
 async def test_web_preload():
-    with mock.patch(
-        "urllib3.PoolManager.request",
-        **{
-            "return_value.data": b"def dask_setup(dask_server):"
-            b"\n    dask_server.foo = 1"
-            b"\n"
-        },
-    ) as request, captured_logger("distributed.preloading") as log:
+    with (
+        mock.patch(
+            "urllib3.PoolManager.request",
+            **{
+                "return_value.data": b"def dask_setup(dask_server):"
+                b"\n    dask_server.foo = 1"
+                b"\n"
+            },
+        ) as request,
+        captured_logger("distributed.preloading") as log,
+    ):
         async with Scheduler(
             host="localhost", preload=["http://example.com/preload"]
         ) as s:

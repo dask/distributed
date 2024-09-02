@@ -631,7 +631,7 @@ def _largest_block_size(chunks: tuple[tuple[int, ...], ...]) -> int:
 
 def _split_partials(
     old_to_new: list[Any],
-) -> Generator[_NDPartial, None, None]:
+) -> Generator[_NDPartial]:
     """Split the rechunking into partials that can be performed separately"""
     partials_per_axis = _split_partials_per_axis(old_to_new)
     indices_per_axis = (range(len(partials)) for partials in partials_per_axis)
@@ -1102,7 +1102,7 @@ class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
     old: ChunkedAxes
 
     @property
-    def output_partitions(self) -> Generator[NDIndex, None, None]:
+    def output_partitions(self) -> Generator[NDIndex]:
         yield from product(*(range(len(c)) for c in self.new))
 
     def pick_worker(self, partition: NDIndex, workers: Sequence[str]) -> str:
