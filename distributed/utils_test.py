@@ -1125,8 +1125,6 @@ def _terminate_process(proc: subprocess.Popen, terminate_timeout: float) -> None
             proc.send_signal(signal.SIGINT)
         try:
             proc.communicate(timeout=terminate_timeout)
-        except subprocess.TimeoutExpired:
-            print("Process did not terminate after SIGINT; sending SIGKILL")
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):
