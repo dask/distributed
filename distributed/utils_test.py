@@ -1137,7 +1137,7 @@ def _terminate_process(proc: subprocess.Popen, terminate_timeout: float) -> None
 def popen(
     args: list[str],
     capture_output: bool = False,
-    terminate_timeout: float = 5,
+    terminate_timeout: float = 10,
     kill_timeout: float = 5,
     **kwargs: Any,
 ) -> Iterator[subprocess.Popen[bytes]]:
