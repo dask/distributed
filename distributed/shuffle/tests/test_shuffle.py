@@ -618,18 +618,13 @@ async def test_restarting_does_not_deadlock(c, s):
         )
         df = await c.persist(df)
         expected = await c.compute(df)
-
-        async with (
-            Worker(s.address) as b,
-            wait_until_worker_has_tasks(
-                "shuffle-transfer", b.worker_address, 1, s
-            ) as event,
-        ):
+        async with Worker(s.address) as b:
             with dask.config.set({"dataframe.shuffle.method": "p2p"}):
                 out = df.shuffle("x")
             assert not s.workers[b.worker_address].has_what
             result = c.compute(out)
-            await event.wait()
+            while not s.extensions["shuffle"].active_shuffles:
+                await asyncio.sleep(0)
             a.status = Status.paused
             await async_poll_for(lambda: len(s.running) == 1, timeout=5)
             b.batched_stream.close()
