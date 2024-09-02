@@ -241,7 +241,7 @@ async def test_nanny_restart_timeout(c, s, a):
 @gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
 async def test_nanny_restart_timeout_stress(c, s, a):
     x = await c.scatter(123)
-    restarts = [a.restart(timeout=random.random() * 0.1) for _ in range(100)]
+    restarts = [a.restart(timeout=random.random()) for _ in range(100)]
     await asyncio.gather(*restarts)
 
     while x.status != "cancelled":
