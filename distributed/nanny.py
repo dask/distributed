@@ -516,7 +516,7 @@ class Nanny(ServerNode):
                 await self.instantiate()
 
         try:
-            await wait_for(_(), timeout)
+            await wait_for(asyncio.shield(_()), timeout)
         except asyncio.TimeoutError:
             logger.error(
                 f"Restart timed out after {timeout}s; returning before finished"
@@ -769,7 +769,6 @@ class WorkerProcess:
         self.worker_dir = msg["dir"]
         assert self.worker_address
         self.status = Status.running
-        self.running.set()
 
         return self.status
 
@@ -804,6 +803,7 @@ class WorkerProcess:
                 msg = self._death_message(self.process.pid, r)
                 logger.info(msg)
             self.status = Status.stopped
+            self.running.clear()
             self.stopped.set()
             # Release resources
             self.process.close()
