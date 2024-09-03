@@ -81,9 +81,10 @@ async def test_subprocess_cluster_does_not_depend_on_logging():
     with new_config_file(
         {"distributed": {"logging": {"distributed": logging.CRITICAL + 1}}}
     ):
-        async with SubprocessCluster(
-            asynchronous=True, dashboard_address=":0"
-        ) as cluster, Client(cluster, asynchronous=True) as client:
+        async with (
+            SubprocessCluster(asynchronous=True, dashboard_address=":0") as cluster,
+            Client(cluster, asynchronous=True) as client,
+        ):
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
 

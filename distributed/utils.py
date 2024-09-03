@@ -449,7 +449,7 @@ class _CollectErrorThread:
         def wrapper() -> None:
             try:
                 target()
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 self._exception = e
 
         self._thread = thread = threading.Thread(
@@ -723,13 +723,11 @@ def key_split_group(x: object) -> str:
 
 
 @overload
-def log_errors(func: Callable[P, T], /) -> Callable[P, T]:
-    ...
+def log_errors(func: Callable[P, T], /) -> Callable[P, T]: ...
 
 
 @overload
-def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
-    ...
+def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors: ...
 
 
 def log_errors(func=None, /, *, pdb=False, unroll_stack=0):
@@ -865,7 +863,7 @@ def silence_logging(level, root="distributed"):
 @contextlib.contextmanager
 def silence_logging_cmgr(
     level: str | int, root: str = "distributed"
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """
     Temporarily change all StreamHandlers for the given logger to the given level
     """

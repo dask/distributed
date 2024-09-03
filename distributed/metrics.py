@@ -195,7 +195,9 @@ class ContextMeter:
     _callbacks: ContextVar[dict[Hashable, Callable[[Hashable, float, str], None]]]
 
     def __init__(self):
-        self._callbacks = ContextVar(f"MetricHook<{id(self)}>._callbacks", default={})
+        self._callbacks = ContextVar(
+            f"MetricHook<{id(self)}>._callbacks", default={}  # noqa: B039
+        )
 
     def __reduce__(self):
         assert self is context_meter, "Found copy of singleton"

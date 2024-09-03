@@ -162,9 +162,10 @@ def test_visible_devices_bad_uuid():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 
-    with mock.patch.dict(
-        os.environ, {"CUDA_VISIBLE_DEVICES": "NOT-A-GPU-UUID"}
-    ), pytest.raises(ValueError, match="Devices in CUDA_VISIBLE_DEVICES"):
+    with (
+        mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "NOT-A-GPU-UUID"}),
+        pytest.raises(ValueError, match="Devices in CUDA_VISIBLE_DEVICES"),
+    ):
         nvml._pynvml_handles()
 
 

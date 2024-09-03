@@ -16,9 +16,10 @@ from distributed.worker import get_worker
 
 @gen_cluster()
 async def test_publish_simple(s, a, b):
-    async with Client(s.address, asynchronous=True) as c, Client(
-        s.address, asynchronous=True
-    ) as f:
+    async with (
+        Client(s.address, asynchronous=True) as c,
+        Client(s.address, asynchronous=True) as f,
+    ):
         data = await c.scatter(range(3))
         await c.publish_dataset(data=data)
         assert "data" in s.extensions["publish"].datasets
@@ -54,9 +55,10 @@ async def test_publish_non_string_key(s, a, b):
 
 @gen_cluster()
 async def test_publish_roundtrip(s, a, b):
-    async with Client(s.address, asynchronous=True) as c, Client(
-        s.address, asynchronous=True
-    ) as f:
+    async with (
+        Client(s.address, asynchronous=True) as c,
+        Client(s.address, asynchronous=True) as f,
+    ):
         data = await c.scatter([0, 1, 2])
         await c.publish_dataset(data=data)
 
@@ -149,9 +151,10 @@ def test_unpublish_multiple_datasets_sync(client):
 @gen_cluster()
 async def test_publish_bag(s, a, b):
     db = pytest.importorskip("dask.bag")
-    async with Client(s.address, asynchronous=True) as c, Client(
-        s.address, asynchronous=True
-    ) as f:
+    async with (
+        Client(s.address, asynchronous=True) as c,
+        Client(s.address, asynchronous=True) as f,
+    ):
         bag = db.from_sequence([0, 1, 2])
         bagp = c.persist(bag)
 

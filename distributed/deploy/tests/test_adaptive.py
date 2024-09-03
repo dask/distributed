@@ -189,14 +189,17 @@ async def test_adapt_quickly():
     Instead we want to wait a few beats before removing a worker in case the
     user is taking a brief pause between work
     """
-    async with LocalCluster(
-        n_workers=0,
-        asynchronous=True,
-        processes=False,
-        silence_logs=False,
-        dashboard_address=":0",
-        threads_per_worker=1,
-    ) as cluster, Client(cluster, asynchronous=True) as client:
+    async with (
+        LocalCluster(
+            n_workers=0,
+            asynchronous=True,
+            processes=False,
+            silence_logs=False,
+            dashboard_address=":0",
+            threads_per_worker=1,
+        ) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
         adapt = cluster.adapt(interval="20 ms", wait_count=5, maximum=10)
         future = client.submit(slowinc, 1, delay=0.100)
         await wait(future)
@@ -240,13 +243,16 @@ async def test_adapt_quickly():
 @gen_test()
 async def test_adapt_down():
     """Ensure that redefining adapt with a lower maximum removes workers"""
-    async with LocalCluster(
-        n_workers=0,
-        asynchronous=True,
-        processes=False,
-        silence_logs=False,
-        dashboard_address=":0",
-    ) as cluster, Client(cluster, asynchronous=True) as client:
+    async with (
+        LocalCluster(
+            n_workers=0,
+            asynchronous=True,
+            processes=False,
+            silence_logs=False,
+            dashboard_address=":0",
+        ) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
         cluster.adapt(interval="20ms", maximum=5)
 
         futures = client.map(slowinc, range(1000), delay=0.1)

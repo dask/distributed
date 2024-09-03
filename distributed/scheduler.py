@@ -1847,8 +1847,7 @@ class SchedulerState:
             )
 
     @abstractmethod
-    def log_event(self, topic: str | Collection[str], msg: Any) -> None:
-        ...
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None: ...
 
     @property
     def memory(self) -> MemoryState:
@@ -1918,7 +1917,7 @@ class SchedulerState:
             self.unknown_durations,
             self.replicated_tasks,
         ):
-            collection.clear()  # type: ignore
+            collection.clear()
 
     @property
     def is_idle(self) -> bool:
@@ -7399,8 +7398,7 @@ class Scheduler(SchedulerState, ServerNode):
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @overload
     async def retire_workers(
@@ -7410,8 +7408,7 @@ class Scheduler(SchedulerState, ServerNode):
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @overload
     async def retire_workers(
@@ -7427,8 +7424,7 @@ class Scheduler(SchedulerState, ServerNode):
         minimum: int | None = None,
         target: int | None = None,
         attribute: str = "address",
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @log_errors
     async def retire_workers(
@@ -7710,12 +7706,10 @@ class Scheduler(SchedulerState, ServerNode):
             self.client_desires_keys(keys=list(who_has), client=client)
 
     @overload
-    def report_on_key(self, key: Key, *, client: str | None = None) -> None:
-        ...
+    def report_on_key(self, key: Key, *, client: str | None = None) -> None: ...
 
     @overload
-    def report_on_key(self, *, ts: TaskState, client: str | None = None) -> None:
-        ...
+    def report_on_key(self, *, ts: TaskState, client: str | None = None) -> None: ...
 
     def report_on_key(self, key=None, *, ts=None, client=None):
         if (ts is None) == (key is None):
@@ -7806,9 +7800,11 @@ class Scheduler(SchedulerState, ServerNode):
     def get_who_has(self, keys: Iterable[Key] | None = None) -> dict[Key, list[str]]:
         if keys is not None:
             return {
-                key: [ws.address for ws in self.tasks[key].who_has or ()]
-                if key in self.tasks
-                else []
+                key: (
+                    [ws.address for ws in self.tasks[key].who_has or ()]
+                    if key in self.tasks
+                    else []
+                )
                 for key in keys
             }
         else:
@@ -7823,9 +7819,11 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: [ts.key for ts in self.workers[w].has_what]
-                if w in self.workers
-                else []
+                w: (
+                    [ts.key for ts in self.workers[w].has_what]
+                    if w in self.workers
+                    else []
+                )
                 for w in workers
             }
         else:
@@ -8555,12 +8553,10 @@ class Scheduler(SchedulerState, ServerNode):
         self._broker.unsubscribe(topic, client)
 
     @overload
-    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]:
-        ...
+    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]: ...
 
     @overload
-    def get_events(self) -> dict[str, tuple[tuple[float, Any], ...]]:
-        ...
+    def get_events(self) -> dict[str, tuple[tuple[float, Any], ...]]: ...
 
     def get_events(
         self, topic: str | None = None

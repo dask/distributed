@@ -1,4 +1,5 @@
 """Tests for distributed.scheduler.Computation objects"""
+
 from __future__ import annotations
 
 import pytest

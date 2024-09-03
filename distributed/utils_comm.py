@@ -385,8 +385,10 @@ async def retry(
     delay_min: float,
     delay_max: float,
     jitter_fraction: float = 0.1,
-    retry_on_exceptions: type[BaseException]
-    | tuple[type[BaseException], ...] = (EnvironmentError, IOError),
+    retry_on_exceptions: type[BaseException] | tuple[type[BaseException], ...] = (
+        EnvironmentError,
+        IOError,
+    ),
     operation: str | None = None,
 ) -> T:
     """
