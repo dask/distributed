@@ -4901,7 +4901,8 @@ class Scheduler(SchedulerState, ServerNode):
                 dsk,
                 dependencies,
                 annotations_by_type,
-            ) = _materialize_graph(
+            ) = await offload(
+                _materialize_graph,
                 graph=graph,
                 global_annotations=annotations or {},
                 keys=keys,
