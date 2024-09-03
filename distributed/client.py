@@ -5084,6 +5084,7 @@ class Client(SyncMethodMixin):
                 "future version. Please mark your plugin as idempotent by setting its "
                 "`.idempotent` attribute to `True`.",
                 FutureWarning,
+                stacklevel=2,
             )
         else:
             idempotent = getattr(plugin, "idempotent", False)
