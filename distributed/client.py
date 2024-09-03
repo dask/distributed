@@ -925,7 +925,7 @@ class _MapLayer(Layer):
 
         if not self.kwargs:
             dsk = {
-                key: (self.func,) + args
+                key: Task(key, self.func, *args)
                 for key, args in zip(self._keys, zip(*self.iterables))
             }
 
