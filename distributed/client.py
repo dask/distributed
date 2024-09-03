@@ -877,8 +877,9 @@ class _MapLayer(Layer):
 
             else:
                 if self.pure:
+                    tok = tokenize(self.func, self.kwargs)
                     keys = [
-                        self.key + "-" + tokenize(self.func, self.kwargs, args)  # type: ignore
+                        self.key + "-" + tokenize(tok, args)  # type: ignore
                         for args in zip(*self.iterables)
                     ]
                 else:
