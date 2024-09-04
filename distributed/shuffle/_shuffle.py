@@ -21,6 +21,7 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
+from dask._task_spec import Task
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
@@ -282,8 +283,8 @@ class P2PShuffleLayer(Layer):
         name = "shuffle-transfer-" + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
-            transfer_keys.append((name, i))
-            dsk[(name, i)] = (
+            t = Task(
+                (name, i),
                 shuffle_transfer,
                 (self.name_input, i),
                 token,
@@ -295,17 +296,22 @@ class P2PShuffleLayer(Layer):
                 self.disk,
                 self.drop_column,
             )
+            dsk[t.key] = t
+            transfer_keys.append(t.ref())
 
-        dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
+        barrier = Task(_barrier_key, shuffle_barrier, token, transfer_keys)
+        dsk[barrier.key] = barrier
 
         name = self.name
         for part_out in self.parts_out:
-            dsk[(name, part_out)] = (
+            t = Task(
+                (name, part_out),
                 shuffle_unpack,
                 token,
                 part_out,
-                _barrier_key,
+                barrier.ref(),
             )
+            dsk[t.key] = t
         return dsk
 
 

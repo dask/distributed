@@ -186,7 +186,9 @@ async def test_web_preload():
         captured_logger("distributed.preloading") as log,
     ):
         async with Scheduler(
-            host="localhost", preload=["http://example.com/preload"]
+            host="localhost",
+            preload=["http://example.com/preload"],
+            dashboard_address=":0",
         ) as s:
             assert s.foo == 1
         assert (

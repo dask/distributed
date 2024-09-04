@@ -620,6 +620,7 @@ async def test_restarting_does_not_deadlock(c, s):
             assert dd.assert_eq(result, expected)
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
 async def test_closed_input_only_worker_during_transfer(c, s, a, b):
     def mock_get_worker_for_range_sharding(
