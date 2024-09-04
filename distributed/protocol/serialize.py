@@ -14,8 +14,8 @@ from typing import Any, Generic, Literal, TypeVar
 import msgpack
 
 import dask
-from dask.base import normalize_token
 from dask.sizeof import sizeof
+from dask.tokenize import normalize_token
 from dask.utils import typename
 
 from distributed.metrics import context_meter
@@ -776,7 +776,7 @@ def register_serialization_lazy(toplevel, func):
 
 @partial(normalize_token.register, Serialized)
 def normalize_Serialized(o):
-    return [o.header] + o.frames  # for dask.base.tokenize
+    return [o.header] + o.frames  # for dask.tokenize.tokenize
 
 
 # Teach serialize how to handle bytes
