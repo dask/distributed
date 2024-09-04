@@ -121,9 +121,9 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.config
-from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
+from dask.tokenize import tokenize
 from dask.typing import Key
 from dask.utils import parse_bytes
 

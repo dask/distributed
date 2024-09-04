@@ -43,6 +43,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
+from dask.tokenize import tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
 from distributed import (
@@ -73,7 +74,6 @@ from distributed.client import (
     futures_of,
     get_task_metadata,
     temp_default_client,
-    tokenize,
     wait,
 )
 from distributed.cluster_dump import load_cluster_dump
@@ -1127,7 +1127,7 @@ async def test_scatter_non_list(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_scatter_tokenize_local(c, s, a, b):
-    from dask.base import normalize_token
+    from dask.tokenize import normalize_token
 
     class MyObj:
         pass

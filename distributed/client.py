@@ -44,11 +44,12 @@ from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 
 import dask
-from dask.base import collections_to_dsk, tokenize
+from dask.base import collections_to_dsk
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.optimization import SubgraphCallable
+from dask.tokenize import tokenize
 from dask.typing import Key, NoDefault, no_default
 from dask.utils import (
     apply,
