@@ -32,7 +32,7 @@ requirements:
     - lz4 >=4.3.2
     - numpy >=1.21
     - pandas >=2
-    - bokeh >=2.4.2,!=3.0.*
+    - bokeh >=3.1.0
     - jinja2 >=2.10.3
     - pyarrow >=7.0
 
