@@ -8421,17 +8421,13 @@ class Scheduler(SchedulerState, ServerNode):
         sysmon.update()
 
         # Scheduler logs
-        from distributed.dashboard.components.scheduler import (
-            _BOKEH_STYLES_KWARGS,
-            SchedulerLogs,
-        )
+        from distributed.dashboard.components.scheduler import _STYLES, SchedulerLogs
 
         logs = SchedulerLogs(self, start=start)
 
-        from bokeh.models import Div, Tabs
+        from bokeh.models import Div, TabPanel, Tabs
 
         import distributed
-        from distributed.dashboard.core import TabPanel
 
         # HTML
         html = """
@@ -8472,7 +8468,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
         )
-        html = Div(text=html, **_BOKEH_STYLES_KWARGS)
+        html = Div(text=html, styles=_STYLES)
 
         html = TabPanel(child=html, title="Summary")
         compute = TabPanel(child=compute, title="Worker Profile (compute)")
