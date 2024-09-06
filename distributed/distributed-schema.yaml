@@ -736,6 +736,27 @@ properties:
               The number of times a worker should be suggested for removal before removing it
 
               This helps to smooth out the number of deployed workers
+          retry:
+            type: object
+            description: |
+              Adaptive scaling is subject to re-tries with the below parameters
+            properties:
+
+              count:
+                type: integer
+                minimum: 0
+                description: |
+                  The number of times to retry scaling before stopping
+
+              delay:
+                type: object
+                properties:
+                  min:
+                    type: string
+                    description: The first non-zero delay between retry attempts
+                  max:
+                    type: string
+                    description: The maximum delay between retries
 
       comm:
         type: object

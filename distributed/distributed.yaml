@@ -213,6 +213,11 @@ distributed:
     minimum: 0           # Minimum number of workers
     maximum: .inf        # Maximum number of workers
     wait-count: 3        # Number of times a worker should be suggested for removal before removing it
+    retry:
+      count: 3           # Number of times adaptive retries scaling before stopping
+      delay:
+         min: 5s  # the first non-zero delay between re-tries
+         max: 60s  # the maximum delay between re-tries
 
   comm:
     retry:  # some operations (such as gathering data) are subject to re-tries with the below parameters

@@ -15,6 +15,7 @@ from dask.utils import parse_timedelta
 
 from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
+from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
     from typing_extensions import TypeAlias
@@ -101,6 +102,9 @@ class AdaptiveCore:
     #: Whether this adaptive strategy is periodically adapting
     _state: AdaptiveStateState
     log: deque[tuple[float, dict]]
+    _retry_count: int
+    _retry_delay_min: float
+    _retry_delay_max: float
 
     def __init__(
         self,
@@ -117,6 +121,16 @@ class AdaptiveCore:
         self.wait_count = wait_count
         self.interval = parse_timedelta(interval, "seconds")
         self.periodic_callback = None
+
+        self._retry_count = parse_timedelta(
+            dask.config.get("distributed.adaptive.retry.count"), default="s"
+        )
+        self._retry_delay_min = parse_timedelta(
+            dask.config.get("distributed.adaptive.retry.delay.min"), default="s"
+        )
+        self._retry_delay_max = parse_timedelta(
+            dask.config.get("distributed.adaptive.retry.delay.max"), default="s"
+        )
 
         if self.interval:
             import weakref
@@ -245,6 +259,14 @@ class AdaptiveCore:
         else:
             return {"status": "same"}
 
+    async def _adapt_callback(self) -> None:
+        if self._state != "running":
+            return
+        try:
+            await self.adapt()
+        except Exception:
+            self.stop()
+
     async def adapt(self) -> None:
         """
         Check the current state, make recommendations, call scale
@@ -254,32 +276,32 @@ class AdaptiveCore:
         if self._adapting:  # Semaphore to avoid overlapping adapt calls
             return
         self._adapting = True
-        status = None
-
         try:
-            target = await self.safe_target()
-            recommendations = await self.recommendations(target)
-
-            if recommendations["status"] != "same":
-                self.log.append((time(), dict(recommendations)))
-
-            status = recommendations.pop("status")
-            if status == "same":
-                return
-            if status == "up":
-                await self.scale_up(**recommendations)
-            if status == "down":
-                await self.scale_down(**recommendations)
-        except OSError:
-            if status != "down":
-                logger.error("Adaptive stopping due to error", exc_info=True)
-                self.stop()
-            else:
-                logger.error(
-                    "Error during adaptive downscaling. Ignoring.", exc_info=True
-                )
+            await retry(
+                self._adapt_once,
+                count=self._retry_count,
+                delay_min=self._retry_delay_min,
+                delay_max=self._retry_delay_max,
+            )
         finally:
             self._adapting = False
+
+    async def _adapt_once(self) -> None:
+        target = await self.safe_target()
+        recommendations = await self.recommendations(target)
+
+        if recommendations["status"] != "same":
+            self.log.append((time(), dict(recommendations)))
+
+        status = recommendations.pop("status")
+        if status == "same":
+            return
+        elif status == "up":
+            await self.scale_up(**recommendations)
+        elif status == "down":
+            await self.scale_down(**recommendations)
+        else:
+            raise RuntimeError(f"Adaptive encountered unexpected status: {status!r}")
 
     def __del__(self):
         self.stop()
