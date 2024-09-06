@@ -265,6 +265,7 @@ class AdaptiveCore:
         try:
             await self.adapt()
         except Exception:
+            logger.exception("Adaptive failed to adapt; stopping.")
             self.stop()
 
     async def adapt(self) -> None:
