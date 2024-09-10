@@ -149,7 +149,7 @@ class ServerNode(Server):
             # the address is empty and it is intended to listen to all interfaces
             if dashboard_address is not None and http_address["address"] == "":
                 http_address["address"] = "0.0.0.0"
-            
+
             if http_address["address"] is None or http_address["address"] == "":
                 address = self._start_address
                 if isinstance(address, (list, tuple)):
