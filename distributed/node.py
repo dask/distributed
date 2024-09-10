@@ -145,7 +145,7 @@ class ServerNode(Server):
         http_addresses = clean_dashboard_address(dashboard_address or default_port)
 
         for http_address in http_addresses:
-            if http_address["address"] is None or http_address["address"] == '':
+            if http_address["address"] is None or http_address["address"] == "":
                 address = self._start_address
                 if isinstance(address, (list, tuple)):
                     address = address[0]
