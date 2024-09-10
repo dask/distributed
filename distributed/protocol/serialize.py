@@ -15,7 +15,7 @@ import msgpack
 
 import dask
 from dask.sizeof import sizeof
-from dask.base import normalize_token
+from dask.tokenize import normalize_token
 from dask.utils import typename
 
 from distributed.metrics import context_meter

@@ -49,7 +49,7 @@ from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.optimization import SubgraphCallable
-from dask.base import tokenize
+from dask.tokenize import tokenize
 from dask.typing import Key, NoDefault, no_default
 from dask.utils import (
     apply,
