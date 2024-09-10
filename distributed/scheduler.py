@@ -55,7 +55,7 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.utils
 from dask.core import get_deps, iskey, validate_key
-from dask.tokenize import TokenizationError, normalize_token, tokenize
+from dask.base import TokenizationError, normalize_token, tokenize
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,

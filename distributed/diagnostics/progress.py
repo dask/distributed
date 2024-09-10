@@ -9,7 +9,7 @@ from typing import ClassVar
 
 from tlz import groupby, valmap
 
-from dask.tokenize import tokenize
+from dask.base import tokenize
 from dask.utils import key_split
 
 from distributed.diagnostics.plugin import SchedulerPlugin

@@ -8,7 +8,7 @@ import dask
 from dask.base import is_dask_collection
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
-from dask.tokenize import tokenize
+from dask.base import tokenize
 
 from distributed.shuffle._arrow import check_minimal_arrow_version
 from distributed.shuffle._core import ShuffleId, barrier_key, get_worker_plugin
