@@ -97,10 +97,10 @@ class AdaptiveCore:
     requested: set[WorkerState]
     observed: set[WorkerState]
     close_counts: defaultdict[WorkerState, int]
-    _adapting: bool
-    #: Whether this adaptive strategy is periodically adapting
-    _state: AdaptiveStateState
     log: deque[tuple[float, dict]]
+    #: Whether this adaptive strategy is periodically adapting
+    state: AdaptiveStateState
+    _adapting: bool
 
     def __init__(
         self,
@@ -129,10 +129,10 @@ class AdaptiveCore:
                     await core.adapt()
 
             self.periodic_callback = PeriodicCallback(_adapt, self.interval * 1000)
-            self._state = "starting"
+            self.state = "starting"
             self.loop.add_callback(self._start)
         else:
-            self._state = "inactive"
+            self.state = "inactive"
         try:
             self.plan = set()
             self.requested = set()
@@ -148,12 +148,12 @@ class AdaptiveCore:
         )
 
     def _start(self) -> None:
-        if self._state != "starting":
+        if self.state != "starting":
             return
 
         assert self.periodic_callback is not None
         self.periodic_callback.start()
-        self._state = "running"
+        self.state = "running"
         logger.info(
             "Adaptive scaling started: minimum=%s maximum=%s",
             self.minimum,
@@ -161,10 +161,10 @@ class AdaptiveCore:
         )
 
     def stop(self) -> None:
-        if self._state in ("inactive", "stopped"):
+        if self.state in ("inactive", "stopped"):
             return
 
-        if self._state == "running":
+        if self.state == "running":
             assert self.periodic_callback is not None
             self.periodic_callback.stop()
             logger.info(
@@ -174,7 +174,7 @@ class AdaptiveCore:
             )
 
         self.periodic_callback = None
-        self._state = "stopped"
+        self.state = "stopped"
 
     async def target(self) -> int:
         """The target number of workers that should exist"""
@@ -270,14 +270,10 @@ class AdaptiveCore:
                 await self.scale_up(**recommendations)
             if status == "down":
                 await self.scale_down(**recommendations)
-        except OSError:
-            if status != "down":
-                logger.error("Adaptive stopping due to error", exc_info=True)
-                self.stop()
-            else:
-                logger.error(
-                    "Error during adaptive downscaling. Ignoring.", exc_info=True
-                )
+        except Exception:
+            logger.warning(
+                "Adaptive encountered an error while adapting", exc_info=True
+            )
         finally:
             self._adapting = False
 

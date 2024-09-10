@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from distributed.deploy.adaptive_core import AdaptiveCore
 from distributed.metrics import time
@@ -93,7 +94,7 @@ async def test_interval():
 
 
 @gen_test()
-async def test_adapt_oserror_safe_target():
+async def test_adapt_logs_error_in_safe_target():
     class BadAdaptive(MyAdaptive):
         """AdaptiveCore subclass which raises an OSError when attempting to adapt
 
@@ -103,45 +104,39 @@ async def test_adapt_oserror_safe_target():
         def safe_target(self):
             raise OSError()
 
-    with captured_logger("distributed.deploy.adaptive_core") as log:
+    with captured_logger(
+        "distributed.deploy.adaptive_core", level=logging.WARNING
+    ) as log:
         adapt = BadAdaptive(minimum=1, maximum=4, interval="10ms")
-        while adapt._state != "stopped":
+        while "encountered an error" not in log.getvalue():
             await asyncio.sleep(0.01)
-    text = log.getvalue()
-    assert "Adaptive stopping due to error" in text
-    assert "Adaptive scaling stopped" in text
-    assert not adapt._adapting
-    assert not adapt.periodic_callback
+    assert "stop" not in log.getvalue()
+    assert adapt.state == "running"
+    assert adapt.periodic_callback
+    assert adapt.periodic_callback.is_running()
 
 
 @gen_test()
-async def test_adapt_oserror_scale():
-    """
-    FIXME:
-    If we encounter an OSError during scale down, we continue as before. It is
-    not entirely clear if this is the correct behaviour but defines the current
-    state.
-    This was probably introduced to protect against comm failures during
-    shutdown but the scale down command should be robust call to the scheduler
-    which is never scaled down.
-    """
-
+async def test_adapt_logs_errors():
     class BadAdaptive(MyAdaptive):
         async def scale_down(self, workers=None):
             raise OSError()
 
     adapt = BadAdaptive(minimum=1, maximum=4, wait_count=0, interval="10ms")
     adapt._target = 2
-    while not adapt.periodic_callback.is_running():
+    while adapt.state != "running":
         await asyncio.sleep(0.01)
+    assert adapt.periodic_callback.is_running()
     await adapt.adapt()
     assert len(adapt.plan) == 2
     assert len(adapt.requested) == 2
-    with captured_logger("distributed.deploy.adaptive_core") as log:
+    with captured_logger(
+        "distributed.deploy.adaptive_core", level=logging.WARNING
+    ) as log:
         adapt._target = 0
         await adapt.adapt()
     text = log.getvalue()
-    assert "Error during adaptive downscaling" in text
+    assert "encountered an error" in text
     assert not adapt._adapting
     assert adapt.periodic_callback
     assert adapt.periodic_callback.is_running()
@@ -152,10 +147,17 @@ async def test_adapt_oserror_scale():
 async def test_adaptive_logs_stopping_once():
     with captured_logger("distributed.deploy.adaptive_core") as log:
         adapt = MyAdaptive(interval="100ms")
-        while not adapt.periodic_callback.is_running():
+        while adapt.state != "running":
             await asyncio.sleep(0.01)
+        assert adapt.periodic_callback
+        assert adapt.periodic_callback.is_running()
+        pc = adapt.periodic_callback
+
         adapt.stop()
         adapt.stop()
+    assert adapt.state == "stopped"
+    assert not adapt.periodic_callback
+    assert not pc.is_running()
     lines = log.getvalue().splitlines()
     assert sum("Adaptive scaling stopped" in line for line in lines) == 1
 
@@ -164,7 +166,7 @@ async def test_adaptive_logs_stopping_once():
 async def test_adapt_stop_del():
     adapt = MyAdaptive(interval="100ms")
     pc = adapt.periodic_callback
-    while not adapt.periodic_callback.is_running():
+    while adapt.state != "running":
         await asyncio.sleep(0.01)
 
     del adapt

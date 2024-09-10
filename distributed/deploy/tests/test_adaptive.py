@@ -8,6 +8,7 @@ import pytest
 
 import dask
 
+from build.lib.distributed.deploy.cluster import Cluster
 from distributed import (
     Adaptive,
     Client,
@@ -78,39 +79,6 @@ async def test_adaptive_local_cluster_multi_workers():
 
             futures = c.map(slowinc, range(100), delay=0.01)
             await c.gather(futures)
-
-
-@pytest.mark.xfail(reason="changed API")
-@gen_test()
-async def test_adaptive_scale_down_override():
-    class TestAdaptive(Adaptive):
-        def __init__(self, *args, **kwargs):
-            self.min_size = kwargs.pop("min_size", 0)
-            super().__init__(*args, **kwargs)
-
-        async def workers_to_close(self, **kwargs):
-            num_workers = len(self.cluster.workers)
-            to_close = await self.scheduler.workers_to_close(**kwargs)
-            if num_workers - len(to_close) < self.min_size:
-                to_close = to_close[: num_workers - self.min_size]
-
-            return to_close
-
-    class TestCluster(LocalCluster):
-        def scale_up(self, n, **kwargs):
-            assert False
-
-    async with TestCluster(
-        n_workers=10, processes=False, asynchronous=True, dashboard_address=":0"
-    ) as cluster:
-        ta = cluster.adapt(
-            min_size=2, interval=0.1, scale_factor=2, Adaptive=TestAdaptive
-        )
-        await asyncio.sleep(0.3)
-
-        # Assert that adaptive cycle does not reduce cluster below minimum size
-        # as determined via override.
-        assert len(cluster.scheduler.workers) == 2
 
 
 @gen_test()
@@ -427,6 +395,8 @@ async def test_update_adaptive():
         first = cluster.adapt(maximum=1)
         second = cluster.adapt(maximum=2)
         await asyncio.sleep(0.2)
+        assert first.state == "stopped"
+        assert second.state == "running"
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()
 
@@ -452,6 +422,19 @@ async def test_adaptive_no_memory_limit():
             )
             <= 5
         )
+
+
+@gen_test()
+async def test_adapt_gets_stopped_on_cluster_close():
+    class MyCluster(Cluster):
+        pass
+
+    async with MyCluster(asynchronous=True) as cluster:
+        adapt = cluster.adapt(minimum=1, maximum=10, interval="10ms")
+        while adapt.state != "running":
+            await asyncio.sleep(0.01)
+        await cluster.close()
+        assert adapt.state == "stopped"
 
 
 @gen_test()
@@ -495,13 +478,12 @@ async def test_adaptive_stopped():
         n_workers=0, asynchronous=True, dashboard_address=":0"
     ) as cluster:
         instance = cluster.adapt(interval="10ms")
+        await async_poll_for(lambda: instance.state == "running", timeout=5)
         assert instance.periodic_callback is not None
-
-        await async_poll_for(lambda: instance.periodic_callback.is_running(), timeout=5)
-
+        assert instance.periodic_callback.is_running()
         pc = instance.periodic_callback
-
-    await async_poll_for(lambda: not pc.is_running(), timeout=5)
+    await async_poll_for(lambda: instance.state == "stopped", timeout=5)
+    assert not pc.is_running()
 
 
 @pytest.mark.parametrize("saturation", [1, float("inf")])
