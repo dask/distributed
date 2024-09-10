@@ -147,7 +147,7 @@ class ServerNode(Server):
             # Handle default case for dashboard address
             # In case dashboard_address is given, e.g. ":8787"
             # the address is empty and it is intended to listen to all interfaces
-            if dashboard_address is not None and http_address["address"] == "":
+            if dashboard_address is None and http_address["address"] == "":
                 http_address["address"] = "0.0.0.0"
 
             if http_address["address"] is None or http_address["address"] == "":
