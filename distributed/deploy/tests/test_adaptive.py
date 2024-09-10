@@ -8,7 +8,6 @@ import pytest
 
 import dask
 
-from build.lib.distributed.deploy.cluster import Cluster
 from distributed import (
     Adaptive,
     Client,
@@ -18,6 +17,7 @@ from distributed import (
     Worker,
     wait,
 )
+from distributed.deploy.cluster import Cluster
 from distributed.metrics import time
 from distributed.utils_test import async_poll_for, gen_cluster, gen_test, slowinc
 
