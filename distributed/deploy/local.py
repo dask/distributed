@@ -62,9 +62,9 @@ class LocalCluster(SpecCluster):
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
         Set to ``None`` to disable the dashboard.
         Use ':0' for a random port.
-        When using ':8787' the dashboard will bind to the given interface from parameter "host".
-        If "host" is empty, binding will occur on all interfaces '0.0.0.0'.
-        To avoid firewall issues when deploying locally specify "host" parameter to localhost.
+        When specifying only a port like ':8787', the dashboard will bind to the given interface from the ``host`` parameter.
+        If ``host`` is empty, binding will occur on all interfaces '0.0.0.0'.
+        To avoid firewall issues when deploying locally, set ``host`` to 'localhost'.
     worker_dashboard_address: str
         Address on which to listen for the Bokeh worker diagnostics server like
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to None which disables the dashboard.
