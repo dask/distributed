@@ -2,37 +2,24 @@ from __future__ import annotations
 
 import logging
 import math
+from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from collections.abc import Iterable
-from datetime import timedelta
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
 
 import tlz as toolz
-from tornado.ioloop import IOLoop
 
 import dask.config
-from dask.utils import parse_timedelta
 
-from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
 
 if TYPE_CHECKING:
-    from typing_extensions import TypeAlias
-
     from distributed.scheduler import WorkerState
 
 logger = logging.getLogger(__name__)
 
 
-AdaptiveStateState: TypeAlias = Literal[
-    "starting",
-    "running",
-    "stopped",
-    "inactive",
-]
-
-
-class AdaptiveCore:
+class AdaptiveCore(ABC):
     """
     The core logic for adaptive deployments, with none of the cluster details
 
@@ -89,56 +76,24 @@ class AdaptiveCore:
     """
 
     minimum: int
-    maximum: int | float
+    maximum: float
     wait_count: int
-    interval: int | float
-    periodic_callback: PeriodicCallback | None
-    plan: set[WorkerState]
-    requested: set[WorkerState]
-    observed: set[WorkerState]
     close_counts: defaultdict[WorkerState, int]
     log: deque[tuple[float, dict]]
-    #: Whether this adaptive strategy is periodically adapting
-    state: AdaptiveStateState
     _adapting: bool
 
     def __init__(
         self,
         minimum: int = 0,
-        maximum: int | float = math.inf,
+        maximum: float = math.inf,
         wait_count: int = 3,
-        interval: str | int | float | timedelta = "1s",
     ):
         if not isinstance(maximum, int) and not math.isinf(maximum):
-            raise TypeError(f"maximum must be int or inf; got {maximum}")
+            raise ValueError(f"maximum must be int or inf; got {maximum}")
 
         self.minimum = minimum
         self.maximum = maximum
         self.wait_count = wait_count
-        self.interval = parse_timedelta(interval, "seconds")
-        self.periodic_callback = None
-
-        if self.interval:
-            import weakref
-
-            self_ref = weakref.ref(self)
-
-            async def _adapt():
-                core = self_ref()
-                if core:
-                    await core.adapt()
-
-            self.periodic_callback = PeriodicCallback(_adapt, self.interval * 1000)
-            self.state = "starting"
-            self.loop.add_callback(self._start)
-        else:
-            self.state = "inactive"
-        try:
-            self.plan = set()
-            self.requested = set()
-            self.observed = set()
-        except Exception:
-            pass
 
         # internal state
         self.close_counts = defaultdict(int)
@@ -147,38 +102,22 @@ class AdaptiveCore:
             maxlen=dask.config.get("distributed.admin.low-level-log-length")
         )
 
-    def _start(self) -> None:
-        if self.state != "starting":
-            return
+    @property
+    @abstractmethod
+    def plan(self) -> set[WorkerState]: ...
 
-        assert self.periodic_callback is not None
-        self.periodic_callback.start()
-        self.state = "running"
-        logger.info(
-            "Adaptive scaling started: minimum=%s maximum=%s",
-            self.minimum,
-            self.maximum,
-        )
+    @property
+    @abstractmethod
+    def requested(self) -> set[WorkerState]: ...
 
-    def stop(self) -> None:
-        if self.state in ("inactive", "stopped"):
-            return
+    @property
+    @abstractmethod
+    def observed(self) -> set[WorkerState]: ...
 
-        if self.state == "running":
-            assert self.periodic_callback is not None
-            self.periodic_callback.stop()
-            logger.info(
-                "Adaptive scaling stopped: minimum=%s maximum=%s",
-                self.minimum,
-                self.maximum,
-            )
-
-        self.periodic_callback = None
-        self.state = "stopped"
-
+    @abstractmethod
     async def target(self) -> int:
         """The target number of workers that should exist"""
-        raise NotImplementedError()
+        ...
 
     async def workers_to_close(self, target: int) -> list:
         """
@@ -198,11 +137,11 @@ class AdaptiveCore:
 
         return n
 
-    async def scale_down(self, n: int) -> None:
-        raise NotImplementedError()
+    @abstractmethod
+    async def scale_down(self, n: int) -> None: ...
 
-    async def scale_up(self, workers: Iterable) -> None:
-        raise NotImplementedError()
+    @abstractmethod
+    async def scale_up(self, workers: Iterable) -> None: ...
 
     async def recommendations(self, target: int) -> dict:
         """
@@ -270,16 +209,5 @@ class AdaptiveCore:
                 await self.scale_up(**recommendations)
             if status == "down":
                 await self.scale_down(**recommendations)
-        except Exception:
-            logger.warning(
-                "Adaptive encountered an error while adapting", exc_info=True
-            )
         finally:
             self._adapting = False
-
-    def __del__(self):
-        self.stop()
-
-    @property
-    def loop(self) -> IOLoop:
-        return IOLoop.current()
