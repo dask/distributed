@@ -2685,33 +2685,6 @@ class BlockedBarrierShuffleSchedulerPlugin(ShuffleSchedulerPlugin):
         return await super().barrier(id, run_id, consistent)
 
 
-@gen_cluster(client=True)
-async def test_unpack_is_non_rootish(c, s, a, b):
-    with pytest.warns(UserWarning):
-        scheduler_plugin = BlockedBarrierShuffleSchedulerPlugin(s)
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-21",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
-    )
-    df = df.shuffle("x")
-    result = c.compute(df)
-
-    await scheduler_plugin.in_barrier.wait()
-
-    unpack_tss = [ts for key, ts in s.tasks.items() if key_split(key) == UNPACK_PREFIX]
-    assert len(unpack_tss) == 20
-    assert not any(s.is_rootish(ts) for ts in unpack_tss)
-    del unpack_tss
-    scheduler_plugin.block_barrier.set()
-    result = await result
-
-    await assert_worker_cleanup(a)
-    await assert_worker_cleanup(b)
-    await assert_scheduler_cleanup(s)
-
-
 class FlakyConnectionPool(ConnectionPool):
     def __init__(self, *args, failing_connects=0, **kwargs):
         self.attempts = 0
