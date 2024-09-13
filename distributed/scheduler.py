@@ -1425,14 +1425,8 @@ class TaskState:
     #: be rejected.
     run_id: int | None
 
-    #: Whether to consider this task rootish in the context of task queueing
-    #: True
-    #:     Always consider this task rootish
-    #: False
-    #:     Never consider this task rootish
-    #: None
-    #:     Use a heuristic to determine whether this task should be considered rootish
-    _rootish: bool | None
+    #: Whether to allow queueing this task if it is rootish
+    _queueable: bool
 
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
@@ -1489,7 +1483,7 @@ class TaskState:
         self.metadata = None
         self.annotations = None
         self.erred_on = None
-        self._rootish = None
+        self._queueable = True
         self.run_id = None
         self.group = group
         group.add(self)
@@ -2286,7 +2280,7 @@ class SchedulerState:
         """
         if self.validate:
             # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
-            assert math.isinf(self.WORKER_SATURATION) or not ts._rootish
+            assert math.isinf(self.WORKER_SATURATION) or not ts._queueable
 
         pool = self.idle.values() if self.idle else self.running
         if not pool:
@@ -2452,7 +2446,7 @@ class SchedulerState:
             # removed, there should only be one, which combines co-assignment and
             # queuing. Eventually, special-casing root tasks might be removed entirely,
             # with better heuristics.
-            if math.isinf(self.WORKER_SATURATION) or not ts._rootish:
+            if math.isinf(self.WORKER_SATURATION) or not ts._queueable:
                 if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                     return {ts.key: "no-worker"}, {}, {}
             else:
