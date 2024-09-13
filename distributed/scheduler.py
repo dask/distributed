@@ -2286,7 +2286,7 @@ class SchedulerState:
         """
         if self.validate:
             # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
-            assert math.isinf(self.WORKER_SATURATION)
+            assert math.isinf(self.WORKER_SATURATION) or not ts._rootish
 
         pool = self.idle.values() if self.idle else self.running
         if not pool:
@@ -2452,7 +2452,7 @@ class SchedulerState:
             # removed, there should only be one, which combines co-assignment and
             # queuing. Eventually, special-casing root tasks might be removed entirely,
             # with better heuristics.
-            if math.isinf(self.WORKER_SATURATION):
+            if math.isinf(self.WORKER_SATURATION) or not ts._rootish:
                 if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                     return {ts.key: "no-worker"}, {}, {}
             else:
@@ -3090,8 +3090,6 @@ class SchedulerState:
         and have few or no dependencies. Tasks may also be explicitly marked as rootish
         to override this heuristic.
         """
-        if ts._rootish is not None:
-            return ts._rootish
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
         tg = ts.group

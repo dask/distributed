@@ -4,8 +4,11 @@ import asyncio
 import math
 import random
 import warnings
+from collections import defaultdict
 
 import pytest
+
+from distributed.diagnostics.plugin import SchedulerPlugin
 
 np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
@@ -1488,3 +1491,36 @@ def test_calculate_prechunking_splitting(old, new, expected):
     # _calculate_prechunking does not concatenate on object
     actual = _calculate_prechunking(old, new, np.dtype(object), None)
     assert actual == expected
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 4, config={"array.chunk-size": "1 B"})
+async def test_homogeneously_schedule_unpack(c, s, *ws):
+    class SchedulingTrackerPlugin(SchedulerPlugin):
+        async def start(self, scheduler):
+            self.scheduler = scheduler
+            self.counts = defaultdict(int)
+            self.seen = set()
+
+        def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+            if key in self.seen:
+                return
+
+            if not isinstance(key, tuple) or not isinstance(key[0], str):
+                return
+
+            if not key[0].startswith("rechunk-p2p"):
+                return
+
+            if start != "waiting" or finish != "processing":
+                return
+
+            self.seen.add(key)
+            self.counts[self.scheduler.tasks[key].processing_on.address] += 1
+
+    await c.register_plugin(SchedulingTrackerPlugin(), name="tracker")
+    res = da.random.random((100, 100), chunks=(1, -1)).rechunk((-1, 1))
+    await c.compute(res)
+    counts = s.plugins["tracker"].counts
+    min_count = min(counts.values())
+    max_count = max(counts.values())
+    assert min_count >= max_count, counts
