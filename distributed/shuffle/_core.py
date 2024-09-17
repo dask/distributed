@@ -526,6 +526,12 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
         raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
 
 
+def _handle_datetime(buf: Any) -> Any:
+    if hasattr(buf, "dtype") and buf.dtype.kind in "Mm":
+        return buf.view("u8")
+    return buf
+
+
 def _mean_shard_size(shards: Iterable) -> int:
     """Return estimated mean size in bytes of each shard"""
     size = 0
@@ -534,6 +540,7 @@ def _mean_shard_size(shards: Iterable) -> int:
         if not isinstance(shard, int):
             # This also asserts that shard is a Buffer and that we didn't forget
             # a container or metadata type above
+            shard = _handle_datetime(shard)
             size += memoryview(shard).nbytes
             count += 1
             if count == 10:
