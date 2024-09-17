@@ -1524,3 +1524,15 @@ async def test_homogeneously_schedule_unpack(c, s, *ws):
     min_count = min(counts.values())
     max_count = max(counts.values())
     assert min_count >= max_count, counts
+
+
+@pytest.mark.parametrize("method", ["tasks", "p2p"])
+@gen_cluster(client=True)
+async def test_rechunk_datetime(c, s, *ws, method):
+    pd = pytest.importorskip("pandas")
+
+    x = pd.date_range("2005-01-01", "2005-01-10").to_numpy(dtype="datetime64[ns]")
+    dx = da.from_array(x, chunks=10)
+    result = dx.rechunk(2, method=method)
+    result = await c.compute(result)
+    np.testing.assert_array_equal(x, result)
