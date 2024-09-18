@@ -10,6 +10,8 @@ distributed:
   #   tornado.application: error
 
   scheduler:
+    rootish-tg: 100
+    rootish-tg-dependencies: 500
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
     blocked-handlers: []
