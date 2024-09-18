@@ -3090,8 +3090,8 @@ class SchedulerState:
         # TODO short-circuit to True if `not ts.dependencies`?
         return (
             len(tg) > self.total_nthreads * 2
-            and len(tg.dependencies) < 5
-            and sum(map(len, tg.dependencies)) < 5
+            and len(tg.dependencies) < 100
+            and sum(map(len, tg.dependencies)) < 500
         )
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:
