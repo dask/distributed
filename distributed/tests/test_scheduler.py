@@ -2401,15 +2401,18 @@ async def test_idle_during_update_graph(c, s, a, b):
 
     await c.register_plugin(UpdateGraphTrackerPlugin(), name="tracker")
     plugin = s.plugins["tracker"]
+    # The cluster is idle because no work ever existed
     assert s.check_idle() is not None
     beginning = time()
-    assert s.check_idle() < beginning
+    assert s.idle_since < beginning
     await c.submit(lambda x: x, 1)
+    # The cluster may be considered not idle because of the unit of work
     s.check_idle()
+    # Now the cluster must be idle
     assert s.check_idle() is not None
     end = time()
-    assert beginning <= s.check_idle()
-    assert s.check_idle() <= end
+    assert beginning <= s.idle_since
+    assert s.idle_since <= end
     assert plugin.idle_during_update_graph is None
 
 
