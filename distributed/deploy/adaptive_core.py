@@ -76,7 +76,7 @@ class AdaptiveCore(ABC):
     """
 
     minimum: int
-    maximum: float
+    maximum: int | float
     wait_count: int
     close_counts: defaultdict[WorkerState, int]
     log: deque[tuple[float, dict]]
@@ -85,7 +85,7 @@ class AdaptiveCore(ABC):
     def __init__(
         self,
         minimum: int = 0,
-        maximum: float = math.inf,
+        maximum: int | float = math.inf,
         wait_count: int = 3,
     ):
         if not isinstance(maximum, int) and not math.isinf(maximum):
