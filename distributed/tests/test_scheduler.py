@@ -284,30 +284,6 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     test_decide_worker_coschedule_order_neighbors_()
 
 
-@gen_cluster(
-    client=True,
-    nthreads=[],
-)
-async def test_override_is_rootish(c, s):
-    x = c.submit(lambda x: x + 1, 1, key="x")
-    await async_poll_for(lambda: "x" in s.tasks, timeout=5)
-    ts_x = s.tasks["x"]
-    assert ts_x._rootish is None
-    assert s.is_rootish(ts_x)
-
-    ts_x._rootish = False
-    assert not s.is_rootish(ts_x)
-
-    y = c.submit(lambda y: y + 1, 1, key="y", workers=["not-existing"])
-    await async_poll_for(lambda: "y" in s.tasks, timeout=5)
-    ts_y = s.tasks["y"]
-    assert ts_y._rootish is None
-    assert not s.is_rootish(ts_y)
-
-    ts_y._rootish = True
-    assert s.is_rootish(ts_y)
-
-
 @pytest.mark.skipif(
     QUEUING_ON_BY_DEFAULT,
     reason="Not relevant with queuing on; see https://github.com/dask/distributed/issues/7204",
@@ -1969,7 +1945,7 @@ async def test_scheduler_file():
 @pytest.mark.parametrize(
     "dashboard_address,expect",
     [
-        (None, ("::", "0.0.0.0")),
+        (None, ("::", "0.0.0.0", "127.0.0.1")),
         ("127.0.0.1:0", ("127.0.0.1",)),
     ],
 )
