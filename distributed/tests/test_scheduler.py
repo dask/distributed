@@ -2399,14 +2399,17 @@ async def test_idle_during_update_graph(c, s, a, b):
         def update_graph(self, *args, **kwargs):
             self.idle_during_update_graph = self.scheduler.check_idle()
 
-    await c.register_plugin(UpdateGraphTrackerPlugin, name="tracker")
+    await c.register_plugin(UpdateGraphTrackerPlugin(), name="tracker")
     plugin = s.plugins["tracker"]
     assert s.check_idle() is not None
     beginning = time()
     assert s.check_idle() < beginning
     await c.submit(lambda x: x, 1)
+    s.check_idle()
+    assert s.check_idle() is not None
     end = time()
-    assert beginning <= s.idle_since() <= end
+    assert beginning <= s.check_idle()
+    assert s.check_idle() <= end
     assert plugin.idle_during_update_graph is None
 
 
