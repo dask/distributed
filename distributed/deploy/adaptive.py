@@ -95,6 +95,7 @@ class Adaptive(AdaptiveCore):
         self.cluster = cluster
         self.worker_key = worker_key
         self._workers_to_close_kwargs = kwargs
+        self._worker_name_mapping = {}
 
         if interval is None:
             interval = dask.config.get("distributed.adaptive.interval")
@@ -128,6 +129,26 @@ class Adaptive(AdaptiveCore):
     @property
     def observed(self):
         return self.cluster.observed
+
+    @property
+    def observed_name_mapped(self):
+        self._assign_hosts_to_names()
+        return self._worker_name_mapping
+
+    def _assign_hosts_to_names(self) -> None:
+        unassigned_worker_names = self._unassigned_worker_names()
+        for worker_address in self.cluster.scheduler_info["workers"].keys():
+            if worker_address not in self._worker_name_mapping.values():
+                assert unassigned_worker_names
+                self._worker_name_mapping[
+                    unassigned_worker_names.pop()
+                ] = worker_address
+        for worker_name, worker_address in self._worker_name_mapping.copy().items():
+            if worker_address not in self.cluster.scheduler_info["workers"].keys():
+                del self._worker_name_mapping[worker_name]
+
+    def _unassigned_worker_names(self) -> set:
+        return self.requested - self._worker_name_mapping.keys()
 
     async def target(self):
         """
