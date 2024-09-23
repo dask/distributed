@@ -4399,7 +4399,7 @@ class Client(SyncMethodMixin):
         if isinstance(workers, (str, Number)):
             workers = [workers]
 
-        state = await self.scheduler.profile(
+        state, interval = await self.scheduler.profile(
             key=key,
             workers=workers,
             merge_workers=merge_workers,
@@ -4415,7 +4415,7 @@ class Client(SyncMethodMixin):
         if plot:
             from distributed import profile
 
-            data = profile.plot_data(state)
+            data = profile.plot_data(state, profile_interval=interval)
             figure, source = profile.plot_figure(data, sizing_mode="stretch_both")
 
             if plot == "save" and not filename:
