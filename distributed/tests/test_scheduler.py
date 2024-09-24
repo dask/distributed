@@ -2389,6 +2389,34 @@ async def test_idle_timeout(c, s, a, b):
     pc.stop()
 
 
+@gen_cluster(client=True)
+async def test_idle_during_update_graph(c, s, a, b):
+    class UpdateGraphTrackerPlugin(SchedulerPlugin):
+        def start(self, scheduler):
+            self.scheduler = scheduler
+            self.idle_during_update_graph = None
+
+        def update_graph(self, *args, **kwargs):
+            self.idle_during_update_graph = self.scheduler.check_idle() is not None
+
+    await c.register_plugin(UpdateGraphTrackerPlugin(), name="tracker")
+    plugin = s.plugins["tracker"]
+    # The cluster is idle because no work ever existed
+    assert s.check_idle() is not None
+    beginning = time()
+    assert s.idle_since < beginning
+    await c.submit(lambda x: x, 1)
+    # The cluster may be considered not idle because of the unit of work
+    s.check_idle()
+    # Now the cluster must be idle
+    assert s.check_idle() is not None
+    end = time()
+    assert beginning <= s.idle_since
+    assert s.idle_since <= end
+    # Ensure the cluster isn't idle while `Scheduler.update_graph` was being run
+    assert plugin.idle_during_update_graph is False
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_idle_timeout_no_workers(c, s):
     """Test that idle-timeout is not triggered if there are no workers available
