@@ -2413,6 +2413,7 @@ async def test_idle_during_update_graph(c, s, a, b):
     end = time()
     assert beginning <= s.idle_since
     assert s.idle_since <= end
+    # Ensure the cluster isn't idle while `Scheduler.update_graph` was being run
     assert plugin.idle_during_update_graph is None
 
 
