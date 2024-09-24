@@ -2397,7 +2397,7 @@ async def test_idle_during_update_graph(c, s, a, b):
             self.idle_during_update_graph = None
 
         def update_graph(self, *args, **kwargs):
-            self.idle_during_update_graph = self.scheduler.check_idle() is None
+            self.idle_during_update_graph = self.scheduler.check_idle() is not None
 
     await c.register_plugin(UpdateGraphTrackerPlugin(), name="tracker")
     plugin = s.plugins["tracker"]
