@@ -2397,7 +2397,7 @@ async def test_idle_during_update_graph(c, s, a, b):
             self.idle_during_update_graph = None
 
         def update_graph(self, *args, **kwargs):
-            self.idle_during_update_graph = self.scheduler.check_idle()
+            self.idle_during_update_graph = self.scheduler.check_idle() is None
 
     await c.register_plugin(UpdateGraphTrackerPlugin(), name="tracker")
     plugin = s.plugins["tracker"]
@@ -2414,7 +2414,7 @@ async def test_idle_during_update_graph(c, s, a, b):
     assert beginning <= s.idle_since
     assert s.idle_since <= end
     # Ensure the cluster isn't idle while `Scheduler.update_graph` was being run
-    assert plugin.idle_during_update_graph is None
+    assert plugin.idle_during_update_graph is False
 
 
 @gen_cluster(client=True, nthreads=[])
