@@ -1,18 +1,37 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Hashable
+from datetime import timedelta
 from inspect import isawaitable
+from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 from tornado.ioloop import IOLoop
 
 import dask.config
 from dask.utils import parse_timedelta
 
+from distributed.compatibility import PeriodicCallback
+from distributed.core import Status
 from distributed.deploy.adaptive_core import AdaptiveCore
 from distributed.protocol import pickle
 from distributed.utils import log_errors
 
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
+
+    from distributed.deploy.cluster import Cluster
+    from distributed.scheduler import WorkerState
+
 logger = logging.getLogger(__name__)
+
+
+AdaptiveStateState: TypeAlias = Literal[
+    "starting",
+    "running",
+    "stopped",
+    "inactive",
+]
 
 
 class Adaptive(AdaptiveCore):
@@ -81,16 +100,21 @@ class Adaptive(AdaptiveCore):
     specified in the dask config under the distributed.adaptive key.
     '''
 
+    interval: float | None
+    periodic_callback: PeriodicCallback | None
+    #: Whether this adaptive strategy is periodically adapting
+    state: AdaptiveStateState
+
     def __init__(
         self,
-        cluster=None,
-        interval=None,
-        minimum=None,
-        maximum=None,
-        wait_count=None,
-        target_duration=None,
-        worker_key=None,
-        **kwargs,
+        cluster: Cluster,
+        interval: str | float | timedelta | None = None,
+        minimum: int | None = None,
+        maximum: int | float | None = None,
+        wait_count: int | None = None,
+        target_duration: str | float | timedelta | None = None,
+        worker_key: Callable[[WorkerState], Hashable] | None = None,
+        **kwargs: Any,
     ):
         self.cluster = cluster
         self.worker_key = worker_key
@@ -99,19 +123,77 @@ class Adaptive(AdaptiveCore):
         if interval is None:
             interval = dask.config.get("distributed.adaptive.interval")
         if minimum is None:
-            minimum = dask.config.get("distributed.adaptive.minimum")
+            minimum = cast(int, dask.config.get("distributed.adaptive.minimum"))
         if maximum is None:
-            maximum = dask.config.get("distributed.adaptive.maximum")
+            maximum = cast(float, dask.config.get("distributed.adaptive.maximum"))
         if wait_count is None:
-            wait_count = dask.config.get("distributed.adaptive.wait-count")
+            wait_count = cast(int, dask.config.get("distributed.adaptive.wait-count"))
         if target_duration is None:
-            target_duration = dask.config.get("distributed.adaptive.target-duration")
+            target_duration = cast(
+                str, dask.config.get("distributed.adaptive.target-duration")
+            )
+
+        self.interval = parse_timedelta(interval, "seconds")
+        self.periodic_callback = None
+
+        if self.interval and self.cluster:
+            import weakref
+
+            self_ref = weakref.ref(self)
+
+            async def _adapt():
+                adaptive = self_ref()
+                if not adaptive or adaptive.state != "running":
+                    return
+                if adaptive.cluster.status != Status.running:
+                    adaptive.stop(reason="cluster-not-running")
+                    return
+                try:
+                    await adaptive.adapt()
+                except Exception:
+                    logger.warning(
+                        "Adaptive encountered an error while adapting", exc_info=True
+                    )
+
+            self.periodic_callback = PeriodicCallback(_adapt, self.interval * 1000)
+            self.state = "starting"
+            self.loop.add_callback(self._start)
+        else:
+            self.state = "inactive"
 
         self.target_duration = parse_timedelta(target_duration)
 
-        super().__init__(
-            minimum=minimum, maximum=maximum, wait_count=wait_count, interval=interval
+        super().__init__(minimum=minimum, maximum=maximum, wait_count=wait_count)
+
+    def _start(self) -> None:
+        if self.state != "starting":
+            return
+
+        assert self.periodic_callback is not None
+        self.periodic_callback.start()
+        self.state = "running"
+        logger.info(
+            "Adaptive scaling started: minimum=%s maximum=%s",
+            self.minimum,
+            self.maximum,
         )
+
+    def stop(self, reason: str = "unknown") -> None:
+        if self.state in ("inactive", "stopped"):
+            return
+
+        if self.state == "running":
+            assert self.periodic_callback is not None
+            self.periodic_callback.stop()
+        logger.info(
+            "Adaptive scaling stopped: minimum=%s maximum=%s. Reason: %s",
+            self.minimum,
+            self.maximum,
+            reason,
+        )
+
+        self.periodic_callback = None
+        self.state = "stopped"
 
     @property
     def scheduler(self):
@@ -210,6 +292,9 @@ class Adaptive(AdaptiveCore):
     def loop(self) -> IOLoop:
         """Override Adaptive.loop"""
         if self.cluster:
-            return self.cluster.loop
+            return self.cluster.loop  # type: ignore[return-value]
         else:
             return IOLoop.current()
+
+    def __del__(self):
+        self.stop(reason="adaptive-deleted")
