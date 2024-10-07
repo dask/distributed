@@ -210,8 +210,7 @@ class _ShuffleRunManager:
     async def _refresh(
         self,
         shuffle_id: ShuffleId,
-    ) -> ShuffleRun:
-        ...
+    ) -> ShuffleRun: ...
 
     @overload
     async def _refresh(
@@ -219,8 +218,7 @@ class _ShuffleRunManager:
         shuffle_id: ShuffleId,
         spec: ShuffleSpec,
         key: Key,
-    ) -> ShuffleRun:
-        ...
+    ) -> ShuffleRun: ...
 
     async def _refresh(
         self,

@@ -131,9 +131,12 @@ def loop(loop_in_thread):
 @pytest.fixture
 def loop_in_thread(cleanup):
     loop_started = concurrent.futures.Future()
-    with concurrent.futures.ThreadPoolExecutor(
-        1, thread_name_prefix="test IOLoop"
-    ) as tpe, config_for_cluster_tests():
+    with (
+        concurrent.futures.ThreadPoolExecutor(
+            1, thread_name_prefix="test IOLoop"
+        ) as tpe,
+        config_for_cluster_tests(),
+    ):
 
         async def run():
             io_loop = IOLoop.current()
@@ -1415,7 +1418,7 @@ def captured_handler(handler):
 
 
 @contextmanager
-def captured_context_meter() -> Generator[defaultdict[tuple, float], None, None]:
+def captured_context_meter() -> Generator[defaultdict[tuple, float]]:
     """Capture distributed.metrics.context_meter metrics into a local defaultdict"""
     # Don't cast int metrics to float
     metrics: defaultdict[tuple, float] = defaultdict(int)
@@ -2060,7 +2063,7 @@ def raises_with_cause(
     expected_cause: type[BaseException] | tuple[type[BaseException], ...],
     match_cause: str | None,
     *more_causes: type[BaseException] | tuple[type[BaseException], ...] | str | None,
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """Contextmanager to assert that a certain exception with cause was raised.
     It can travel the causes recursively by adding more expected, match pairs at the end.
 

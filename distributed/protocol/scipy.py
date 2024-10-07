@@ -1,6 +1,7 @@
 """
 Efficient serialization of SciPy sparse matrices.
 """
+
 from __future__ import annotations
 
 import scipy

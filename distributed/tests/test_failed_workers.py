@@ -216,9 +216,10 @@ def test_worker_doesnt_await_task_completion(loop):
 
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_multiple_clients_restart(s, a, b):
-    async with Client(s.address, asynchronous=True) as c1, Client(
-        s.address, asynchronous=True
-    ) as c2:
+    async with (
+        Client(s.address, asynchronous=True) as c1,
+        Client(s.address, asynchronous=True) as c2,
+    ):
         x = c1.submit(inc, 1)
         y = c2.submit(inc, 2)
         xx = await x

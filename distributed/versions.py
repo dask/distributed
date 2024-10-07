@@ -14,7 +14,7 @@ from typing import Any
 
 from packaging.requirements import Requirement
 
-BOKEH_REQUIREMENT = Requirement("bokeh>=2.4.2,!=3.0.*")
+BOKEH_REQUIREMENT = Requirement("bokeh>=3.1.0")
 
 required_packages = [
     ("dask", lambda p: p.__version__),
@@ -44,8 +44,9 @@ notes_mismatch_package: dict[str, str] = {}
 
 
 def get_versions(
-    packages: Iterable[str | tuple[str, Callable[[ModuleType], str | None]]]
-    | None = None
+    packages: (
+        Iterable[str | tuple[str, Callable[[ModuleType], str | None]]] | None
+    ) = None
 ) -> dict[str, dict[str, Any]]:
     """Return basic information on our software installation, and our installed versions
     of packages
@@ -139,9 +140,11 @@ def error_message(scheduler, workers, source, source_name="Client"):
         versions.add(source_version)
 
         worker_versions = {
-            workers[w].get(pkg, "MISSING")
-            if isinstance(workers[w], dict)
-            else workers[w]
+            (
+                workers[w].get(pkg, "MISSING")
+                if isinstance(workers[w], dict)
+                else workers[w]
+            )
             for w in workers
         }
         versions |= worker_versions

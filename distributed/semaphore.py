@@ -64,10 +64,8 @@ class SemaphoreExtension:
             dask.config.get("distributed.scheduler.locks.lease-validation-interval"),
             default="s",
         )
-        self.scheduler.periodic_callbacks[
-            "semaphore-lease-timeout"
-        ] = pc = PeriodicCallback(
-            self._check_lease_timeout, validation_callback_time * 1000
+        self.scheduler.periodic_callbacks["semaphore-lease-timeout"] = pc = (
+            PeriodicCallback(self._check_lease_timeout, validation_callback_time * 1000)
         )
         pc.start()
 

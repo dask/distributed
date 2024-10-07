@@ -84,14 +84,12 @@ class Broker:
         self._scheduler.send_all(client_msgs, worker_msgs={})
 
     @overload
-    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]:
-        ...
+    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]: ...
 
     @overload
     def get_events(
         self, topic: None = None
-    ) -> dict[str, tuple[tuple[float, Any], ...]]:
-        ...
+    ) -> dict[str, tuple[tuple[float, Any], ...]]: ...
 
     def get_events(
         self, topic: str | None = None

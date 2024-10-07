@@ -43,6 +43,7 @@ import dask
 import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
+from dask.tokenize import tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
 from distributed import (
@@ -73,7 +74,6 @@ from distributed.client import (
     futures_of,
     get_task_metadata,
     temp_default_client,
-    tokenize,
     wait,
 )
 from distributed.cluster_dump import load_cluster_dump
@@ -1127,7 +1127,7 @@ async def test_scatter_non_list(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_scatter_tokenize_local(c, s, a, b):
-    from dask.base import normalize_token
+    from dask.tokenize import normalize_token
 
     class MyObj:
         pass
@@ -3811,7 +3811,7 @@ class UnhandledExceptions(Exception):
 
 
 @contextmanager
-def catch_unhandled_exceptions() -> Generator[None, None, None]:
+def catch_unhandled_exceptions() -> Generator[None]:
     loop = asyncio.get_running_loop()
     ctxs: list[dict[str, Any]] = []
 
@@ -6939,8 +6939,7 @@ async def test_get_task_metadata_multiple(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_register_worker_plugin_instance_required(c, s, a, b):
-    class MyPlugin(WorkerPlugin):
-        ...
+    class MyPlugin(WorkerPlugin): ...
 
     with pytest.raises(TypeError, match="instance"):
         await c.register_plugin(MyPlugin)

@@ -44,11 +44,12 @@ from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 
 import dask
-from dask.base import collections_to_dsk, tokenize
+from dask.base import collections_to_dsk
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.optimization import SubgraphCallable
+from dask.tokenize import tokenize
 from dask.typing import Key, NoDefault, no_default
 from dask.utils import (
     apply,
@@ -133,9 +134,9 @@ from distributed.worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
-_global_clients: weakref.WeakValueDictionary[
-    int, Client
-] = weakref.WeakValueDictionary()
+_global_clients: weakref.WeakValueDictionary[int, Client] = (
+    weakref.WeakValueDictionary()
+)
 _global_client_index = [0]
 
 _current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
@@ -483,6 +484,7 @@ class Future(WrappedKey):
                 fn(fut)
             except BaseException:
                 logger.exception("Error in callback %s of %s:", fn, fut)
+                raise
 
         self.client.loop.add_callback(
             done_callback, self, partial(cls._cb_executor.submit, execute_callback)
@@ -876,8 +878,9 @@ class _MapLayer(Layer):
 
             else:
                 if self.pure:
+                    tok = tokenize(self.func, self.kwargs)
                     keys = [
-                        self.key + "-" + tokenize(self.func, self.kwargs, args)  # type: ignore
+                        self.key + "-" + tokenize(tok, args)  # type: ignore
                         for args in zip(*self.iterables)
                     ]
                 else:
@@ -3873,13 +3876,13 @@ class Client(SyncMethodMixin):
         name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
         worker_addrs = [name_to_addr.get(w, w) for w in workers]
 
-        out: dict[
-            str, Literal["OK", "removed", "timed out"]
-        ] = await self.scheduler.restart_workers(
-            workers=worker_addrs,
-            timeout=timeout,
-            on_error="raise" if raise_for_error else "return",
-            stimulus_id=f"client-restart-workers-{time()}",
+        out: dict[str, Literal["OK", "removed", "timed out"]] = (
+            await self.scheduler.restart_workers(
+                workers=worker_addrs,
+                timeout=timeout,
+                on_error="raise" if raise_for_error else "return",
+                stimulus_id=f"client-restart-workers-{time()}",
+            )
         )
         # Map keys back to original `workers` input names/addresses
         out = {w: out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
@@ -5082,6 +5085,7 @@ class Client(SyncMethodMixin):
                 "future version. Please mark your plugin as idempotent by setting its "
                 "`.idempotent` attribute to `True`.",
                 FutureWarning,
+                stacklevel=2,
             )
         else:
             idempotent = getattr(plugin, "idempotent", False)

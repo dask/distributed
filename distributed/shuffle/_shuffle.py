@@ -21,9 +21,9 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
+from dask.tokenize import tokenize
 from dask.typing import Key
 
 from distributed.core import PooledRPCCall
@@ -567,7 +567,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
     drop_column: bool
 
     @property
-    def output_partitions(self) -> Generator[int, None, None]:
+    def output_partitions(self) -> Generator[int]:
         yield from self.parts_out
 
     def pick_worker(self, partition: int, workers: Sequence[str]) -> str:
@@ -600,9 +600,9 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
             rpc=plugin.worker.rpc,
             digest_metric=plugin.worker.digest_metric,
             scheduler=plugin.worker.scheduler,
-            memory_limiter_disk=plugin.memory_limiter_disk
-            if self.disk
-            else ResourceLimiter(None),
+            memory_limiter_disk=(
+                plugin.memory_limiter_disk if self.disk else ResourceLimiter(None)
+            ),
             memory_limiter_comms=plugin.memory_limiter_comms,
             disk=self.disk,
             drop_column=self.drop_column,

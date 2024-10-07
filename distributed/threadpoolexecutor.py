@@ -20,6 +20,7 @@ which is included as a comment at the end of this file:
 
    Copyright 2001-2016 Python Software Foundation; All Rights Reserved
 """
+
 from __future__ import annotations
 
 import itertools
@@ -62,6 +63,7 @@ def _worker(executor, work_queue):
         del executor
     except BaseException:
         logger.critical("Exception in worker", exc_info=True)
+        raise
     finally:
         del thread_state.proceed
         del thread_state.executor

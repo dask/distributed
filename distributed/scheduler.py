@@ -54,8 +54,8 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
-from dask.base import TokenizationError, normalize_token, tokenize
 from dask.core import get_deps, iskey, validate_key
+from dask.tokenize import TokenizationError, normalize_token, tokenize
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
@@ -1425,14 +1425,8 @@ class TaskState:
     #: be rejected.
     run_id: int | None
 
-    #: Whether to consider this task rootish in the context of task queueing
-    #: True
-    #:     Always consider this task rootish
-    #: False
-    #:     Never consider this task rootish
-    #: None
-    #:     Use a heuristic to determine whether this task should be considered rootish
-    _rootish: bool | None
+    #: Whether to allow queueing this task if it is rootish
+    _queueable: bool
 
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
@@ -1489,7 +1483,7 @@ class TaskState:
         self.metadata = None
         self.annotations = None
         self.erred_on = None
-        self._rootish = None
+        self._queueable = True
         self.run_id = None
         self.group = group
         group.add(self)
@@ -1847,8 +1841,7 @@ class SchedulerState:
             )
 
     @abstractmethod
-    def log_event(self, topic: str | Collection[str], msg: Any) -> None:
-        ...
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None: ...
 
     @property
     def memory(self) -> MemoryState:
@@ -1918,7 +1911,7 @@ class SchedulerState:
             self.unknown_durations,
             self.replicated_tasks,
         ):
-            collection.clear()  # type: ignore
+            collection.clear()
 
     @property
     def is_idle(self) -> bool:
@@ -2287,7 +2280,7 @@ class SchedulerState:
         """
         if self.validate:
             # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
-            assert math.isinf(self.WORKER_SATURATION)
+            assert math.isinf(self.WORKER_SATURATION) or not ts._queueable
 
         pool = self.idle.values() if self.idle else self.running
         if not pool:
@@ -2453,7 +2446,7 @@ class SchedulerState:
             # removed, there should only be one, which combines co-assignment and
             # queuing. Eventually, special-casing root tasks might be removed entirely,
             # with better heuristics.
-            if math.isinf(self.WORKER_SATURATION):
+            if math.isinf(self.WORKER_SATURATION) or not ts._queueable:
                 if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                     return {ts.key: "no-worker"}, {}, {}
             else:
@@ -3091,8 +3084,6 @@ class SchedulerState:
         and have few or no dependencies. Tasks may also be explicitly marked as rootish
         to override this heuristic.
         """
-        if ts._rootish is not None:
-            return ts._rootish
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
         tg = ts.group
@@ -3695,6 +3686,7 @@ class Scheduler(SchedulerState, ServerNode):
     _client_connections_removed_total: int
     _workers_added_total: int
     _workers_removed_total: int
+    _active_graph_updates: int
 
     def __init__(
         self,
@@ -4058,6 +4050,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._client_connections_removed_total = 0
         self._workers_added_total = 0
         self._workers_removed_total = 0
+        self._active_graph_updates = 0
 
     ##################
     # Administration #
@@ -4850,6 +4843,7 @@ class Scheduler(SchedulerState, ServerNode):
         stimulus_id: str | None = None,
     ) -> None:
         start = time()
+        self._active_graph_updates += 1
         try:
             try:
                 graph = deserialize(graph_header, graph_frames).data
@@ -4922,8 +4916,11 @@ class Scheduler(SchedulerState, ServerNode):
                     # (which may not have been added to who_wants yet)
                     client=client,
                 )
-        end = time()
-        self.digest_metric("update-graph-duration", end - start)
+        finally:
+            self._active_graph_updates -= 1
+            assert self._active_graph_updates >= 0
+            end = time()
+            self.digest_metric("update-graph-duration", end - start)
 
     def _generate_taskstates(
         self,
@@ -7399,8 +7396,7 @@ class Scheduler(SchedulerState, ServerNode):
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @overload
     async def retire_workers(
@@ -7410,8 +7406,7 @@ class Scheduler(SchedulerState, ServerNode):
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @overload
     async def retire_workers(
@@ -7427,8 +7422,7 @@ class Scheduler(SchedulerState, ServerNode):
         minimum: int | None = None,
         target: int | None = None,
         attribute: str = "address",
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @log_errors
     async def retire_workers(
@@ -7710,12 +7704,10 @@ class Scheduler(SchedulerState, ServerNode):
             self.client_desires_keys(keys=list(who_has), client=client)
 
     @overload
-    def report_on_key(self, key: Key, *, client: str | None = None) -> None:
-        ...
+    def report_on_key(self, key: Key, *, client: str | None = None) -> None: ...
 
     @overload
-    def report_on_key(self, *, ts: TaskState, client: str | None = None) -> None:
-        ...
+    def report_on_key(self, *, ts: TaskState, client: str | None = None) -> None: ...
 
     def report_on_key(self, key=None, *, ts=None, client=None):
         if (ts is None) == (key is None):
@@ -7806,9 +7798,11 @@ class Scheduler(SchedulerState, ServerNode):
     def get_who_has(self, keys: Iterable[Key] | None = None) -> dict[Key, list[str]]:
         if keys is not None:
             return {
-                key: [ws.address for ws in self.tasks[key].who_has or ()]
-                if key in self.tasks
-                else []
+                key: (
+                    [ws.address for ws in self.tasks[key].who_has or ()]
+                    if key in self.tasks
+                    else []
+                )
                 for key in keys
             }
         else:
@@ -7823,9 +7817,11 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: [ts.key for ts in self.workers[w].has_what]
-                if w in self.workers
-                else []
+                w: (
+                    [ts.key for ts in self.workers[w].has_what]
+                    if w in self.workers
+                    else []
+                )
                 for w in workers
             }
         else:
@@ -8423,17 +8419,13 @@ class Scheduler(SchedulerState, ServerNode):
         sysmon.update()
 
         # Scheduler logs
-        from distributed.dashboard.components.scheduler import (
-            _BOKEH_STYLES_KWARGS,
-            SchedulerLogs,
-        )
+        from distributed.dashboard.components.scheduler import _STYLES, SchedulerLogs
 
         logs = SchedulerLogs(self, start=start)
 
-        from bokeh.models import Div, Tabs
+        from bokeh.models import Div, TabPanel, Tabs
 
         import distributed
-        from distributed.dashboard.core import TabPanel
 
         # HTML
         html = """
@@ -8474,7 +8466,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
         )
-        html = Div(text=html, **_BOKEH_STYLES_KWARGS)
+        html = Div(text=html, styles=_STYLES)
 
         html = TabPanel(child=html, title="Summary")
         compute = TabPanel(child=compute, title="Worker Profile (compute)")
@@ -8555,12 +8547,10 @@ class Scheduler(SchedulerState, ServerNode):
         self._broker.unsubscribe(topic, client)
 
     @overload
-    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]:
-        ...
+    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]: ...
 
     @overload
-    def get_events(self) -> dict[str, tuple[tuple[float, Any], ...]]:
-        ...
+    def get_events(self) -> dict[str, tuple[tuple[float, Any], ...]]: ...
 
     def get_events(
         self, topic: str | None = None
@@ -8620,6 +8610,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if self.transition_counter != self._idle_transition_counter:
             self._idle_transition_counter = self.transition_counter
+            self.idle_since = None
+            return None
+
+        if self._active_graph_updates > 0:
             self.idle_since = None
             return None
 
