@@ -300,7 +300,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         """
         barrier = self.scheduler.tasks[barrier_key(spec.id)]
         for dependent in barrier.dependents:
-            dependent._rootish = False
+            dependent._queueable = False
 
     @log_errors()
     def _set_restriction(self, ts: TaskState, worker: str) -> None:

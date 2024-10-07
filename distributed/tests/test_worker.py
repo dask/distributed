@@ -1115,7 +1115,7 @@ async def test_service_hosts_match_worker(s):
 
     async with Worker(s.address, host="tcp://127.0.0.1") as w:
         sock = first(w.http_server._sockets.values())
-        assert sock.getsockname()[0] in ("::", "0.0.0.0")
+        assert sock.getsockname()[0] in ("::", "127.0.0.1")
 
     # See what happens with e.g. `dask worker --listen-address tcp://:8811`
     async with Worker(s.address, host="") as w:

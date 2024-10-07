@@ -38,6 +38,7 @@ from bokeh.models import (
     Range1d,
     ResetTool,
     Select,
+    TabPanel,
     Tabs,
     TapTool,
     Title,
@@ -73,10 +74,8 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.core import TabPanel
 from distributed.dashboard.utils import (
     _DATATABLE_STYLESHEETS_KWARGS,
-    BOKEH_VERSION,
     PROFILING,
     transpose,
     update,
@@ -2271,18 +2270,8 @@ class TaskGraph(DashboardComponent):
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
         filter = GroupFilter(column_name="visible", group="True")
-        if BOKEH_VERSION.major < 3:
-            filter_kwargs = {"filters": [filter]}
-        else:
-            filter_kwargs = {"filter": filter}
-        node_view = CDSView(**filter_kwargs)
-        edge_view = CDSView(**filter_kwargs)
-
-        # Bokeh >= 3.0 automatically infers the source to use
-        if BOKEH_VERSION.major < 3:
-            node_view.source = self.node_source
-            edge_view.source = self.edge_source
-
+        node_view = CDSView(filter=filter)
+        edge_view = CDSView(filter=filter)
         node_colors = factor_cmap(
             "state",
             factors=["waiting", "queued", "processing", "memory", "released", "erred"],
@@ -4515,10 +4504,6 @@ _STYLES = {
     "box-shadow": "inset 1px 0 8px 0 lightgray",
     "overflow": "auto",
 }
-if BOKEH_VERSION.major < 3:
-    _BOKEH_STYLES_KWARGS = {"style": _STYLES}
-else:
-    _BOKEH_STYLES_KWARGS = {"styles": _STYLES}
 
 
 class SchedulerLogs:
@@ -4538,7 +4523,7 @@ class SchedulerLogs:
                 )
             )._repr_html_()
 
-        self.root = Div(text=logs_html, **_BOKEH_STYLES_KWARGS)
+        self.root = Div(text=logs_html, styles=_STYLES)
 
 
 @log_errors

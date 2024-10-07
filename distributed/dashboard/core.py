@@ -26,12 +26,6 @@ if not BOKEH_REQUIREMENT.specifier.contains(BOKEH_VERSION, prereleases=True):
     )
 
 
-if BOKEH_VERSION.major < 3:
-    from bokeh.models import Panel as TabPanel  # noqa: F401
-else:
-    from bokeh.models import TabPanel  # noqa: F401
-
-
 if BOKEH_VERSION < parse_version("3.3.0"):
     from bokeh.server.server import BokehTornado as DaskBokehTornado
 else:

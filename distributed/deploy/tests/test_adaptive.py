@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 from time import sleep
 
@@ -17,8 +18,16 @@ from distributed import (
     Worker,
     wait,
 )
+from distributed.core import Status
+from distributed.deploy.cluster import Cluster
 from distributed.metrics import time
-from distributed.utils_test import async_poll_for, gen_cluster, gen_test, slowinc
+from distributed.utils_test import (
+    async_poll_for,
+    captured_logger,
+    gen_cluster,
+    gen_test,
+    slowinc,
+)
 
 
 def test_adaptive_local_cluster(loop):
@@ -78,39 +87,6 @@ async def test_adaptive_local_cluster_multi_workers():
 
             futures = c.map(slowinc, range(100), delay=0.01)
             await c.gather(futures)
-
-
-@pytest.mark.xfail(reason="changed API")
-@gen_test()
-async def test_adaptive_scale_down_override():
-    class TestAdaptive(Adaptive):
-        def __init__(self, *args, **kwargs):
-            self.min_size = kwargs.pop("min_size", 0)
-            super().__init__(*args, **kwargs)
-
-        async def workers_to_close(self, **kwargs):
-            num_workers = len(self.cluster.workers)
-            to_close = await self.scheduler.workers_to_close(**kwargs)
-            if num_workers - len(to_close) < self.min_size:
-                to_close = to_close[: num_workers - self.min_size]
-
-            return to_close
-
-    class TestCluster(LocalCluster):
-        def scale_up(self, n, **kwargs):
-            assert False
-
-    async with TestCluster(
-        n_workers=10, processes=False, asynchronous=True, dashboard_address=":0"
-    ) as cluster:
-        ta = cluster.adapt(
-            min_size=2, interval=0.1, scale_factor=2, Adaptive=TestAdaptive
-        )
-        await asyncio.sleep(0.3)
-
-        # Assert that adaptive cycle does not reduce cluster below minimum size
-        # as determined via override.
-        assert len(cluster.scheduler.workers) == 2
 
 
 @gen_test()
@@ -400,17 +376,23 @@ async def test_adapt_cores_memory():
 
 @gen_test()
 async def test_adaptive_config():
-    with dask.config.set(
-        {"distributed.adaptive.minimum": 10, "distributed.adaptive.wait-count": 8}
-    ):
-        try:
-            adapt = Adaptive(interval="5s")
-            assert adapt.minimum == 10
-            assert adapt.maximum == math.inf
-            assert adapt.interval == 5
-            assert adapt.wait_count == 8
-        finally:
-            adapt.stop()
+    async with LocalCluster(
+        n_workers=0,
+        asynchronous=True,
+        silence_logs=False,
+        dashboard_address=":0",
+    ) as cluster:
+        with dask.config.set(
+            {"distributed.adaptive.minimum": 10, "distributed.adaptive.wait-count": 8}
+        ):
+            try:
+                adapt = Adaptive(cluster, interval="5s")
+                assert adapt.minimum == 10
+                assert adapt.maximum == math.inf
+                assert adapt.interval == 5
+                assert adapt.wait_count == 8
+            finally:
+                adapt.stop()
 
 
 @gen_test()
@@ -427,6 +409,8 @@ async def test_update_adaptive():
         first = cluster.adapt(maximum=1)
         second = cluster.adapt(maximum=2)
         await asyncio.sleep(0.2)
+        assert first.state == "stopped"
+        assert second.state == "running"
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()
 
@@ -452,6 +436,19 @@ async def test_adaptive_no_memory_limit():
             )
             <= 5
         )
+
+
+@gen_test()
+async def test_adapt_gets_stopped_on_cluster_close():
+    class MyCluster(Cluster):
+        pass
+
+    async with MyCluster(asynchronous=True) as cluster:
+        adapt = cluster.adapt(minimum=1, maximum=10, interval="10ms")
+        while adapt.state != "running":
+            await asyncio.sleep(0.01)
+        await cluster.close()
+        assert adapt.state == "stopped"
 
 
 @gen_test()
@@ -495,13 +492,12 @@ async def test_adaptive_stopped():
         n_workers=0, asynchronous=True, dashboard_address=":0"
     ) as cluster:
         instance = cluster.adapt(interval="10ms")
+        await async_poll_for(lambda: instance.state == "running", timeout=5)
         assert instance.periodic_callback is not None
-
-        await async_poll_for(lambda: instance.periodic_callback.is_running(), timeout=5)
-
+        assert instance.periodic_callback.is_running()
         pc = instance.periodic_callback
-
-    await async_poll_for(lambda: not pc.is_running(), timeout=5)
+    await async_poll_for(lambda: instance.state == "stopped", timeout=5)
+    assert not pc.is_running()
 
 
 @pytest.mark.parametrize("saturation", [1, float("inf")])
@@ -544,3 +540,200 @@ async def test_respect_average_nthreads(c, s, w):
         await asyncio.sleep(0.001)
 
     assert s.adaptive_target() == 40
+
+
+class MyAdaptive(Adaptive):
+    def __init__(self, *args, interval=None, **kwargs):
+        super().__init__(*args, interval=interval, **kwargs)
+        self._target = 0
+        self._log = []
+        self._observed = set()
+        self._plan = set()
+        self._requested = set()
+
+    @property
+    def observed(self):
+        return self._observed
+
+    @property
+    def plan(self):
+        return self._plan
+
+    @property
+    def requested(self):
+        return self._requested
+
+    async def target(self):
+        return self._target
+
+    async def scale_up(self, n=0):
+        self._plan = self._requested = set(range(n))
+
+    async def scale_down(self, workers=()):
+        for collection in [self.plan, self.requested, self.observed]:
+            for w in workers:
+                collection.discard(w)
+
+
+@gen_test()
+async def test_adaptive_stops_on_cluster_status_change():
+    async with LocalCluster(
+        n_workers=0,
+        asynchronous=True,
+        silence_logs=False,
+        dashboard_address=":0",
+    ) as cluster:
+        adapt = Adaptive(cluster, interval="100 ms")
+        assert adapt.state == "starting"
+        await async_poll_for(lambda: adapt.state == "running", timeout=5)
+
+        assert adapt.periodic_callback
+        assert adapt.periodic_callback.is_running()
+
+        try:
+            cluster.status = Status.closing
+
+            await async_poll_for(lambda: adapt.state != "running", timeout=5)
+            assert adapt.state == "stopped"
+            assert not adapt.periodic_callback
+        finally:
+            # Set back to running to let normal shutdown do its thing
+            cluster.status = Status.running
+
+
+@gen_test()
+async def test_interval():
+    async with LocalCluster(
+        n_workers=0,
+        asynchronous=True,
+        silence_logs=False,
+        dashboard_address=":0",
+    ) as cluster:
+        adapt = MyAdaptive(cluster=cluster, interval="100 ms")
+        assert not adapt.plan
+
+        for i in [0, 3, 1]:
+            start = time()
+            adapt._target = i
+            while len(adapt.plan) != i:
+                await asyncio.sleep(0.01)
+                assert time() < start + 2
+
+        adapt.stop()
+        await asyncio.sleep(0.05)
+
+        adapt._target = 10
+        await asyncio.sleep(0.02)
+        assert len(adapt.plan) == 1  # last value from before, unchanged
+
+
+@gen_test()
+async def test_adapt_logs_error_in_safe_target():
+    class BadAdaptive(MyAdaptive):
+        """Adaptive subclass which raises an OSError when attempting to adapt
+
+        We use this to check that error handling works properly
+        """
+
+        def safe_target(self):
+            raise OSError()
+
+    async with LocalCluster(
+        n_workers=0,
+        asynchronous=True,
+        silence_logs=False,
+        dashboard_address=":0",
+    ) as cluster:
+        with captured_logger(
+            "distributed.deploy.adaptive", level=logging.WARNING
+        ) as log:
+            adapt = cluster.adapt(
+                Adaptive=BadAdaptive, minimum=1, maximum=4, interval="10ms"
+            )
+            while "encountered an error" not in log.getvalue():
+                await asyncio.sleep(0.01)
+        assert "stop" not in log.getvalue()
+        assert adapt.state == "running"
+        assert adapt.periodic_callback
+        assert adapt.periodic_callback.is_running()
+
+
+@gen_test()
+async def test_adapt_callback_logs_error_in_scale_down():
+    class BadAdaptive(MyAdaptive):
+        async def scale_down(self, workers=None):
+            raise OSError()
+
+    async with LocalCluster(
+        n_workers=0,
+        asynchronous=True,
+        silence_logs=False,
+        dashboard_address=":0",
+    ) as cluster:
+        adapt = cluster.adapt(
+            Adaptive=BadAdaptive, minimum=1, maximum=4, wait_count=0, interval="10ms"
+        )
+        adapt._target = 2
+        await async_poll_for(lambda: adapt.state == "running", timeout=5)
+        assert adapt.periodic_callback.is_running()
+        await adapt.adapt()
+        assert len(adapt.plan) == 2
+        assert len(adapt.requested) == 2
+        with captured_logger(
+            "distributed.deploy.adaptive", level=logging.WARNING
+        ) as log:
+            adapt._target = 0
+            while "encountered an error" not in log.getvalue():
+                await asyncio.sleep(0.01)
+        assert "stop" not in log.getvalue()
+        assert not adapt._adapting
+        assert adapt.periodic_callback
+        assert adapt.periodic_callback.is_running()
+
+
+@pytest.mark.parametrize("wait_until_running", [True, False])
+@gen_test()
+async def test_adaptive_logs_stopping_once(wait_until_running):
+    async with LocalCluster(
+        n_workers=0,
+        asynchronous=True,
+        silence_logs=False,
+        dashboard_address=":0",
+    ) as cluster:
+        with captured_logger("distributed.deploy.adaptive") as log:
+            adapt = cluster.adapt(Adaptive=MyAdaptive, interval="100ms")
+            if wait_until_running:
+                await async_poll_for(lambda: adapt.state == "running", timeout=5)
+                assert adapt.periodic_callback
+                assert adapt.periodic_callback.is_running()
+                pc = adapt.periodic_callback
+            else:
+                assert adapt.periodic_callback
+                assert not adapt.periodic_callback.is_running()
+                pc = adapt.periodic_callback
+
+            adapt.stop()
+            adapt.stop()
+        assert adapt.state == "stopped"
+        assert not adapt.periodic_callback
+        assert not pc.is_running()
+        lines = log.getvalue().splitlines()
+        assert sum("Adaptive scaling stopped" in line for line in lines) == 1
+
+
+@gen_test()
+async def test_adapt_stop_del():
+    async with LocalCluster(
+        n_workers=0,
+        asynchronous=True,
+        silence_logs=False,
+        dashboard_address=":0",
+    ) as cluster:
+        adapt = cluster.adapt(Adaptive=MyAdaptive, interval="100ms")
+        pc = adapt.periodic_callback
+        await async_poll_for(lambda: adapt.state == "running", timeout=5)  # noqa: F821
+
+        # Remove reference of adaptive object from cluster
+        cluster._adaptive = None
+        del adapt
+        await async_poll_for(lambda: not pc.is_running(), timeout=5)
