@@ -15,7 +15,6 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop
 
 import dask
@@ -24,12 +23,10 @@ from dask.utils import key_split
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.worker import Status
 
-dd = pytest.importorskip("dask.dataframe")
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
 
-import numpy as np
-import pandas as pd
-
-from dask.dataframe._compat import PANDAS_GE_150, PANDAS_GE_200
+import dask.dataframe as dd
 from dask.typing import Key
 
 from distributed import (
@@ -39,9 +36,10 @@ from distributed import (
     LocalCluster,
     Nanny,
     Scheduler,
+    Semaphore,
     Worker,
 )
-from distributed.core import ConnectionPool
+from distributed.core import ConnectionPool, ErrorMessage, OKMessage
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
     buffers_to_table,
@@ -49,6 +47,7 @@ from distributed.shuffle._arrow import (
     read_from_disk,
     serialize_table,
 )
+from distributed.shuffle._exceptions import P2PConsistencyError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
@@ -73,13 +72,8 @@ from distributed.worker_state_machine import TaskState as WorkerTaskState
 
 try:
     import pyarrow as pa
-
-    PYARROW_GE_12 = parse_version(pa.__version__).release >= (12,)
-    PYARROW_GE_14 = parse_version(pa.__version__).release >= (14,)
 except ImportError:
     pa = None
-    PYARROW_GE_12 = False
-    PYARROW_GE_14 = False
 
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
@@ -87,29 +81,32 @@ def lose_annotations(request):
     return request.param
 
 
-async def check_worker_cleanup(
+async def assert_worker_cleanup(
     worker: Worker,
-    closed: bool = False,
+    close: bool = False,
     interval: float = 0.01,
     timeout: int | None = 5,
 ) -> None:
     """Assert that the worker has no shuffle state"""
-    deadline = Deadline.after(timeout)
     plugin = worker.plugins["shuffle"]
     assert isinstance(plugin, ShuffleWorkerPlugin)
 
-    while plugin.shuffle_runs._runs and not deadline.expired:
-        await asyncio.sleep(interval)
-    assert not plugin.shuffle_runs._runs
-    if closed:
+    deadline = Deadline.after(timeout)
+    if close:
+        await worker.close()
+        assert "shuffle" not in worker.plugins
         assert plugin.closed
+    else:
+        while plugin.shuffle_runs._runs and not deadline.expired:
+            await asyncio.sleep(interval)
+    assert not plugin.shuffle_runs._runs
     for dirpath, dirnames, filenames in os.walk(worker.local_directory):
         assert "shuffle" not in dirpath
         for fn in dirnames + filenames:
             assert "shuffle" not in fn
 
 
-async def check_scheduler_cleanup(
+async def assert_scheduler_cleanup(
     scheduler: Scheduler, interval: float = 0.01, timeout: int | None = 5
 ) -> None:
     """Assert that the scheduler has no shuffle state"""
@@ -175,9 +172,9 @@ async def test_basic_cudf_support(c, s, a, b):
     result, expected = await c.compute([shuffled, df], sync=True)
     dd.assert_eq(result, expected)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 def get_active_shuffle_run(shuffle_id: ShuffleId, worker: Worker) -> ShuffleRun:
@@ -213,9 +210,9 @@ async def test_basic_integration(c, s, a, b, npartitions, disk):
     result, expected = await c.compute([shuffled, df], sync=True)
     dd.assert_eq(result, expected)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.parametrize("processes", [True, False])
@@ -255,16 +252,14 @@ async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
 
     if npartitions == 1:
         # FIXME: distributed#7816
-        with raises_with_cause(
-            RuntimeError, "failed during transfer", RuntimeError, "Barrier task"
-        ):
+        with pytest.raises(P2PConsistencyError, match="Barrier task"):
             await c.compute(out)
     else:
         await c.compute(out)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 def test_shuffle_before_categorize(loop_in_thread):
@@ -297,9 +292,9 @@ async def test_concurrent(c, s, a, b):
     dd.assert_eq(x, df, check_index=False)
     dd.assert_eq(y, df, check_index=False)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -325,9 +320,9 @@ async def test_bad_disk(c, s, a, b):
         out = await c.compute(out)
 
     await c.close()
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 async def wait_until_worker_has_tasks(
@@ -403,15 +398,14 @@ async def test_closed_worker_during_transfer(c, s, a, b):
         shuffled = df.shuffle("x")
     fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
-    await b.close()
+    await assert_worker_cleanup(b, close=True)
 
     result, expected = await fut
     dd.assert_eq(result, expected)
 
     await c.close()
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b, closed=True)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(
@@ -430,15 +424,75 @@ async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
         out = df.shuffle("x")
     out = c.compute(out.x.size)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
-    await b.close()
+    await assert_worker_cleanup(b, close=True)
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
     await c.close()
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b, closed=True)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_scheduler_cleanup(s)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1), ("", 1)],
+    config={"distributed.scheduler.allowed-failures": 0},
+)
+async def test_erred_task_before_p2p_does_not_log_event(c, s, a, b):
+    def block_and_fail_eventually(df, semaphore, event):
+        acquired = semaphore.acquire(timeout=0)
+        if acquired:
+            return df
+        event.wait()
+        raise RuntimeError("test error")
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    semaphore = await Semaphore(max_leases=s.total_nthreads * 2 + 1)
+    event = Event()
+
+    df = df.map_partitions(block_and_fail_eventually, semaphore, event, meta=df._meta)
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = df.shuffle("x")
+        shuffle_ext = s.plugins["shuffle"]
+    out = c.compute(out)
+    await async_poll_for(lambda: shuffle_ext.active_shuffles, timeout=5)
+    await event.set()
+    with pytest.raises(RuntimeError, match="test error"):
+        await out
+
+    assert all(event["action"] != "p2p-failed" for _, event in s.get_events("p2p"))
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.allowed-failures": 1},
+)
+async def test_restarting_does_not_log_p2p_failed(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-03-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = df.shuffle("x")
+    out = c.compute(out.x.size)
+    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
+    await assert_worker_cleanup(b, close=True)
+
+    await out
+    assert not s.get_events("p2p")
+    await c.close()
+    await assert_worker_cleanup(a)
+    await assert_scheduler_cleanup(s)
 
 
 class BlockedGetOrCreateShuffleRunManager(_ShuffleRunManager):
@@ -478,7 +532,7 @@ async def test_get_or_create_from_dangling_transfer(c, s, a, b):
     shuffle_extB.shuffle_runs.block_get_or_create.set()
 
     await shuffle_extA.shuffle_runs.in_get_or_create.wait()
-    await b.close()
+    await assert_worker_cleanup(b, close=True)
     await async_poll_for(
         lambda: not any(ws.processing for ws in s.workers.values()), timeout=5
     )
@@ -492,10 +546,9 @@ async def test_get_or_create_from_dangling_transfer(c, s, a, b):
     await async_poll_for(lambda: not a.state.tasks, timeout=10)
 
     assert not s.plugins["shuffle"].active_shuffles
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b, closed=True)
+    await assert_worker_cleanup(a)
     await c.close()
-    await check_scheduler_cleanup(s)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.slow
@@ -521,8 +574,8 @@ async def test_crashed_worker_during_transfer(c, s, a):
         dd.assert_eq(result, expected)
 
         await c.close()
-        await check_worker_cleanup(a)
-        await check_scheduler_cleanup(s)
+        await assert_worker_cleanup(a)
+        await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(
@@ -535,18 +588,21 @@ async def test_crashed_worker_during_transfer(c, s, a):
 async def test_restarting_does_not_deadlock(c, s):
     """Regression test for https://github.com/dask/distributed/issues/8088"""
     async with Worker(s.address) as a:
+        # Ensure that a holds the input tasks to the shuffle
+        df = dask.datasets.timeseries(
+            start="2000-01-01",
+            end="2000-03-01",
+            dtypes={"x": float, "y": float},
+            freq="10 s",
+        )
+        df = await c.persist(df)
+        expected = await c.compute(df)
+
         async with Nanny(s.address) as b:
-            # Ensure that a holds the input tasks to the shuffle
-            with dask.annotate(workers=[a.address]):
-                df = dask.datasets.timeseries(
-                    start="2000-01-01",
-                    end="2000-03-01",
-                    dtypes={"x": float, "y": float},
-                    freq="10 s",
-                )
             with dask.config.set({"dataframe.shuffle.method": "p2p"}):
                 out = df.shuffle("x")
-            fut = c.compute(out.x.size)
+            assert not s.workers[b.worker_address].has_what
+            result = c.compute(out)
             await wait_until_worker_has_tasks(
                 "shuffle-transfer", b.worker_address, 1, s
             )
@@ -560,7 +616,8 @@ async def test_restarting_does_not_deadlock(c, s):
             a.status = Status.running
 
             await async_poll_for(lambda: s.running, timeout=5)
-            await fut
+            result = await result
+            assert dd.assert_eq(result, expected)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -584,15 +641,14 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
             shuffled = df.shuffle("x")
         fut = c.compute([shuffled, df], sync=True)
         await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b, 0.001)
-        await b.close()
+        await assert_worker_cleanup(b, close=True)
 
         result, expected = await fut
         dd.assert_eq(result, expected)
 
         await c.close()
-        await check_worker_cleanup(a)
-        await check_worker_cleanup(b, closed=True)
-        await check_scheduler_cleanup(s)
+        await assert_worker_cleanup(a)
+        await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.slow
@@ -627,34 +683,37 @@ async def test_crashed_input_only_worker_during_transfer(c, s, a):
             dd.assert_eq(result, expected)
 
             await c.close()
-            await check_worker_cleanup(a)
-            await check_scheduler_cleanup(s)
+            await assert_worker_cleanup(a)
+            await assert_scheduler_cleanup(s)
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
 async def test_closed_bystanding_worker_during_shuffle(c, s, w1, w2, w3):
-    with dask.annotate(workers=[w1.address, w2.address], allow_other_workers=False):
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-02-01",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-            shuffled = df.shuffle("x")
-        fut = c.compute([shuffled, df], sync=True)
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        shuffled = df.shuffle("x")
+    fut = c.compute(
+        [shuffled, df],
+        sync=True,
+        workers=[w1.address, w2.address],
+        allow_other_workers=False,
+    )
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w1)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, w2)
-    await w3.close()
+    await assert_worker_cleanup(w3, close=True)
 
     result, expected = await fut
     dd.assert_eq(result, expected)
 
-    await check_worker_cleanup(w1)
-    await check_worker_cleanup(w2)
-    await check_worker_cleanup(w3, closed=True)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(w1)
+    await assert_worker_cleanup(w2)
+    await assert_scheduler_cleanup(s)
 
 
 class RaiseOnCloseShuffleRun(DataFrameShuffleRun):
@@ -681,9 +740,8 @@ async def test_exception_on_close_cleans_up(c, s, caplog):
             with dask.config.set({"dataframe.shuffle.method": "p2p"}):
                 shuffled = df.shuffle("x")
             await c.compute([shuffled, df], sync=True)
-
+            await assert_worker_cleanup(w, close=True)
     assert any("test-exception-on-close" in record.message for record in caplog.records)
-    await check_worker_cleanup(w, closed=True)
 
 
 class BlockedInputsDoneShuffle(DataFrameShuffleRun):
@@ -730,7 +788,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     else:
         close_worker, alive_worker = b, a
         alive_shuffle = shuffleA
-    await close_worker.close()
+    await assert_worker_cleanup(close_worker, close=True)
 
     alive_shuffle.block_inputs_done.set()
     alive_shuffles = get_active_shuffle_runs(alive_worker)
@@ -752,9 +810,8 @@ async def test_closed_worker_during_barrier(c, s, a, b):
     dd.assert_eq(result, expected)
 
     await c.close()
-    await check_worker_cleanup(close_worker, closed=True)
-    await check_worker_cleanup(alive_worker)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(alive_worker)
+    await assert_scheduler_cleanup(s)
 
 
 @mock.patch(
@@ -793,17 +850,17 @@ async def test_restarting_during_barrier_raises_killed_worker(c, s, a, b):
     else:
         close_worker, alive_worker = b, a
         alive_shuffle = shuffleA
-    await close_worker.close()
+    await assert_worker_cleanup(close_worker, close=True)
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
     alive_shuffle.block_inputs_done.set()
 
     await c.close()
-    await check_worker_cleanup(close_worker, closed=True)
-    await check_worker_cleanup(alive_worker)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(alive_worker)
+    await assert_scheduler_cleanup(s)
 
 
 @mock.patch(
@@ -840,7 +897,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     else:
         close_worker, alive_worker = a, b
         alive_shuffle = shuffleB
-    await close_worker.close()
+    await assert_worker_cleanup(close_worker, close=True)
 
     alive_shuffle.block_inputs_done.set()
     alive_shuffles = get_active_shuffle_runs(alive_worker)
@@ -862,9 +919,8 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
     dd.assert_eq(result, expected)
 
     await c.close()
-    await check_worker_cleanup(close_worker, closed=True)
-    await check_worker_cleanup(alive_worker)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(alive_worker)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.slow
@@ -912,8 +968,8 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
         dd.assert_eq(result, expected)
 
         await c.close()
-        await check_worker_cleanup(a)
-        await check_scheduler_cleanup(s)
+        await assert_worker_cleanup(a)
+        await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 2)
@@ -928,15 +984,14 @@ async def test_closed_worker_during_unpack(c, s, a, b):
         shuffled = df.shuffle("x")
     fut = c.compute([shuffled, df], sync=True)
     await wait_for_tasks_in_state(UNPACK_PREFIX, "memory", 1, b)
-    await b.close()
+    await assert_worker_cleanup(b, close=True)
 
     result, expected = await fut
     dd.assert_eq(result, expected)
 
     await c.close()
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b, closed=True)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(
@@ -955,15 +1010,15 @@ async def test_restarting_during_unpack_raises_killed_worker(c, s, a, b):
         out = df.shuffle("x")
     out = c.compute(out.x.size)
     await wait_for_tasks_in_state(UNPACK_PREFIX, "memory", 1, b)
-    await b.close()
+    await assert_worker_cleanup(b, close=True)
 
     with pytest.raises(KilledWorker):
         await out
+    assert sum(event["action"] == "p2p-failed" for _, event in s.get_events("p2p")) == 1
 
     await c.close()
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b, closed=True)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.slow
@@ -989,14 +1044,14 @@ async def test_crashed_worker_during_unpack(c, s, a):
         dd.assert_eq(result, expected)
 
         await c.close()
-        await check_worker_cleanup(a)
-        await check_scheduler_cleanup(s)
+        await assert_worker_cleanup(a)
+        await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
 async def test_heartbeat(c, s, a, b):
     await a.heartbeat()
-    await check_scheduler_cleanup(s)
+    await assert_scheduler_cleanup(s)
     df = dask.datasets.timeseries(
         start="2000-01-01",
         end="2000-01-10",
@@ -1014,10 +1069,10 @@ async def test_heartbeat(c, s, a, b):
     assert s.plugins["shuffle"].heartbeats.values()
     await out
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
     del out
-    await check_scheduler_cleanup(s)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.skipif("not pa", reason="Requires PyArrow")
@@ -1084,6 +1139,9 @@ def test_processing_chain(tmp_path, drop_column):
         ),
         f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
         f"col{next(counter)}": pd.array(["lorem ipsum"] * 100, dtype="string"),
+        # Extension types
+        f"col{next(counter)}": pd.period_range("2022-01-01", periods=100, freq="D"),
+        f"col{next(counter)}": pd.interval_range(start=0, end=100, freq=1),
         # FIXME: PyArrow does not support sparse data:
         #        https://issues.apache.org/jira/browse/ARROW-8679
         # f"col{next(counter)}": pd.array(
@@ -1097,52 +1155,38 @@ def test_processing_chain(tmp_path, drop_column):
         # ),
     }
 
-    if PYARROW_GE_12:
-        columns.update(
-            {
-                # Extension types
-                f"col{next(counter)}": pd.period_range(
-                    "2022-01-01", periods=100, freq="D"
-                ),
-                f"col{next(counter)}": pd.interval_range(start=0, end=100, freq=1),
-            }
-        )
-
-    if PANDAS_GE_150:
-        columns.update(
-            {
-                # PyArrow dtypes
-                f"col{next(counter)}": pd.array(
-                    [True, False] * 50, dtype="bool[pyarrow]"
-                ),
-                f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
-                f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
-                f"col{next(counter)}": pd.array(
-                    [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
-                    dtype=pd.ArrowDtype(pa.timestamp("ms")),
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype="string[pyarrow]",
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype=pd.StringDtype("pyarrow"),
-                ),
-                f"col{next(counter)}": pd.array(
-                    ["lorem ipsum"] * 100,
-                    dtype="string[python]",
-                ),
-            }
-        )
+    columns.update(
+        {
+            # PyArrow dtypes
+            f"col{next(counter)}": pd.array([True, False] * 50, dtype="bool[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int8[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int16[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="int64[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint8[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint16[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="uint64[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float32[pyarrow]"),
+            f"col{next(counter)}": pd.array(range(100), dtype="float64[pyarrow]"),
+            f"col{next(counter)}": pd.array(
+                [pd.Timestamp.fromtimestamp(1641034800 + i) for i in range(100)],
+                dtype=pd.ArrowDtype(pa.timestamp("ms")),
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[pyarrow]",
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype=pd.StringDtype("pyarrow"),
+            ),
+            f"col{next(counter)}": pd.array(
+                ["lorem ipsum"] * 100,
+                dtype="string[python]",
+            ),
+        }
+    )
 
     df = pd.DataFrame(columns)
     df["_partitions"] = df.col4 % npartitions
@@ -1225,10 +1269,10 @@ async def test_head(c, s, a, b):
     assert list(os.walk(a.local_directory)) == a_files  # cleaned up files?
     assert list(os.walk(b.local_directory)) == b_files
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
     del out
-    await check_scheduler_cleanup(s)
+    await assert_scheduler_cleanup(s)
 
 
 def test_split_by_worker():
@@ -1332,9 +1376,9 @@ async def test_clean_after_forgotten_early(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, a)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
     del out
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -1357,9 +1401,9 @@ async def test_tail(c, s, a, b):
     assert len(s.tasks) < ntasks_full
     del partial
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
@@ -1387,9 +1431,9 @@ async def test_repeat_shuffle_instance(c, s, a, b, wait_until_forgotten):
 
     await c.compute(out)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.parametrize("wait_until_forgotten", [True, False])
@@ -1418,9 +1462,9 @@ async def test_repeat_shuffle_operation(c, s, a, b, wait_until_forgotten):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         await c.compute(df.shuffle("x"))
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -1465,8 +1509,8 @@ async def test_crashed_worker_after_shuffle(c, s, a):
         assert result == expected
 
         await c.close()
-        await check_worker_cleanup(a)
-        await check_scheduler_cleanup(s)
+        await assert_worker_cleanup(a)
+        await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -1494,8 +1538,8 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
         assert result == expected
 
         await c.close()
-        await check_worker_cleanup(a)
-        await check_scheduler_cleanup(s)
+        await assert_worker_cleanup(a)
+        await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)] * 3)
@@ -1511,25 +1555,22 @@ async def test_closed_worker_between_repeats(c, s, w1, w2, w3):
         out = df.shuffle("x")
     await c.compute(out.head(compute=False))
 
-    await check_worker_cleanup(w1)
-    await check_worker_cleanup(w2)
-    await check_worker_cleanup(w3)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(w1)
+    await assert_worker_cleanup(w2)
+    await assert_worker_cleanup(w3)
+    await assert_scheduler_cleanup(s)
 
-    await w3.close()
+    await assert_worker_cleanup(w3, close=True)
     await c.compute(out.tail(compute=False))
 
-    await check_worker_cleanup(w1)
-    await check_worker_cleanup(w2)
-    await check_worker_cleanup(w3, closed=True)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(w1)
+    await assert_worker_cleanup(w2)
+    await assert_scheduler_cleanup(s)
 
-    await w2.close()
+    await assert_worker_cleanup(w2, close=True)
     await c.compute(out.head(compute=False))
-    await check_worker_cleanup(w1)
-    await check_worker_cleanup(w2, closed=True)
-    await check_worker_cleanup(w3, closed=True)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(w1)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -1549,11 +1590,11 @@ async def test_new_worker(c, s, a, b):
     async with Worker(s.address) as w:
         await c.compute(persisted)
 
-        await check_worker_cleanup(a)
-        await check_worker_cleanup(b)
-        await check_worker_cleanup(w)
+        await assert_worker_cleanup(a)
+        await assert_worker_cleanup(b)
+        await assert_worker_cleanup(w)
         del persisted
-        await check_scheduler_cleanup(s)
+        await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -1577,9 +1618,9 @@ async def test_multi(c, s, a, b):
     out = await c.compute(out.size)
     assert out
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.skipif(
@@ -1627,10 +1668,10 @@ async def test_delete_some_results(c, s, a, b):
     x = x.partitions[: x.npartitions // 2]
     x = await c.compute(x.size)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
     del x
-    await check_scheduler_cleanup(s)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -1652,11 +1693,11 @@ async def test_add_some_results(c, s, a, b):
 
     await c.compute(x.size)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
     del x
     del y
-    await check_scheduler_cleanup(s)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.slow
@@ -1676,12 +1717,11 @@ async def test_clean_after_close(c, s, a, b):
     await wait_for_tasks_in_state("shuffle-transfer", "executing", 1, a)
     await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
 
-    await a.close()
-    await check_worker_cleanup(a, closed=True)
+    await assert_worker_cleanup(a, close=True)
 
     del out
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 class DataFrameShuffleTestPool(AbstractShuffleTestPool):
@@ -1911,7 +1951,7 @@ async def test_error_send(tmp_path, loop_in_thread):
         partitions_for_worker[w].append(part)
 
     class ErrorSend(DataFrameShuffleRun):
-        async def send(self, *args: Any, **kwargs: Any) -> None:
+        async def send(self, *args: Any, **kwargs: Any) -> OKMessage | ErrorMessage:
             raise RuntimeError("Error during send")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
@@ -1943,8 +1983,9 @@ async def test_error_send(tmp_path, loop_in_thread):
 
 
 @pytest.mark.skipif(not pa, reason="Requires PyArrow")
+@pytest.mark.parametrize("Error", [P2PConsistencyError, ValueError])
 @gen_test()
-async def test_error_receive(tmp_path, loop_in_thread):
+async def test_error_receive(tmp_path, loop_in_thread, Error):
     dfs = []
     rows_per_df = 10
     n_input_partitions = 1
@@ -1968,7 +2009,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
 
     class ErrorReceive(DataFrameShuffleRun):
         async def _receive(self, data: list[tuple[int, bytes]]) -> None:
-            raise RuntimeError("Error during receive")
+            raise Error("Error during receive")
 
     with DataFrameShuffleTestPool() as local_shuffle_pool:
         sA = local_shuffle_pool.new_shuffle(
@@ -1992,7 +2033,7 @@ async def test_error_receive(tmp_path, loop_in_thread):
         )
         try:
             sB.add_partition(dfs[0], 0)
-            with pytest.raises(RuntimeError, match="Error during receive"):
+            with pytest.raises(Error, match="Error during receive"):
                 await sB.barrier(run_ids=[sB.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
@@ -2004,7 +2045,9 @@ class BlockedShuffleReceiveShuffleWorkerPlugin(ShuffleWorkerPlugin):
         self.in_shuffle_receive = asyncio.Event()
         self.block_shuffle_receive = asyncio.Event()
 
-    async def shuffle_receive(self, *args: Any, **kwargs: Any) -> None:
+    async def shuffle_receive(
+        self, *args: Any, **kwargs: Any
+    ) -> OKMessage | ErrorMessage:
         self.in_shuffle_receive.set()
         await self.block_shuffle_receive.wait()
         return await super().shuffle_receive(*args, **kwargs)
@@ -2045,9 +2088,9 @@ async def test_deduplicate_stale_transfer(c, s, a, b, wait_until_forgotten):
     expected = await c.compute(df)
     dd.assert_eq(result, expected)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 class BlockedBarrierShuffleWorkerPlugin(ShuffleWorkerPlugin):
@@ -2102,9 +2145,9 @@ async def test_handle_stale_barrier(c, s, a, b, wait_until_forgotten):
     result, expected = await fut
     dd.assert_eq(result, expected)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -2136,7 +2179,7 @@ async def test_shuffle_run_consistency(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
 
     # Shuffle run manager can fetch the current run
     assert await run_manager.get_with_run_id(shuffle_id, spec.run_id)
@@ -2162,7 +2205,7 @@ async def test_shuffle_run_consistency(c, s, a):
     new_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id == new_shuffle_id
 
-    new_spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    new_spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
 
     # Check invariant that the new run ID is larger than the previous
     assert spec.run_id < new_spec.run_id
@@ -2188,7 +2231,9 @@ async def test_shuffle_run_consistency(c, s, a):
     independent_shuffle_id = await wait_until_new_shuffle_is_initialized(s)
     assert shuffle_id != independent_shuffle_id
 
-    independent_spec = scheduler_ext.get(independent_shuffle_id, a.worker_address).data
+    independent_spec = scheduler_ext.get(independent_shuffle_id, a.worker_address)[
+        "run_spec"
+    ].data
 
     # Check invariant that the new run ID is larger than the previous
     # for independent shuffles
@@ -2198,8 +2243,8 @@ async def test_shuffle_run_consistency(c, s, a):
     await out
     del out
 
-    await check_worker_cleanup(a)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -2228,7 +2273,7 @@ async def test_fail_fetch_race(c, s, a):
     out = out.persist()
 
     shuffle_id = await wait_until_new_shuffle_is_initialized(s)
-    spec = scheduler_ext.get(shuffle_id, a.worker_address).data
+    spec = scheduler_ext.get(shuffle_id, a.worker_address)["run_spec"].data
     await worker_plugin.in_barrier.wait()
     # Pretend that the fail from the scheduler arrives first
     run_manager.fail(shuffle_id, spec.run_id, "error")
@@ -2245,8 +2290,8 @@ async def test_fail_fetch_race(c, s, a):
     worker_plugin.block_barrier.set()
     del out
 
-    await check_worker_cleanup(a)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_scheduler_cleanup(s)
 
 
 class BlockedShuffleAccessAndFailShuffleRunManager(_ShuffleRunManager):
@@ -2321,7 +2366,7 @@ async def test_replace_stale_shuffle(c, s, a, b):
         await asyncio.sleep(0)
 
     # A is cleaned
-    await check_worker_cleanup(a)
+    await assert_worker_cleanup(a)
 
     # B is not cleaned
     assert shuffle_id in get_active_shuffle_runs(b)
@@ -2352,12 +2397,11 @@ async def test_replace_stale_shuffle(c, s, a, b):
     await out
     del out
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
-@pytest.mark.skipif(not PANDAS_GE_200, reason="requires pandas >=2.0")
 @gen_cluster(client=True)
 async def test_handle_null_partitions(c, s, a, b):
     data = [
@@ -2373,9 +2417,9 @@ async def test_handle_null_partitions(c, s, a, b):
     result = await c.compute(ddf)
     dd.assert_eq(result, df)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -2396,9 +2440,9 @@ async def test_handle_null_partitions_2(c, s, a, b):
     expected = await expected
     dd.assert_eq(result, expected)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -2425,9 +2469,9 @@ async def test_handle_object_columns(c, s, a, b):
         result = await c.compute(shuffled)
     dd.assert_eq(result, df)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -2444,23 +2488,16 @@ async def test_reconcile_partitions(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
 
-    if PYARROW_GE_14:
-        result, expected = c.compute([ddf, out])
-        result = await result
-        expected = await expected
-        dd.assert_eq(result, expected)
-        del result
-    else:
-        with raises_with_cause(
-            RuntimeError, r"shuffling \w+ failed", pa.ArrowInvalid, "incompatible types"
-        ):
-            await c.compute(out)
-        await c.close()
+    result, expected = c.compute([ddf, out])
+    result = await result
+    expected = await expected
+    dd.assert_eq(result, expected)
+    del result
     del out
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -2478,15 +2515,15 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
     with raises_with_cause(
         RuntimeError,
         r"(shuffling \w*|shuffle_barrier) failed",
-        pa.ArrowTypeError if PYARROW_GE_14 else pa.ArrowInvalid,
+        pa.ArrowTypeError,
         "incompatible types",
     ):
         await c.compute(out)
 
     await c.close()
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -2511,9 +2548,9 @@ async def test_handle_categorical_data(c, s, a, b):
     result, expected = await c.compute([shuffled, df], sync=True)
     dd.assert_eq(result, expected, check_categorical=False)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(client=True)
@@ -2549,8 +2586,8 @@ async def test_set_index(c, s, *workers):
     dd.assert_eq(result, df.set_index("a"))
 
     await c.close()
-    await asyncio.gather(*[check_worker_cleanup(w) for w in workers])
-    await check_scheduler_cleanup(s)
+    await asyncio.gather(*[assert_worker_cleanup(w) for w in workers])
+    await assert_scheduler_cleanup(s)
 
 
 def test_shuffle_with_existing_index(client):
@@ -2648,33 +2685,6 @@ class BlockedBarrierShuffleSchedulerPlugin(ShuffleSchedulerPlugin):
         return await super().barrier(id, run_id, consistent)
 
 
-@gen_cluster(client=True)
-async def test_unpack_is_non_rootish(c, s, a, b):
-    with pytest.warns(UserWarning):
-        scheduler_plugin = BlockedBarrierShuffleSchedulerPlugin(s)
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-21",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
-    )
-    df = df.shuffle("x")
-    result = c.compute(df)
-
-    await scheduler_plugin.in_barrier.wait()
-
-    unpack_tss = [ts for key, ts in s.tasks.items() if key_split(key) == UNPACK_PREFIX]
-    assert len(unpack_tss) == 20
-    assert not any(s.is_rootish(ts) for ts in unpack_tss)
-    del unpack_tss
-    scheduler_plugin.block_barrier.set()
-    result = await result
-
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
-
-
 class FlakyConnectionPool(ConnectionPool):
     def __init__(self, *args, failing_connects=0, **kwargs):
         self.attempts = 0
@@ -2720,10 +2730,10 @@ async def test_flaky_connect_fails_without_retry(c, s, a, b):
         ):
             await c.compute(x)
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
     await c.close()
-    await check_scheduler_cleanup(s)
+    await assert_scheduler_cleanup(s)
 
 
 @gen_cluster(
@@ -2752,9 +2762,9 @@ async def test_flaky_connect_recover_with_retry(c, s, a, b):
         assert len(line) < 250
         assert not line or line.startswith("Retrying")
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 class BlockedAfterGatherDep(Worker):
@@ -2829,9 +2839,9 @@ async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
     for _, group in result.groupby("b"):
         assert group["a"].is_monotonic_increasing
 
-    await check_worker_cleanup(a)
-    await check_worker_cleanup(b)
-    await check_scheduler_cleanup(s)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
 
 
 @pytest.mark.parametrize("disk", [True, False])

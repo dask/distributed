@@ -14,11 +14,10 @@ from distributed.shuffle._core import ShuffleId, ShuffleSpec, id_from_key
 from distributed.shuffle._worker_plugin import ShuffleRun, _ShuffleRunManager
 from distributed.utils_test import gen_cluster
 
-dd = pytest.importorskip("dask.dataframe")
-import pandas as pd
-
+pd = pytest.importorskip("pandas")
 import dask
-from dask.dataframe._compat import PANDAS_GE_200, tm
+import dask.dataframe as dd
+from dask.dataframe._compat import tm
 from dask.dataframe.utils import assert_eq
 
 from distributed import get_client
@@ -62,9 +61,10 @@ async def test_minimal_version(c, s, a, b):
         B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
         b = dd.repartition(B, [0, 2, 5])
 
-        with pytest.raises(
-            ModuleNotFoundError, match="requires pyarrow"
-        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        with (
+            pytest.raises(ModuleNotFoundError, match="requires pyarrow"),
+            dask.config.set({"dataframe.shuffle.method": "p2p"}),
+        ):
             await c.compute(dd.merge(a, b, left_on="x", right_on="z"))
 
 
@@ -294,7 +294,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                     # FIXME: There's an discrepancy with an empty index for
                     # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                     # Temporarily avoid index check until the discrepancy is fixed.
-                    check_index=not (PANDAS_GE_200 and expected.index.empty),
+                    check_index=not expected.index.empty,
                 )
 
                 expected = pdr.join(pdl, how=how)
@@ -304,7 +304,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                     # FIXME: There's an discrepancy with an empty index for
                     # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                     # Temporarily avoid index check until the discrepancy is fixed.
-                    check_index=not (PANDAS_GE_200 and expected.index.empty),
+                    check_index=not expected.index.empty,
                 )
 
                 expected = pd.merge(
@@ -324,7 +324,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                     # FIXME: There's an discrepancy with an empty index for
                     # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                     # Temporarily avoid index check until the discrepancy is fixed.
-                    check_index=not (PANDAS_GE_200 and expected.index.empty),
+                    check_index=not expected.index.empty,
                 )
 
                 expected = pd.merge(
@@ -344,7 +344,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                     # FIXME: There's an discrepancy with an empty index for
                     # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                     # Temporarily avoid index check until the discrepancy is fixed.
-                    check_index=not (PANDAS_GE_200 and expected.index.empty),
+                    check_index=not expected.index.empty,
                 )
 
                 # hash join

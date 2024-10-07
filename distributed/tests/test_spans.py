@@ -8,7 +8,7 @@ import dask
 from dask import delayed
 
 import distributed
-from distributed import Client, Event, Future, Worker, span, wait
+from distributed import Client, Event, Worker, span, wait
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.utils_test import (
     NoSchedulerDelayWorker,
@@ -214,7 +214,9 @@ async def test_no_extension(c, s, a, b):
     config={"optimization.fuse.active": False},
 )
 async def test_task_groups(c, s, a, b, release, no_time_resync):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     t0 = await padded_time(before=0)
 
     with span("wf"):
@@ -385,54 +387,12 @@ def test_no_tags():
 
 
 @gen_cluster(client=True)
-async def test_client_desires_keys_creates_ts(c, s, a, b):
-    """A TaskState object is created by client_desires_keys, and
-    is only later submitted with submit/compute by a different client
-
-    See also
-    --------
-    test_scheduler.py::test_client_desires_keys_creates_ts
-    test_spans.py::test_client_desires_keys_creates_tg
-    test_spans.py::test_scatter_creates_ts
-    test_spans.py::test_scatter_creates_tg
-    """
-    x = Future(key="x")
-    await wait_for_state("x", "released", s)
-    assert s.tasks["x"].group.span_id is None
-    async with Client(s.address, asynchronous=True) as c2:
-        c2.submit(inc, 1, key="x")
-        assert await x == 2
-    assert s.tasks["x"].group.span_id is not None
-
-
-@gen_cluster(client=True)
-async def test_client_desires_keys_creates_tg(c, s, a, b):
-    """A TaskGroup object is created by client_desires_keys, and
-    only later gains runnable tasks
-
-    See also
-    --------
-    test_spans.py::test_client_desires_keys_creates_ts
-    test_spans.py::test_scatter_creates_ts
-    test_spans.py::test_scatter_creates_tg
-    """
-    x0 = Future(key="x-0")
-    await wait_for_state("x-0", "released", s)
-    assert s.tasks["x-0"].group.span_id is None
-    x1 = c.submit(inc, 1, key="x-1")
-    assert await x1 == 2
-    assert s.tasks["x-0"].group.span_id is not None
-
-
-@gen_cluster(client=True)
 async def test_scatter_creates_ts(c, s, a, b):
     """A TaskState object is created by scatter, and only later becomes runnable
 
     See also
     --------
     test_scheduler.py::test_scatter_creates_ts
-    test_spans.py::test_client_desires_keys_creates_ts
-    test_spans.py::test_client_desires_keys_creates_tg
     test_spans.py::test_scatter_creates_tg
     """
     x1 = (await c.scatter({"x": 1}, workers=[a.address]))["x"]
@@ -452,8 +412,6 @@ async def test_scatter_creates_tg(c, s, a, b):
 
     See also
     --------
-    test_spans.py::test_client_desires_keys_creates_ts
-    test_spans.py::test_client_desires_keys_creates_tg
     test_spans.py::test_scatter_creates_ts
     """
     x0 = (await c.scatter({"x-0": 1}))["x-0"]
@@ -859,3 +817,26 @@ async def test_span_on_persist(c, s, a, b):
 
     assert s.tasks["x"].group.span_id == x_id
     assert s.tasks["y"].group.span_id == y_id
+
+
+@pytest.mark.filterwarnings("ignore:Dask annotations")
+@gen_cluster(client=True)
+async def test_collections_metadata(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+    df = pd.DataFrame(
+        {"x": np.random.random(1000), "y": np.random.random(1000)},
+        index=np.arange(1000),
+    )
+    ldf = dd.from_pandas(df, npartitions=10)
+
+    with span("foo") as span_id:
+        await c.compute(ldf)
+
+    ext = s.extensions["spans"]
+    span_ = ext.spans[span_id]
+    collections_meta = span_.metadata["collections"]
+    assert isinstance(collections_meta, list)
+    assert len(collections_meta) == 1
+    assert collections_meta[0]["type"] == type(ldf).__name__

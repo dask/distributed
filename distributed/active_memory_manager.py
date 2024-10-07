@@ -4,6 +4,7 @@ sends drop/replicate suggestions to the worker.
 See also :mod:`distributed.worker_memory` and :mod:`distributed.spill`, which implement
 spill/pause/terminate mechanics on the Worker side.
 """
+
 from __future__ import annotations
 
 import abc
@@ -392,12 +393,12 @@ class ActiveMemoryManagerExtension:
         logger.debug("Enacting suggestions for %d tasks:", len(self.pending))
 
         validate = self.scheduler.validate
-        drop_by_worker: (
-            defaultdict[scheduler_module.WorkerState, list[Key]]
-        ) = defaultdict(list)
-        repl_by_worker: (
-            defaultdict[scheduler_module.WorkerState, list[Key]]
-        ) = defaultdict(list)
+        drop_by_worker: defaultdict[scheduler_module.WorkerState, list[Key]] = (
+            defaultdict(list)
+        )
+        repl_by_worker: defaultdict[scheduler_module.WorkerState, list[Key]] = (
+            defaultdict(list)
+        )
 
         for ts, (pending_repl, pending_drop) in self.pending.items():
             if not ts.who_has:

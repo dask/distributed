@@ -325,3 +325,12 @@ async def test_unpickle_without_client(s):
         obj3 = pickle.loads(pickled)
         await obj3.set(42)
         assert await obj3.get() == 42
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_set_cancelled_future(c, s):
+    x = c.submit(inc, 1)
+    await x.cancel()
+    v = Variable("x")
+    with pytest.raises(TimeoutError):
+        await v.set(x, timeout="5ms")

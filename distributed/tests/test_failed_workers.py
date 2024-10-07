@@ -216,9 +216,10 @@ def test_worker_doesnt_await_task_completion(loop):
 
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_multiple_clients_restart(s, a, b):
-    async with Client(s.address, asynchronous=True) as c1, Client(
-        s.address, asynchronous=True
-    ) as c2:
+    async with (
+        Client(s.address, asynchronous=True) as c1,
+        Client(s.address, asynchronous=True) as c2,
+    ):
         x = c1.submit(inc, 1)
         y = c2.submit(inc, 2)
         xx = await x
@@ -456,6 +457,10 @@ async def test_worker_time_to_live(c, s, a, b):
     # Note that this value is ignored because is less than 10x heartbeat_interval
     assert s.worker_ttl == 0.5
     assert set(s.workers) == {a.address, b.address}
+    assert all(
+        event["action"] != "worker-ttl-timed-out"
+        for _, event in s.get_events("scheduler")
+    )
 
     a.periodic_callbacks["heartbeat"].stop()
 
@@ -463,6 +468,18 @@ async def test_worker_time_to_live(c, s, a, b):
     while set(s.workers) == {a.address, b.address}:
         await asyncio.sleep(0.01)
     assert set(s.workers) == {b.address}
+    events = [
+        event
+        for _, event in s.get_events("scheduler")
+        if event["action"] == "worker-ttl-timed-out"
+    ]
+    assert len(events) == 1
+    # This event includes the actual TTL that we applied, i.e, 10 * heartbeat.
+    assert events[0] == {
+        "action": "worker-ttl-timed-out",
+        "workers": [a.address],
+        "ttl": 5.0,
+    }
 
     # Worker removal is triggered after 10 * heartbeat
     # This is 10 * 0.5s at the moment of writing.

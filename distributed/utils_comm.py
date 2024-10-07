@@ -269,6 +269,13 @@ def _unpack_remotedata_inner(
         return o
 
 
+class DoNotUnpack(tuple):
+    """A tuple sublass to indicate that we should not unpack its contents
+
+    See also unpack_remotedata
+    """
+
+
 def unpack_remotedata(o: Any, byte_keys: bool = False) -> tuple[Any, set]:
     """Unpack WrappedKey objects from collection
 
@@ -378,8 +385,10 @@ async def retry(
     delay_min: float,
     delay_max: float,
     jitter_fraction: float = 0.1,
-    retry_on_exceptions: type[BaseException]
-    | tuple[type[BaseException], ...] = (EnvironmentError, IOError),
+    retry_on_exceptions: type[BaseException] | tuple[type[BaseException], ...] = (
+        EnvironmentError,
+        IOError,
+    ),
     operation: str | None = None,
 ) -> T:
     """

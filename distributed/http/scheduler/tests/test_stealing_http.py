@@ -53,7 +53,7 @@ async def test_prometheus_collect_count_total_by_cost_multipliers(c, s, a, b):
     count = sum(active_metrics.values())
     assert count > 0
     expected_count = sum(
-        len(event[1]) for _, event in s.events["stealing"] if event[0] == "request"
+        len(event[1]) for _, event in s.get_events("stealing") if event[0] == "request"
     )
     assert count == expected_count
 
@@ -87,11 +87,11 @@ async def test_prometheus_collect_cost_total_by_cost_multipliers(c, s, a, b):
     assert count > 0
     expected_cost = sum(
         request[3]
-        for _, event in s.events["stealing"]
+        for _, event in s.get_events("stealing")
         for request in event[1]
         if event[0] == "request"
     )
-    assert count == expected_cost
+    assert count == pytest.approx(expected_cost)
 
 
 @gen_cluster(

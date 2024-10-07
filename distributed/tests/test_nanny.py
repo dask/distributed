@@ -22,7 +22,7 @@ from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, profile, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
-from distributed.core import CommClosedError, Status, error_message
+from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.diagnostics.plugin import NannyPlugin, WorkerPlugin
 from distributed.metrics import time
@@ -208,25 +208,47 @@ async def test_scheduler_file():
         s.stop()
 
 
-@pytest.mark.xfail(
-    os.environ.get("MINDEPS") == "true",
-    reason="Timeout errors with mindeps environment",
-)
-@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 2)])
-async def test_nanny_timeout(c, s, a):
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_nanny_restart(c, s, a):
+    x = await c.scatter(123)
+    assert await c.submit(lambda: 1) == 1
+
+    await a.restart()
+
+    while x.status != "cancelled":
+        await asyncio.sleep(0.1)
+
+    assert await c.submit(lambda: 1) == 1
+
+
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_nanny_restart_timeout(c, s, a):
     x = await c.scatter(123)
     with captured_logger(
         logging.getLogger("distributed.nanny"), level=logging.ERROR
     ) as logger:
-        await a.restart(timeout=0.1)
+        await a.restart(timeout=0)
 
     out = logger.getvalue()
     assert "timed out" in out.lower()
 
-    start = time()
     while x.status != "cancelled":
         await asyncio.sleep(0.1)
-        assert time() < start + 7
+
+    assert await c.submit(lambda: 1) == 1
+
+
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_nanny_restart_timeout_stress(c, s, a):
+    x = await c.scatter(123)
+    restarts = [a.restart(timeout=random.random()) for _ in range(100)]
+    await asyncio.gather(*restarts)
+
+    while x.status != "cancelled":
+        await asyncio.sleep(0.1)
+
+    assert await c.submit(lambda: 1) == 1
+    assert len(s.workers) == 1
 
 
 @gen_cluster(
@@ -554,7 +576,7 @@ async def test_nanny_closed_by_keyboard_interrupt(ucx_loop, protocol):
         ) as n:
             await n.process.stopped.wait()
             # Check that the scheduler has been notified about the closed worker
-            assert "remove-worker" in str(s.events)
+            assert "remove-worker" in str(s.get_events())
 
 
 class BrokenWorker(worker.Worker):
@@ -574,6 +596,34 @@ async def test_worker_start_exception(s):
         ):
             async with nanny:
                 pass
+    assert nanny.status == Status.failed
+    # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
+    assert nanny.process is None
+    assert "Restarting worker" not in logs.getvalue()
+    # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
+    assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
+
+
+@gen_cluster(nthreads=[])
+async def test_worker_start_exception_while_killing(s):
+    nanny = Nanny(s.address, worker_class=BrokenWorker)
+
+    async def try_to_kill_nanny():
+        while not nanny.process or nanny.process.status != Status.starting:
+            await asyncio.sleep(0)
+        await nanny.kill()
+
+    kill_task = asyncio.create_task(try_to_kill_nanny())
+    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
+        with raises_with_cause(
+            RuntimeError,
+            "Nanny failed to start",
+            RuntimeError,
+            "BrokenWorker failed to start",
+        ):
+            async with nanny:
+                pass
+    await kill_task
     assert nanny.status == Status.failed
     # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
     assert nanny.process is None
@@ -746,7 +796,9 @@ async def test_malloc_trim_threshold(c, s, a):
     This test may start failing in a future Python version if CPython switches to
     using mimalloc by default. If it does, a thorough benchmarking exercise is needed.
     """
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     arr = da.random.random(2**29 // 8, chunks="512 kiB")  # 0.5 GiB
     arr = arr.persist()
     await wait(arr)
@@ -796,36 +848,6 @@ async def test_worker_inherits_temp_config(c, s):
         async with Nanny(s.address):
             out = await c.submit(lambda: dask.config.get("test123"))
             assert out == 123
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_log_event(c, s):
-    async with Nanny(s.address) as n:
-        n.log_event("test-topic1", "foo")
-
-        class C:
-            pass
-
-        with pytest.raises(TypeError, match="msgpack"):
-            n.log_event("test-topic2", C())
-        n.log_event("test-topic3", "bar")
-        n.log_event("test-topic4", error_message(Exception()))
-
-        # Worker unaffected
-        assert await c.submit(lambda x: x + 1, 1) == 2
-
-    assert [msg[1] for msg in s.get_events("test-topic1")] == ["foo"]
-    assert [msg[1] for msg in s.get_events("test-topic3")] == ["bar"]
-    # assertion reversed for mock.ANY.__eq__(Serialized())
-    assert [
-        {
-            "status": "error",
-            "exception": mock.ANY,
-            "traceback": mock.ANY,
-            "exception_text": "Exception()",
-            "traceback_text": "",
-        },
-    ] == [msg[1] for msg in s.get_events("test-topic4")]
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)

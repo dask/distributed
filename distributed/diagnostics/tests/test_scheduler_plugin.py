@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from distributed import Nanny, Scheduler, SchedulerPlugin, Worker, get_worker
+from distributed import Nanny, Scheduler, SchedulerPlugin, Worker
 from distributed.protocol.pickle import dumps
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
@@ -433,26 +433,6 @@ async def test_unregister_scheduler_plugin_from_client(c, s, a, b):
 
     with pytest.raises(ValueError, match="Could not find plugin"):
         await c.unregister_scheduler_plugin(name="plugin")
-
-
-@gen_cluster(client=True)
-async def test_log_event_plugin(c, s, a, b):
-    class EventPlugin(SchedulerPlugin):
-        async def start(self, scheduler: Scheduler) -> None:
-            self.scheduler = scheduler
-            self.scheduler._recorded_events = list()  # type: ignore
-
-        def log_event(self, name, msg):
-            self.scheduler._recorded_events.append((name, msg))
-
-    await c.register_plugin(EventPlugin())
-
-    def f():
-        get_worker().log_event("foo", 123)
-
-    await c.submit(f)
-
-    assert ("foo", 123) in s._recorded_events
 
 
 @gen_cluster(client=True)

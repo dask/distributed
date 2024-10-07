@@ -22,6 +22,8 @@ ignore =
     B028
     # do not compare types, for exact checks use `is` / `is not`, for instance checks use `isinstance()`
     E721
+    # multiple statements on one line; required for black compat
+    E701, E704
 
 per-file-ignores =
     **/tests/*:

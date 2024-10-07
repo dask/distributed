@@ -184,35 +184,44 @@ def test_transports_tcp_port(loop):
 
 
 def test_cores(loop):
-    with LocalCluster(
-        n_workers=2,
-        scheduler_port=0,
-        silence_logs=False,
-        dashboard_address=":0",
-        processes=False,
-        loop=loop,
-    ) as cluster, Client(cluster.scheduler_address, loop=loop) as client:
+    with (
+        LocalCluster(
+            n_workers=2,
+            scheduler_port=0,
+            silence_logs=False,
+            dashboard_address=":0",
+            processes=False,
+            loop=loop,
+        ) as cluster,
+        Client(cluster.scheduler_address, loop=loop) as client,
+    ):
         client.scheduler_info()
         assert len(client.nthreads()) == 2
 
 
 def test_submit(loop):
-    with LocalCluster(
-        n_workers=2,
-        scheduler_port=0,
-        silence_logs=False,
-        dashboard_address=":0",
-        processes=False,
-        loop=loop,
-    ) as cluster, Client(cluster.scheduler_address, loop=loop) as client:
+    with (
+        LocalCluster(
+            n_workers=2,
+            scheduler_port=0,
+            silence_logs=False,
+            dashboard_address=":0",
+            processes=False,
+            loop=loop,
+        ) as cluster,
+        Client(cluster.scheduler_address, loop=loop) as client,
+    ):
         future = client.submit(lambda x: x + 1, 1)
         assert future.result() == 2
 
 
 def test_context_manager(loop):
-    with LocalCluster(
-        silence_logs=False, dashboard_address=":0", processes=False, loop=loop
-    ) as c, Client(c) as e:
+    with (
+        LocalCluster(
+            silence_logs=False, dashboard_address=":0", processes=False, loop=loop
+        ) as c,
+        Client(c) as e,
+    ):
         assert e.nthreads()
 
 
@@ -829,14 +838,17 @@ async def test_scale_retires_workers():
         def scale_down(self, *args, **kwargs):
             pass
 
-    async with MyCluster(
-        n_workers=0,
-        processes=False,
-        silence_logs=False,
-        dashboard_address=":0",
-        loop=None,
-        asynchronous=True,
-    ) as cluster, Client(cluster, asynchronous=True) as c:
+    async with (
+        MyCluster(
+            n_workers=0,
+            processes=False,
+            silence_logs=False,
+            dashboard_address=":0",
+            loop=None,
+            asynchronous=True,
+        ) as cluster,
+        Client(cluster, asynchronous=True) as c,
+    ):
         assert not cluster.workers
 
         await cluster.scale(2)

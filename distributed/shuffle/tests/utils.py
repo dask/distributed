@@ -32,7 +32,7 @@ class PooledRPCShuffle(PooledRPCCall):
             # here.
             kwargs = _nested_deserialize(kwargs)
             meth = getattr(self.shuffle, method_name)
-            return await meth(**kwargs)
+            return _nested_deserialize(await meth(**kwargs))
 
         return _
 
