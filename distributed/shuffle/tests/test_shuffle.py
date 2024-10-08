@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import itertools
 import logging
 import os
@@ -21,6 +22,7 @@ import dask
 from dask.utils import key_split
 
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
+from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.worker import Status
 
 np = pytest.importorskip("numpy")
@@ -47,7 +49,7 @@ from distributed.shuffle._arrow import (
     read_from_disk,
     serialize_table,
 )
-from distributed.shuffle._exceptions import P2PConsistencyError
+from distributed.shuffle._exceptions import P2PConsistencyError, P2POutOfDiskError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._shuffle import (
@@ -2037,6 +2039,35 @@ async def test_error_receive(tmp_path, loop_in_thread, Error):
                 await sB.barrier(run_ids=[sB.run_id])
         finally:
             await asyncio.gather(*[s.close() for s in [sA, sB]])
+
+
+@gen_cluster(client=True)
+async def test_meaningful_out_of_disk_error(c, s, a, b):
+    class OutOfDiskShardsBuffer(DiskShardsBuffer):
+        def _write_frames(self, frames, id):
+            code = errno.ENOSPC
+            raise OSError(code, os.strerror(code))
+
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-01-10",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": True}
+    ):
+        shuffled = df.shuffle("x", npartitions=10)
+    with pytest.raises(P2POutOfDiskError, match="out of available disk space"):
+        with mock.patch(
+            "distributed.shuffle._core.DiskShardsBuffer",
+            OutOfDiskShardsBuffer,
+        ):
+            await c.compute(shuffled)
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await c.close()
+    await assert_scheduler_cleanup(s)
 
 
 class BlockedShuffleReceiveShuffleWorkerPlugin(ShuffleWorkerPlugin):

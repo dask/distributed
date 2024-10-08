@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import pathlib
 import shutil
 import threading
@@ -12,7 +13,7 @@ from toolz import concat
 
 from distributed.metrics import context_meter, thread_time
 from distributed.shuffle._buffer import ShardsBuffer
-from distributed.shuffle._exceptions import DataUnavailable
+from distributed.shuffle._exceptions import DataUnavailable, P2POutOfDiskError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import pickle_bytelist
 from distributed.utils import Deadline, empty_context, log_errors, nbytes
@@ -177,11 +178,20 @@ class DiskShardsBuffer(ShardsBuffer):
             if self._closed:
                 raise RuntimeError("Already closed")
 
-            with open(self.directory / str(id), mode="ab") as f:
-                f.writelines(frames)
-
+            try:
+                self._write_frames(frames, id)
+            except OSError as e:
+                if e.errno == errno.ENOSPC:
+                    raise P2POutOfDiskError from e
+                raise
         context_meter.digest_metric("disk-write", 1, "count")
         context_meter.digest_metric("disk-write", sum(map(nbytes, frames)), "bytes")
+
+    def _write_frames(
+        self, frames: Iterable[bytes | bytearray | memoryview], id: str
+    ) -> None:
+        with open(self.directory / str(id), mode="ab") as f:
+            f.writelines(frames)
 
     def read(self, id: str) -> Any:
         """Read a complete file back into memory"""

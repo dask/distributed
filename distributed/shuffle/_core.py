@@ -36,7 +36,11 @@ from distributed.protocol import to_serialize
 from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
-from distributed.shuffle._exceptions import P2PConsistencyError, ShuffleClosedError
+from distributed.shuffle._exceptions import (
+    P2PConsistencyError,
+    P2POutOfDiskError,
+    ShuffleClosedError,
+)
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
 from distributed.utils import run_in_executor_with_context, sync
@@ -508,6 +512,8 @@ def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
         raise Reschedule()
     except P2PConsistencyError:
         raise
+    except P2POutOfDiskError:
+        raise
     except Exception as e:
         raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
 
@@ -521,6 +527,8 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
     except ShuffleClosedError:
         raise Reschedule()
     except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
         raise
     except Exception as e:
         raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e

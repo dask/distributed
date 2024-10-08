@@ -48,7 +48,11 @@ from distributed.shuffle._core import (
     handle_transfer_errors,
     handle_unpack_errors,
 )
-from distributed.shuffle._exceptions import DataUnavailable, P2PConsistencyError
+from distributed.shuffle._exceptions import (
+    DataUnavailable,
+    P2PConsistencyError,
+    P2POutOfDiskError,
+)
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -106,6 +110,8 @@ def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
     except Reschedule as e:
         raise e
     except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
         raise
     except Exception as e:
         raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
