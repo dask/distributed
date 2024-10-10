@@ -1690,6 +1690,10 @@ def error_message(e: BaseException, status: str = "error") -> ErrorMessage:
     }
 
 
+class UnreadablePickledException(Exception):
+    pass
+
+
 def clean_exception(
     exception: BaseException | bytes | bytearray | str | None,
     traceback: types.TracebackType | bytes | str | None = None,
@@ -1707,7 +1711,7 @@ def clean_exception(
         try:
             exception = protocol.pickle.loads(exception)
         except Exception:
-            exception = Exception(exception)
+            exception = UnreadablePickledException(exception)
     elif isinstance(exception, str):
         exception = Exception(exception)
 
