@@ -133,6 +133,8 @@ class Adaptive(AdaptiveCore):
                 str, dask.config.get("distributed.adaptive.target-duration")
             )
 
+        super().__init__(minimum=minimum, maximum=maximum, wait_count=wait_count)
+
         self.interval = parse_timedelta(interval, "seconds")
         self.periodic_callback = None
 
@@ -162,8 +164,6 @@ class Adaptive(AdaptiveCore):
             self.state = "inactive"
 
         self.target_duration = parse_timedelta(target_duration)
-
-        super().__init__(minimum=minimum, maximum=maximum, wait_count=wait_count)
 
     def _start(self) -> None:
         if self.state != "starting":
