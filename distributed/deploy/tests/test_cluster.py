@@ -36,7 +36,9 @@ async def test_repr():
 
 @gen_test()
 async def test_cluster_wait_for_worker():
-    async with LocalCluster(n_workers=2, asynchronous=True) as cluster:
+    async with LocalCluster(
+        n_workers=2, asynchronous=True, dashboard_address=":0"
+    ) as cluster:
         assert len(cluster.scheduler.workers) == 2
         cluster.scale(4)
         await cluster.wait_for_workers(4)
