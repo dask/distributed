@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, Union, cast
 from tlz import peekn
 
 import dask
+from dask._task_spec import Task
 from dask.typing import Key
 from dask.utils import key_split, parse_bytes, typename
 
@@ -39,7 +40,7 @@ from distributed.comm import get_address_host
 from distributed.core import ErrorMessage, error_message
 from distributed.metrics import DelayedMetricsLedger, monotonic, time
 from distributed.protocol import pickle
-from distributed.protocol.serialize import Serialize, ToPickle
+from distributed.protocol.serialize import Serialize
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.utils import recursive_to_dict
 
@@ -748,10 +749,6 @@ class ComputeTaskEvent(StateMachineEvent):
         # Fixes after msgpack decode
         if isinstance(self.priority, list):  # type: ignore[unreachable]
             self.priority = tuple(self.priority)  # type: ignore[unreachable]
-        if isinstance(self.run_spec, ToPickle):
-            # FIXME Sometimes the protocol is not unpacking this
-            # E.g. distributed/tests/test_client.py::test_async_with
-            self.run_spec = self.run_spec.data
 
     def _to_dict(self, *, exclude: Container[str] = ()) -> dict:
         return StateMachineEvent._to_dict(self._clean(), exclude=exclude)
@@ -774,8 +771,8 @@ class ComputeTaskEvent(StateMachineEvent):
         return  # pragma: nocover
 
     @classmethod
-    def dummy_runspec(cls) -> tuple[Callable, tuple, dict]:
-        return (cls._f, (), {})
+    def dummy_runspec(cls, key: Key) -> Task:
+        return Task(key, cls._f)
 
     @staticmethod
     def dummy(
@@ -801,7 +798,7 @@ class ComputeTaskEvent(StateMachineEvent):
             nbytes=nbytes or {k: 1 for k in who_has or ()},
             priority=priority,
             duration=duration,
-            run_spec=ComputeTaskEvent.dummy_runspec(),
+            run_spec=ComputeTaskEvent.dummy_runspec(key),
             resource_restrictions=resource_restrictions or {},
             actor=actor,
             annotations=annotations or {},

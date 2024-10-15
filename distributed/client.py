@@ -70,7 +70,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from dask._task_spec import DataNode, Task, TaskRef
+from dask._task_spec import DataNode, GraphNode, Task, TaskRef
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -819,7 +819,7 @@ class VersionsDict(TypedDict):
     client: dict[str, dict[str, Any]]
 
 
-_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
+_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
 
 
 def _is_nested(iterable):
@@ -911,7 +911,7 @@ class _MapLayer(Layer):
     def is_materialized(self) -> bool:
         return hasattr(self, "_cached_dict")
 
-    def __getitem__(self, key: Key) -> tuple:
+    def __getitem__(self, key: Key) -> GraphNode:
         return self._dict[key]
 
     def __iter__(self) -> Iterator[Key]:

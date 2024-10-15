@@ -21,7 +21,7 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
-from dask._task_spec import Task
+from dask._task_spec import GraphNode, Task
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
@@ -162,7 +162,7 @@ def rearrange_by_column_p2p(
     )
 
 
-_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
+_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
 
 
 class P2PShuffleLayer(Layer):
@@ -227,7 +227,7 @@ class P2PShuffleLayer(Layer):
             self._cached_dict = dsk
         return self._cached_dict
 
-    def __getitem__(self, key: Key) -> tuple:
+    def __getitem__(self, key: Key) -> GraphNode:
         return self._dict[key]
 
     def __iter__(self) -> Iterator[Key]:
