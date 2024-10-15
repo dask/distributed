@@ -20,8 +20,8 @@ from distributed.utils import log_errors
 if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
+    import distributed
     from distributed.deploy.cluster import Cluster
-    from distributed.scheduler import WorkerState
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,9 @@ class Adaptive(AdaptiveCore):
         maximum: int | float | None = None,
         wait_count: int | None = None,
         target_duration: str | float | timedelta | None = None,
-        worker_key: Callable[[WorkerState], Hashable] | None = None,
+        worker_key: (
+            Callable[[distributed.scheduler.WorkerState], Hashable] | None
+        ) = None,
         **kwargs: Any,
     ):
         self.cluster = cluster
