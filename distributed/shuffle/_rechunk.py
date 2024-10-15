@@ -122,7 +122,6 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.config
 from dask._task_spec import Task, TaskRef
-from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
