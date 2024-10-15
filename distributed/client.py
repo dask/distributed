@@ -5101,6 +5101,14 @@ class Client(SyncMethodMixin):
     ):
         if isinstance(plugin, type):
             raise TypeError("Please provide an instance of a plugin, not a type.")
+        if any(
+            "dask.distributed.diagnostics.plugin" in str(c)
+            for c in plugin.__class__.__bases__
+        ):
+            raise TypeError(
+                "Importing plugin base classes from `from dask.distributed.diagnostics.plugin` "
+                "is not supported. Please import directly from `distributed.diagnostics.plugin` instead."
+            )
         raise TypeError(
             "Registering duck-typed plugins is not allowed. Please inherit from "
             "NannyPlugin, WorkerPlugin, or SchedulerPlugin to create a plugin."
