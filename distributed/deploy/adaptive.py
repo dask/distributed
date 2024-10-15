@@ -57,7 +57,7 @@ class Adaptive(AdaptiveCore):
     target_duration: timedelta or str, default "5s"
         Amount of time we want a computation to take.
         This affects how aggressively we scale up.
-    worker_key: Callable[~distributed.scheduler.WorkerState]
+    worker_key: Callable
         Function to group workers together when scaling down
         See Scheduler.workers_to_close for more information
     minimum: int
