@@ -5106,8 +5106,8 @@ class Client(SyncMethodMixin):
             for c in plugin.__class__.__bases__
         ):
             raise TypeError(
-                "Importing plugin base classes from `from dask.distributed.diagnostics.plugin` "
-                "is not supported. Please import directly from `distributed.diagnostics.plugin` instead."
+                "Importing plugin base classes from `dask.distributed.diagnostics.plugin` is not supported. "
+                "Please import directly from `distributed.diagnostics.plugin` instead."
             )
         raise TypeError(
             "Registering duck-typed plugins is not allowed. Please inherit from "
