@@ -731,7 +731,9 @@ class Server:
                 raise
             warnings.warn(
                 f"Address {addr} is already in use.\n"
-                f"Falling back to {fallback_port_or_addr} instead"
+                f"Falling back to {fallback_port_or_addr} instead",
+                UserWarning,
+                stacklevel=2,
             )
             listener = await listen(
                 fallback_port_or_addr,
