@@ -1046,6 +1046,28 @@ properties:
             description: Configuration settings for Dask communications specific to P2P
             properties:
 
+              buffer:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum amount of data for P2P's comm buffers to buffer in-memory per worker. 
+                  This limit is not absolute but used to apply back pressure.
+              concurrency:
+                type: integer
+                description: Number of concurrent background tasks used for IO-intensive operations in per P2P comm buffer.
+              message-bytes-limit:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum amount of data for P2P to send to another worker in a single operation
+
+                  Data is sent in batches, and if the first shard is larger than this value,
+                  the task shard still be sent to ensure progress. Hence, this limit is not absolute.
+                  Note that this limit applies to a single send operation and a worker may send data to
+                  multiple workers in parallel.
+
               retry:
                 type: object
                 description: |
@@ -1067,10 +1089,28 @@ properties:
                       max:
                         type: string
                         description: The maximum delay between retries
-          disk:
-            type: boolean
-            description: |
-              Whether or not P2P stores intermediate data on disk instead of memory
+          
+          storage:
+            type: object
+            description: Configuration settings for P2P storage
+            properties:
+
+              buffer:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum amount of data for P2P's disk buffers to buffer in-memory per worker 
+                  This limit is not absolute but used to apply back pressure.
+              disk:
+                type: boolean
+                description: | 
+                  Whether or not P2P stores intermediate data on disk instead of memory
+          threads:
+            type: 
+              - integer
+              - "null"
+            description: Number of threads used for CPU-intensive operations per worker. Defaults to number of worker threads.
 
       dashboard:
         type: object
