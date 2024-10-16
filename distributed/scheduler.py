@@ -1840,6 +1840,11 @@ class SchedulerState:
                 + repr(self.WORKER_SATURATION)
             )
 
+        self.rootish_tg_threshold = dask.config.get("distributed.scheduler.rootish-tg")
+        self.rootish_tg_dependencies_threshold = dask.config.get(
+            "distributed.scheduler.rootish-tg-dependencies"
+        )
+
     @abstractmethod
     def log_event(self, topic: str | Collection[str], msg: Any) -> None: ...
 
@@ -3090,8 +3095,8 @@ class SchedulerState:
         # TODO short-circuit to True if `not ts.dependencies`?
         return (
             len(tg) > self.total_nthreads * 2
-            and len(tg.dependencies) < 5
-            and sum(map(len, tg.dependencies)) < 5
+            and len(tg.dependencies) < self.rootish_tg_threshold
+            and sum(map(len, tg.dependencies)) < self.rootish_tg_dependencies_threshold
         )
 
     def check_idle_saturated(self, ws: WorkerState, occ: float = -1.0) -> None:
