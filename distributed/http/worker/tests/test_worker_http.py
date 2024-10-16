@@ -52,6 +52,7 @@ async def test_prometheus(c, s, a):
         "dask_worker_transfer_outgoing_count",
         "dask_worker_transfer_outgoing_count_total",
         "dask_worker_transfer_outgoing_bytes_total",
+        "dask_worker_gc_collection_seconds_total",
     }
 
     try:
@@ -59,7 +60,7 @@ async def test_prometheus(c, s, a):
     except ImportError:
         pass  # pragma: nocover
     else:
-        expected_metrics.add("dask_worker_gil_contention_total")
+        expected_metrics.add("dask_worker_gil_contention_seconds_total")
 
     try:
         import crick  # noqa: F401

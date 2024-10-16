@@ -71,8 +71,11 @@ def _fetch_memray_profile(
 def memray_workers(
     directory: str | pathlib.Path = "memray-profiles",
     workers: int | None | list[str] = None,
-    report_args: Sequence[str]
-    | Literal[False] = ("flamegraph", "--temporal", "--leaks"),
+    report_args: Sequence[str] | Literal[False] = (
+        "flamegraph",
+        "--temporal",
+        "--leaks",
+    ),
     fetch_reports_parallel: bool | int = True,
     **memray_kwargs: Any,
 ) -> Iterator[None]:
@@ -144,43 +147,50 @@ def memray_workers(
     # Sleep for a brief moment such that we get
     # a clear profiling signal when everything starts
     time.sleep(0.1)
-    yield
-    directory.mkdir(exist_ok=True)
+    try:
+        yield
+    finally:
+        directory.mkdir(exist_ok=True)
 
-    client = get_client()
-    if fetch_reports_parallel is True:
-        fetch_parallel = len(workers)
-    elif fetch_reports_parallel is False:
-        fetch_parallel = 1
-    else:
-        fetch_parallel = fetch_reports_parallel
+        client = get_client()
+        if fetch_reports_parallel is True:
+            fetch_parallel = len(workers)
+        elif fetch_reports_parallel is False:
+            fetch_parallel = 1
+        else:
+            fetch_parallel = fetch_reports_parallel
 
-    for w in partition(fetch_parallel, workers):
-        try:
-            profiles = client.run(
-                _fetch_memray_profile,
-                filename=filename,
-                report_args=report_args,
-                workers=w,
-            )
-            for worker_addr, profile in profiles.items():
-                path = directory / quote(str(worker_names[worker_addr]), safe="")
-                if report_args:
-                    suffix = ".html"
-                else:
-                    suffix = ".memray"
-                with open(str(path) + suffix, "wb") as fd:
-                    fd.write(profile)
+        for w in partition(fetch_parallel, workers):
+            try:
+                profiles = client.run(
+                    _fetch_memray_profile,
+                    filename=filename,
+                    report_args=report_args,
+                    workers=w,
+                )
+                for worker_addr, profile in profiles.items():
+                    path = directory / quote(str(worker_names[worker_addr]), safe="")
+                    if report_args:
+                        suffix = ".html"
+                    else:
+                        suffix = ".memray"
+                    with open(str(path) + suffix, "wb") as fd:
+                        fd.write(profile)
 
-        except Exception:
-            logger.exception("Exception during report downloading from worker %s", w)
+            except Exception:
+                logger.exception(
+                    "Exception during report downloading from worker %s", w
+                )
 
 
 @contextlib.contextmanager
 def memray_scheduler(
     directory: str | pathlib.Path = "memray-profiles",
-    report_args: Sequence[str]
-    | Literal[False] = ("flamegraph", "--temporal", "--leaks"),
+    report_args: Sequence[str] | Literal[False] = (
+        "flamegraph",
+        "--temporal",
+        "--leaks",
+    ),
     **memray_kwargs: Any,
 ) -> Iterator[None]:
     """Generate a Memray profile on the Scheduler and download the generated report.
@@ -226,20 +236,22 @@ def memray_scheduler(
     # Sleep for a brief moment such that we get
     # a clear profiling signal when everything starts
     time.sleep(0.1)
-    yield
-    directory.mkdir(exist_ok=True)
+    try:
+        yield
+    finally:
+        directory.mkdir(exist_ok=True)
 
-    client = get_client()
+        client = get_client()
 
-    profile = client.run_on_scheduler(
-        _fetch_memray_profile,
-        filename=filename,
-        report_args=report_args,
-    )
-    path = directory / "scheduler"
-    if report_args:
-        suffix = ".html"
-    else:
-        suffix = ".memray"
-    with open(str(path) + suffix, "wb") as fd:
-        fd.write(profile)
+        profile = client.run_on_scheduler(
+            _fetch_memray_profile,
+            filename=filename,
+            report_args=report_args,
+        )
+        path = directory / "scheduler"
+        if report_args:
+            suffix = ".html"
+        else:
+            suffix = ".memray"
+        with open(str(path) + suffix, "wb") as fd:
+            fd.write(profile)

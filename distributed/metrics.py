@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import sys
 import threading
 import time as timemod
 from collections.abc import Callable, Hashable, Iterator
@@ -93,7 +94,7 @@ class _WindowsTime:
 
 
 # A high-resolution wall clock timer measuring the seconds since Unix epoch
-if WINDOWS:
+if WINDOWS and sys.version_info < (3, 13):
     time = _WindowsTime(timemod.time, is_monotonic=False).time
     monotonic = _WindowsTime(timemod.monotonic, is_monotonic=True).time
 else:
@@ -194,7 +195,9 @@ class ContextMeter:
     _callbacks: ContextVar[dict[Hashable, Callable[[Hashable, float, str], None]]]
 
     def __init__(self):
-        self._callbacks = ContextVar(f"MetricHook<{id(self)}>._callbacks", default={})
+        self._callbacks = ContextVar(
+            f"MetricHook<{id(self)}>._callbacks", default={}  # noqa: B039
+        )
 
     def __reduce__(self):
         assert self is context_meter, "Found copy of singleton"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sys
 
 import pytest
@@ -20,6 +21,7 @@ from distributed.protocol.serialize import (
     serialize,
 )
 from distributed.utils import nbytes
+from distributed.utils_test import captured_logger
 
 
 def test_protocol():
@@ -160,17 +162,82 @@ def test_sizeof_serialize(Wrapper, Wrapped):
 @pytest.mark.skipif(WINDOWS, reason="On windows this is triggering a stackoverflow")
 def test_deeply_nested_structures():
     # These kind of deeply nested structures are generated in our profiling code
-    def gen_deeply_nested(depth):
-        msg = {}
-        d = msg
+    def gen_deeply_nested(depth, msg=None):
+        d = msg or {}
         while depth:
             depth -= 1
-            d["children"] = d = {}
-        return msg
+            d = {"children": d}
+        return d
 
-    msg = gen_deeply_nested(sys.getrecursionlimit() - 100)
+    msg = {}
+    for _ in range(10):
+        msg = gen_deeply_nested(sys.getrecursionlimit() // 2, msg=msg)
+
+    with pytest.raises(RecursionError):
+        copy.deepcopy(msg)
+
     with pytest.raises(TypeError, match="Could not serialize object"):
         serialize(msg, on_error="raise")
 
-    msg = gen_deeply_nested(sys.getrecursionlimit() // 4)
+    msg = gen_deeply_nested(sys.getrecursionlimit() // 2)
     assert isinstance(serialize(msg), tuple)
+
+
+def test_fallback_to_pickle():
+    np = pytest.importorskip("numpy")
+
+    d = 1
+    L = dumps(d)
+    assert b"__Pickled__" not in L[0]
+    assert loads(L) == d
+
+    d = np.int64(1)
+    with captured_logger("distributed.protocol.core") as logger:
+        L = dumps(d)
+    assert "can not serialize 'numpy.int64'" in logger.getvalue()
+    assert L[0].count(b"__Pickled__") == 1
+    assert loads(L) == d
+
+    d = {np.int64(1): {np.int64(2): "a"}, 3: ("b", "c"), 4: "d"}
+    with captured_logger("distributed.protocol.core") as logger:
+        L = dumps(d)
+    assert "can not serialize 'numpy.int64'" in logger.getvalue()
+    # Make sure that we pickle the individual ints, not the entire dict
+    assert L[0].count(b"__Pickled__") == 2
+    assert loads(L) == d
+
+    d = {np.int64(1): {Serialize(2): "a"}, 3: ("b", "c"), 4: "d"}
+    with captured_logger("distributed.protocol.core") as logger:
+        L = dumps(d)
+    assert "can not serialize 'numpy.int64'" in logger.getvalue()
+    # Make sure that we still serialize and don't pickle indiscriminately
+    assert L[0].count(b"__Pickled__") == 1
+    assert L[0].count(b"__Serialized__") == 1
+    assert loads(L) == {np.int64(1): {2: "a"}, 3: ("b", "c"), 4: "d"}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("typ", [bytes, str, "ext"])
+def test_large_payload(typ):
+    """See also: test_core.py::test_large_payload"""
+    critical_size = 2**31 + 1  # >2 GiB
+    if typ == bytes:
+        large_payload = critical_size * b"0"
+        expected = large_payload
+    elif typ == str:
+        large_payload = critical_size * "0"
+        expected = large_payload
+    # Testing array and map dtypes is practically not possible since we'd have
+    # to create an actual list or dict object of critical size (i.e. not the
+    # content but the container itself). These are so large that msgpack is
+    # running forever
+    # elif typ == "array":
+    #     large_payload = [b"0"] * critical_size
+    #     expected = tuple(large_payload)
+    # elif typ == "map":
+    #     large_payload = {x: b"0" for x in range(critical_size)}
+    #     expected = large_payload
+    elif typ == "ext":
+        large_payload = msgpack.ExtType(1, b"0" * critical_size)
+        expected = large_payload
+    assert loads(dumps(large_payload)) == expected

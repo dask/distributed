@@ -10,6 +10,7 @@ import pytest
 from tornado.httpclient import AsyncHTTPClient
 
 from distributed import Client, Scheduler
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.utils import open_port
 from distributed.utils_test import gen_test, popen
@@ -20,6 +21,17 @@ import requests
 pytest.importorskip("jupyter_server")
 
 pytestmark = pytest.mark.filterwarnings("ignore:Jupyter is migrating its paths")
+
+if WINDOWS:
+    try:
+        import jupyter_server  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        pytest.skip(
+            allow_module_level=True,
+            reason="Windows struggles running these tests w/ jupyter server",
+        )
 
 
 @gen_test()
@@ -73,7 +85,8 @@ async def test_jupyter_idle_timeout():
 
             assert s.status not in (Status.closed, Status.closing)
 
-        await asyncio.sleep(s.idle_timeout)
+        # small bit of extra time to catch up
+        await asyncio.sleep(s.idle_timeout + 0.5)
         assert s.status in (Status.closed, Status.closing)
 
 
@@ -94,13 +107,13 @@ async def test_jupyter_idle_timeout_returned():
         assert next_idle is not None
         assert next_idle > last_idle
 
-        assert s.check_idle() is None
-        # ^ NOTE: this probably should be `== next_idle`;
-        # see discussion in https://github.com/dask/distributed/pull/7687#discussion_r1145095196
+        assert s.check_idle() is next_idle
 
 
 @pytest.mark.slow
-def test_shutsdown_cleanly(loop):
+@pytest.mark.xfail(WINDOWS, reason="Subprocess launching scheduler TimeoutError")
+@pytest.mark.xfail(MACOS, reason="Client fails to connect on OSX")
+def test_shutsdown_cleanly(requires_default_ports):
     port = open_port()
     with concurrent.futures.ThreadPoolExecutor() as tpe:
         subprocess_fut = tpe.submit(
@@ -120,7 +133,7 @@ def test_shutsdown_cleanly(loop):
         )
 
         # wait until scheduler is running
-        with Client(f"127.0.0.1:{port}", loop=loop):
+        with Client(f"127.0.0.1:{port}"):
             pass
 
         with requests.Session() as session:
@@ -133,8 +146,8 @@ def test_shutsdown_cleanly(loop):
         stderr = subprocess_fut.result().stderr
         assert "Traceback" not in stderr
         assert (
-            "distributed.scheduler - INFO - Scheduler closing due to shutdown "
-            "requested via Jupyter...\n" in stderr
+            "distributed.scheduler - INFO - Closing scheduler. Reason: jupyter-requested-shutdown"
+            in stderr
         )
         assert "Shutting down on /api/shutdown request.\n" in stderr
         assert (

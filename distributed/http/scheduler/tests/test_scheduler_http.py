@@ -3,19 +3,19 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from typing import Any
 from unittest import mock
 
 import pytest
-from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
 
 import dask.config
 from dask.sizeof import sizeof
 
 from distributed import Event, Lock, Scheduler
-from distributed.client import wait
+from distributed.client import Client, wait
 from distributed.core import Status
-from distributed.utils import is_valid_xml
+from distributed.utils import is_valid_xml, url_escape
 from distributed.utils_test import (
     async_poll_for,
     div,
@@ -28,6 +28,7 @@ from distributed.utils_test import (
     slowinc,
     wait_for_state,
 )
+from distributed.worker import Worker
 
 DEFAULT_ROUTES = dask.config.get("distributed.scheduler.http.routes")
 
@@ -112,8 +113,12 @@ async def test_prometheus(c, s, a, b):
 
     expected_metrics = {
         "dask_scheduler_clients",
+        "dask_scheduler_client_connections_added",
+        "dask_scheduler_client_connections_removed",
         "dask_scheduler_desired_workers",
         "dask_scheduler_workers",
+        "dask_scheduler_workers_added",
+        "dask_scheduler_workers_removed",
         "dask_scheduler_last_time",
         "dask_scheduler_tasks",
         "dask_scheduler_tasks_suspicious",
@@ -121,9 +126,11 @@ async def test_prometheus(c, s, a, b):
         "dask_scheduler_tasks_output_bytes",
         "dask_scheduler_tasks_compute_seconds",
         "dask_scheduler_tasks_transfer_seconds",
+        "dask_scheduler_task_groups",
         "dask_scheduler_prefix_state_totals",
         "dask_scheduler_tick_count",
         "dask_scheduler_tick_duration_maximum_seconds",
+        "dask_scheduler_gc_collection_seconds",
     }
 
     try:
@@ -132,7 +139,7 @@ async def test_prometheus(c, s, a, b):
     except ImportError:
         pass  # pragma: nocover
     else:
-        expected_metrics.add("dask_scheduler_gil_contention")
+        expected_metrics.add("dask_scheduler_gil_contention_seconds")
 
     assert set(active_metrics.keys()) == expected_metrics
     assert active_metrics["dask_scheduler_clients"].samples[0].value == 1.0
@@ -156,6 +163,71 @@ async def test_metrics_when_prometheus_client_not_installed(prometheus_not_avail
     async with Scheduler(dashboard_address=":0") as s:
         body = await fetch_metrics_body(s.http_server.port)
         assert "Prometheus metrics are not available" in body
+
+
+@gen_cluster(
+    nthreads=[],
+)
+async def test_prometheus_collect_client_connections_totals(s):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family
+            for family in text_string_to_metric_families(txt)
+            if family.name
+            in (
+                "dask_scheduler_client_connections_added",
+                "dask_scheduler_client_connections_removed",
+            )
+        }
+        return {
+            name: [sample.value for sample in family.samples]
+            for name, family in families.items()
+        }
+
+    assert await fetch_metrics() == {
+        "dask_scheduler_client_connections_added": [0],
+        "dask_scheduler_client_connections_removed": [0],
+    }
+    async with Client(s.address, asynchronous=True):
+        assert await fetch_metrics() == {
+            "dask_scheduler_client_connections_added": [1],
+            "dask_scheduler_client_connections_removed": [0],
+        }
+
+        async with Client(s.address, asynchronous=True):
+            assert await fetch_metrics() == {
+                "dask_scheduler_client_connections_added": [2],
+                "dask_scheduler_client_connections_removed": [0],
+            }
+
+        assert await fetch_metrics() == {
+            "dask_scheduler_client_connections_added": [2],
+            "dask_scheduler_client_connections_removed": [1],
+        }
+
+        async with Client(s.address, asynchronous=True):
+            assert await fetch_metrics() == {
+                "dask_scheduler_client_connections_added": [3],
+                "dask_scheduler_client_connections_removed": [1],
+            }
+
+        assert await fetch_metrics() == {
+            "dask_scheduler_client_connections_added": [3],
+            "dask_scheduler_client_connections_removed": [2],
+        }
+
+    assert await fetch_metrics() == {
+        "dask_scheduler_client_connections_added": [3],
+        "dask_scheduler_client_connections_removed": [3],
+    }
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})
@@ -217,6 +289,67 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     assert sum(forgotten_tasks) == 0.0
 
 
+@gen_cluster(client=True)
+async def test_prometheus_collect_task_groups(c, s, a, b):
+    pytest.importorskip("prometheus_client")
+
+    async def fetch_task_groups_metric():
+        families = await fetch_metrics(s.http_server.port, prefix="dask_scheduler_")
+        return families["dask_scheduler_task_groups"]
+
+    assert not s.task_groups
+    metric = await fetch_task_groups_metric()
+    assert len(metric.samples) == 1
+    assert metric.samples[0].value == 0
+
+    # submit a task which should show up in the prometheus scraping
+    def block(x: Any, in_event: Event, block_event: Event) -> Any:
+        in_event.set()
+        block_event.wait()
+        return x
+
+    in_event = Event()
+    block_event = Event()
+
+    future = c.submit(block, 1, in_event, block_event, key=("block-first", 1))
+
+    await in_event.wait()
+    assert len(s.task_groups) == 1
+    metric = await fetch_task_groups_metric()
+    assert len(metric.samples) == 1
+    assert metric.samples[0].value == 1
+
+    in_event_2 = Event()
+    block_event_2 = Event()
+
+    future2 = c.submit(block, 2, in_event_2, block_event_2, key=("block-second", 2))
+
+    await in_event_2.wait()
+    assert len(s.task_groups) == 2
+    metric = await fetch_task_groups_metric()
+    assert len(metric.samples) == 1
+    assert metric.samples[0].value == 2
+
+    await block_event.set()
+    res = await c.gather(future)
+    assert res == 1
+
+    await block_event_2.set()
+    res2 = await c.gather(future2)
+    assert res2 == 2
+
+    future.release()
+    future2.release()
+
+    while s.task_groups:
+        await asyncio.sleep(0.001)
+
+    assert not s.task_groups
+    metric = await fetch_task_groups_metric()
+    assert len(metric.samples) == 1
+    assert metric.samples[0].value == 0
+
+
 @gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
     pytest.importorskip("prometheus_client")
@@ -256,6 +389,69 @@ async def test_prometheus_collect_task_prefix_counts(c, s, a, b):
 
 @gen_cluster(
     client=True,
+    nthreads=[],
+)
+async def test_prometheus_collect_worker_totals(c, s):
+    pytest.importorskip("prometheus_client")
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    async def fetch_metrics():
+        port = s.http_server.port
+        response = await http_client.fetch(f"http://localhost:{port}/metrics")
+        txt = response.body.decode("utf8")
+        families = {
+            family.name: family
+            for family in text_string_to_metric_families(txt)
+            if family.name
+            in ("dask_scheduler_workers_added", "dask_scheduler_workers_removed")
+        }
+        return {
+            name: [sample.value for sample in family.samples]
+            for name, family in families.items()
+        }
+
+    assert await fetch_metrics() == {
+        "dask_scheduler_workers_added": [0],
+        "dask_scheduler_workers_removed": [0],
+    }
+    async with Worker(s.address):
+        assert await fetch_metrics() == {
+            "dask_scheduler_workers_added": [1],
+            "dask_scheduler_workers_removed": [0],
+        }
+
+        async with Worker(s.address):
+            assert await fetch_metrics() == {
+                "dask_scheduler_workers_added": [2],
+                "dask_scheduler_workers_removed": [0],
+            }
+
+        assert await fetch_metrics() == {
+            "dask_scheduler_workers_added": [2],
+            "dask_scheduler_workers_removed": [1],
+        }
+
+        async with Worker(s.address):
+            assert await fetch_metrics() == {
+                "dask_scheduler_workers_added": [3],
+                "dask_scheduler_workers_removed": [1],
+            }
+
+        assert await fetch_metrics() == {
+            "dask_scheduler_workers_added": [3],
+            "dask_scheduler_workers_removed": [2],
+        }
+
+    assert await fetch_metrics() == {
+        "dask_scheduler_workers_added": [3],
+        "dask_scheduler_workers_removed": [3],
+    }
+
+
+@gen_cluster(
+    client=True,
     config={"distributed.worker.memory.monitor-interval": "10ms"},
     timeout=3,
 )
@@ -281,7 +477,8 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 2,
         "partially_saturated": 0,
         "saturated": 0,
-        "paused_or_retiring": 0,
+        "paused": 0,
+        "retiring": 0,
     }
 
     ev = Event()
@@ -291,7 +488,8 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 1,
         "saturated": 0,
-        "paused_or_retiring": 0,
+        "paused": 0,
+        "retiring": 0,
     }
 
     y = c.submit(lambda ev: ev.wait(), ev, key="y", workers=[a.address])
@@ -303,7 +501,8 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 0,
         "saturated": 1,
-        "paused_or_retiring": 0,
+        "paused": 0,
+        "retiring": 0,
     }
 
     a.monitor.get_process_memory = lambda: 2**40
@@ -313,9 +512,21 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
         "idle": 1,
         "partially_saturated": 0,
         "saturated": 0,
-        "paused_or_retiring": 1,
+        "paused": 1,
+        "retiring": 0,
     }
 
+    sa.status = Status.stopping
+    while sa.status != Status.stopping:
+        await asyncio.sleep(0.01)
+
+    assert await fetch_metrics() == {
+        "idle": 1,
+        "partially_saturated": 0,
+        "saturated": 0,
+        "paused": 0,
+        "retiring": 1,
+    }
     await ev.set()
 
 

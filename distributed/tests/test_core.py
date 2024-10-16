@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import random
 import socket
 import sys
 import threading
-import time as timemod
 import weakref
 from unittest import mock
 
@@ -21,9 +21,8 @@ from distributed.comm.core import CommClosedError
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend, TCPListener
 from distributed.core import (
-    AsyncTaskGroup,
-    AsyncTaskGroupClosedError,
     ConnectionPool,
+    RPCClosed,
     Server,
     Status,
     _expects_comm,
@@ -81,156 +80,6 @@ def echo_serialize(comm, x):
 
 def echo_no_serialize(comm, x):
     return {"result": x}
-
-
-def test_async_task_group_initialization():
-    group = AsyncTaskGroup()
-    assert not group.closed
-    assert len(group) == 0
-
-
-async def _wait_for_n_loop_cycles(n):
-    for _ in range(n):
-        await asyncio.sleep(0)
-
-
-@gen_test()
-async def test_async_task_group_call_soon_executes_task_in_background():
-    group = AsyncTaskGroup()
-    ev = asyncio.Event()
-    flag = False
-
-    async def set_flag():
-        nonlocal flag
-        await ev.wait()
-        flag = True
-
-    assert group.call_soon(set_flag) is None
-    assert len(group) == 1
-    ev.set()
-    await _wait_for_n_loop_cycles(2)
-    assert len(group) == 0
-    assert flag
-
-
-@gen_test()
-async def test_async_task_group_call_later_executes_delayed_task_in_background():
-    group = AsyncTaskGroup()
-    ev = asyncio.Event()
-
-    start = timemod.monotonic()
-    assert group.call_later(1, ev.set) is None
-    assert len(group) == 1
-    await ev.wait()
-    end = timemod.monotonic()
-    # the task must be removed in exactly 1 event loop cycle
-    await _wait_for_n_loop_cycles(2)
-    assert len(group) == 0
-    assert end - start > 1 - timemod.get_clock_info("monotonic").resolution
-
-
-def test_async_task_group_close_closes():
-    group = AsyncTaskGroup()
-    group.close()
-    assert group.closed
-
-    # Test idempotency
-    group.close()
-    assert group.closed
-
-
-@gen_test()
-async def test_async_task_group_close_does_not_cancel_existing_tasks():
-    group = AsyncTaskGroup()
-
-    ev = asyncio.Event()
-    flag = False
-
-    async def set_flag():
-        nonlocal flag
-        await ev.wait()
-        flag = True
-        return None
-
-    assert group.call_soon(set_flag) is None
-
-    group.close()
-
-    assert len(group) == 1
-
-    ev.set()
-    await _wait_for_n_loop_cycles(2)
-    assert len(group) == 0
-
-
-@gen_test()
-async def test_async_task_group_close_prohibits_new_tasks():
-    group = AsyncTaskGroup()
-    group.close()
-
-    ev = asyncio.Event()
-    flag = False
-
-    async def set_flag():
-        nonlocal flag
-        await ev.wait()
-        flag = True
-        return True
-
-    with pytest.raises(AsyncTaskGroupClosedError):
-        group.call_soon(set_flag)
-    assert len(group) == 0
-
-    with pytest.raises(AsyncTaskGroupClosedError):
-        group.call_later(1, set_flag)
-    assert len(group) == 0
-
-    await asyncio.sleep(0.01)
-    assert not flag
-
-
-@gen_test()
-async def test_async_task_group_stop_disallows_shutdown():
-    group = AsyncTaskGroup()
-
-    task = None
-
-    async def set_flag():
-        nonlocal task
-        task = asyncio.current_task()
-
-    assert group.call_soon(set_flag) is None
-    assert len(group) == 1
-    # tasks are not given a grace period, and are not even allowed to start
-    # if the group is closed immediately
-    await group.stop()
-    assert task is None
-
-
-@gen_test()
-async def test_async_task_group_stop_cancels_long_running():
-    group = AsyncTaskGroup()
-
-    task = None
-    flag = False
-    started = asyncio.Event()
-
-    async def set_flag():
-        nonlocal task
-        task = asyncio.current_task()
-        started.set()
-        await asyncio.sleep(10)
-        nonlocal flag
-        flag = True
-        return True
-
-    assert group.call_soon(set_flag) is None
-    assert len(group) == 1
-    await started.wait()
-    await group.stop()
-    assert task
-    assert task.cancelled()
-    assert not flag
 
 
 @gen_test()
@@ -1075,6 +924,20 @@ async def test_rpc_serialization():
             assert result == {"result": inc}
 
 
+@gen_test()
+async def test_rpc_closed_exception():
+    async with Server({"echo": echo_serialize}) as server:
+        await server.listen("tcp://")
+
+        async with rpc(server.address, serializers=["msgpack"]) as r:
+            r.status = Status.closed
+            with pytest.raises(
+                RPCClosed,
+                match="Exception while trying to call remote method .* before comm was established.",
+            ):
+                await r.__getattr__("foo")()
+
+
 @gen_cluster()
 async def test_thread_id(s, a, b):
     assert s.thread_id == a.thread_id == b.thread_id == threading.get_ident()
@@ -1336,38 +1199,27 @@ async def test_close_grace_period_for_handlers():
 
 def test_expects_comm():
     class A:
-        def empty(self):
-            ...
+        def empty(self): ...
 
-        def one_arg(self, arg):
-            ...
+        def one_arg(self, arg): ...
 
-        def comm_arg(self, comm):
-            ...
+        def comm_arg(self, comm): ...
 
-        def stream_arg(self, stream):
-            ...
+        def stream_arg(self, stream): ...
 
-        def two_arg(self, arg, other):
-            ...
+        def two_arg(self, arg, other): ...
 
-        def comm_arg_other(self, comm, other):
-            ...
+        def comm_arg_other(self, comm, other): ...
 
-        def stream_arg_other(self, stream, other):
-            ...
+        def stream_arg_other(self, stream, other): ...
 
-        def arg_kwarg(self, arg, other=None):
-            ...
+        def arg_kwarg(self, arg, other=None): ...
 
-        def comm_posarg_only(self, comm, /, other):
-            ...
+        def comm_posarg_only(self, comm, /, other): ...
 
-        def comm_not_leading_position(self, other, comm):
-            ...
+        def comm_not_leading_position(self, other, comm): ...
 
-        def stream_not_leading_position(self, other, stream):
-            ...
+        def stream_not_leading_position(self, other, stream): ...
 
     expected_warning = "first argument of a RPC handler `stream` is deprecated"
 
@@ -1481,3 +1333,27 @@ async def test_messages_are_ordered_raw():
             assert ledger == list(range(n))
         finally:
             await comm.close()
+
+
+@pytest.mark.slow
+@gen_test(timeout=180)
+async def test_large_payload(caplog):
+    """See also: protocol/tests/test_protocol.py::test_large_payload"""
+    critical_size = 2**31 + 1  # >2 GiB
+    data = b"0" * critical_size
+
+    async with Server({"echo": echo_serialize}) as server:
+        await server.listen(0)
+        comm = await connect(server.address)
+
+        # FIXME https://github.com/dask/distributed/issues/8465
+        # At debug level, messages are dumped into the log. By default, pytest captures
+        # all logs, which would make this test extremely expensive to run.
+        with caplog.at_level(logging.INFO, logger="distributed.core"):
+            # Note: if we wrap data in to_serialize, it will be sent as a buffer, which
+            # is not encoded by msgpack.
+            await comm.write({"op": "echo", "x": data})
+            response = await comm.read()
+
+        assert response["result"] == data
+        await comm.close()

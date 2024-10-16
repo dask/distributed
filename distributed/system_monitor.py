@@ -31,7 +31,7 @@ class SystemMonitor:
     _last_host_cpu_counters: Any  # dynamically-defined psutil namedtuple
     _last_gil_contention: float  # 0-1 value
 
-    _cumulative_gil_contention: float
+    cumulative_gil_contention: float
 
     gpu_name: str | None
     gpu_memory_total: int
@@ -114,12 +114,11 @@ class SystemMonitor:
                 self.monitor_gil_contention = False
             else:
                 self.quantities["gil_contention"] = deque(maxlen=maxlen)
-                self._cumulative_gil_contention = 0.0
+                self.cumulative_gil_contention = 0.0
                 raw_interval = dask.config.get(
                     "distributed.admin.system-monitor.gil.interval",
                 )
-                interval = parse_timedelta(raw_interval, default="us") * 1e6
-
+                interval = parse_timedelta(raw_interval) * 1e6
                 self._gilknocker = KnockKnock(polling_interval_micros=int(interval))
                 self._gilknocker.start()
 
@@ -130,6 +129,7 @@ class SystemMonitor:
             gpu_extra = nvml.one_time()
             self.gpu_name = gpu_extra["name"]
             self.gpu_memory_total = gpu_extra["memory-total"]
+            self.quantities["gpu-memory-total"] = deque(maxlen=1)
             self.quantities["gpu_utilization"] = deque(maxlen=maxlen)
             self.quantities["gpu_memory_used"] = deque(maxlen=maxlen)
         else:
@@ -197,10 +197,10 @@ class SystemMonitor:
             self._last_host_cpu_counters = host_cpu
 
         if self.monitor_gil_contention:
-            self._last_gil_contention = self._gilknocker.contention_metric
-            self._cumulative_gil_contention += self._last_gil_contention
-            result["gil_contention"] = self._last_gil_contention
+            gil_contention = self._gilknocker.contention_metric
             self._gilknocker.reset_contention_metric()
+            result["gil_contention"] = self._last_gil_contention = gil_contention
+            self.cumulative_gil_contention += duration * gil_contention
 
         # Note: WINDOWS constant doesn't work with `mypy --platform win32`
         if sys.platform != "win32":
@@ -208,6 +208,7 @@ class SystemMonitor:
 
         if self.gpu_name:
             gpu_metrics = nvml.real_time()
+            result["gpu-memory-total"] = self.gpu_memory_total
             result["gpu_utilization"] = gpu_metrics["utilization"]
             result["gpu_memory_used"] = gpu_metrics["memory-used"]
 

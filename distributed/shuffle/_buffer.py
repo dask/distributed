@@ -126,8 +126,7 @@ class ShardsBuffer(Generic[ShardType]):
             self.bytes_memory -= size
 
     @abc.abstractmethod
-    async def _process(self, id: str, shards: list[ShardType]) -> None:
-        ...
+    async def _process(self, id: str, shards: list[ShardType]) -> None: ...
 
     def read(self, id: str) -> ShardType:
         raise NotImplementedError()  # pragma: nocover

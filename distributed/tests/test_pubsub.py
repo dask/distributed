@@ -23,8 +23,10 @@ async def test_speed(c, s, a, b):
     """
 
     def pingpong(a, b, start=False, n=1000, msg=1):
-        sub = Sub(a)
-        pub = Pub(b)
+        with pytest.warns(FutureWarning, match="deprecated"):
+            sub = Sub(a)
+        with pytest.warns(FutureWarning, match="deprecated"):
+            pub = Pub(b)
 
         while not pub.subscribers:
             sleep(0.01)
@@ -56,8 +58,10 @@ async def test_speed(c, s, a, b):
 async def test_client(c, s):
     with pytest.raises(ValueError, match="No worker found"):
         get_worker()
-    sub = Sub("a")
-    pub = Pub("a")
+    with pytest.warns(FutureWarning, match="deprecated"):
+        sub = Sub("a")
+    with pytest.warns(FutureWarning, match="deprecated"):
+        pub = Pub("a")
 
     sps = s.extensions["pubsub"]
     cps = c.extensions["pubsub"]
@@ -75,10 +79,12 @@ async def test_client(c, s):
 
 @gen_cluster(client=True)
 async def test_client_worker(c, s, a, b):
-    sub = Sub("a", client=c, worker=None)
+    with pytest.warns(FutureWarning, match="deprecated"):
+        sub = Sub("a", client=c, worker=None)
 
     def f(x):
-        pub = Pub("a")
+        with pytest.warns(FutureWarning, match="deprecated"):
+            pub = Pub("a")
         pub.put(x)
 
     futures = c.map(f, range(10))
@@ -104,7 +110,7 @@ async def test_client_worker(c, s, a, b):
         or len(sps.client_subscribers["a"]) != 1
     ):
         await asyncio.sleep(0.01)
-        assert time() < start + 3
+        assert time() < start + 10
 
     del sub
 
@@ -115,12 +121,13 @@ async def test_client_worker(c, s, a, b):
         or any(bps.publish_to_scheduler.values())
     ):
         await asyncio.sleep(0.01)
-        assert time() < start + 3
+        assert time() < start + 10
 
 
 @gen_cluster(client=True)
 async def test_timeouts(c, s, a, b):
-    sub = Sub("a", client=c, worker=None)
+    with pytest.warns(FutureWarning, match="deprecated"):
+        sub = Sub("a", client=c, worker=None)
     start = time()
     with pytest.raises(TimeoutError):
         await sub.get(timeout="100ms")
@@ -132,8 +139,10 @@ async def test_timeouts(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_repr(c, s, a, b):
-    pub = Pub("my-topic")
-    sub = Sub("my-topic")
+    with pytest.warns(FutureWarning, match="deprecated"):
+        pub = Pub("my-topic")
+    with pytest.warns(FutureWarning, match="deprecated"):
+        sub = Sub("my-topic")
     assert "my-topic" in str(pub)
     assert "Pub" in str(pub)
     assert "my-topic" in str(sub)
@@ -144,7 +153,8 @@ async def test_repr(c, s, a, b):
 @gen_cluster(client=True)
 async def test_basic(c, s, a, b):
     async def publish():
-        pub = Pub("a")
+        with pytest.warns(FutureWarning, match="deprecated"):
+            pub = Pub("a")
 
         i = 0
         while True:
@@ -153,7 +163,8 @@ async def test_basic(c, s, a, b):
             i += 1
 
     def f(_):
-        sub = Sub("a")
+        with pytest.warns(FutureWarning, match="deprecated"):
+            sub = Sub("a")
         return list(toolz.take(5, sub))
 
     asyncio.ensure_future(c.run(publish, workers=[a.address]))

@@ -30,11 +30,15 @@ def main() -> None:
     bench()
     print(f"Crude CPU benchmark (higher is better): {bench():.1f}")
 
-    freqs = psutil.cpu_freq(percpu=True)
-    print("CPU frequency:")
-    for freq in freqs:
-        # FIXME types-psutil
-        print(f"  - current={freq.current}, min={freq.min}, max={freq.max}")  # type: ignore
+    try:
+        freqs = psutil.cpu_freq(percpu=True)
+    # https://github.com/giampaolo/psutil/issues/2382
+    except RuntimeError:
+        print("CPU frequency: not available")
+    else:
+        print("CPU frequency:")
+        for freq in freqs:
+            print(f"  - current={freq.current}, min={freq.min}, max={freq.max}")
 
     mem = psutil.virtual_memory()
     print("Memory:")

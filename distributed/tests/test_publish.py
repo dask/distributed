@@ -11,13 +11,15 @@ from distributed.client import futures_of
 from distributed.metrics import time
 from distributed.protocol import Serialized
 from distributed.utils_test import gen_cluster, inc
+from distributed.worker import get_worker
 
 
 @gen_cluster()
 async def test_publish_simple(s, a, b):
-    async with Client(s.address, asynchronous=True) as c, Client(
-        s.address, asynchronous=True
-    ) as f:
+    async with (
+        Client(s.address, asynchronous=True) as c,
+        Client(s.address, asynchronous=True) as f,
+    ):
         data = await c.scatter(range(3))
         await c.publish_dataset(data=data)
         assert "data" in s.extensions["publish"].datasets
@@ -53,9 +55,10 @@ async def test_publish_non_string_key(s, a, b):
 
 @gen_cluster()
 async def test_publish_roundtrip(s, a, b):
-    async with Client(s.address, asynchronous=True) as c, Client(
-        s.address, asynchronous=True
-    ) as f:
+    async with (
+        Client(s.address, asynchronous=True) as c,
+        Client(s.address, asynchronous=True) as f,
+    ):
         data = await c.scatter([0, 1, 2])
         await c.publish_dataset(data=data)
 
@@ -148,9 +151,10 @@ def test_unpublish_multiple_datasets_sync(client):
 @gen_cluster()
 async def test_publish_bag(s, a, b):
     db = pytest.importorskip("dask.bag")
-    async with Client(s.address, asynchronous=True) as c, Client(
-        s.address, asynchronous=True
-    ) as f:
+    async with (
+        Client(s.address, asynchronous=True) as c,
+        Client(s.address, asynchronous=True) as f,
+    ):
         bag = db.from_sequence([0, 1, 2])
         bagp = c.persist(bag)
 
@@ -301,3 +305,30 @@ async def test_deserialize_client(c, s, a, b):
     from distributed.client import _current_client
 
     assert _current_client.get() is c
+
+
+@gen_cluster(client=True, worker_kwargs={"resources": {"A": 1}})
+async def test_publish_submit_ordering(c, s, a, b):
+    RESOURCES = {"A": 1}
+
+    def _retrieve_annotations():
+        worker = get_worker()
+        task = worker.state.tasks.get(worker.get_current_task())
+        return task.annotations
+
+    # If publish does not take the same comm channel as the submit, it can
+    # happen that the publish message reaches the scheduler before the submit
+    # such that the state of the published future is not the one that has been
+    # requested from the submit. Particularly, this lets us drop annotations
+    # The current implementation does in fact not use the same channel due to
+    # serialization issue (including Futures in BatchedSend appends them to the
+    # "recent messages" log which screws with the refcounting) but ensure that
+    # all queued up messages are flushed and received by the schduler befure
+    # publishing
+    future = c.submit(_retrieve_annotations, resources=RESOURCES, pure=False)
+
+    await c.publish_dataset(future, name="foo")
+    assert await c.list_datasets() == ("foo",)
+
+    result = await future.result()
+    assert result == {"resources": RESOURCES}

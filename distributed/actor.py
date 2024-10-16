@@ -77,7 +77,7 @@ class Actor(WrappedKey):
         if not self._client:
             try:
                 self._client = get_client()
-                self._future = Future(self._key, inform=False)
+                self._future = Future(self._key, self._client)
                 # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
@@ -245,12 +245,10 @@ class BaseActorFuture(abc.ABC, Awaitable[_T]):
     """
 
     @abc.abstractmethod
-    def result(self, timeout: str | timedelta | float | None = None) -> _T:
-        ...
+    def result(self, timeout: str | timedelta | float | None = None) -> _T: ...
 
     @abc.abstractmethod
-    def done(self) -> bool:
-        ...
+    def done(self) -> bool: ...
 
     def __repr__(self) -> Literal["<ActorFuture>"]:
         return "<ActorFuture>"

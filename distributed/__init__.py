@@ -97,27 +97,6 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-_python_shutting_down = False
-
-
-@atexit.register
-def _():
-    """Set a global when Python shuts down.
-
-    Note
-    ----
-    This function must be registered with atexit *after* any class that invokes
-    ``dstributed.utils.is_python_shutting_down`` has been defined. This way it
-    will be called before the ``__del__`` method of those classes.
-
-    See Also
-    --------
-    distributed.utils.is_python_shutting_down
-    """
-    global _python_shutting_down
-    _python_shutting_down = True
-
-
 __all__ = [
     "Actor",
     "ActorFuture",

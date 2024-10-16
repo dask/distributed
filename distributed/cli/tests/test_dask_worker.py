@@ -18,7 +18,7 @@ from distributed.cli.dask_worker import _apportion_ports, main
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
-from distributed.utils import open_port
+from distributed.utils import get_ip, open_port
 from distributed.utils_test import (
     gen_cluster,
     inc,
@@ -485,39 +485,32 @@ async def test_respect_host_listen_address(c, s, nanny, host):
 
 
 @pytest.mark.slow
-@gen_cluster(
-    client=True, nthreads=[], scheduler_kwargs={"dashboard_address": "localhost:8787"}
-)
-async def test_dashboard_non_standard_ports(c, s, requires_default_ports):
+def test_dashboard_non_standard_ports():
     pytest.importorskip("bokeh")
     requests = pytest.importorskip("requests")
 
-    try:
-        import jupyter_server_proxy  # noqa: F401
+    s_host = "127.0.0.1"
+    # use internal ip instead of localhost ip to verify GlobalProxyHandler will update
+    # to allow internal host ip of a worker.
+    w_host = get_ip()
+    s_port = open_port(s_host)
+    s_dashboard_port = open_port(s_host)
+    w_dashboard_port = open_port(w_host)
+    s_cmd = f"dask scheduler --host {s_host} --port {s_port} --dashboard-address :{s_dashboard_port}"
+    w_cmd = f"dask worker {s_host}:{s_port} --dashboard-address :{w_dashboard_port} --host {w_host}"
 
-        proxy_exists = True
-    except ImportError:
-        proxy_exists = False
+    with popen(s_cmd.split()), popen(w_cmd.split()):
+        with Client(f"{s_host}:{s_port}") as c:
+            c.wait_for_workers(1)
 
-    with popen(
-        [
-            "dask",
-            "worker",
-            s.address,
-            "--dashboard-address",
-            ":4833",
-            "--host",
-            "127.0.0.1",
-        ]
-    ):
-        await c.wait_for_workers(1)
-
-        response = requests.get("http://127.0.0.1:4833/status")
+        response = requests.get(f"http://{s_host}:{w_dashboard_port}/status")
         response.raise_for_status()
+
         # TEST PROXYING WORKS
-        if proxy_exists:
-            response = requests.get("http://127.0.0.1:8787/proxy/4833/127.0.0.1/status")
-            response.raise_for_status()
+        response = requests.get(
+            f"http://{s_host}:{s_dashboard_port}/proxy/{w_dashboard_port}/{w_host}/status"
+        )
+        response.raise_for_status()
 
     with pytest.raises(requests.ConnectionError):
         requests.get("http://localhost:4833/status/")
@@ -617,8 +610,9 @@ async def test_set_lifetime_stagger_via_env_var(c, s):
     env = os.environ.copy()
     env["DASK_DISTRIBUTED__WORKER__LIFETIME__DURATION"] = "10 seconds"
     env["DASK_DISTRIBUTED__WORKER__LIFETIME__STAGGER"] = "2 seconds"
-    with popen(["dask", "worker", s.address], env=env), popen(
-        ["dask", "worker", s.address], env=env
+    with (
+        popen(["dask", "worker", s.address], env=env),
+        popen(["dask", "worker", s.address], env=env),
     ):
         await c.wait_for_workers(2)
         [lifetime1, lifetime2] = (

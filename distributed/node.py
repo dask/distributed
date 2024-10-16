@@ -143,9 +143,14 @@ class ServerNode(Server):
         self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
 
         http_addresses = clean_dashboard_address(dashboard_address or default_port)
-
         for http_address in http_addresses:
-            if http_address["address"] is None:
+            # Handle default case for dashboard address
+            # In case dashboard_address is given, e.g. ":8787"
+            # the address is empty and it is intended to listen to all interfaces
+            if dashboard_address is not None and http_address["address"] == "":
+                http_address["address"] = "0.0.0.0"
+
+            if http_address["address"] is None or http_address["address"] == "":
                 address = self._start_address
                 if isinstance(address, (list, tuple)):
                     address = address[0]

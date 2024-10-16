@@ -70,6 +70,7 @@ async def test_slow_send(tmp_path):
         await block_send.wait()
         d[address].extend(shards)
         sending_first.set()
+        return {"status": "OK"}
 
     mc = CommShardsBuffer(
         send=send,
@@ -144,6 +145,7 @@ async def test_concurrent_puts_error():
         if counter == 5:
             raise OSError("error during send")
         d[address].extend(shards)
+        return {"status": "OK"}
 
     frac = 0.1
     nshards = 10

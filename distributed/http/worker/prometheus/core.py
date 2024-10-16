@@ -8,6 +8,7 @@ from typing import ClassVar
 import prometheus_client
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, Metric
 
+from distributed.gc import gc_collect_duration
 from distributed.http.prometheus import PrometheusCollector
 from distributed.http.utils import RequestHandler
 from distributed.worker import Worker
@@ -32,6 +33,7 @@ class WorkerMetricCollector(PrometheusCollector):
             )
 
     def collect(self) -> Iterator[Metric]:
+        self.server.monitor.update()
         ws = self.server.state
 
         tasks = GaugeMetricFamily(
@@ -63,8 +65,16 @@ class WorkerMetricCollector(PrometheusCollector):
             yield CounterMetricFamily(
                 self.build_name("gil_contention"),
                 "GIL contention metric",
-                value=self.server.monitor._cumulative_gil_contention,
+                value=self.server.monitor.cumulative_gil_contention,
+                unit="seconds",
             )
+
+        yield CounterMetricFamily(
+            self.build_name("gc_collection"),
+            "Total time spent on garbage collection",
+            value=gc_collect_duration(),
+            unit="seconds",
+        )
 
         yield GaugeMetricFamily(
             self.build_name("threads"),

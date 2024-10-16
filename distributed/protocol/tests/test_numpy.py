@@ -77,6 +77,7 @@ def test_serialize():
         np.arange(12)[::2],  # non-contiguous array
         np.ones(shape=(5, 6)).astype(dtype=[("total", "<f8"), ("n", "<f8")]),
         np.broadcast_to(np.arange(3), shape=(10, 3)),  # zero-strided array
+        np.matrix([[1, 2], [3, 4]]),
     ],
 )
 def test_dumps_serialize_numpy(x):

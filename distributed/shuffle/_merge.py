@@ -5,9 +5,10 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 import dask
-from dask.base import is_dask_collection, tokenize
+from dask.base import is_dask_collection
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
+from dask.tokenize import tokenize
 
 from distributed.shuffle._arrow import check_minimal_arrow_version
 from distributed.shuffle._core import ShuffleId, barrier_key, get_worker_plugin
@@ -156,6 +157,7 @@ def merge_transfer(
         meta=meta,
         parts_out=parts_out,
         disk=disk,
+        drop_column=True,
     )
 
 
@@ -172,17 +174,14 @@ def merge_unpack(
     suffixes: Suffixes,
     left_index: bool,
     right_index: bool,
+    indicator: bool = False,
 ):
     from dask.dataframe.multi import merge_chunk
 
     ext = get_worker_plugin()
     # If the partition is empty, it doesn't contain the hash column name
-    left = ext.get_output_partition(
-        shuffle_id_left, barrier_left, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
-    right = ext.get_output_partition(
-        shuffle_id_right, barrier_right, output_partition
-    ).drop(columns=_HASH_COLUMN_NAME, errors="ignore")
+    left = ext.get_output_partition(shuffle_id_left, barrier_left, output_partition)
+    right = ext.get_output_partition(shuffle_id_right, barrier_right, output_partition)
     return merge_chunk(
         left,
         right,
@@ -193,6 +192,7 @@ def merge_unpack(
         suffixes=suffixes,
         left_index=left_index,
         right_index=right_index,
+        indicator=indicator,
     )
 
 
@@ -271,8 +271,8 @@ class HashJoinP2PLayer(Layer):
         """
         deps = {}
         parts_out = parts_out or self._keys_to_parts(keys)
-        keys = {(self.name_input_left, i) for i in range(self.npartitions)}
-        keys |= {(self.name_input_right, i) for i in range(self.npartitions)}
+        keys = {(self.name_input_left, i) for i in range(self.n_partitions_left)}
+        keys |= {(self.name_input_right, i) for i in range(self.n_partitions_right)}
         # Protect against mutations later on with frozenset
         keys = frozenset(keys)
         for part in parts_out:
@@ -352,6 +352,7 @@ class HashJoinP2PLayer(Layer):
         parameter.
         """
         parts_out = self._keys_to_parts(keys)
+
         culled_deps = self._cull_dependencies(keys, parts_out=parts_out)
         if parts_out != set(self.parts_out):
             culled_layer = self._cull(parts_out)
@@ -429,5 +430,6 @@ class HashJoinP2PLayer(Layer):
                 self.suffixes,
                 self.left_index,
                 self.right_index,
+                self.indicator,
             )
         return dsk

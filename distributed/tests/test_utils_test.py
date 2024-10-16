@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import pathlib
 import signal
 import socket
@@ -16,7 +15,6 @@ from time import sleep
 from unittest import mock
 
 import pytest
-import yaml
 from tornado import gen
 
 import dask.config
@@ -41,7 +39,6 @@ from distributed.utils_test import (
     check_process_leak,
     check_thread_leak,
     cluster,
-    dump_cluster_state,
     ensure_no_new_clients,
     freeze_batched_send,
     gen_cluster,
@@ -439,40 +436,6 @@ async def test_locked_comm_intercept_write(loop):
         assert await fut == "pong"
 
 
-@pytest.mark.slow()
-def test_dump_cluster_state_timeout(tmp_path):
-    sleep_time = 30
-
-    async def inner_test(c, s, a, b):
-        await asyncio.sleep(sleep_time)
-
-    # This timeout includes cluster startup and teardown which sometimes can
-    # take a significant amount of time. For this particular test we would like
-    # to keep the _test timeout_ small because we intend to trigger it but the
-    # overall timeout large.
-    test = gen_cluster(client=True, timeout=5, cluster_dump_directory=tmp_path)(
-        inner_test
-    )
-    try:
-        with pytest.raises(asyncio.TimeoutError) as exc:
-            test()
-        assert "inner_test" in str(exc)
-        assert "await asyncio.sleep(sleep_time)" in str(exc)
-    except gen.TimeoutError:
-        pytest.xfail("Cluster startup or teardown took too long")
-
-    _, dirs, files = next(os.walk(tmp_path))
-    assert not dirs
-    assert files == [inner_test.__name__ + ".yaml"]
-    import yaml
-
-    with open(tmp_path / files[0], "rb") as fd:
-        state = yaml.load(fd, Loader=yaml.Loader)
-
-    assert "scheduler" in state
-    assert "workers" in state
-
-
 def test_assert_story():
     now = time()
     story = [
@@ -556,64 +519,6 @@ async def test_assert_story_identity(c, s, a, strict):
         assert_story(scheduler_story, worker_story, strict=strict)
     with pytest.raises(AssertionError):
         assert_story(worker_story, scheduler_story, strict=strict)
-
-
-@gen_cluster()
-async def test_dump_cluster_state(s, a, b, tmp_path):
-    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
-    with open(f"{tmp_path}/dump.yaml") as fh:
-        out = yaml.safe_load(fh)
-
-    assert out.keys() == {"scheduler", "workers", "versions"}
-    assert out["workers"].keys() == {a.address, b.address}
-
-
-@gen_cluster(nthreads=[])
-async def test_dump_cluster_state_no_workers(s, tmp_path):
-    await dump_cluster_state(s, [], str(tmp_path), "dump")
-    with open(f"{tmp_path}/dump.yaml") as fh:
-        out = yaml.safe_load(fh)
-
-    assert out.keys() == {"scheduler", "workers", "versions"}
-    assert out["workers"] == {}
-
-
-@gen_cluster(Worker=Nanny)
-async def test_dump_cluster_state_nannies(s, a, b, tmp_path):
-    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
-    with open(f"{tmp_path}/dump.yaml") as fh:
-        out = yaml.safe_load(fh)
-
-    assert out.keys() == {"scheduler", "workers", "versions"}
-    assert out["workers"].keys() == s.workers.keys()
-
-
-@gen_cluster()
-async def test_dump_cluster_state_unresponsive_local_worker(s, a, b, tmp_path):
-    a.stop()
-    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
-    with open(f"{tmp_path}/dump.yaml") as fh:
-        out = yaml.safe_load(fh)
-
-    assert out.keys() == {"scheduler", "workers", "versions"}
-    assert isinstance(out["workers"][a.address], dict)
-    assert isinstance(out["workers"][b.address], dict)
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny)
-async def test_dump_cluster_unresponsive_remote_worker(c, s, a, b, tmp_path):
-    await c.run(lambda dask_worker: dask_worker.stop(), workers=[a.worker_address])
-
-    await dump_cluster_state(s, [a, b], str(tmp_path), "dump")
-    with open(f"{tmp_path}/dump.yaml") as fh:
-        out = yaml.safe_load(fh)
-
-    assert out.keys() == {"scheduler", "workers", "versions"}
-    assert isinstance(out["workers"][b.worker_address], dict)
-    assert out["workers"][a.worker_address].startswith(
-        "OSError('Timed out trying to connect to"
-    )
 
 
 # Note: WINDOWS constant doesn't work with `mypy --platform win32`
@@ -712,7 +617,7 @@ def test_invalid_transitions(capsys):
             with pytest.raises(InvalidTransition):
                 a.handle_stimulus(ev)
 
-        while not s.events["invalid-worker-transition"]:
+        while not s.get_events("invalid-worker-transition"):
             await asyncio.sleep(0.01)
 
     with pytest.raises(Exception) as info:
@@ -737,7 +642,7 @@ def test_invalid_worker_state(capsys):
         with pytest.raises(InvalidTaskState):
             a.validate_state()
 
-        while not s.events["invalid-worker-task-state"]:
+        while not s.get_events("invalid-worker-task-state"):
             await asyncio.sleep(0.01)
 
     with pytest.raises(Exception) as info:

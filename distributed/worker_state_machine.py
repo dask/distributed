@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import random
-import sys
 import warnings
 import weakref
 from collections import Counter, defaultdict, deque
@@ -199,12 +198,7 @@ def _default_data_size() -> int:
     return parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 
 
-# Note: can't specify __slots__ manually to enable slots in Python <3.10 in a @dataclass
-# that defines any default values
-DC_SLOTS = {"slots": True} if sys.version_info >= (3, 10) else {}
-
-
-@dataclass(repr=False, eq=False, **DC_SLOTS)
+@dataclass(repr=False, eq=False, slots=True)
 class TaskState:
     """Holds volatile state relating to an individual Dask task.
 
@@ -336,7 +330,7 @@ class TaskState:
         -----
         This class uses ``_to_dict_no_nest`` instead of ``_to_dict``.
         When a task references another task, just print the task repr. All tasks
-        should neatly appear under Worker.tasks. This also prevents a RecursionError
+        should neatly appear under Worker.state.tasks. This also prevents a RecursionError
         during particularly heavy loads, which have been observed to happen whenever
         there's an acyclic dependency chain of ~200+ tasks.
         """

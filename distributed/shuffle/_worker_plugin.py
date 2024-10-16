@@ -11,6 +11,7 @@ from dask.context import thread_state
 from dask.typing import Key
 from dask.utils import parse_bytes
 
+from distributed.core import ErrorMessage, OKMessage, clean_exception, error_message
 from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._core import (
@@ -20,7 +21,7 @@ from distributed.shuffle._core import (
     ShuffleRunSpec,
     ShuffleSpec,
 )
-from distributed.shuffle._exceptions import ShuffleClosedError
+from distributed.shuffle._exceptions import P2PConsistencyError, ShuffleClosedError
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors, sync
 
@@ -68,7 +69,7 @@ class _ShuffleRunManager:
         if shuffle_run is None or shuffle_run.run_id != run_id:
             return
         self._active_runs.pop(shuffle_id)
-        exception = RuntimeError(message)
+        exception = P2PConsistencyError(message)
         shuffle_run.fail(exception)
 
         self._plugin.worker._ongoing_background_tasks.call_soon(self.close, shuffle_run)
@@ -111,17 +112,19 @@ class _ShuffleRunManager:
         ------
         KeyError
             If the shuffle does not exist
-        RuntimeError
+        P2PConsistencyError
             If the run_id is stale
+        ShuffleClosedError
+            If the run manager has been closed
         """
         shuffle_run = self._active_runs.get(shuffle_id, None)
         if shuffle_run is None or shuffle_run.run_id < run_id:
             shuffle_run = await self._refresh(shuffle_id=shuffle_id)
 
         if shuffle_run.run_id > run_id:
-            raise RuntimeError(f"{run_id=} stale, got {shuffle_run}")
+            raise P2PConsistencyError(f"{run_id=} stale, got {shuffle_run}")
         elif shuffle_run.run_id < run_id:
-            raise RuntimeError(f"{run_id=} invalid, got {shuffle_run}")
+            raise P2PConsistencyError(f"{run_id=} invalid, got {shuffle_run}")
 
         if self.closed:
             raise ShuffleClosedError(f"{self} has already been closed")
@@ -173,7 +176,7 @@ class _ShuffleRunManager:
         ------
         KeyError
             If the shuffle does not exist
-        RuntimeError
+        P2PConsistencyError
             If the most recent run_id is stale
         """
         return await self.get_with_run_id(shuffle_id=shuffle_id, run_id=max(run_ids))
@@ -184,29 +187,31 @@ class _ShuffleRunManager:
         spec: ShuffleSpec | None = None,
         key: Key | None = None,
     ) -> ShuffleRunSpec:
-        # FIXME: This should never be ToPickle[ShuffleRunSpec]
-        result: ShuffleRunSpec | ToPickle[ShuffleRunSpec]
         if spec is None:
-            result = await self._plugin.worker.scheduler.shuffle_get(
+            response = await self._plugin.worker.scheduler.shuffle_get(
                 id=shuffle_id,
                 worker=self._plugin.worker.address,
             )
         else:
-            result = await self._plugin.worker.scheduler.shuffle_get_or_create(
+            response = await self._plugin.worker.scheduler.shuffle_get_or_create(
                 spec=ToPickle(spec),
                 key=key,
                 worker=self._plugin.worker.address,
             )
-        if isinstance(result, ToPickle):
-            result = result.data
-        return result
+
+        status = response["status"]
+        if status == "error":
+            _, exc, tb = clean_exception(**response)
+            assert exc
+            raise exc.with_traceback(tb)
+        assert status == "OK"
+        return response["run_spec"]
 
     @overload
     async def _refresh(
         self,
         shuffle_id: ShuffleId,
-    ) -> ShuffleRun:
-        ...
+    ) -> ShuffleRun: ...
 
     @overload
     async def _refresh(
@@ -214,8 +219,7 @@ class _ShuffleRunManager:
         shuffle_id: ShuffleId,
         spec: ShuffleSpec,
         key: Key,
-    ) -> ShuffleRun:
-        ...
+    ) -> ShuffleRun: ...
 
     async def _refresh(
         self,
@@ -237,7 +241,7 @@ class _ShuffleRunManager:
                 )
         stale_run_id = self._stale_run_ids.get(shuffle_id, None)
         if stale_run_id is not None and stale_run_id >= result.run_id:
-            raise RuntimeError(
+            raise P2PConsistencyError(
                 f"Received stale shuffle run with run_id={result.run_id};"
                 f" expected run_id > {stale_run_id}"
             )
@@ -312,15 +316,17 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         shuffle_id: ShuffleId,
         run_id: int,
         data: list[tuple[int, Any]] | bytes,
-    ) -> None:
+    ) -> OKMessage | ErrorMessage:
         """
         Handler: Receive an incoming shard of data from a peer worker.
         Using an unknown ``shuffle_id`` is an error.
         """
-        shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
-        await shuffle_run.receive(data)
+        try:
+            shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
+            return await shuffle_run.receive(data)
+        except P2PConsistencyError as e:
+            return error_message(e)
 
-    @log_errors
     async def shuffle_inputs_done(self, shuffle_id: ShuffleId, run_id: int) -> None:
         """
         Handler: Inform the extension that all input partitions have been handed off to extensions.
@@ -347,6 +353,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         spec: ShuffleSpec,
         **kwargs: Any,
     ) -> int:
+        spec.validate_data(data)
         shuffle_run = self.get_or_create_shuffle(spec)
         return shuffle_run.add_partition(
             data=data,

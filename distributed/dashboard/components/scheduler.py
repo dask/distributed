@@ -38,6 +38,7 @@ from bokeh.models import (
     Range1d,
     ResetTool,
     Select,
+    TabPanel,
     Tabs,
     TapTool,
     Title,
@@ -51,9 +52,8 @@ from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap, stack
 from jinja2 import Environment, FileSystemLoader
-from tlz import curry, pipe, valmap
+from tlz import curry, pipe, second, valmap
 from tlz.curried import concat, groupby, map
-from tornado import escape
 
 import dask
 from dask import config
@@ -74,10 +74,8 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.core import TabPanel
 from distributed.dashboard.utils import (
     _DATATABLE_STYLESHEETS_KWARGS,
-    BOKEH_VERSION,
     PROFILING,
     transpose,
     update,
@@ -91,7 +89,7 @@ from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
 from distributed.spans import SpansSchedulerExtension
-from distributed.utils import Log, log_errors
+from distributed.utils import Log, log_errors, url_escape
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -199,7 +197,7 @@ class Occupancy(DashboardComponent):
                 "worker": [ws.address for ws in workers],
                 "ms": ms,
                 "color": color,
-                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                "escaped_worker": [url_escape(ws.address) for ws in workers],
                 "x": x,
                 "y": y,
             }
@@ -581,7 +579,7 @@ class WorkersMemory(DashboardComponent, MemoryColor):
             "color": color,
             "alpha": [1, 0.7, 0.4, 1] * len(workers),
             "worker": quadlist(ws.address for ws in workers),
-            "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
+            "escaped_worker": quadlist(url_escape(ws.address) for ws in workers),
             "y": quadlist(range(len(workers))),
             "proc_memory": quadlist(procmemory),
             "managed": quadlist(managed),
@@ -732,7 +730,7 @@ class WorkersTransferBytes(DashboardComponent):
             ws.metrics["transfer"]["outgoing_bytes"] for ws in wss
         ]
         workers = [ws.address for ws in wss]
-        escaped_workers = [escape.url_escape(worker) for worker in workers]
+        escaped_workers = [url_escape(worker) for worker in workers]
 
         if wss:
             x_limit = max(
@@ -1523,42 +1521,44 @@ class ComputePerKey(DashboardComponent):
     def update(self):
         compute_times = defaultdict(float)
 
-        for key, ts in self.scheduler.task_prefixes.items():
-            name = key_split(key)
-            for action, t in ts.all_durations.items():
+        for name, tp in self.scheduler.task_prefixes.items():
+            for action, t in tp.all_durations.items():
                 if action == "compute":
                     compute_times[name] += t
 
+        if not compute_times:
+            return
+
         # order by largest time first
-        compute_times = sorted(compute_times.items(), key=lambda x: x[1], reverse=True)
+        compute_times = sorted(compute_times.items(), key=second, reverse=True)
 
-        # keep only time which are 2% of max or greater
-        if compute_times:
-            max_time = compute_times[0][1] * 0.02
-            compute_times = [(n, t) for n, t in compute_times if t > max_time]
-            compute_colors = list()
-            compute_names = list()
-            compute_time = list()
-            total_time = 0
-            for name, t in compute_times:
-                compute_names.append(name)
-                compute_colors.append(ts_color_of(name))
-                compute_time.append(t)
-                total_time += t
+        # Keep only times which are 2% of max or greater
+        max_time = compute_times[0][1] * 0.02
+        compute_colors = []
+        compute_names = []
+        compute_time = []
+        total_time = 0
+        for name, t in compute_times:
+            if t < max_time:
+                break
+            compute_names.append(name)
+            compute_colors.append(ts_color_of(name))
+            compute_time.append(t)
+            total_time += t
 
-            angles = [t / total_time * 2 * math.pi for t in compute_time]
+        angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            self.fig.x_range.factors = compute_names
+        self.fig.x_range.factors = compute_names
 
-            compute_result = dict(
-                angles=angles,
-                times=compute_time,
-                color=compute_colors,
-                names=compute_names,
-                formatted_time=[format_time(t) for t in compute_time],
-            )
+        compute_result = dict(
+            angles=angles,
+            times=compute_time,
+            color=compute_colors,
+            names=compute_names,
+            formatted_time=[format_time(t) for t in compute_time],
+        )
 
-            update(self.compute_source, compute_result)
+        update(self.compute_source, compute_result)
 
 
 class AggregateAction(DashboardComponent):
@@ -1838,7 +1838,7 @@ class CurrentLoad(DashboardComponent):
             "nprocessing-half": [np / 2 for np in nprocessing],
             "nprocessing-color": nprocessing_color,
             "worker": [ws.address for ws in workers],
-            "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+            "escaped_worker": [url_escape(ws.address) for ws in workers],
             "y": list(range(len(workers))),
         }
 
@@ -1920,7 +1920,7 @@ class StealingEvents(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="level",
@@ -1970,12 +1970,12 @@ class StealingEvents(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        log = self.scheduler.get_events(topic="stealing")
-        current = len(self.scheduler.events["stealing"])
-        n = current - self.last
-
-        log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
-        self.last = current
+        topic = self.scheduler._broker._topics["stealing"]
+        log = log = topic.events
+        n = min(topic.count - self.last, len(log))
+        if log:
+            log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
+        self.last = topic.count
 
         if log:
             new = pipe(
@@ -2014,7 +2014,7 @@ class Events(DashboardComponent):
             **kwargs,
         )
 
-        self.root.circle(
+        self.root.scatter(
             source=self.source,
             x="time",
             y="y",
@@ -2040,11 +2040,12 @@ class Events(DashboardComponent):
     @without_property_validation
     @log_errors
     def update(self):
-        log = self.scheduler.events[self.name]
-        n = self.scheduler.event_counts[self.name] - self.last
+        topic = self.scheduler._broker._topics[self.name]
+        log = topic.events
+        n = min(topic.count - self.last, len(log))
         if log:
             log = [log[-i] for i in range(1, n + 1)]
-        self.last = self.scheduler.event_counts[self.name]
+        self.last = topic.count
 
         if log:
             actions = []
@@ -2269,18 +2270,8 @@ class TaskGraph(DashboardComponent):
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
         filter = GroupFilter(column_name="visible", group="True")
-        if BOKEH_VERSION.major < 3:
-            filter_kwargs = {"filters": [filter]}
-        else:
-            filter_kwargs = {"filter": filter}
-        node_view = CDSView(**filter_kwargs)
-        edge_view = CDSView(**filter_kwargs)
-
-        # Bokeh >= 3.0 automatically infers the source to use
-        if BOKEH_VERSION.major < 3:
-            node_view.source = self.node_source
-            edge_view.source = self.edge_source
-
+        node_view = CDSView(filter=filter)
+        edge_view = CDSView(filter=filter)
         node_colors = factor_cmap(
             "state",
             factors=["waiting", "queued", "processing", "memory", "released", "erred"],
@@ -2300,7 +2291,7 @@ class TaskGraph(DashboardComponent):
             color="black",
             alpha=0.3,
         )
-        rect = self.root.square(
+        rect = self.root.scatter(
             x="x",
             y="y",
             size=10,
@@ -2308,6 +2299,7 @@ class TaskGraph(DashboardComponent):
             source=self.node_source,
             view=node_view,
             legend_field="state",
+            marker="square",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -2378,7 +2370,7 @@ class TaskGraph(DashboardComponent):
                     continue
                 xx = x[key]
                 yy = y[key]
-                node_key.append(escape.url_escape(str(key)))
+                node_key.append(url_escape(str(key)))
                 node_x.append(xx)
                 node_y.append(yy)
                 node_state.append(task.state)
@@ -2867,16 +2859,16 @@ class TaskGroupGraph(DashboardComponent):
                 f"{comp_tasks} ({comp_tasks / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_processing"].append(
-                f"{tasks_processing} ({tasks_processing/ tot_tasks * 100:.0f} %)"
+                f"{tasks_processing} ({tasks_processing / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_memory"].append(
-                f"{tasks_memory} ({tasks_memory/ tot_tasks * 100:.0f} %)"
+                f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased/ tot_tasks * 100:.0f} %)"
+                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
-                f"{ tasks_erred} ({tasks_erred/ tot_tasks * 100:.0f} %)"
+                f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
             )
 
         self.nodes_source.data.update(nodes_data)
@@ -3339,15 +3331,15 @@ class TaskProgress(DashboardComponent):
         }
 
         for tp in self.scheduler.task_prefixes.values():
-            active_states = tp.active_states
-            if any(active_states.get(s) for s in state.keys()):
-                state["memory"][tp.name] = active_states["memory"]
-                state["erred"][tp.name] = active_states["erred"]
-                state["released"][tp.name] = active_states["released"]
-                state["processing"][tp.name] = active_states["processing"]
-                state["waiting"][tp.name] = active_states["waiting"]
-                state["queued"][tp.name] = active_states["queued"]
-                state["no_worker"][tp.name] = active_states["no-worker"]
+            states = tp.states
+            if any(states.get(s) for s in state.keys()):
+                state["memory"][tp.name] = states["memory"]
+                state["erred"][tp.name] = states["erred"]
+                state["released"][tp.name] = states["released"]
+                state["processing"][tp.name] = states["processing"]
+                state["waiting"][tp.name] = states["waiting"]
+                state["queued"][tp.name] = states["queued"]
+                state["no_worker"][tp.name] = states["no-worker"]
 
         state["all"] = {k: sum(v[k] for v in state.values()) for k in state["memory"]}
 
@@ -3909,7 +3901,6 @@ class Contention(DashboardComponent):
     @log_errors
     def update(self):
         s = self.scheduler
-        monitor_gil = s.monitor.monitor_gil_contention
 
         self.data["values"] = [
             s._tick_interval_observed,
@@ -3917,11 +3908,15 @@ class Contention(DashboardComponent):
             sum(w.metrics["event_loop_interval"] for w in s.workers.values())
             / (len(s.workers) or 1),
             self.gil_contention_workers,
-        ][:: 1 if monitor_gil else 2]
+        ][:: 1 if s.monitor.monitor_gil_contention else 2]
 
         # Format event loop as time and GIL (if configured) as %
         self.data["text"] = [
-            f"{x * 100:.1f}%" if i % 2 and monitor_gil else format_time(x)
+            (
+                f"{x * 100:.1f}%"
+                if i % 2 and s.monitor.monitor_gil_contention
+                else format_time(x)
+            )
             for i, x in enumerate(self.data["values"])
         ]
         update(self.source, self.data)
@@ -4195,7 +4190,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        mem_plot.circle(
+        mem_plot.scatter(
             source=self.source, x="memory_percent", y=0, size=10, fill_alpha=0.5
         )
         mem_plot.ygrid.visible = False
@@ -4225,7 +4220,7 @@ class WorkerTable(DashboardComponent):
             min_border_right=0,
             **kwargs,
         )
-        cpu_plot.circle(
+        cpu_plot.scatter(
             source=self.source, x="cpu_fraction", y=0, size=10, fill_alpha=0.5
         )
         cpu_plot.ygrid.visible = False
@@ -4509,10 +4504,6 @@ _STYLES = {
     "box-shadow": "inset 1px 0 8px 0 lightgray",
     "overflow": "auto",
 }
-if BOKEH_VERSION.major < 3:
-    _BOKEH_STYLES_KWARGS = {"style": _STYLES}
-else:
-    _BOKEH_STYLES_KWARGS = {"styles": _STYLES}
 
 
 class SchedulerLogs:
@@ -4532,7 +4523,7 @@ class SchedulerLogs:
                 )
             )._repr_html_()
 
-        self.root = Div(text=logs_html, **_BOKEH_STYLES_KWARGS)
+        self.root = Div(text=logs_html, styles=_STYLES)
 
 
 @log_errors

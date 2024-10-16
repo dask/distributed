@@ -21,6 +21,10 @@ from distributed.protocol.pickle import dumps
 
 if TYPE_CHECKING:
     # circular imports
+    # Needed to avoid Sphinx WARNING: more than one target found for cross-reference
+    # 'WorkerState'"
+    # https://github.com/agronholm/sphinx-autodoc-typehints#dealing-with-circular-imports
+    from distributed import scheduler as scheduler_module
     from distributed.scheduler import Scheduler
     from distributed.scheduler import TaskStateState as SchedulerTaskStateState
     from distributed.worker import Worker
@@ -204,6 +208,29 @@ class SchedulerPlugin:
 
     def remove_client(self, scheduler: Scheduler, client: str) -> None:
         """Run when a client disconnects"""
+
+    def valid_workers_downscaling(
+        self, scheduler: Scheduler, workers: list[scheduler_module.WorkerState]
+    ) -> list[scheduler_module.WorkerState]:
+        """Determine which workers can be removed from the cluster
+
+        This method is called when the scheduler is about to downscale the cluster
+        by removing workers. The method should return a set of worker states that
+        can be removed from the cluster.
+
+        Parameters
+        ----------
+        workers : list
+            The list of worker states that are candidates for removal.
+        stimulus_id : str
+            ID of stimulus causing the downscaling.
+
+        Returns
+        -------
+        list
+            The list of worker states that can be removed from the cluster.
+        """
+        return workers
 
     def log_event(self, topic: str, msg: Any) -> None:
         """Run when an event is logged"""
@@ -415,6 +442,9 @@ class InstallPlugin(SchedulerPlugin):
         self.name = f"{self.__class__.__name__}-{uuid.uuid4()}"
 
     async def start(self, scheduler: Scheduler) -> None:
+        from distributed.core import clean_exception
+        from distributed.protocol.serialize import Serialized, deserialize
+
         self._scheduler = scheduler
 
         if InstallPlugin._lock is None:
@@ -425,7 +455,7 @@ class InstallPlugin(SchedulerPlugin):
 
             if self.restart_workers:
                 nanny_plugin = _InstallNannyPlugin(self._install_fn, self.name)
-                await scheduler.register_nanny_plugin(
+                responses = await scheduler.register_nanny_plugin(
                     comm=None,
                     plugin=dumps(nanny_plugin),
                     name=self.name,
@@ -433,12 +463,21 @@ class InstallPlugin(SchedulerPlugin):
                 )
             else:
                 worker_plugin = _InstallWorkerPlugin(self._install_fn, self.name)
-                await scheduler.register_worker_plugin(
+                responses = await scheduler.register_worker_plugin(
                     comm=None,
                     plugin=dumps(worker_plugin),
                     name=self.name,
                     idempotent=True,
                 )
+            for response in responses.values():
+                if response["status"] == "error":
+                    response = {  # type: ignore[unreachable]
+                        k: deserialize(v.header, v.frames)
+                        for k, v in response.items()
+                        if isinstance(v, Serialized)
+                    }
+                    _, exc, tb = clean_exception(**response)
+                    raise exc.with_traceback(tb)
 
     async def close(self) -> None:
         assert InstallPlugin._lock is not None
@@ -487,14 +526,11 @@ class _InstallNannyPlugin(NannyPlugin):
     async def setup(self, nanny):
         from distributed.semaphore import Semaphore
 
-        async with (
-            await Semaphore(
-                max_leases=1,
-                name=socket.gethostname(),
-                register=True,
-                scheduler_rpc=nanny.scheduler,
-                loop=nanny.loop,
-            )
+        async with await Semaphore(
+            max_leases=1,
+            name=socket.gethostname(),
+            scheduler_rpc=nanny.scheduler,
+            loop=nanny.loop,
         ):
             self._install_fn()
 
@@ -533,14 +569,11 @@ class _InstallWorkerPlugin(WorkerPlugin):
     async def setup(self, worker):
         from distributed.semaphore import Semaphore
 
-        async with (
-            await Semaphore(
-                max_leases=1,
-                name=socket.gethostname(),
-                register=True,
-                scheduler_rpc=worker.scheduler,
-                loop=worker.loop,
-            )
+        async with await Semaphore(
+            max_leases=1,
+            name=socket.gethostname(),
+            scheduler_rpc=worker.scheduler,
+            loop=worker.loop,
         ):
             self._install_fn()
 

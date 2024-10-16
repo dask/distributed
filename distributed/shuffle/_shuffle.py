@@ -21,20 +21,20 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
+from dask.tokenize import tokenize
 from dask.typing import Key
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
 from distributed.metrics import context_meter
 from distributed.shuffle._arrow import (
+    buffers_to_table,
     check_dtype_support,
     check_minimal_arrow_version,
     convert_shards,
     deserialize_table,
-    list_of_buffers_to_table,
     read_from_disk,
     serialize_table,
 )
@@ -47,6 +47,11 @@ from distributed.shuffle._core import (
     get_worker_plugin,
     handle_transfer_errors,
     handle_unpack_errors,
+)
+from distributed.shuffle._exceptions import (
+    DataUnavailable,
+    P2PConsistencyError,
+    P2POutOfDiskError,
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
@@ -72,6 +77,7 @@ def shuffle_transfer(
     meta: pd.DataFrame,
     parts_out: set[int],
     disk: bool,
+    drop_column: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
@@ -84,6 +90,7 @@ def shuffle_transfer(
                 meta=meta,
                 parts_out=parts_out,
                 disk=disk,
+                drop_column=drop_column,
             ),
         )
 
@@ -102,6 +109,10 @@ def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
         return get_worker_plugin().barrier(id, run_ids)
     except Reschedule as e:
         raise e
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
     except Exception as e:
         raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
 
@@ -162,6 +173,7 @@ class P2PShuffleLayer(Layer):
     meta_input: pd.DataFrame
     disk: bool
     parts_out: set[int]
+    drop_column: bool
 
     def __init__(
         self,
@@ -174,6 +186,7 @@ class P2PShuffleLayer(Layer):
         disk: bool,
         parts_out: Iterable[int] | None = None,
         annotations: dict | None = None,
+        drop_column: bool = False,
     ):
         check_minimal_arrow_version()
         self.name = name
@@ -187,6 +200,7 @@ class P2PShuffleLayer(Layer):
         else:
             self.parts_out = set(range(self.npartitions))
         self.npartitions_input = npartitions_input
+        self.drop_column = drop_column
         super().__init__(annotations=annotations)
 
     def __repr__(self) -> str:
@@ -285,6 +299,7 @@ class P2PShuffleLayer(Layer):
                 self.meta_input,
                 self.parts_out,
                 self.disk,
+                self.drop_column,
             )
 
         dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
@@ -315,8 +330,7 @@ def split_by_worker(
 
     # (cudf support) Avoid pd.Series
     constructor = df._constructor_sliced
-    assert isinstance(constructor, type)
-    worker_for = constructor(worker_for)
+    worker_for = constructor(worker_for)  # type: ignore
     df = df.merge(
         right=worker_for.cat.codes.rename("_worker"),
         left_on=column,
@@ -353,7 +367,9 @@ def split_by_worker(
     return out
 
 
-def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
+def split_by_partition(
+    t: pa.Table, column: str, drop_column: bool
+) -> dict[int, pa.Table]:
     """
     Split data into many arrow batches, partitioned by final partition
     """
@@ -364,6 +380,8 @@ def split_by_partition(t: pa.Table, column: str) -> dict[int, pa.Table]:
     t = t.sort_by(column)
 
     partition = np.asarray(t[column])
+    if drop_column:
+        t = t.drop([column])
     splits = np.where(partition[1:] != partition[:-1])[0] + 1
     splits = np.concatenate([[0], splits])
 
@@ -424,6 +442,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     meta: pd.DataFrame
     partitions_of: dict[str, list[int]]
     worker_for: pd.Series
+    drop_column: bool
 
     def __init__(
         self,
@@ -442,6 +461,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         memory_limiter_disk: ResourceLimiter,
         memory_limiter_comms: ResourceLimiter,
         disk: bool,
+        drop_column: bool,
         loop: IOLoop,
     ):
         import pandas as pd
@@ -468,6 +488,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             partitions_of[addr].append(part)
         self.partitions_of = dict(partitions_of)
         self.worker_for = pd.Series(worker_for, name="_workers").astype("category")
+        self.drop_column = drop_column
 
     async def _receive(self, data: list[tuple[int, bytes]]) -> None:
         self.raise_if_closed()
@@ -475,7 +496,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
         filtered = []
         for d in data:
             if d[0] not in self.received:
-                filtered.append(d[1])
+                filtered.append(d)
                 self.received.add(d[0])
                 self.total_recvd += sizeof(d)
         del data
@@ -489,9 +510,11 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             self._exception = e
             raise
 
-    def _repartition_buffers(self, data: list[bytes]) -> dict[NDIndex, bytes]:
-        table = list_of_buffers_to_table(data)
-        groups = split_by_partition(table, self.column)
+    def _repartition_buffers(
+        self, data: list[tuple[int, bytes]]
+    ) -> dict[NDIndex, bytes]:
+        table = buffers_to_table(data)
+        groups = split_by_partition(table, self.column, self.drop_column)
         assert len(table) == sum(map(len, groups.values()))
         del data
         return {(k,): serialize_table(v) for k, v in groups.items()}
@@ -524,9 +547,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     ) -> pd.DataFrame:
         try:
             data = self._read_from_disk((partition_id,))
-            return convert_shards(data, self.meta)
-        except KeyError:
-            return self.meta.copy()
+            return convert_shards(data, self.meta, self.column, self.drop_column)
+        except DataUnavailable:
+            result = self.meta.copy()
+            if self.drop_column:
+                result = self.meta.drop(columns=self.column)
+            return result
 
     def _get_assigned_worker(self, id: int) -> str:
         return self.worker_for[id]
@@ -544,13 +570,18 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
     column: str
     meta: pd.DataFrame
     parts_out: set[int]
+    drop_column: bool
 
     @property
-    def output_partitions(self) -> Generator[int, None, None]:
+    def output_partitions(self) -> Generator[int]:
         yield from self.parts_out
 
     def pick_worker(self, partition: int, workers: Sequence[str]) -> str:
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
+
+    def validate_data(self, data: pd.DataFrame) -> None:
+        if set(data.columns) != set(self.meta.columns):
+            raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
 
     def create_run_on_worker(
         self,
@@ -575,11 +606,12 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
             rpc=plugin.worker.rpc,
             digest_metric=plugin.worker.digest_metric,
             scheduler=plugin.worker.scheduler,
-            memory_limiter_disk=plugin.memory_limiter_disk
-            if self.disk
-            else ResourceLimiter(None),
+            memory_limiter_disk=(
+                plugin.memory_limiter_disk if self.disk else ResourceLimiter(None)
+            ),
             memory_limiter_comms=plugin.memory_limiter_comms,
             disk=self.disk,
+            drop_column=self.drop_column,
             loop=plugin.worker.loop,
         )
 

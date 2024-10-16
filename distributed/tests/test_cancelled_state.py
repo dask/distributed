@@ -169,7 +169,11 @@ async def test_flight_to_executing_via_cancelled_resumed(c, s, b):
         with lock:
             return x + 1
 
-    async with BrokenWorker(s.address) as a:
+    async with BrokenWorker(
+        s.address,
+        # heartbeat will close a worker after remove_worker(close=False)
+        heartbeat_interval="100s",
+    ) as a:
         await c.wait_for_workers(2)
         fut1 = c.submit(
             blockable_compute,
@@ -267,7 +271,11 @@ def test_flight_cancelled_error(ws):
 
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_in_flight_lost_after_resumed(c, s, b):
-    async with BlockedGetData(s.address) as a:
+    async with BlockedGetData(
+        s.address,
+        # heartbeat will close a worker after remove_worker(close=False)
+        heartbeat_interval="100s",
+    ) as a:
         fut1 = c.submit(inc, 1, workers=[a.address], key="fut1")
         # Ensure fut1 is in memory but block any further execution afterwards to
         # ensure we control when the recomputation happens
@@ -282,7 +290,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         s.set_restrictions({fut1.key: [a.address, b.address]})
         # It is removed, i.e. get_data is guaranteed to fail and f1 is scheduled
         # to be recomputed on B
-        await s.remove_worker(a.address, stimulus_id="foo", close=False, safe=True)
+        await s.remove_worker(a.address, stimulus_id="foo", close=False, expected=True)
 
         await wait_for_state(fut1.key, "resumed", b, interval=0)
 
@@ -842,7 +850,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
 
         await s.remove_worker(
             address=x.address,
-            safe=True,
+            expected=True,
             close=close_worker,
             stimulus_id="remove-worker",
         )

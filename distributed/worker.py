@@ -83,6 +83,7 @@ from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
+from distributed.gc import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.http import get_handlers
 from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
@@ -101,7 +102,6 @@ from distributed.utils import (
     get_ip,
     has_arg,
     in_async_call,
-    is_python_shutting_down,
     iscoroutinefunction,
     json_load_robust,
     log_errors,
@@ -115,7 +115,6 @@ from distributed.utils import (
     wait_for,
 )
 from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
-from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.versions import get_versions
 from distributed.worker_memory import (
     DeprecatedMemoryManagerAttribute,
@@ -1029,23 +1028,22 @@ class Worker(BaseWorker, ServerNode):
             spilled_memory, spilled_disk = 0, 0
 
         # Send Fine Performance Metrics
-        # Make sure we do not yield the event loop between the moment we parse
-        # self.digests_total_since_heartbeat to send it to the scheduler and the moment
-        # we clear it!
+        # Swap the dictionary to avoid updates while we iterate over it
+        digests_total_since_heartbeat = self.digests_total_since_heartbeat
+        self.digests_total_since_heartbeat = defaultdict(int)
+
         spans_ext: SpansWorkerExtension | None = self.extensions.get("spans")
         if spans_ext:
             # Send metrics with disaggregated span_id
-            spans_ext.collect_digests()
+            spans_ext.collect_digests(digests_total_since_heartbeat)
 
         # Send metrics with squashed span_id
         # Don't cast int metrics to float
         digests: defaultdict[Hashable, float] = defaultdict(int)
-        for k, v in self.digests_total_since_heartbeat.items():
+        for k, v in digests_total_since_heartbeat.items():
             if isinstance(k, tuple) and k[0] in CONTEXTS_WITH_SPAN_ID:
                 k = k[:1] + k[2:]
             digests[k] += v
-
-        self.digests_total_since_heartbeat.clear()
 
         out: dict = dict(
             task_counts=self.state.task_counter.current_count(by_prefix=False),
@@ -1231,7 +1229,7 @@ class Worker(BaseWorker, ServerNode):
             *(
                 self.plugin_add(name=name, plugin=plugin)
                 for name, plugin in response["worker-plugins"].items()
-            )
+            ),
         )
 
         logger.info("        Registered to: %26s", self.scheduler.address)
@@ -1272,12 +1270,15 @@ class Worker(BaseWorker, ServerNode):
             self._update_latency(end - start)
 
             if response["status"] == "missing":
-                # Scheduler thought we left. Reconnection is not supported, so just shut down.
-                logger.error(
-                    f"Scheduler was unaware of this worker {self.address!r}. Shutting down."
-                )
-                # Something is out of sync; have the nanny restart us if possible.
-                await self.close(nanny=False)
+                # Scheduler thought we left.
+                # This is a common race condition when the scheduler calls
+                # remove_worker(); there can be a heartbeat between when the scheduler
+                # removes the worker on its side and when the {"op": "close"} command
+                # arrives through batched comms to the worker.
+                logger.warning("Scheduler was unaware of this worker; shutting down.")
+                # We close here just for safety's sake - the {op: close} should
+                # arrive soon anyway.
+                await self.close(reason="worker-heartbeat-missing")
                 return
 
             self.scheduler_delay = response["time"] - middle
@@ -1290,7 +1291,7 @@ class Worker(BaseWorker, ServerNode):
             logger.exception("Failed to communicate with scheduler during heartbeat.")
         except Exception:
             logger.exception("Unexpected exception during heartbeat. Closing worker.")
-            await self.close()
+            await self.close(reason="worker-heartbeat-error")
             raise
 
     @fail_hard
@@ -1559,12 +1560,7 @@ class Worker(BaseWorker, ServerNode):
         # Cancel async instructions
         await BaseWorker.close(self, timeout=timeout)
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
@@ -1632,7 +1628,9 @@ class Worker(BaseWorker, ServerNode):
             # weird deadlocks particularly if the task that is executing in
             # the thread is waiting for a server reply, e.g. when using
             # worker clients, semaphores, etc.
-            if is_python_shutting_down():
+
+            # Are we shutting down the process?
+            if self._is_finalizing() or not threading.main_thread().is_alive():
                 # If we're shutting down there is no need to wait for daemon
                 # threads to finish
                 _close(executor=executor, wait=False)
@@ -1641,7 +1639,7 @@ class Worker(BaseWorker, ServerNode):
                     await asyncio.to_thread(
                         _close, executor=executor, wait=executor_wait
                     )
-                except RuntimeError:  # Are we shutting down the process?
+                except RuntimeError:
                     logger.error(
                         "Could not close executor %r by dispatching to thread. Trying synchronously.",
                         executor,
@@ -1867,13 +1865,14 @@ class Worker(BaseWorker, ServerNode):
 
         self.plugins[name] = plugin
 
-        logger.info("Starting Worker plugin %s" % name)
+        logger.info("Starting Worker plugin %s", name)
         if hasattr(plugin, "setup"):
             try:
                 result = plugin.setup(worker=self)
                 if isawaitable(result):
-                    result = await result
+                    await result
             except Exception as e:
+                logger.exception("Worker plugin %s failed to setup", name)
                 if not catch_errors:
                     raise
                 return error_message(e)
@@ -1888,8 +1887,9 @@ class Worker(BaseWorker, ServerNode):
             if hasattr(plugin, "teardown"):
                 result = plugin.teardown(worker=self)
                 if isawaitable(result):
-                    result = await result
+                    await result
         except Exception as e:
+            logger.exception("Worker plugin %s failed to teardown", name)
             return error_message(e)
 
         return {"status": "OK"}
@@ -2337,19 +2337,25 @@ class Worker(BaseWorker, ServerNode):
                     key=ts.key, stimulus_id=f"cancelled-by-worker-close-{time()}"
                 )
 
-            logger.warning(
-                "Compute Failed\n"
-                "Key:       %s\n"
-                "Function:  %s\n"
-                "args:      %s\n"
-                "kwargs:    %s\n"
-                "Exception: %r\n",
-                key,
-                str(funcname(function))[:1000],
-                convert_args_to_str(args2, max_len=1000),
-                convert_kwargs_to_str(kwargs2, max_len=1000),
-                result["exception_text"],
-            )
+            if ts.state in ("executing", "long-running", "resumed"):
+                logger.error(
+                    "Compute Failed\n"
+                    "Key:       %s\n"
+                    "State:     %s\n"
+                    "Function:  %s\n"
+                    "args:      %s\n"
+                    "kwargs:    %s\n"
+                    "Exception: %r\n"
+                    "Traceback: %r\n",
+                    key,
+                    ts.state,
+                    str(funcname(function))[:1000],
+                    convert_args_to_str(args2, max_len=1000),
+                    convert_kwargs_to_str(kwargs2, max_len=1000),
+                    result["exception_text"],
+                    result["traceback_text"],
+                )
+
             return ExecuteFailureEvent.from_exception(
                 result,
                 key=key,
@@ -2367,7 +2373,7 @@ class Worker(BaseWorker, ServerNode):
             #   _prepare_args_for_execution() to raise KeyError;
             # - A dependency was unspilled but failed to deserialize due to a bug in
             #   user-defined or third party classes.
-            if ts.state == "executing":
+            if ts.state in ("executing", "long-running"):
                 logger.error(
                     f"Exception during execution of task {key!r}",
                     exc_info=True,
@@ -2602,6 +2608,14 @@ class Worker(BaseWorker, ServerNode):
             Worker._initialized_clients.add(self._client)
             if not asynchronous:
                 assert self._client.status == "running"
+
+        self.log_event(
+            "worker-get-client",
+            {
+                "client": self._client.id,
+                "timeout": timeout,
+            },
+        )
 
         return self._client
 
@@ -2972,49 +2986,50 @@ def apply_function_simple(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = threading.get_ident()
-    try:
-        # meter("thread-cpu").delta
-        #   difference in thread_time() before and after function call, minus user calls
-        #   to context_meter inside the function. Published to Server.digests as
-        #   {("execute", <prefix>, "thread-cpu", "seconds"): <value>}
-        # m.delta
-        #   difference in wall time before and after function call, minus thread-cpu,
-        #   minus user calls to context_meter. Published to Server.digests as
-        #   {("execute", <prefix>, "thread-noncpu", "seconds"): <value>}
-        # m.stop - m.start
-        #   difference in wall time before and after function call, without subtracting
-        #   anything. This is used in scheduler heuristics, e.g. task stealing.
-        with context_meter.meter("thread-noncpu", func=time) as m:
-            with context_meter.meter("thread-cpu", func=thread_time):
-                result = function(*args, **kwargs)
-    except (SystemExit, KeyboardInterrupt):
-        # Special-case these, just like asyncio does all over the place. They will pass
-        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
-        # by special-case logic in asyncio:
-        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
-        # Any other `BaseException` types would ultimately be ignored by asyncio if
-        # raised here, after messing up the worker state machine along their way.
-        raise
-    except BaseException as e:
-        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
-        # aren't a reason to shut down the whole system (since we allow the
-        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
-        msg = error_message(e)
-        msg["op"] = "task-erred"
-        msg["actual-exception"] = e
-    else:
-        msg = {
-            "op": "task-finished",
-            "status": "OK",
-            "result": result,
-            "nbytes": sizeof(result),
-            "type": type(result) if result is not None else None,
-        }
+    # meter("thread-cpu").delta
+    #   Difference in thread_time() before and after function call, minus user calls
+    #   to context_meter inside the function. Published to Server.digests as
+    #   {("execute", <prefix>, "thread-cpu", "seconds"): <value>}
+    # m.delta
+    #   Difference in wall time before and after function call, minus thread-cpu,
+    #   minus user calls to context_meter. Published to Server.digests as
+    #   {("execute", <prefix>, "thread-noncpu", "seconds"): <value>}
+    # m.stop - m.start
+    #   Difference in wall time before and after function call, without subtracting
+    #   anything. This is used in scheduler heuristics, e.g. task stealing.
+    with (
+        context_meter.meter("thread-noncpu", func=time) as m,
+        context_meter.meter("thread-cpu", func=thread_time),
+    ):
+        try:
+            result = function(*args, **kwargs)
+        except (SystemExit, KeyboardInterrupt):
+            # Special-case these, just like asyncio does all over the place. They will
+            # pass through `fail_hard` and `_handle_stimulus_from_task`, and eventually
+            # be caught by special-case logic in asyncio:
+            # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+            # Any other `BaseException` types would ultimately be ignored by asyncio if
+            # raised here, after messing up the worker state machine along their way.
+            raise
+        except BaseException as e:  # noqa: B036
+            # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+            # aren't a reason to shut down the whole system (since we allow the
+            # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
+            msg = error_message(e)
+            msg["op"] = "task-erred"
+            msg["actual-exception"] = e
+        else:
+            msg = {
+                "op": "task-finished",
+                "status": "OK",
+                "result": result,
+                "nbytes": sizeof(result),
+                "type": type(result) if result is not None else None,
+            }
 
     msg["start"] = m.start + time_delay
     msg["stop"] = m.stop + time_delay
-    msg["thread"] = ident
+    msg["thread"] = threading.get_ident()
     return msg
 
 
@@ -3030,39 +3045,38 @@ async def apply_function_async(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = threading.get_ident()
-    try:
-        with context_meter.meter("thread-noncpu", func=time) as m:
+    with context_meter.meter("thread-noncpu", func=time) as m:
+        try:
             result = await function(*args, **kwargs)
-    except (SystemExit, KeyboardInterrupt):
-        # Special-case these, just like asyncio does all over the place. They will pass
-        # through `fail_hard` and `_handle_stimulus_from_task`, and eventually be caught
-        # by special-case logic in asyncio:
-        # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
-        # Any other `BaseException` types would ultimately be ignored by asyncio if
-        # raised here, after messing up the worker state machine along their way.
-        raise
-    except BaseException as e:
-        # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_ a
-        # reason to shut down the worker.
-        # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
-        # aren't a reason to shut down the whole system (since we allow the
-        # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
-        msg = error_message(e)
-        msg["op"] = "task-erred"
-        msg["actual-exception"] = e
-    else:
-        msg = {
-            "op": "task-finished",
-            "status": "OK",
-            "result": result,
-            "nbytes": sizeof(result),
-            "type": type(result) if result is not None else None,
-        }
+        except (SystemExit, KeyboardInterrupt):
+            # Special-case these, just like asyncio does all over the place. They will
+            # pass through `fail_hard` and `_handle_stimulus_from_task`, and eventually
+            # be caught by special-case logic in asyncio:
+            # https://github.com/python/cpython/blob/v3.9.4/Lib/asyncio/events.py#L81-L82
+            # Any other `BaseException` types would ultimately be ignored by asyncio if
+            # raised here, after messing up the worker state machine along their way.
+            raise
+        except BaseException as e:  # noqa: B036
+            # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_
+            # a reason to shut down the worker.
+            # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
+            # aren't a reason to shut down the whole system (since we allow the
+            # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
+            msg = error_message(e)
+            msg["op"] = "task-erred"
+            msg["actual-exception"] = e
+        else:
+            msg = {
+                "op": "task-finished",
+                "status": "OK",
+                "result": result,
+                "nbytes": sizeof(result),
+                "type": type(result) if result is not None else None,
+            }
 
     msg["start"] = m.start + time_delay
     msg["stop"] = m.stop + time_delay
-    msg["thread"] = ident
+    msg["thread"] = threading.get_ident()
     return msg
 
 

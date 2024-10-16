@@ -18,7 +18,6 @@ from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
 from operator import add
 from time import sleep
-from unittest import mock
 
 import psutil
 import pytest
@@ -49,7 +48,7 @@ from distributed.diagnostics.plugin import ForwardOutput
 from distributed.metrics import time
 from distributed.protocol import pickle
 from distributed.scheduler import KilledWorker, Scheduler
-from distributed.utils import wait_for
+from distributed.utils import get_mp_context, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedExecute,
@@ -172,8 +171,9 @@ async def test_worker_bad_args(c, s, a, b):
 
     tb = await y._traceback()
     assert any("1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line)
-    assert "Compute Failed" in hdlr.messages["warning"][0]
-    assert y.key in hdlr.messages["warning"][0]
+    assert "Compute Failed" in hdlr.messages["error"][0]
+    assert y.key in hdlr.messages["error"][0]
+    assert "executing" in hdlr.messages["error"][0]
     logger.setLevel(old_level)
 
     # Now we check that both workers are still alive.
@@ -450,6 +450,7 @@ async def test_base_exception_in_task(c, s, a, sync, exc_type):
         # Prevent test failure from killing the whole pytest process
         traceback.print_exc()
         pytest.fail(f"BaseException propagated back to test: {e!r}. See stdout.")
+        raise
 
     # Nanny restarts it
     await c.wait_for_workers(1)
@@ -663,9 +664,12 @@ async def test_close_on_disconnect(s, w):
 
 @gen_cluster(nthreads=[])
 async def test_memory_limit_auto(s):
-    async with Worker(s.address, nthreads=1) as a, Worker(
-        s.address, nthreads=2
-    ) as b, Worker(s.address, nthreads=100) as c, Worker(s.address, nthreads=200) as d:
+    async with (
+        Worker(s.address, nthreads=1) as a,
+        Worker(s.address, nthreads=2) as b,
+        Worker(s.address, nthreads=100) as c,
+        Worker(s.address, nthreads=200) as d,
+    ):
         assert isinstance(a.memory_manager.memory_limit, Number)
         assert isinstance(b.memory_manager.memory_limit, Number)
 
@@ -867,39 +871,6 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_log_event(c, s, a):
-    def log_event(msg):
-        w = get_worker()
-        w.log_event("test-topic", msg)
-
-    await c.submit(log_event, "foo")
-
-    class C:
-        pass
-
-    with pytest.raises(TypeError, match="msgpack"):
-        await c.submit(log_event, C())
-
-    # Worker still works
-    await c.submit(log_event, "bar")
-    await c.submit(log_event, error_message(Exception()))
-
-    # assertion reversed for mock.ANY.__eq__(Serialized())
-    assert [
-        "foo",
-        "bar",
-        {
-            "status": "error",
-            "exception": mock.ANY,
-            "traceback": mock.ANY,
-            "exception_text": "Exception()",
-            "traceback_text": "",
-            "worker": a.address,
-        },
-    ] == [msg[1] for msg in s.get_events("test-topic")]
-
-
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
     with captured_logger("distributed.worker") as logger:
@@ -911,6 +882,7 @@ async def test_log_exception_on_failed_task(c, s, a, b):
     text = logger.getvalue()
     assert "ZeroDivisionError" in text
     assert "Exception" in text
+    assert "Traceback" in text
 
 
 @gen_cluster(client=True)
@@ -1143,7 +1115,7 @@ async def test_service_hosts_match_worker(s):
 
     async with Worker(s.address, host="tcp://127.0.0.1") as w:
         sock = first(w.http_server._sockets.values())
-        assert sock.getsockname()[0] in ("::", "0.0.0.0")
+        assert sock.getsockname()[0] in ("::", "127.0.0.1")
 
     # See what happens with e.g. `dask worker --listen-address tcp://:8811`
     async with Worker(s.address, host="") as w:
@@ -1216,7 +1188,9 @@ async def test_statistical_profiling(c, s, a, b):
     },
 )
 async def test_statistical_profiling_2(c, s, a, b):
+    pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
+
     while True:
         x = da.random.random(1000000, chunks=(10000,))
         y = (x + x * 2) - x.sum().persist()
@@ -1224,7 +1198,7 @@ async def test_statistical_profiling_2(c, s, a, b):
 
         profile = await a.get_profile()
         text = str(profile)
-        if profile["count"] and "sum" in text and "random" in text:
+        if profile["count"] and "sum" in text or "random" in text:
             break
 
 
@@ -1798,11 +1772,10 @@ async def test_heartbeat_missing_real_cluster(s, a):
 
     assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
 
-    with captured_logger(
-        "distributed.worker", level=logging.WARNING
-    ) as wlogger, captured_logger(
-        "distributed.scheduler", level=logging.WARNING
-    ) as slogger:
+    with (
+        captured_logger("distributed.worker", level=logging.WARNING) as wlogger,
+        captured_logger("distributed.scheduler", level=logging.WARNING) as slogger,
+    ):
         with freeze_batched_send(s.stream_comms[a.address]):
             await s.remove_worker(a.address, stimulus_id="foo")
             assert not s.workers
@@ -1834,7 +1807,8 @@ async def test_heartbeat_missing_real_cluster(s, a):
     Worker=Nanny,
     worker_kwargs={"heartbeat_interval": "1ms"},
 )
-async def test_heartbeat_missing_restarts(c, s, n):
+async def test_heartbeat_missing_doesnt_restart(c, s, n):
+    """Read: https://github.com/dask/distributed/pull/8522"""
     old_heartbeat_handler = s.handlers["heartbeat_worker"]
     s.handlers["heartbeat_worker"] = lambda *args, **kwargs: {"status": "missing"}
 
@@ -1843,11 +1817,8 @@ async def test_heartbeat_missing_restarts(c, s, n):
 
     assert not s.workers
     s.handlers["heartbeat_worker"] = old_heartbeat_handler
-
-    await n.process.running.wait()
-    assert n.status == Status.running
-
-    await c.wait_for_workers(1)
+    assert n.status == Status.closing_gracefully
+    assert not n.process.is_alive()
 
 
 @gen_cluster(nthreads=[])
@@ -2200,7 +2171,7 @@ async def test_bad_executor_annotation(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_process_executor(c, s, a, b):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         b.executors["processes"] = e
 
@@ -2232,7 +2203,7 @@ def kill_process():
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_process_executor_kills_process(c, s, a):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
             future = c.submit(kill_process)
@@ -2255,7 +2226,7 @@ def raise_exc():
 
 @gen_cluster(client=True)
 async def test_process_executor_raise_exception(c, s, a, b):
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(mp_context=get_mp_context()) as e:
         a.executors["processes"] = e
         b.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
@@ -2939,32 +2910,184 @@ async def test_worker_status_sync(s, a):
     while ws.status != Status.closed:
         await asyncio.sleep(0.01)
 
-    events = [ev for _, ev in s.events[ws.address] if ev["action"] != "heartbeat"]
+    events = [ev for _, ev in s.get_events(ws.address) if ev["action"] != "heartbeat"]
+    for ev in events:
+        if "stimulus_id" in ev:  # Strip timestamp
+            ev["stimulus_id"] = ev["stimulus_id"].rsplit("-", 1)[0]
+
     assert events == [
         {"action": "add-worker"},
         {
             "action": "worker-status-change",
             "prev-status": "init",
             "status": "running",
+            "stimulus_id": "worker-status-change",
         },
         {
             "action": "worker-status-change",
             "prev-status": "running",
             "status": "paused",
+            "stimulus_id": "worker-status-change",
         },
         {
             "action": "worker-status-change",
             "prev-status": "paused",
             "status": "running",
+            "stimulus_id": "worker-status-change",
         },
         {
             "action": "worker-status-change",
             "prev-status": "running",
             "status": "closing_gracefully",
+            "stimulus_id": "retire-workers",
         },
-        {"action": "remove-worker", "processing-tasks": set()},
-        {"action": "retired"},
+        {
+            "action": "remove-worker",
+            "lost-computed-tasks": set(),
+            "lost-scattered-tasks": set(),
+            "processing-tasks": set(),
+            "expected": True,
+            "stimulus_id": "retire-workers",
+        },
+        {"action": "retired", "stimulus_id": "retire-workers"},
     ]
+
+
+@gen_cluster(client=True)
+async def test_log_remove_worker(c, s, a, b):
+    # Computed task
+    x = c.submit(inc, 1, key="x", workers=a.address)
+    await x
+    ev = Event()
+    # Processing task
+    y = c.submit(
+        lambda ev: ev.wait(), ev, key="y", workers=a.address, allow_other_workers=True
+    )
+    await wait_for_state("y", "processing", s)
+    # Scattered task
+    z = await c.scatter({"z": 3}, workers=a.address)
+
+    s._broker.truncate()
+
+    with captured_logger("distributed.scheduler", level=logging.INFO) as log:
+        # Successful graceful shutdown
+        await s.retire_workers([a.address], stimulus_id="graceful")
+        # Refuse to retire gracefully as there's nowhere to put x and z
+        await s.retire_workers([b.address], stimulus_id="graceful_abort")
+        await asyncio.sleep(0.2)
+        # Ungraceful shutdown
+        await s.remove_worker(b.address, stimulus_id="ungraceful")
+        await asyncio.sleep(0.2)
+    await ev.set()
+
+    assert log.getvalue().splitlines() == [
+        # Successful graceful
+        f"Retire worker addresses ['{a.address}']",
+        f"Retiring worker '{a.address}' (stimulus_id='graceful')",
+        f"Remove worker <WorkerState '{a.address}', name: 0, status: "
+        "closing_gracefully, memory: 2, processing: 1> (stimulus_id='graceful')",
+        f"Retired worker '{a.address}' (stimulus_id='graceful')",
+        # Aborted graceful
+        f"Retire worker addresses ['{b.address}']",
+        f"Retiring worker '{b.address}' (stimulus_id='graceful_abort')",
+        f"Could not retire worker '{b.address}': unique data could not be "
+        "moved to any other worker (stimulus_id='graceful_abort')",
+        # Ungraceful
+        f"Remove worker <WorkerState '{b.address}', name: 1, status: "
+        "running, memory: 2, processing: 1> (stimulus_id='ungraceful')",
+        f"Removing worker '{b.address}' caused the cluster to lose already "
+        "computed task(s), which will be recomputed elsewhere: {'x'} "
+        "(stimulus_id='ungraceful')",
+        f"Removing worker '{b.address}' caused the cluster to lose scattered "
+        "data, which can't be recovered: {'z'} (stimulus_id='ungraceful')",
+        "Lost all workers",
+    ]
+
+    events = {topic: [ev for _, ev in evs] for topic, evs in s.get_events().items()}
+    for evs in events.values():
+        for ev in evs:
+            if ev.get("action", None) == "retire-workers":
+                for k in ("retired", "could-not-retire"):
+                    ev[k] = {addr: "snip" for addr in ev[k]}
+            if "stimulus_id" in ev:  # Strip timestamp
+                ev["stimulus_id"] = ev["stimulus_id"].rsplit("-", 1)[0]
+
+    assert events == {
+        a.address: [
+            {
+                "action": "worker-status-change",
+                "prev-status": "running",
+                "status": "closing_gracefully",
+                "stimulus_id": "graceful",
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": set(),
+                "lost-scattered-tasks": set(),
+                "processing-tasks": {"y"},
+                "expected": True,
+                "stimulus_id": "graceful",
+            },
+            {"action": "retired", "stimulus_id": "graceful"},
+        ],
+        b.address: [
+            {
+                "action": "worker-status-change",
+                "prev-status": "running",
+                "status": "closing_gracefully",
+                "stimulus_id": "graceful_abort",
+            },
+            {"action": "could-not-retire", "stimulus_id": "graceful_abort"},
+            {
+                "action": "worker-status-change",
+                "prev-status": "closing_gracefully",
+                "status": "running",
+                "stimulus_id": "worker-status-change",
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": {"x"},
+                "lost-scattered-tasks": {"z"},
+                "processing-tasks": {"y"},
+                "expected": False,
+                "stimulus_id": "ungraceful",
+            },
+            {"action": "closing-worker", "reason": "scheduler-remove-worker"},
+        ],
+        "all": [
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": set(),
+                "lost-scattered-tasks": set(),
+                "processing-tasks": {"y"},
+                "expected": True,
+                "stimulus_id": "graceful",
+                "worker": a.address,
+            },
+            {
+                "action": "retire-workers",
+                "stimulus_id": "graceful",
+                "retired": {a.address: "snip"},
+                "could-not-retire": {},
+            },
+            {
+                "action": "retire-workers",
+                "stimulus_id": "graceful_abort",
+                "retired": {},
+                "could-not-retire": {b.address: "snip"},
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": {"x"},
+                "lost-scattered-tasks": {"z"},
+                "processing-tasks": {"y"},
+                "expected": False,
+                "stimulus_id": "ungraceful",
+                "worker": b.address,
+            },
+        ],
+        "worker-get-client": [{"client": c.id, "timeout": 5, "worker": b.address}],
+    }
 
 
 @gen_cluster(client=True)
@@ -3305,7 +3428,8 @@ class BreakingWorker(Worker):
 @pytest.mark.slow
 @gen_cluster(client=True, Worker=BreakingWorker)
 async def test_broken_comm(c, s, a, b):
-    pytest.importorskip("dask.dataframe")
+    pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
 
     df = dask.datasets.timeseries(
         start="2000-01-01",
@@ -3631,5 +3755,27 @@ async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
                 del y, z
 
             await async_poll_for(lambda: not b.state.tasks, timeout=5)
+
+    assert not log.getvalue()
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_suppress_compute_failure_for_cancelled_tasks(c, s, a):
+    with captured_logger("distributed.worker", level=logging.WARNING) as log:
+        in_event = Event()
+        block_event = Event()
+
+        def block_and_raise(in_event, block_event):
+            in_event.set()
+            block_event.wait()
+            return 1 / 0
+
+        x = c.submit(block_and_raise, in_event, block_event, key="x")
+        await in_event.wait()
+        del x
+
+        await wait_for_state("x", "cancelled", a)
+        await block_event.set()
+        await async_poll_for(lambda: not a.state.tasks, timeout=5)
 
     assert not log.getvalue()

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import gc
 import pickle
-import sys
 from collections import defaultdict
 from collections.abc import Iterator
 from time import sleep
@@ -287,9 +286,6 @@ def traverse_subclasses(cls: type) -> Iterator[type]:
     [
         pytest.param(
             TaskState,
-            marks=pytest.mark.skipif(
-                sys.version_info < (3, 10), reason="Requires @dataclass(slots=True)"
-            ),
         ),
         *traverse_subclasses(Instruction),
         *traverse_subclasses(StateMachineEvent),
@@ -922,7 +918,7 @@ async def test_task_state_instance_are_garbage_collected(c, s, a, b):
     f2 = c.submit(inc, red, pure=False)
 
     async def check(dask_worker):
-        while dask_worker.tasks:
+        while dask_worker.state.tasks:
             await asyncio.sleep(0.01)
         with profile.lock:
             gc.collect()
@@ -935,9 +931,14 @@ async def test_task_state_instance_are_garbage_collected(c, s, a, b):
     async def check(dask_scheduler):
         while dask_scheduler.tasks:
             await asyncio.sleep(0.01)
-        with profile.lock:
-            gc.collect()
-        assert not SchedulerTaskState._instances
+
+        gc.collect()
+        # Gargabe collection might already be running in which case gc.collect()'s behavior is undefined.
+        # Try again and hope for the best.
+        while SchedulerTaskState._instances:
+            await asyncio.sleep(0.01)
+            with profile.lock:
+                gc.collect()
 
     await c.run_on_scheduler(check)
 

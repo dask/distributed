@@ -3,17 +3,19 @@ from __future__ import annotations
 import codecs
 import importlib
 import traceback
+import warnings
 from array import array
 from enum import Enum
 from functools import partial
+from pickle import PickleBuffer
 from types import ModuleType
 from typing import Any, Generic, Literal, TypeVar
 
 import msgpack
 
 import dask
-from dask.base import normalize_token
 from dask.sizeof import sizeof
+from dask.tokenize import normalize_token
 from dask.utils import typename
 
 from distributed.metrics import context_meter
@@ -86,19 +88,27 @@ def pickle_dumps(x, context=None):
     return header, frames
 
 
-def pickle_loads(header, frames):
-    x, buffers = frames[0], frames[1:]
+def pickle_loads(
+    header: dict[str, Any], frames: list[bytes | bytearray | memoryview | PickleBuffer]
+) -> Any:
+    pik, buffers = frames[0], frames[1:]
 
-    writeable = header.get("writeable")
-    if not writeable:
-        writeable = len(buffers) * (None,)
+    def ensure_writeable_flag(mv: memoryview, w: bool) -> memoryview:
+        if w and mv.readonly:
+            # Can't avoid a deep copy
+            return memoryview(bytearray(mv))
+        elif not w and not mv.readonly:
+            # Zero copy - this is just a flag
+            return mv.toreadonly()
+        else:
+            return mv
 
     buffers = [
-        memoryview(bytearray(mv) if w else bytes(mv)) if w == mv.readonly else mv
-        for w, mv in zip(writeable, map(ensure_memoryview, buffers))
+        ensure_writeable_flag(ensure_memoryview(mv), w)
+        for mv, w in zip(buffers, header["writeable"])
     ]
 
-    return pickle.loads(x, buffers=buffers)
+    return pickle.loads(pik, buffers=buffers)
 
 
 def import_allowed_module(name):
@@ -199,17 +209,20 @@ register_serialization_family("error", None, serialization_error_loads)
 
 
 def check_dask_serializable(x):
-    if type(x) in (list, set, tuple) and len(x):
-        return check_dask_serializable(next(iter(x)))
-    elif type(x) is dict and len(x):
-        return check_dask_serializable(next(iter(x.items()))[1])
-    else:
-        try:
-            dask_serialize.dispatch(type(x))
-            return True
-        except TypeError:
-            pass
-    return False
+    try:
+        if type(x) in (list, set, tuple) and len(x):
+            return check_dask_serializable(next(iter(x)))
+        elif type(x) is dict and len(x):
+            return check_dask_serializable(next(iter(x.items()))[1])
+        else:
+            try:
+                dask_serialize.dispatch(type(x))
+                return True
+            except TypeError:
+                pass
+        return False
+    except RecursionError:
+        return False
 
 
 def serialize(  # type: ignore[no-untyped-def]
@@ -612,6 +625,14 @@ class Pickled:
 
 
 def nested_deserialize(x):
+    warnings.warn(
+        "nested_deserialize is deprecated and will be removed in a future release.",
+        DeprecationWarning,
+    )
+    return _nested_deserialize(x, emulate_deserialize=True)
+
+
+def _nested_deserialize(x, emulate_deserialize=True):
     """
     Replace all Serialize and Serialized values nested in *x*
     with the original values.  Returns a copy of *x*.
@@ -628,10 +649,13 @@ def nested_deserialize(x):
                 typ = type(v)
                 if typ is dict or typ is list:
                     x[k] = replace_inner(v)
-                elif typ is Serialize:
+                if emulate_deserialize:
+                    if typ is Serialize:
+                        x[k] = v.data
+                    elif typ is Serialized:
+                        x[k] = deserialize(v.header, v.frames)
+                if typ is ToPickle:
                     x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
 
         elif type(x) is list:
             x = list(x)
@@ -639,10 +663,13 @@ def nested_deserialize(x):
                 typ = type(v)
                 if typ is dict or typ is list:
                     x[k] = replace_inner(v)
-                elif typ is Serialize:
+                if emulate_deserialize:
+                    if typ is Serialize:
+                        x[k] = v.data
+                    elif typ is Serialized:
+                        x[k] = deserialize(v.header, v.frames)
+                if typ is ToPickle:
                     x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
 
         return x
 
@@ -749,7 +776,7 @@ def register_serialization_lazy(toplevel, func):
 
 @partial(normalize_token.register, Serialized)
 def normalize_Serialized(o):
-    return [o.header] + o.frames  # for dask.base.tokenize
+    return [o.header] + o.frames  # for dask.tokenize.tokenize
 
 
 # Teach serialize how to handle bytes

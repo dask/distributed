@@ -1,6 +1,7 @@
 """
 Efficient serialization of SciPy sparse matrices.
 """
+
 from __future__ import annotations
 
 import scipy
@@ -14,7 +15,7 @@ from distributed.protocol.serialize import (
 register_generic(scipy.sparse.spmatrix, "dask", dask_serialize, dask_deserialize)
 
 
-@dask_serialize.register(scipy.sparse.dok.dok_matrix)
+@dask_serialize.register(scipy.sparse.dok_matrix)
 def serialize_scipy_sparse_dok(x):
     coo_header, coo_frames = dask_serialize(x.tocoo())
 
@@ -24,7 +25,7 @@ def serialize_scipy_sparse_dok(x):
     return header, frames
 
 
-@dask_deserialize.register(scipy.sparse.dok.dok_matrix)
+@dask_deserialize.register(scipy.sparse.dok_matrix)
 def deserialize_scipy_sparse_dok(header, frames):
     coo_header = header["coo_header"]
     coo_frames = frames

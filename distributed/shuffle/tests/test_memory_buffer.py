@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._memory import MemoryShardsBuffer
 from distributed.utils_test import gen_test
 
@@ -21,7 +22,7 @@ async def test_basic():
         x = mf.read("x")
         y = mf.read("y")
 
-        with pytest.raises(KeyError):
+        with pytest.raises(DataUnavailable):
             mf.read("z")
 
         assert x == [b"0" * 1000] * 2
@@ -42,7 +43,7 @@ async def test_read_before_flush():
 
         await mf.flush()
         assert mf.read("1") == [b"foo"]
-        with pytest.raises(KeyError):
+        with pytest.raises(DataUnavailable):
             mf.read("2")
 
 
