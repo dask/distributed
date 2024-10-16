@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.9", "3.10", "3.11", "3.12"]
+        environment: [mindeps, "3.10", "3.11", "3.12"]
         label: [default]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
@@ -36,8 +36,6 @@ jobs:
           # MacOS CI does not have any hosts available; run it on 3.12 only
           - os: macos-latest
             environment: mindeps
-          - os: macos-latest
-            environment: "3.9"
           - os: macos-latest
             environment: "3.10"
           - os: macos-latest
@@ -49,21 +47,21 @@ jobs:
         include:
           # Set distributed.scheduler.worker-saturation: .inf
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_queue
             partition: "ci1"
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_queue
             partition: "not ci1"
 
           # Set dataframe.query-planning: false
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_expr
             partition: "ci1"
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_expr
             partition: "not ci1"
 
@@ -71,24 +69,24 @@ jobs:
           - os: ubuntu-latest
             environment: mindeps
             label: numpy
-            extra_packages: [numpy=1.21]
+            extra_packages: [numpy=1.24]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: numpy
-            extra_packages: [numpy=1.21]
+            extra_packages: [numpy=1.24]
             partition: "not ci1"
 
           # dask.dataframe P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=2.0, pyarrow=7, pyarrow-hotfix]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=2.0, pyarrow=7, pyarrow-hotfix]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
             partition: "not ci1"
 
           - os: ubuntu-latest
@@ -127,7 +125,6 @@ jobs:
       - name: Setup Conda Environment
         uses: conda-incubator/setup-miniconda@v3.0.3
         with:
-          miniforge-variant: Mambaforge
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
           use-mamba: true

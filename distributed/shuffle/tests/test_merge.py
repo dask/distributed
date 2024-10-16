@@ -61,9 +61,10 @@ async def test_minimal_version(c, s, a, b):
         B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
         b = dd.repartition(B, [0, 2, 5])
 
-        with pytest.raises(
-            ModuleNotFoundError, match="requires pyarrow"
-        ), dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        with (
+            pytest.raises(ModuleNotFoundError, match="requires pyarrow"),
+            dask.config.set({"dataframe.shuffle.method": "p2p"}),
+        ):
             await c.compute(dd.merge(a, b, left_on="x", right_on="z"))
 
 

@@ -38,7 +38,7 @@ def check_minimal_arrow_version() -> None:
     Raises a ModuleNotFoundError if pyarrow is not installed or an
     ImportError if the installed version is not recent enough.
     """
-    minversion = "7.0.0"
+    minversion = "14.0.1"
     try:
         import pyarrow as pa
     except ModuleNotFoundError:
@@ -52,14 +52,7 @@ def check_minimal_arrow_version() -> None:
 def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
     import pyarrow as pa
 
-    if parse(pa.__version__) >= parse("14.0.0"):
-        return pa.concat_tables(tables, promote_options="permissive")
-    try:
-        return pa.concat_tables(tables, promote=True)
-    except pa.ArrowNotImplementedError as e:
-        if parse(pa.__version__) >= parse("12.0.0"):
-            raise e
-        raise
+    return pa.concat_tables(tables, promote_options="permissive")
 
 
 def convert_shards(
@@ -179,23 +172,8 @@ def read_from_disk(path: Path) -> tuple[list[pa.Table], int]:
     return shards, size
 
 
-def concat_arrays(arrays: Iterable[pa.Array]) -> pa.Array:
-    import pyarrow as pa
-
-    try:
-        return pa.concat_arrays(arrays)
-    except pa.ArrowNotImplementedError as e:
-        if parse(pa.__version__) >= parse("12.0.0"):
-            raise
-        if e.args[0].startswith("concatenation of extension"):
-            raise RuntimeError(
-                "P2P shuffling requires pyarrow>=12.0.0 to support extension types."
-            ) from e
-        raise
-
-
 def _copy_table(table: pa.Table) -> pa.Table:
     import pyarrow as pa
 
-    arrs = [concat_arrays(column.chunks) for column in table.columns]
+    arrs = [pa.concat_arrays(column.chunks) for column in table.columns]
     return pa.table(data=arrs, schema=table.schema)

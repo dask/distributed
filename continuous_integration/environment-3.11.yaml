@@ -44,6 +44,8 @@ dependencies:
   - tornado
   - zict  # overridden by git tip below
   - zstandard
+  # Temporary fix for https://github.com/pypa/setuptools/issues/4496
+  - setuptools < 71
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask-contrib/dask-expr

@@ -24,6 +24,18 @@ The scheduler exposes the following metrics about itself:
 
 dask_scheduler_clients
     Number of clients connected
+dask_scheduler_client_connections_added_total
+    Total number of client connections added to the scheduler
+
+    .. note::
+        This metric does *not* count distinct clients. If a client disconnects
+        and reconnects later on, it will be counted twice.
+dask_scheduler_client_connections_removed_total
+    Total number of client connections removed from the scheduler
+
+    .. note::
+        This metric does *not* count distinct clients. If a client disconnects, 
+        then reconnects and disconnects again, it will be counted twice.
 dask_scheduler_desired_workers
     Number of workers scheduler needs for task graph
 dask_scheduler_gil_contention_seconds_total
@@ -37,8 +49,19 @@ dask_scheduler_gil_contention_seconds_total
        ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
 
+dask_scheduler_gc_collection_seconds_total
+    Total time spent on garbage dask_scheduler_gc_collection_seconds_total
+
+    .. note::
+        Due to measurement overhead, this metric only measures
+        time spent on garbage collection for generation=2
+
 dask_scheduler_workers
     Number of workers known by scheduler
+dask_scheduler_workers_added_total
+    Total numbers of workers added to the scheduler
+dask_scheduler_workers_removed_total
+    Total number of workers removed from the scheduler
 dask_scheduler_last_time_total
     Cumulative SystemMonitor time
 dask_scheduler_tasks
@@ -142,6 +165,13 @@ dask_worker_gil_contention_seconds_total
        Requires ``gilknocker`` to be installed, and
        ``distributed.admin.system-monitor.gil.enabled``
        configuration to be set.
+
+dask_worker_gc_collection_seconds_total
+    Total time spent on garbage dask_scheduler_gc_collection_seconds_total
+
+    .. note::
+        Due to measurement overhead, this metric only measures
+        time spent on garbage collection for generation=2
 
 dask_worker_latency_seconds
     Latency of worker connection

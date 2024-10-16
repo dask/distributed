@@ -1,29 +1,16 @@
 from __future__ import annotations
 
 import importlib.metadata
-import sys
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Protocol
 
 
 class _EntryPoints(Protocol):
-    def __call__(self, **kwargs: str) -> Iterable[importlib.metadata.EntryPoint]:
-        ...
+    def __call__(self, **kwargs: str) -> Iterable[importlib.metadata.EntryPoint]: ...
 
 
-if sys.version_info >= (3, 10):
-    # py3.10 importlib.metadata type annotations are not in mypy yet
-    # https://github.com/python/typeshed/pull/7331
-    _entry_points: _EntryPoints = importlib.metadata.entry_points
-else:
-
-    def _entry_points(
-        *, group: str, name: str
-    ) -> Iterable[importlib.metadata.EntryPoint]:
-        for ep in importlib.metadata.entry_points().get(group, []):
-            if ep.name == name:
-                yield ep
+_entry_points: _EntryPoints = importlib.metadata.entry_points  # type: ignore[assignment]
 
 
 class Backend(ABC):

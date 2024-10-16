@@ -25,12 +25,12 @@ from dask.system import CPU_COUNT
 from dask.utils import parse_timedelta
 
 from distributed import preloading
+from distributed._async_taskgroup import AsyncTaskGroupClosedError
 from distributed.comm import get_address_host
 from distributed.comm.addressing import address_from_user_args
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import (
-    AsyncTaskGroupClosedError,
     CommClosedError,
     ErrorMessage,
     OKMessage,
@@ -477,13 +477,14 @@ class Nanny(ServerNode):
 
         self.plugins[name] = plugin
 
-        logger.info("Starting Nanny plugin %s" % name)
+        logger.info("Starting Nanny plugin %s", name)
         if hasattr(plugin, "setup"):
             try:
                 result = plugin.setup(nanny=self)
                 if isawaitable(result):
                     result = await result
             except Exception as e:
+                logger.exception("Nanny plugin %s failed to setup", name)
                 return error_message(e)
         if getattr(plugin, "restart", False):
             await self.restart(reason=f"nanny-plugin-{name}-restart")
@@ -500,6 +501,7 @@ class Nanny(ServerNode):
                 if isawaitable(result):
                     result = await result
         except Exception as e:
+            logger.exception("Nanny plugin %s failed to teardown", name)
             msg = error_message(e)
             return msg
 
@@ -514,7 +516,7 @@ class Nanny(ServerNode):
                 await self.instantiate()
 
         try:
-            await wait_for(_(), timeout)
+            await wait_for(asyncio.shield(_()), timeout)
         except asyncio.TimeoutError:
             logger.error(
                 f"Restart timed out after {timeout}s; returning before finished"
@@ -610,13 +612,7 @@ class Nanny(ServerNode):
 
         await self.preloads.teardown()
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
 
         self.stop()
         if self.process is not None:
@@ -749,26 +745,30 @@ class WorkerProcess:
         os.environ.update(self.pre_spawn_env)
 
         try:
-            await self.process.start()
-        except OSError:
-            logger.exception("Nanny failed to start process", exc_info=True)
-            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
-            await self.process.terminate()
-            self.status = Status.failed
-        try:
-            msg = await self._wait_until_connected(uid)
-        except Exception:
-            # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
-            await self.process.terminate()
-            self.status = Status.failed
-            raise
+            try:
+                await self.process.start()
+            except OSError:
+                # This can only happen if the actual process creation failed, e.g.
+                # multiprocessing.Process.start failed. This is not tested!
+                logger.exception("Nanny failed to start process", exc_info=True)
+                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+                await self.process.terminate()
+                self.status = Status.failed
+            try:
+                msg = await self._wait_until_connected(uid)
+            except Exception:
+                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+                await self.process.terminate()
+                self.status = Status.failed
+                raise
+        finally:
+            self.running.set()
         if not msg:
             return self.status
         self.worker_address = msg["address"]
         self.worker_dir = msg["dir"]
         assert self.worker_address
         self.status = Status.running
-        self.running.set()
 
         return self.status
 
@@ -803,6 +803,7 @@ class WorkerProcess:
                 msg = self._death_message(self.process.pid, r)
                 logger.info(msg)
             self.status = Status.stopped
+            self.running.clear()
             self.stopped.set()
             # Release resources
             self.process.close()
@@ -834,11 +835,6 @@ class WorkerProcess:
         """
         deadline = time() + timeout
 
-        if self.status == Status.stopped:
-            return
-        if self.status == Status.stopping:
-            await self.stopped.wait()
-            return
         # If the process is not properly up it will not watch the closing queue
         # and we may end up leaking this process
         # Therefore wait for it to be properly started before killing it
@@ -846,10 +842,17 @@ class WorkerProcess:
             await self.running.wait()
 
         assert self.status in (
+            Status.stopping,
+            Status.stopped,
             Status.running,
             Status.failed,  # process failed to start, but hasn't been joined yet
             Status.closing_gracefully,
         ), self.status
+        if self.status == Status.stopped:
+            return
+        if self.status == Status.stopping:
+            await self.stopped.wait()
+            return
         self.status = Status.stopping
         logger.info("Nanny asking worker to close. Reason: %s", reason)
 

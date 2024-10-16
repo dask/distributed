@@ -81,15 +81,14 @@ properties:
             - string
             - "null"
             description: |
-              Shut down the scheduler after this duration if there are pending tasks,
-              but no workers that can process them. This can either mean that there are
-              no workers running at all, or that there are idle workers but they've been
-              excluded through worker or resource restrictions.
+              Timeout for tasks in an unrunnable state.
+
+              If task remains unrunnable for longer than this, it fails. A task is considered unrunnable IFF
+              it has no pending dependencies, and the task has restrictions that are not satisfied by 
+              any available worker or no workers are running at all.
 
               In adaptive clusters, this timeout must be set to be safely higher than
               the time it takes for workers to spin up.
-
-              Works in conjunction with idle-timeout.
 
           work-stealing:
             type: boolean

@@ -11,6 +11,7 @@ dependencies:
   - click
   - cloudpickle
   - coverage
+  - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
   - filesystem-spec  # overridden by git tip below
   - gilknocker
@@ -21,6 +22,7 @@ dependencies:
   - jupyter-server-proxy
   - jupyterlab
   - locket
+  - lz4  # Only tested here
   - msgpack-python
   - netcdf4
   - paramiko
@@ -28,12 +30,15 @@ dependencies:
   - prometheus_client
   - psutil
   - pyarrow
+  - pynvml  # Only tested here
   - pytest
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
+  - python-snappy  # Only tested here
+  - pytorch  # Only tested here
   - requests
   - s3fs  # overridden by git tip below
   - scikit-learn
@@ -41,13 +46,17 @@ dependencies:
   - sortedcollections
   - tblib
   - toolz
+  - torchvision  # Only tested here
   - tornado
   - zict  # overridden by git tip below
   - zstandard
+  # Temporary fix for https://github.com/pypa/setuptools/issues/4496
+  - setuptools < 71
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask-contrib/dask-expr
       - git+https://github.com/dask/zict
+      - git+https://github.com/dask/crick  # Only tested here
       # Revert after https://github.com/dask/distributed/issues/8614 is fixed
       # - git+https://github.com/dask/s3fs
       # - git+https://github.com/fsspec/filesystem_spec

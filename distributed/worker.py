@@ -83,6 +83,7 @@ from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
 from distributed.diskutils import WorkSpace
 from distributed.exceptions import Reschedule
+from distributed.gc import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.http import get_handlers
 from distributed.metrics import context_meter, thread_time, time
 from distributed.node import ServerNode
@@ -114,7 +115,6 @@ from distributed.utils import (
     wait_for,
 )
 from distributed.utils_comm import gather_from_workers, pack_data, retry_operation
-from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.versions import get_versions
 from distributed.worker_memory import (
     DeprecatedMemoryManagerAttribute,
@@ -1229,7 +1229,7 @@ class Worker(BaseWorker, ServerNode):
             *(
                 self.plugin_add(name=name, plugin=plugin)
                 for name, plugin in response["worker-plugins"].items()
-            )
+            ),
         )
 
         logger.info("        Registered to: %26s", self.scheduler.address)
@@ -1560,12 +1560,7 @@ class Worker(BaseWorker, ServerNode):
         # Cancel async instructions
         await BaseWorker.close(self, timeout=timeout)
 
-        teardowns = [
-            plugin.teardown(self)
-            for plugin in self.plugins.values()
-            if hasattr(plugin, "teardown")
-        ]
-        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+        await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
 
         for extension in self.extensions.values():
             if hasattr(extension, "close"):
@@ -1870,13 +1865,14 @@ class Worker(BaseWorker, ServerNode):
 
         self.plugins[name] = plugin
 
-        logger.info("Starting Worker plugin %s" % name)
+        logger.info("Starting Worker plugin %s", name)
         if hasattr(plugin, "setup"):
             try:
                 result = plugin.setup(worker=self)
                 if isawaitable(result):
-                    result = await result
+                    await result
             except Exception as e:
+                logger.exception("Worker plugin %s failed to setup", name)
                 if not catch_errors:
                     raise
                 return error_message(e)
@@ -1891,8 +1887,9 @@ class Worker(BaseWorker, ServerNode):
             if hasattr(plugin, "teardown"):
                 result = plugin.teardown(worker=self)
                 if isawaitable(result):
-                    result = await result
+                    await result
         except Exception as e:
+            logger.exception("Worker plugin %s failed to teardown", name)
             return error_message(e)
 
         return {"status": "OK"}
@@ -2341,7 +2338,7 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             if ts.state in ("executing", "long-running", "resumed"):
-                logger.warning(
+                logger.error(
                     "Compute Failed\n"
                     "Key:       %s\n"
                     "State:     %s\n"
@@ -2611,6 +2608,14 @@ class Worker(BaseWorker, ServerNode):
             Worker._initialized_clients.add(self._client)
             if not asynchronous:
                 assert self._client.status == "running"
+
+        self.log_event(
+            "worker-get-client",
+            {
+                "client": self._client.id,
+                "timeout": timeout,
+            },
+        )
 
         return self._client
 
@@ -3006,7 +3011,7 @@ def apply_function_simple(
             # Any other `BaseException` types would ultimately be ignored by asyncio if
             # raised here, after messing up the worker state machine along their way.
             raise
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
             # aren't a reason to shut down the whole system (since we allow the
             # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
@@ -3051,7 +3056,7 @@ async def apply_function_async(
             # Any other `BaseException` types would ultimately be ignored by asyncio if
             # raised here, after messing up the worker state machine along their way.
             raise
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_
             # a reason to shut down the worker.
             # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they

@@ -21,9 +21,9 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
+from dask.tokenize import tokenize
 from dask.typing import Key
 
 from distributed.core import PooledRPCCall
@@ -48,7 +48,11 @@ from distributed.shuffle._core import (
     handle_transfer_errors,
     handle_unpack_errors,
 )
-from distributed.shuffle._exceptions import DataUnavailable
+from distributed.shuffle._exceptions import (
+    DataUnavailable,
+    P2PConsistencyError,
+    P2POutOfDiskError,
+)
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -105,6 +109,10 @@ def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
         return get_worker_plugin().barrier(id, run_ids)
     except Reschedule as e:
         raise e
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
     except Exception as e:
         raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
 
@@ -565,7 +573,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
     drop_column: bool
 
     @property
-    def output_partitions(self) -> Generator[int, None, None]:
+    def output_partitions(self) -> Generator[int]:
         yield from self.parts_out
 
     def pick_worker(self, partition: int, workers: Sequence[str]) -> str:
@@ -598,9 +606,9 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
             rpc=plugin.worker.rpc,
             digest_metric=plugin.worker.digest_metric,
             scheduler=plugin.worker.scheduler,
-            memory_limiter_disk=plugin.memory_limiter_disk
-            if self.disk
-            else ResourceLimiter(None),
+            memory_limiter_disk=(
+                plugin.memory_limiter_disk if self.disk else ResourceLimiter(None)
+            ),
             memory_limiter_comms=plugin.memory_limiter_comms,
             disk=self.disk,
             drop_column=self.drop_column,

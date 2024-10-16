@@ -36,7 +36,11 @@ from distributed.protocol import to_serialize
 from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
-from distributed.shuffle._exceptions import P2PConsistencyError, ShuffleClosedError
+from distributed.shuffle._exceptions import (
+    P2PConsistencyError,
+    P2POutOfDiskError,
+    ShuffleClosedError,
+)
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
 from distributed.utils import run_in_executor_with_context, sync
@@ -447,7 +451,7 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
 
     @property
     @abc.abstractmethod
-    def output_partitions(self) -> Generator[_T_partition_id, None, None]:
+    def output_partitions(self) -> Generator[_T_partition_id]:
         """Output partitions"""
 
     @abc.abstractmethod
@@ -506,6 +510,10 @@ def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
         yield
     except ShuffleClosedError:
         raise Reschedule()
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
     except Exception as e:
         raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
 
@@ -518,8 +526,18 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
         raise e
     except ShuffleClosedError:
         raise Reschedule()
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
     except Exception as e:
         raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
+
+
+def _handle_datetime(buf: Any) -> Any:
+    if hasattr(buf, "dtype") and buf.dtype.kind in "Mm":
+        return buf.view("u8")
+    return buf
 
 
 def _mean_shard_size(shards: Iterable) -> int:
@@ -530,6 +548,7 @@ def _mean_shard_size(shards: Iterable) -> int:
         if not isinstance(shard, int):
             # This also asserts that shard is a Buffer and that we didn't forget
             # a container or metadata type above
+            shard = _handle_datetime(shard)
             size += memoryview(shard).nbytes
             count += 1
             if count == 10:

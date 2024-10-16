@@ -38,8 +38,7 @@ def main() -> None:
     else:
         print("CPU frequency:")
         for freq in freqs:
-            # FIXME types-psutil
-            print(f"  - current={freq.current}, min={freq.min}, max={freq.max}")  # type: ignore
+            print(f"  - current={freq.current}, min={freq.min}, max={freq.max}")
 
     mem = psutil.virtual_memory()
     print("Memory:")

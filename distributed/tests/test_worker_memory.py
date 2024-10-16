@@ -538,7 +538,7 @@ async def test_pause_executor_manual(c, s, a):
     z = c.submit(inc, 2, key="z")
     while "z" not in s.tasks or s.tasks["z"].state != "no-worker":
         await asyncio.sleep(0.01)
-    assert s.unrunnable == {s.tasks["z"]}
+    assert s.unrunnable.keys() == {s.tasks["z"]}
 
     # Test that a task that already started when the worker paused can complete
     # and its output can be retrieved. Also test that the now free slot won't be
@@ -605,7 +605,7 @@ async def test_pause_executor_with_memory_monitor(c, s, a):
         z = c.submit(inc, 2, key="z")
         while "z" not in s.tasks or s.tasks["z"].state != "no-worker":
             await asyncio.sleep(0.01)
-        assert s.unrunnable == {s.tasks["z"]}
+        assert s.unrunnable.keys() == {s.tasks["z"]}
 
         # Test that a task that already started when the worker paused can complete
         # and its output can be retrieved. Also test that the now free slot won't be
@@ -1097,12 +1097,12 @@ async def test_pause_while_idle(s, a, b):
     assert sa in s.running
 
     a.monitor.get_process_memory = lambda: 2**40
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.paused, timeout=5)
     assert a.address not in s.idle
     assert sa not in s.running
 
     a.monitor.get_process_memory = lambda: 0
-    await async_poll_for(lambda: sa.status == Status.running, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.running, timeout=5)
     assert a.address in s.idle
     assert sa in s.running
 
@@ -1112,17 +1112,17 @@ async def test_pause_while_saturated(c, s, a, b):
     sa = s.workers[a.address]
     ev = Event()
     futs = c.map(lambda i, ev: ev.wait(), range(3), ev=ev, workers=[a.address])
-    await async_poll_for(lambda: len(a.state.tasks) == 3, timeout=2)
+    await async_poll_for(lambda: len(a.state.tasks) == 3, timeout=5)
     assert sa in s.saturated
     assert sa in s.running
 
     a.monitor.get_process_memory = lambda: 2**40
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.paused, timeout=5)
     assert sa not in s.saturated
     assert sa not in s.running
 
     a.monitor.get_process_memory = lambda: 0
-    await async_poll_for(lambda: sa.status == Status.running, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.running, timeout=5)
     assert sa in s.saturated
     assert sa in s.running
 

@@ -14,8 +14,8 @@ from typing import Any, Generic, Literal, TypeVar
 import msgpack
 
 import dask
-from dask.base import normalize_token
 from dask.sizeof import sizeof
+from dask.tokenize import normalize_token
 from dask.utils import typename
 
 from distributed.metrics import context_meter
@@ -209,17 +209,20 @@ register_serialization_family("error", None, serialization_error_loads)
 
 
 def check_dask_serializable(x):
-    if type(x) in (list, set, tuple) and len(x):
-        return check_dask_serializable(next(iter(x)))
-    elif type(x) is dict and len(x):
-        return check_dask_serializable(next(iter(x.items()))[1])
-    else:
-        try:
-            dask_serialize.dispatch(type(x))
-            return True
-        except TypeError:
-            pass
-    return False
+    try:
+        if type(x) in (list, set, tuple) and len(x):
+            return check_dask_serializable(next(iter(x)))
+        elif type(x) is dict and len(x):
+            return check_dask_serializable(next(iter(x.items()))[1])
+        else:
+            try:
+                dask_serialize.dispatch(type(x))
+                return True
+            except TypeError:
+                pass
+        return False
+    except RecursionError:
+        return False
 
 
 def serialize(  # type: ignore[no-untyped-def]
@@ -773,7 +776,7 @@ def register_serialization_lazy(toplevel, func):
 
 @partial(normalize_token.register, Serialized)
 def normalize_Serialized(o):
-    return [o.header] + o.frames  # for dask.base.tokenize
+    return [o.header] + o.frames  # for dask.tokenize.tokenize
 
 
 # Teach serialize how to handle bytes

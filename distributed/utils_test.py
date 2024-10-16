@@ -38,7 +38,6 @@ import dask
 from dask.typing import Key
 
 from distributed import Event, Scheduler, system
-from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.client import Client, _global_clients, default_client
 from distributed.comm import Comm
@@ -133,9 +132,12 @@ def loop(loop_in_thread):
 @pytest.fixture
 def loop_in_thread(cleanup):
     loop_started = concurrent.futures.Future()
-    with concurrent.futures.ThreadPoolExecutor(
-        1, thread_name_prefix="test IOLoop"
-    ) as tpe, config_for_cluster_tests():
+    with (
+        concurrent.futures.ThreadPoolExecutor(
+            1, thread_name_prefix="test IOLoop"
+        ) as tpe,
+        config_for_cluster_tests(),
+    ):
 
         async def run():
             io_loop = IOLoop.current()
@@ -879,7 +881,7 @@ def gen_cluster(
     clean_kwargs: dict[str, Any] | None = None,
     # FIXME: distributed#8054
     allow_unclosed: bool = True,
-    cluster_dump_directory: str | Literal[False] = "test_cluster_dump",
+    cluster_dump_directory: str | Literal[False] = False,
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
 
@@ -902,6 +904,11 @@ def gen_cluster(
         start
         end
     """
+    if cluster_dump_directory:
+        warnings.warn(
+            "The `cluster_dump_directory` argument is being ignored and will be removed in a future version.",
+            DeprecationWarning,
+        )
     if nthreads is None:
         nthreads = [
             ("127.0.0.1", 1),
@@ -1020,14 +1027,6 @@ def gen_cluster(
                             # This stack indicates where the coro/test is suspended
                             task.print_stack(file=buffer)
 
-                            if cluster_dump_directory:
-                                await dump_cluster_state(
-                                    s=s,
-                                    ws=workers,
-                                    output_dir=cluster_dump_directory,
-                                    func_name=func.__name__,
-                                )
-
                             task.cancel()
                             while not task.cancelled():
                                 await asyncio.sleep(0.01)
@@ -1047,18 +1046,6 @@ def gen_cluster(
                             ) from None
 
                         except pytest.xfail.Exception:
-                            raise
-
-                        except Exception:
-                            if cluster_dump_directory and not has_pytestmark(
-                                test_func, "xfail"
-                            ):
-                                await dump_cluster_state(
-                                    s=s,
-                                    ws=workers,
-                                    output_dir=cluster_dump_directory,
-                                    func_name=func.__name__,
-                                )
                             raise
 
                     try:
@@ -1121,41 +1108,6 @@ def gen_cluster(
         return test_func
 
     return _
-
-
-async def dump_cluster_state(
-    s: Scheduler, ws: list[ServerNode], output_dir: str, func_name: str
-) -> None:
-    """A variant of Client.dump_cluster_state, which does not rely on any of the below
-    to work:
-
-    - Having a client at all
-    - Client->Scheduler comms
-    - Scheduler->Worker comms (unless using Nannies)
-    """
-    scheduler_info = s._to_dict()
-    workers_info: dict[str, Any]
-    versions_info = version_module.get_versions()
-
-    if not ws or isinstance(ws[0], Worker):
-        workers_info = {w.address: w._to_dict() for w in ws}
-    else:
-        workers_info = await s.broadcast(msg={"op": "dump_state"}, on_error="return")
-        workers_info = {
-            k: repr(v) if isinstance(v, Exception) else v
-            for k, v in workers_info.items()
-        }
-
-    state = {
-        "scheduler": scheduler_info,
-        "workers": workers_info,
-        "versions": versions_info,
-    }
-    os.makedirs(output_dir, exist_ok=True)
-    fname = os.path.join(output_dir, func_name) + ".yaml"
-    with open(fname, "w") as fh:
-        yaml.safe_dump(state, fh)  # Automatically convert tuples to lists
-    print(f"Dumped cluster state to {fname}")
 
 
 def validate_state(*servers: Scheduler | Worker | Nanny) -> None:
@@ -1467,7 +1419,7 @@ def captured_handler(handler):
 
 
 @contextmanager
-def captured_context_meter() -> Generator[defaultdict[tuple, float], None, None]:
+def captured_context_meter() -> Generator[defaultdict[tuple, float]]:
     """Capture distributed.metrics.context_meter metrics into a local defaultdict"""
     # Don't cast int metrics to float
     metrics: defaultdict[tuple, float] = defaultdict(int)
@@ -1506,8 +1458,6 @@ def new_config_file(c: dict[str, Any]) -> Iterator[None]:
     """
     Temporarily change configuration file to match dictionary *c*.
     """
-    import yaml
-
     old_file = os.environ.get("DASK_CONFIG")
     fd, path = tempfile.mkstemp(prefix="dask-config")
     with os.fdopen(fd, "w") as f:
@@ -2114,7 +2064,7 @@ def raises_with_cause(
     expected_cause: type[BaseException] | tuple[type[BaseException], ...],
     match_cause: str | None,
     *more_causes: type[BaseException] | tuple[type[BaseException], ...] | str | None,
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """Contextmanager to assert that a certain exception with cause was raised.
     It can travel the causes recursively by adding more expected, match pairs at the end.
 

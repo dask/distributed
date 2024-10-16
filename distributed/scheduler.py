@@ -17,6 +17,7 @@ import textwrap
 import uuid
 import warnings
 import weakref
+from abc import abstractmethod
 from collections import defaultdict, deque
 from collections.abc import (
     Callable,
@@ -53,8 +54,8 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
-from dask.base import TokenizationError, normalize_token, tokenize
 from dask.core import get_deps, iskey, validate_key
+from dask.tokenize import TokenizationError, normalize_token, tokenize
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
@@ -100,9 +101,9 @@ from distributed.core import (
 from distributed.diagnostics.memory_sampler import MemorySamplerExtension
 from distributed.diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from distributed.event import EventExtension
+from distributed.gc import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.http import get_handlers
-from distributed.lock import LockExtension
-from distributed.metrics import time
+from distributed.metrics import monotonic, time
 from distributed.multi_lock import MultiLockExtension
 from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
@@ -136,7 +137,6 @@ from distributed.utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
-from distributed.utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from distributed.variable import VariableExtension
 from distributed.worker import _normalize_task
 
@@ -179,7 +179,6 @@ DEFAULT_DATA_SIZE = parse_bytes(
 STIMULUS_ID_UNSET = "<stimulus_id unset>"
 
 DEFAULT_EXTENSIONS = {
-    "locks": LockExtension,
     "multi_locks": MultiLockExtension,
     "publish": PublishExtension,
     "replay-tasks": ReplayTaskScheduler,
@@ -572,7 +571,9 @@ class WorkerState:
         return self._hash
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, WorkerState) and other.server_id == self.server_id
+        return self is other or (
+            isinstance(other, WorkerState) and other.server_id == self.server_id
+        )
 
     @property
     def has_what(self) -> Set[TaskState]:
@@ -671,9 +672,7 @@ class WorkerState:
         )
         ws._occupancy_cache = self.occupancy
 
-        ws.executing = {
-            ts.key: duration for ts, duration in self.executing.items()  # type: ignore
-        }
+        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}  # type: ignore
         return ws
 
     def __repr__(self) -> str:
@@ -776,17 +775,20 @@ class WorkerState:
                 self._dec_needs_replica(dts)
 
     def _remove_from_task_prefix_count(self, ts: TaskState) -> None:
-        count = self.task_prefix_count[ts.prefix.name] - 1
+        prefix_name = ts.prefix.name
+        count = self.task_prefix_count[prefix_name] - 1
+        tp_count = self.task_prefix_count
+        tp_count_global = self.scheduler._task_prefix_count_global
         if count:
-            self.task_prefix_count[ts.prefix.name] = count
+            tp_count[prefix_name] = count
         else:
-            del self.task_prefix_count[ts.prefix.name]
+            del tp_count[prefix_name]
 
-        count = self.scheduler._task_prefix_count_global[ts.prefix.name] - 1
+        count = tp_count_global[prefix_name] - 1
         if count:
-            self.scheduler._task_prefix_count_global[ts.prefix.name] = count
+            tp_count_global[prefix_name] = count
         else:
-            del self.scheduler._task_prefix_count_global[ts.prefix.name]
+            del tp_count_global[prefix_name]
 
     def remove_replica(self, ts: TaskState) -> None:
         """The worker no longer has a task in memory"""
@@ -1003,6 +1005,9 @@ class TaskCollection:
     def _calculate_duration_us(start: float, stop: float) -> int:
         return max(round((stop - start) * 1e6), 0)
 
+    def __len__(self) -> int:
+        return sum(self.states.values())
+
 
 class TaskPrefix(TaskCollection):
     """Collection tracking all tasks within a prefix
@@ -1192,9 +1197,6 @@ class TaskGroup(TaskCollection):
             )
             + ">"
         )
-
-    def __len__(self) -> int:
-        return sum(self.states.values())
 
     def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
@@ -1425,14 +1427,8 @@ class TaskState:
     #: be rejected.
     run_id: int | None
 
-    #: Whether to consider this task rootish in the context of task queueing
-    #: True
-    #:     Always consider this task rootish
-    #: False
-    #:     Never consider this task rootish
-    #: None
-    #:     Use a heuristic to determine whether this task should be considered rootish
-    _rootish: bool | None
+    #: Whether to allow queueing this task if it is rootish
+    _queueable: bool
 
     #: Cached hash of :attr:`~TaskState.client_key`
     _hash: int
@@ -1489,7 +1485,7 @@ class TaskState:
         self.metadata = None
         self.annotations = None
         self.erred_on = None
-        self._rootish = None
+        self._queueable = True
         self.run_id = None
         self.group = group
         group.add(self)
@@ -1682,8 +1678,8 @@ class SchedulerState:
     #: Tasks in the "queued" state, ordered by priority
     queued: HeapSet[TaskState]
 
-    #: Tasks in the "no-worker" state
-    unrunnable: set[TaskState]
+    #: Tasks in the "no-worker" state with the (monotonic) time when they became unrunnable
+    unrunnable: dict[TaskState, float]
 
     #: Subset of tasks that exist in memory on more than one worker
     replicated_tasks: set[TaskState]
@@ -1756,7 +1752,7 @@ class SchedulerState:
         host_info: dict[str, dict[str, Any]],
         resources: dict[str, dict[str, float]],
         tasks: dict[Key, TaskState],
-        unrunnable: set[TaskState],
+        unrunnable: dict[TaskState, float],
         queued: HeapSet[TaskState],
         validate: bool,
         plugins: Iterable[SchedulerPlugin] = (),
@@ -1846,6 +1842,9 @@ class SchedulerState:
                 + repr(self.WORKER_SATURATION)
             )
 
+    @abstractmethod
+    def log_event(self, topic: str | Collection[str], msg: Any) -> None: ...
+
     @property
     def memory(self) -> MemoryState:
         return MemoryState.sum(*(w.memory for w in self.workers.values()))
@@ -1914,7 +1913,7 @@ class SchedulerState:
             self.unknown_durations,
             self.replicated_tasks,
         ):
-            collection.clear()  # type: ignore
+            collection.clear()
 
     @property
     def is_idle(self) -> bool:
@@ -2090,6 +2089,16 @@ class SchedulerState:
             return recommendations, client_msgs, worker_msgs
         except Exception:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
+            self.log_event(
+                "transitions",
+                {
+                    "action": "scheduler-transition-failed",
+                    "key": key,
+                    "start": start,
+                    "finish": finish,
+                    "transition_log": list(self.transition_log),
+                },
+            )
             if LOG_PDB:
                 import pdb
 
@@ -2180,11 +2189,73 @@ class SchedulerState:
             assert ts in self.unrunnable
 
         if ws := self.decide_worker_non_rootish(ts):
-            self.unrunnable.discard(ts)
+            self.unrunnable.pop(ts, None)
             return self._add_to_processing(ts, ws, stimulus_id=stimulus_id)
         # If no worker, task just stays in `no-worker`
 
         return {}, {}, {}
+
+    def _transition_no_worker_erred(
+        self,
+        key: Key,
+        stimulus_id: str,
+        *,
+        # TODO: Which ones can actually be None?
+        cause: Key | None = None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+    ) -> RecsMsgs:
+        ts = self.tasks[key]
+
+        if self.validate:
+            assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
+            assert cause
+            assert ts in self.unrunnable
+            assert not ts.processing_on
+
+        self.unrunnable.pop(ts)
+
+        return self._propagate_erred(
+            ts,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
+        )
+
+    def _transition_queued_erred(
+        self,
+        key: Key,
+        stimulus_id: str,
+        *,
+        # TODO: Which ones can actually be None?
+        cause: Key | None = None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+    ) -> RecsMsgs:
+        ts = self.tasks[key]
+
+        if self.validate:
+            assert not ts.actor, f"Actors can't be in `no-worker`: {ts}"
+            assert cause
+            assert ts in self.queued
+            assert not ts.processing_on
+
+        self.queued.remove(ts)
+
+        return self._propagate_erred(
+            ts,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
+        )
 
     def decide_worker_rootish_queuing_disabled(
         self, ts: TaskState
@@ -2211,7 +2282,7 @@ class SchedulerState:
         """
         if self.validate:
             # See root-ish-ness note below in `decide_worker_rootish_queuing_enabled`
-            assert math.isinf(self.WORKER_SATURATION)
+            assert math.isinf(self.WORKER_SATURATION) or not ts._queueable
 
         pool = self.idle.values() if self.idle else self.running
         if not pool:
@@ -2377,7 +2448,7 @@ class SchedulerState:
             # removed, there should only be one, which combines co-assignment and
             # queuing. Eventually, special-casing root tasks might be removed entirely,
             # with better heuristics.
-            if math.isinf(self.WORKER_SATURATION):
+            if math.isinf(self.WORKER_SATURATION) or not ts._queueable:
                 if not (ws := self.decide_worker_rootish_queuing_disabled(ts)):
                     return {ts.key: "no-worker"}, {}, {}
             else:
@@ -2717,8 +2788,6 @@ class SchedulerState:
         Recommendations, client messages and worker messages to process
         """
         ts = self.tasks[key]
-        recommendations: Recs = {}
-        client_msgs: Msgs = {}
 
         if self.validate:
             assert cause or ts.exception_blame
@@ -2733,9 +2802,41 @@ class SchedulerState:
 
         self._exit_processing_common(ts)
 
+        if self.validate:
+            assert not ts.processing_on
+
+        return self._propagate_erred(
+            ts,
+            worker=worker,
+            cause=cause,
+            exception=exception,
+            traceback=traceback,
+            exception_text=exception_text,
+            traceback_text=traceback_text,
+        )
+
+    def _propagate_erred(
+        self,
+        ts: TaskState,
+        *,
+        worker: str | None = None,
+        cause: Key | None = None,
+        exception: Serialized | None = None,
+        traceback: Serialized | None = None,
+        exception_text: str | None = None,
+        traceback_text: str | None = None,
+    ) -> RecsMsgs:
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+
+        ts.state = "erred"
+        key = ts.key
+
         if not ts.erred_on:
             ts.erred_on = set()
-        ts.erred_on.add(worker)
+        if worker is not None:
+            ts.erred_on.add(worker)
+
         if exception is not None:
             ts.exception = exception
             ts.exception_text = exception_text
@@ -2770,8 +2871,6 @@ class SchedulerState:
 
         ts.waiters = None
 
-        ts.state = "erred"
-
         report_msg = {
             "op": "task-erred",
             "key": key,
@@ -2789,9 +2888,6 @@ class SchedulerState:
                 recommendations=recommendations,
             )
 
-        if self.validate:
-            assert not ts.processing_on
-
         return recommendations, client_msgs, {}
 
     def _transition_no_worker_released(self, key: Key, stimulus_id: str) -> RecsMsgs:
@@ -2802,7 +2898,7 @@ class SchedulerState:
             assert not ts.who_has
             assert not ts.waiting_on
 
-        self.unrunnable.remove(ts)
+        self.unrunnable.pop(ts)
 
         recommendations: Recs = {}
         self._propagate_released(ts, recommendations)
@@ -2825,9 +2921,13 @@ class SchedulerState:
 
         if self.validate:
             self._validate_ready(ts)
+            assert ts not in self.unrunnable
 
         ts.state = "no-worker"
-        self.unrunnable.add(ts)
+        self.unrunnable[ts] = monotonic()
+
+        if self.validate:
+            validate_unrunnable(self.unrunnable)
 
         return {}, {}, {}
 
@@ -2860,7 +2960,7 @@ class SchedulerState:
     def _remove_key(self, key: Key) -> None:
         ts = self.tasks.pop(key)
         assert ts.state == "forgotten"
-        self.unrunnable.discard(ts)
+        self.unrunnable.pop(ts, None)
         for cs in ts.who_wants or ():
             cs.wants_what.remove(ts)
         ts.who_wants = None
@@ -2950,11 +3050,13 @@ class SchedulerState:
         ("waiting", "memory"): _transition_waiting_memory,
         ("queued", "released"): _transition_queued_released,
         ("queued", "processing"): _transition_queued_processing,
+        ("queued", "erred"): _transition_queued_erred,
         ("processing", "released"): _transition_processing_released,
         ("processing", "memory"): _transition_processing_memory,
         ("processing", "erred"): _transition_processing_erred,
         ("no-worker", "released"): _transition_no_worker_released,
         ("no-worker", "processing"): _transition_no_worker_processing,
+        ("no-worker", "erred"): _transition_no_worker_erred,
         ("released", "forgotten"): _transition_released_forgotten,
         ("memory", "forgotten"): _transition_memory_forgotten,
         ("erred", "released"): _transition_erred_released,
@@ -2984,8 +3086,6 @@ class SchedulerState:
         and have few or no dependencies. Tasks may also be explicitly marked as rootish
         to override this heuristic.
         """
-        if ts._rootish is not None:
-            return ts._rootish
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
         tg = ts.group
@@ -3583,12 +3683,15 @@ class Scheduler(SchedulerState, ServerNode):
     idle_timeout: float | None
     _no_workers_since: float | None  # Note: not None iff there are pending tasks
     no_workers_timeout: float | None
+    _client_connections_added_total: int
+    _client_connections_removed_total: int
+    _workers_added_total: int
+    _workers_removed_total: int
+    _active_graph_updates: int
 
     def __init__(
         self,
         loop=None,
-        delete_interval="500ms",
-        synchronize_worker_interval="60s",
         services=None,
         service_kwargs=None,
         allowed_failures=None,
@@ -3637,10 +3740,6 @@ class Scheduler(SchedulerState, ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.proc = psutil.Process()
-        self.delete_interval = parse_timedelta(delete_interval, default="ms")
-        self.synchronize_worker_interval = parse_timedelta(
-            synchronize_worker_interval, default="ms"
-        )
         self.service_specs = services or {}
         self.service_kwargs = service_kwargs or {}
         self.services = {}
@@ -3751,7 +3850,7 @@ class Scheduler(SchedulerState, ServerNode):
                     """Shut down the server."""
                     self.log.info("Shutting down on /api/shutdown request.")
 
-                    await scheduler.close(reason="shutdown requested via Jupyter")
+                    await scheduler.close(reason="jupyter-requested-shutdown")
 
             j = ServerApp.instance(
                 config=Config(
@@ -3791,7 +3890,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.generation = 0
         self._last_client = None
         self._last_time = 0
-        unrunnable = set()
+        unrunnable = {}
         queued = HeapSet(key=operator.attrgetter("priority"))
 
         self.datasets = {}
@@ -3957,6 +4056,12 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle("dask scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
+
+        self._client_connections_added_total = 0
+        self._client_connections_removed_total = 0
+        self._workers_added_total = 0
+        self._workers_removed_total = 0
+        self._active_graph_updates = 0
 
     ##################
     # Administration #
@@ -4174,7 +4279,7 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None, reason=""):
+    async def close(self, fast=None, close_workers=None, reason="unknown"):
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -4191,6 +4296,10 @@ class Scheduler(SchedulerState, ServerNode):
             await self.finished()
             return
 
+        self.status = Status.closing
+        logger.info("Closing scheduler. Reason: %s", reason)
+        setproctitle("dask scheduler [closing]")
+
         async def log_errors(func):
             try:
                 await func()
@@ -4200,10 +4309,6 @@ class Scheduler(SchedulerState, ServerNode):
         await asyncio.gather(
             *[log_errors(plugin.before_close) for plugin in list(self.plugins.values())]
         )
-
-        self.status = Status.closing
-        logger.info("Scheduler closing due to %s...", reason or "unknown reason")
-        setproctitle("dask scheduler [closing]")
 
         await self.preloads.teardown()
 
@@ -4426,8 +4531,10 @@ class Scheduler(SchedulerState, ServerNode):
             server_id=server_id,
             scheduler=self,
         )
+        self._workers_added_total += 1
         if ws.status == Status.running:
             self.running.add(ws)
+            self._refresh_no_workers_since()
 
         dh = self.host_info.get(host)
         if dh is None:
@@ -4522,17 +4629,17 @@ class Scheduler(SchedulerState, ServerNode):
         dependencies: dict[Key, set[Key]],
         keys: set[Key],
     ) -> set[Key]:
-        n = 0
+        n = -1
         lost_keys = set()
         while len(dsk) != n:  # walk through new tasks, cancel any bad deps
             n = len(dsk)
             for k, deps in list(dependencies.items()):
-                if any(
+                if (k not in self.tasks and k not in dsk) or any(
                     dep not in self.tasks and dep not in dsk for dep in deps
                 ):  # bad key
                     lost_keys.add(k)
                     logger.info("User asked for computation on lost data, %s", k)
-                    del dsk[k]
+                    dsk.pop(k, None)
                     del dependencies[k]
                     if k in keys:
                         keys.remove(k)
@@ -4750,6 +4857,7 @@ class Scheduler(SchedulerState, ServerNode):
         stimulus_id: str | None = None,
     ) -> None:
         start = time()
+        self._active_graph_updates += 1
         try:
             try:
                 graph = deserialize(graph_header, graph_frames).data
@@ -4770,6 +4878,7 @@ class Scheduler(SchedulerState, ServerNode):
                 _materialize_graph,
                 graph=graph,
                 global_annotations=annotations or {},
+                validate=self.validate,
             )
             del graph
             if not internal_priority:
@@ -4785,6 +4894,7 @@ class Scheduler(SchedulerState, ServerNode):
                 internal_priority = await offload(
                     dask.order.order, dsk=dsk, dependencies=stripped_deps
                 )
+            dsk = valmap(_normalize_task, dsk)
 
             self._create_taskstate_from_graph(
                 dsk=dsk,
@@ -4820,8 +4930,11 @@ class Scheduler(SchedulerState, ServerNode):
                     # (which may not have been added to who_wants yet)
                     client=client,
                 )
-        end = time()
-        self.digest_metric("update-graph-duration", end - start)
+        finally:
+            self._active_graph_updates -= 1
+            assert self._active_graph_updates >= 0
+            end = time()
+            self.digest_metric("update-graph-duration", end - start)
 
     def _generate_taskstates(
         self,
@@ -5308,11 +5421,13 @@ class Scheduler(SchedulerState, ServerNode):
         self.idle_task_count.discard(ws)
         self.saturated.discard(ws)
         del self.workers[address]
+        self._workers_removed_total += 1
         ws.status = Status.closed
         self.running.discard(ws)
 
         recommendations: Recs = {}
 
+        timestamp = monotonic()
         processing_keys = {ts.key for ts in ws.processing}
         for ts in list(ws.processing):
             k = ts.key
@@ -5383,6 +5498,9 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", event_msg)
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
+        # Make sure that the timestamp has been collected before tasks were transitioned to no-worker
+        # to ensure a meaningful error message.
+        self._refresh_no_workers_since(timestamp=timestamp)
 
         awaitables = []
         for plugin in list(self.plugins.values()):
@@ -5486,8 +5604,8 @@ class Scheduler(SchedulerState, ServerNode):
         for k in keys:
             ts = self.tasks.get(k)
             if ts is None:
-                # For publish, queues etc.
-                ts = self.new_task(k, None, "released")
+                warnings.warn(f"Client desires key {k!r} but key is unknown.")
+                continue
             if ts.who_wants is None:
                 ts.who_wants = set()
             ts.who_wants.add(cs)
@@ -5625,6 +5743,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def validate_state(self, allow_overlap: bool = False) -> None:
         validate_state(self.tasks, self.workers, self.clients)
+        validate_unrunnable(self.unrunnable)
 
         if not (set(self.workers) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
@@ -5769,6 +5888,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
         self.clients[client] = ClientState(client, versions=versions)
+        self._client_connections_added_total += 1
 
         for plugin in list(self.plugins.values()):
             try:
@@ -5824,7 +5944,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=stimulus_id,
             )
             del self.clients[client]
-
+            self._client_connections_removed_total += 1
             for plugin in list(self.plugins.values()):
                 try:
                     plugin.remove_client(scheduler=self, client=client)
@@ -5963,6 +6083,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle.pop(ws.address, None)
             self.idle_task_count.discard(ws)
             self.saturated.discard(ws)
+        self._refresh_no_workers_since()
 
     def handle_request_refresh_who_has(
         self, keys: Iterable[Key], worker: str, stimulus_id: str
@@ -7289,8 +7410,7 @@ class Scheduler(SchedulerState, ServerNode):
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @overload
     async def retire_workers(
@@ -7300,8 +7420,7 @@ class Scheduler(SchedulerState, ServerNode):
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @overload
     async def retire_workers(
@@ -7317,8 +7436,7 @@ class Scheduler(SchedulerState, ServerNode):
         minimum: int | None = None,
         target: int | None = None,
         attribute: str = "address",
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     @log_errors
     async def retire_workers(
@@ -7600,12 +7718,10 @@ class Scheduler(SchedulerState, ServerNode):
             self.client_desires_keys(keys=list(who_has), client=client)
 
     @overload
-    def report_on_key(self, key: Key, *, client: str | None = None) -> None:
-        ...
+    def report_on_key(self, key: Key, *, client: str | None = None) -> None: ...
 
     @overload
-    def report_on_key(self, *, ts: TaskState, client: str | None = None) -> None:
-        ...
+    def report_on_key(self, *, ts: TaskState, client: str | None = None) -> None: ...
 
     def report_on_key(self, key=None, *, ts=None, client=None):
         if (ts is None) == (key is None):
@@ -7696,9 +7812,11 @@ class Scheduler(SchedulerState, ServerNode):
     def get_who_has(self, keys: Iterable[Key] | None = None) -> dict[Key, list[str]]:
         if keys is not None:
             return {
-                key: [ws.address for ws in self.tasks[key].who_has or ()]
-                if key in self.tasks
-                else []
+                key: (
+                    [ws.address for ws in self.tasks[key].who_has or ()]
+                    if key in self.tasks
+                    else []
+                )
                 for key in keys
             }
         else:
@@ -7713,9 +7831,11 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: [ts.key for ts in self.workers[w].has_what]
-                if w in self.workers
-                else []
+                w: (
+                    [ts.key for ts in self.workers[w].has_what]
+                    if w in self.workers
+                    else []
+                )
                 for w in workers
             }
         else:
@@ -8313,17 +8433,13 @@ class Scheduler(SchedulerState, ServerNode):
         sysmon.update()
 
         # Scheduler logs
-        from distributed.dashboard.components.scheduler import (
-            _BOKEH_STYLES_KWARGS,
-            SchedulerLogs,
-        )
+        from distributed.dashboard.components.scheduler import _STYLES, SchedulerLogs
 
         logs = SchedulerLogs(self, start=start)
 
-        from bokeh.models import Div, Tabs
+        from bokeh.models import Div, TabPanel, Tabs
 
         import distributed
-        from distributed.dashboard.core import TabPanel
 
         # HTML
         html = """
@@ -8364,7 +8480,7 @@ class Scheduler(SchedulerState, ServerNode):
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
         )
-        html = Div(text=html, **_BOKEH_STYLES_KWARGS)
+        html = Div(text=html, styles=_STYLES)
 
         html = TabPanel(child=html, title="Summary")
         compute = TabPanel(child=compute, title="Worker Profile (compute)")
@@ -8445,12 +8561,10 @@ class Scheduler(SchedulerState, ServerNode):
         self._broker.unsubscribe(topic, client)
 
     @overload
-    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]:
-        ...
+    def get_events(self, topic: str) -> tuple[tuple[float, Any], ...]: ...
 
     @overload
-    def get_events(self) -> dict[str, tuple[tuple[float, Any], ...]]:
-        ...
+    def get_events(self) -> dict[str, tuple[tuple[float, Any], ...]]: ...
 
     def get_events(
         self, topic: str | None = None
@@ -8490,6 +8604,14 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
         if to_restart:
+            self.log_event(
+                "scheduler",
+                {
+                    "action": "worker-ttl-timed-out",
+                    "workers": to_restart.copy(),
+                    "ttl": ttl,
+                },
+            )
             await self.restart_workers(
                 to_restart,
                 wait_for_workers=False,
@@ -8502,6 +8624,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if self.transition_counter != self._idle_transition_counter:
             self._idle_transition_counter = self.transition_counter
+            self.idle_since = None
+            return None
+
+        if self._active_graph_updates > 0:
             self.idle_since = None
             return None
 
@@ -8532,43 +8658,140 @@ class Scheduler(SchedulerState, ServerNode):
                     "Scheduler closing after being idle for %s",
                     format_time(self.idle_timeout),
                 )
-                self._ongoing_background_tasks.call_soon(self.close)
+                self._ongoing_background_tasks.call_soon(
+                    self.close, reason="idle-timeout-exceeded"
+                )
         return self.idle_since
 
     def _check_no_workers(self) -> None:
-        """Shut down the scheduler if there have been tasks ready to run which have
-        nowhere to run for `distributed.scheduler.no-workers-timeout`, and there
-        aren't other tasks running.
-        """
-        if self.status in (Status.closing, Status.closed):
-            return  # pragma: nocover
-
         if (
-            (not self.queued and not self.unrunnable)
-            or (self.queued and self.workers)
-            or any(ws.processing for ws in self.workers.values())
+            self.status in (Status.closing, Status.closed)
+            or self.no_workers_timeout is None
         ):
+            return
+
+        now = monotonic()
+        stimulus_id = f"check-no-workers-timeout-{time()}"
+
+        recommendations: Recs = {}
+
+        self._refresh_no_workers_since(now)
+
+        affected = self._check_unrunnable_task_timeouts(
+            now, recommendations=recommendations, stimulus_id=stimulus_id
+        )
+
+        affected.update(
+            self._check_queued_task_timeouts(
+                now, recommendations=recommendations, stimulus_id=stimulus_id
+            )
+        )
+        self.transitions(recommendations, stimulus_id=stimulus_id)
+        if affected:
+            self.log_event(
+                "scheduler",
+                {"action": "no-workers-timeout-exceeded", "keys": affected},
+            )
+
+    def _check_unrunnable_task_timeouts(
+        self, timestamp: float, recommendations: Recs, stimulus_id: str
+    ) -> set[Key]:
+        assert self.no_workers_timeout
+        unsatisfied = []
+        no_workers = []
+        for ts, unrunnable_since in self.unrunnable.items():
+            if timestamp <= unrunnable_since + self.no_workers_timeout:
+                # unrunnable is insertion-ordered, which means that unrunnable_since will
+                # be monotonically increasing in this loop.
+                break
+            if (
+                self._no_workers_since is None
+                or self._no_workers_since >= unrunnable_since
+            ):
+                unsatisfied.append(ts)
+            else:
+                no_workers.append(ts)
+        if not unsatisfied and not no_workers:
+            return set()
+
+        for ts in unsatisfied:
+            e = pickle.dumps(
+                NoValidWorkerError(
+                    task=ts.key,
+                    host_restrictions=(ts.host_restrictions or set()).copy(),
+                    worker_restrictions=(ts.worker_restrictions or set()).copy(),
+                    resource_restrictions=(ts.resource_restrictions or {}).copy(),
+                    timeout=self.no_workers_timeout,
+                ),
+            )
+            r = self.transition(
+                ts.key,
+                "erred",
+                exception=e,
+                cause=ts.key,
+                stimulus_id=stimulus_id,
+            )
+            recommendations.update(r)
+            logger.error(
+                "Task %s marked as failed because it timed out waiting "
+                "for its restrictions to become satisfied.",
+                ts.key,
+            )
+        self._fail_tasks_after_no_workers_timeout(
+            no_workers, recommendations, stimulus_id
+        )
+        return {ts.key for ts in concat([unsatisfied, no_workers])}
+
+    def _check_queued_task_timeouts(
+        self, timestamp: float, recommendations: Recs, stimulus_id: str
+    ) -> set[Key]:
+        assert self.no_workers_timeout
+
+        if self._no_workers_since is None:
+            return set()
+
+        if timestamp <= self._no_workers_since + self.no_workers_timeout:
+            return set()
+        affected = list(self.queued)
+        self._fail_tasks_after_no_workers_timeout(
+            affected, recommendations, stimulus_id
+        )
+        return {ts.key for ts in affected}
+
+    def _fail_tasks_after_no_workers_timeout(
+        self, timed_out: Iterable[TaskState], recommendations: Recs, stimulus_id: str
+    ) -> None:
+        assert self.no_workers_timeout
+
+        for ts in timed_out:
+            e = pickle.dumps(
+                NoWorkerError(
+                    task=ts.key,
+                    timeout=self.no_workers_timeout,
+                ),
+            )
+            r = self.transition(
+                ts.key,
+                "erred",
+                exception=e,
+                cause=ts.key,
+                stimulus_id=stimulus_id,
+            )
+            recommendations.update(r)
+            logger.error(
+                "Task %s marked as failed because it timed out waiting "
+                "without any running workers.",
+                ts.key,
+            )
+
+    def _refresh_no_workers_since(self, timestamp: float | None = None) -> None:
+        if self.running or not (self.queued or self.unrunnable):
             self._no_workers_since = None
             return
 
-        # 1. There are queued or unrunnable tasks and no workers at all
-        # 2. There are unrunnable tasks and no workers satisfy their restrictions
-        # (Only rootish tasks can be queued, and rootish tasks can't have restrictions)
-
         if not self._no_workers_since:
-            self._no_workers_since = time()
+            self._no_workers_since = timestamp or monotonic()
             return
-
-        if (
-            self.no_workers_timeout
-            and time() > self._no_workers_since + self.no_workers_timeout
-        ):
-            logger.info(
-                "Tasks have been without any workers to run them for %s; "
-                "shutting scheduler down",
-                format_time(self.no_workers_timeout),
-            )
-            self._ongoing_background_tasks.call_soon(self.close)
 
     def adaptive_target(self, target_duration=None):
         """Desired number of workers based on the current workload
@@ -8591,7 +8814,7 @@ class Scheduler(SchedulerState, ServerNode):
         target_duration = parse_timedelta(target_duration)
 
         # CPU
-        queued = take(100, concat([self.queued, self.unrunnable]))
+        queued = take(100, concat([self.queued, self.unrunnable.keys()]))
         queued_occupancy = 0
         for ts in queued:
             if ts.prefix.duration_average == -1:
@@ -8878,6 +9101,25 @@ def validate_task_state(ts: TaskState) -> None:
         assert ts.state != "queued"
 
 
+def validate_unrunnable(unrunnable: dict[TaskState, float]) -> None:
+    prev_unrunnable_since: float | None = None
+    prev_ts: TaskState | None = None
+    for ts, unrunnable_since in unrunnable.items():
+        assert ts.state == "no-worker"
+        if prev_ts is not None:
+            assert prev_unrunnable_since is not None
+            # Ensure that unrunnable_since is monotonically increasing when iterating over unrunnable.
+            # _check_no_workers relies on this.
+            assert prev_unrunnable_since <= unrunnable_since, (
+                prev_ts,
+                ts,
+                prev_unrunnable_since,
+                unrunnable_since,
+            )
+        prev_ts = ts
+        prev_unrunnable_since = unrunnable_since
+
+
 def validate_worker_state(ws: WorkerState) -> None:
     for ts in ws.has_what or ():
         assert ts.who_has
@@ -8972,6 +9214,68 @@ class KilledWorker(Exception):
         )
 
 
+class NoValidWorkerError(Exception):
+    def __init__(
+        self,
+        task: Key,
+        host_restrictions: set[str],
+        worker_restrictions: set[str],
+        resource_restrictions: dict[str, float],
+        timeout: float,
+    ):
+        super().__init__(
+            task, host_restrictions, worker_restrictions, resource_restrictions, timeout
+        )
+
+    @property
+    def task(self) -> Key:
+        return self.args[0]
+
+    @property
+    def host_restrictions(self) -> Any:
+        return self.args[1]
+
+    @property
+    def worker_restrictions(self) -> Any:
+        return self.args[2]
+
+    @property
+    def resource_restrictions(self) -> Any:
+        return self.args[3]
+
+    @property
+    def timeout(self) -> float:
+        return self.args[4]
+
+    def __str__(self) -> str:
+        return (
+            f"Attempted to run task {self.task!r} but timed out after {format_time(self.timeout)} "
+            "waiting for a valid worker matching all restrictions.\n\nRestrictions:\n"
+            "host_restrictions={self.host_restrictions!s}\n"
+            "worker_restrictions={self.worker_restrictions!s}\n"
+            "resource_restrictions={self.resource_restrictions!s}\n"
+        )
+
+
+class NoWorkerError(Exception):
+    def __init__(self, task: Key, timeout: float):
+        super().__init__(task, timeout)
+
+    @property
+    def task(self) -> Key:
+        return self.args[0]
+
+    @property
+    def timeout(self) -> float:
+        return self.args[1]
+
+    def __str__(self) -> str:
+        return (
+            f"Attempted to run task {self.task!r} but timed out after {format_time(self.timeout)} "
+            "waiting without any running workers."
+        )
+
+
 class WorkerStatusPlugin(SchedulerPlugin):
     """A plugin to share worker status with a remote observer
 
@@ -9045,11 +9349,12 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 
 def _materialize_graph(
-    graph: HighLevelGraph, global_annotations: dict[str, Any]
+    graph: HighLevelGraph, global_annotations: dict[str, Any], validate: bool
 ) -> tuple[dict[Key, T_runspec], dict[Key, set[Key]], dict[str, dict[Key, Any]]]:
-    dsk = ensure_dict(graph)
-    for k in dsk:
-        validate_key(k)
+    dsk: dict = ensure_dict(graph)
+    if validate:
+        for k in dsk:
+            validate_key(k)
     annotations_by_type: defaultdict[str, dict[Key, Any]] = defaultdict(dict)
     for annotations_type, value in global_annotations.items():
         annotations_by_type[annotations_type].update(
@@ -9092,5 +9397,4 @@ def _materialize_graph(
         deps.discard(k)
         dependencies[k] = deps
 
-    dsk = valmap(_normalize_task, dsk)
     return dsk, dependencies, annotations_by_type

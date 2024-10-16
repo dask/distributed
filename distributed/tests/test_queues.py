@@ -332,3 +332,14 @@ async def test_unpickle_without_client(s):
         q3 = pickle.loads(pickled)
         await q3.put(1)
         assert await q3.get() == 1
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_set_cancelled_future(c, s):
+    x = c.submit(inc, 1)
+    await x.cancel()
+    q = Queue("x")
+    # FIXME: This is a TimeoutError but pytest doesn't appear to recognize it as
+    # such
+    with pytest.raises(Exception, match="unknown to scheduler"):
+        await q.put(x, timeout="100ms")

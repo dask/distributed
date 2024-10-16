@@ -75,9 +75,10 @@ async def test_log_event_e2e(c, s, a):
 
 @gen_cluster(client=True, nthreads=[])
 async def test_log_event_multiple_clients(c, s):
-    async with Client(s.address, asynchronous=True) as c2, Client(
-        s.address, asynchronous=True
-    ) as c3:
+    async with (
+        Client(s.address, asynchronous=True) as c2,
+        Client(s.address, asynchronous=True) as c3,
+    ):
         received_events = []
 
         def get_event_handler(handler_id):
@@ -185,9 +186,10 @@ async def test_events_subscribe_topic_cancelled(c, s, a):
 
 @gen_cluster(nthreads=[])
 async def test_topic_subscribe_unsubscribe(s):
-    async with Client(s.address, asynchronous=True) as c1, Client(
-        s.address, asynchronous=True
-    ) as c2:
+    async with (
+        Client(s.address, asynchronous=True) as c1,
+        Client(s.address, asynchronous=True) as c2,
+    ):
 
         def event_handler(recorded_events, event):
             _, msg = event
