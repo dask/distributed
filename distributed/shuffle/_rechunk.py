@@ -237,7 +237,7 @@ def rechunk_p2p(
 
     token = tokenize(x, chunks)
     name = rechunk_name(token)
-    disk: bool = dask.config.get("distributed.p2p.disk")
+    disk: bool = dask.config.get("distributed.p2p.storage.disk")
 
     layer = P2PRechunkLayer(
         name=name,

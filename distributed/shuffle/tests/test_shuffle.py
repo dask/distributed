@@ -2055,7 +2055,7 @@ async def test_meaningful_out_of_disk_error(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set(
-        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": True}
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.storage.disk": True}
     ):
         shuffled = df.shuffle("x", npartitions=10)
     with pytest.raises(P2POutOfDiskError, match="out of available disk space"):
@@ -2861,7 +2861,7 @@ async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
     df = dd.from_map(make_partition, np.arange(19), args=(250,))
 
     with dask.config.set(
-        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.storage.disk": disk}
     ):
         shuffled = df.shuffle("b")
     result, expected = await c.compute([shuffled, df], sync=True)
@@ -2882,7 +2882,7 @@ async def test_drop_duplicates_stable_ordering(c, s, a, b, keep, disk):
     df = dask.datasets.timeseries()
 
     with dask.config.set(
-        {"dataframe.shuffle.method": "p2p", "distributed.p2p.disk": disk}
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.storage.disk": disk}
     ):
         result, expected = await c.compute(
             [
