@@ -2704,18 +2704,6 @@ async def test_unpack_gets_rescheduled_from_non_participating_worker(c, s, a):
         dd.assert_eq(result, expected)
 
 
-class BlockedBarrierShuffleSchedulerPlugin(ShuffleSchedulerPlugin):
-    def __init__(self, scheduler: Scheduler):
-        super().__init__(scheduler)
-        self.in_barrier = asyncio.Event()
-        self.block_barrier = asyncio.Event()
-
-    async def barrier(self, id: ShuffleId, run_id: int, consistent: bool) -> None:
-        self.in_barrier.set()
-        await self.block_barrier.wait()
-        return await super().barrier(id, run_id, consistent)
-
-
 class FlakyConnectionPool(ConnectionPool):
     def __init__(self, *args, failing_connects=0, **kwargs):
         self.attempts = 0
@@ -2955,3 +2943,86 @@ async def test_dont_downscale_participating_workers(c, s, a, b):
 
     workers_to_close = s.workers_to_close(n=2)
     assert len(workers_to_close) == 2
+
+
+class RequestCountingSchedulerPlugin(ShuffleSchedulerPlugin):
+    def __init__(self, scheduler):
+        super().__init__(scheduler)
+        self.counts = defaultdict(int)
+
+    def get(self, *args, **kwargs):
+        self.counts["get"] += 1
+        return super().get(*args, **kwargs)
+
+    def get_or_create(self, *args, **kwargs):
+        self.counts["get_or_create"] += 1
+        return super().get_or_create(*args, **kwargs)
+
+
+class PostFetchBlockingManager(_ShuffleRunManager):
+    def __init__(self, plugin):
+        super().__init__(plugin)
+        self.in_fetch = asyncio.Event()
+        self.block_fetch = asyncio.Event()
+
+    async def _fetch(self, *args, **kwargs):
+        result = await super()._fetch(*args, **kwargs)
+        self.in_fetch.set()
+        await self.block_fetch.wait()
+        return result
+
+
+@mock.patch(
+    "distributed.shuffle.ShuffleSchedulerPlugin",
+    RequestCountingSchedulerPlugin,
+)
+@mock.patch(
+    "distributed.shuffle._worker_plugin._ShuffleRunManager",
+    PostFetchBlockingManager,
+)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)] * 2,
+    config={
+        "distributed.scheduler.allowed-failures": 0,
+        "distributed.p2p.comm.message-size-limit": "10 B",
+    },
+)
+async def test_workers_do_not_spam_get_requests(c, s, a, b):
+    df = dask.datasets.timeseries(
+        start="2000-01-01",
+        end="2000-02-01",
+        dtypes={"x": float, "y": float},
+        freq="10 s",
+    )
+    s.remove_plugin("shuffle")
+    shuffle_extS = RequestCountingSchedulerPlugin(s)
+    shuffle_extA = a.plugins["shuffle"]
+    shuffle_extB = b.plugins["shuffle"]
+
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        out = df.shuffle("x", npartitions=100)
+    out = c.compute(out.x.size)
+
+    shuffle_id = await wait_until_new_shuffle_is_initialized(s)
+    key = barrier_key(shuffle_id)
+    await shuffle_extA.shuffle_runs.in_fetch.wait()
+    await shuffle_extB.shuffle_runs.in_fetch.wait()
+
+    shuffle_extA.shuffle_runs.block_fetch.set()
+
+    barrier_task = s.tasks[key]
+    while any(
+        ts.state not in ("processing", "memory") for ts in barrier_task.dependencies
+    ):
+        await asyncio.sleep(0.1)
+    shuffle_extB.shuffle_runs.block_fetch.set()
+    await out
+
+    assert sum(shuffle_extS.counts.values()) == 2
+
+    del out
+
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
