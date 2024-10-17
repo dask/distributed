@@ -1266,7 +1266,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
             # Instead of yielding ("drop", ts, None) for each worker, which would result
             # in semi-predictable output about which replica survives, randomly choose a
             # different survivor at each AMM run.
-            candidates = list(ts.who_has)
+            candidates = list(ts.who_has or ())
             random.shuffle(candidates)
             for ws in candidates:
                 yield "drop", ts, {ws}
@@ -1288,13 +1288,19 @@ async def tensordot_stress(c, s):
         warnings.simplefilter("ignore")
         b = (a @ a.T).sum().round(3)
     assert await c.compute(b) == 245.394
-
+    expected_tasks = -1
+    for _, msg in await c.get_events("scheduler"):
+        if msg["action"] == "update-graph":
+            assert msg["status"] == "OK", msg
+            expected_tasks = msg["metrics"]["tasks"]
+            break
+    else:
+        raise RuntimeError("Expected 'update_graph' event not found")
     # Test that we didn't recompute any tasks during the stress test
     await async_poll_for(lambda: not s.tasks, timeout=5)
-    assert sum(t.start == "memory" for t in s.transition_log) == 1639
+    assert sum(t.start == "memory" for t in s.transition_log) == expected_tasks
 
 
-@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -1350,7 +1356,6 @@ async def test_ReduceReplicas_stress(c, s, *workers):
     await tensordot_stress(c, s)
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("use_ReduceReplicas", [False, True])
 @gen_cluster(
     client=True,
