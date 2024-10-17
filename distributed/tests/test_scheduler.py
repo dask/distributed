@@ -5277,3 +5277,15 @@ async def test_concurrent_close_requests(c, s, *workers):
     assert s.plugins["before_close"].call_count == 1
     lines = caplog.getvalue().split("\n")
     assert sum("Closing scheduler" in line for line in lines) == 1
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.rootish-taskgroup": 10,
+        "distributed.scheduler.rootish-taskgroup-dependencies": 15,
+    },
+)
+async def test_rootish_taskgroup_configuration(c, s, *workers):
+    assert s.rootish_tg_threshold == 10
+    assert s.rootish_tg_dependencies_threshold == 15

@@ -23,6 +23,8 @@ distributed:
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
     worker-saturation: 1.1  # Send this fraction of nthreads root tasks to workers
+    rootish-taskgroup: 5  # number of dependencies of a rootish tg
+    rootish-taskgroup-dependencies: 5  # number of dependencies of the dependencies of the rootish tg
     worker-ttl: "5 minutes" # like '60s'. Time to live for workers.  They must heartbeat faster than this
     preload: []             # Run custom modules with Scheduler
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
