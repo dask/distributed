@@ -1840,9 +1840,11 @@ class SchedulerState:
                 + repr(self.WORKER_SATURATION)
             )
 
-        self.rootish_tg_threshold = dask.config.get("distributed.scheduler.rootish-tg")
+        self.rootish_tg_threshold = dask.config.get(
+            "distributed.scheduler.rootish-taskgroup"
+        )
         self.rootish_tg_dependencies_threshold = dask.config.get(
-            "distributed.scheduler.rootish-tg-dependencies"
+            "distributed.scheduler.rootish-taskgroup-dependencies"
         )
 
     @abstractmethod
