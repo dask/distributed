@@ -320,6 +320,9 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         self,
         shuffle_id: ShuffleId,
         run_id: int,
+        input_partitions,
+        output_partitions,
+        locs,
         data: list[tuple[int, Any]] | bytes,
     ) -> OKMessage | ErrorMessage:
         """
@@ -328,7 +331,7 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         """
         try:
             shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
-            return await shuffle_run.receive(data)
+            return await shuffle_run.receive(input_partitions, output_partitions, locs, data)
         except P2PConsistencyError as e:
             return error_message(e)
 
