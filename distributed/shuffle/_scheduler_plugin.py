@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import itertools
 import logging
@@ -96,10 +97,44 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 stimulus_id=f"p2p-barrier-inconsistent-{time()}",
             )
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
-        await self.scheduler.broadcast(
-            msg=msg,
-            workers=list(shuffle.participating_workers),
-        )
+        workers = list(shuffle.participating_workers)
+        no_progress = 0
+        while workers:
+            res = await self.scheduler.broadcast(
+                msg=msg,
+                workers=workers,
+                on_error="return",
+            )
+            before = len(workers)
+            workers = []
+            for w, r in res.items():
+                if r is None:
+                    continue
+                if isinstance(r, OSError):
+                    workers.append(w)
+                else:
+                    raise P2PConsistencyError(
+                        "Unexpected error encountered during barrier"
+                    )
+            workers = [w for w, r in res.items() if r is not None]
+            if workers:
+                logger.warning(
+                    "Failure during broadcast of %s, retrying.",
+                    shuffle.id,
+                )
+                if any(w not in self.scheduler.workers for w in workers):
+                    raise P2PConsistencyError(
+                        f"Worker {workers} left during shuffle {shuffle}"
+                    )
+                await asyncio.sleep(0.1)
+                if len(workers) == before:
+                    no_progress += 1
+                    if no_progress >= 3:
+                        raise P2PConsistencyError(
+                            f"""Broadcast not making progress for {shuffle}.
+                            Aborting. This is possibly due to overloaded
+                            workers. Increasing tcp.connect timeout may help."""
+                        )
 
     def restrict_task(
         self, id: ShuffleId, run_id: int, key: Key, worker: str
