@@ -586,6 +586,10 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
 
     def validate_data(self, data: pd.DataFrame) -> None:
+        import pandas as pd
+
+        if not isinstance(data, pd.DataFrame):
+            raise TypeError(f"Expected {data=} to be a DataFrame, got {type(data)}.")
         if set(data.columns) != set(self.meta.columns):
             raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
 
