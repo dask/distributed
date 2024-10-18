@@ -256,13 +256,6 @@ def _unpack_remotedata_inner(
         return o
 
 
-class DoNotUnpack(tuple):
-    """A tuple sublass to indicate that we should not unpack its contents
-
-    See also unpack_remotedata
-    """
-
-
 def unpack_remotedata(o: Any, byte_keys: bool = False) -> tuple[Any, set]:
     """Unpack TaskRef objects from collection
 

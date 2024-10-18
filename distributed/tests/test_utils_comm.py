@@ -14,7 +14,6 @@ from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import ConnectionPool, Status
 from distributed.utils_comm import (
-    DoNotUnpack,
     gather_from_workers,
     pack_data,
     retry,
@@ -262,24 +261,3 @@ def test_unpack_remotedata():
     res, keys = unpack_remotedata(dsk)
     assert res == (sc, "arg1")  # Notice, the first item (the SC) has NOT been changed
     assert_eq(keys, set())
-
-
-def test_unpack_remotedata_custom_tuple():
-    # We don't want to recurse into custom tuples. This is used as a sentinel to
-    # avoid recursion for performance reasons if we know that there are no
-    # nested futures. This test case is not how this feature should be used in
-    # practice.
-
-    akey = TaskRef("a")
-
-    ordinary_tuple = (1, 2, akey)
-    dont_recurse = DoNotUnpack(ordinary_tuple)
-
-    res, keys = unpack_remotedata(ordinary_tuple)
-    assert res is not ordinary_tuple
-    assert res == (1, 2, "a")
-    assert all(not isinstance(item, TaskRef) for item in res)
-    assert keys == {akey}
-    res, keys = unpack_remotedata(dont_recurse)
-    assert not keys
-    assert res is dont_recurse

@@ -4643,41 +4643,6 @@ class Scheduler(SchedulerState, ServerNode):
                 wupdate(dsk[d].dependencies)
         return lost_keys
 
-    def _remove_done_tasks(
-        self, dsk: dict[Key, GraphNode], dependencies: dict[Key, set[Key]]
-    ) -> None:
-        # Avoid computation that is already finished
-        done = set()  # tasks that are already done
-        for k, v in dependencies.items():
-            if v and k in self.tasks:
-                ts = self.tasks[k]
-                if ts.state in ("memory", "erred"):
-                    done.add(k)
-
-        if done:
-            dependents = dask.core.reverse_dict(dependencies)
-            stack = list(done)
-            while stack:  # remove unnecessary dependencies
-                key = stack.pop()
-                try:
-                    deps = dependencies[key]
-                except KeyError:
-                    deps = {ts.key for ts in self.tasks[key].dependencies}
-                for dep in deps:
-                    if dep in dependents:
-                        child_deps = dependents[dep]
-                    elif dep in self.tasks:
-                        child_deps = {ts.key for ts in self.tasks[key].dependencies}
-                    else:
-                        child_deps = set()
-                    if all(d in done for d in child_deps):
-                        if dep in self.tasks and dep not in done:
-                            done.add(dep)
-                            stack.append(dep)
-        for anc in done:
-            dsk.pop(anc, None)
-            dependencies.pop(anc, None)
-
     def _create_taskstate_from_graph(
         self,
         *,
@@ -4736,8 +4701,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         metrics = {
             "tasks": len(dsk),
-            "new-tasks": len(new_tasks),
-            "key-collisions": colliding_task_count,
+            "new_tasks": len(new_tasks),
+            "key_collisions": colliding_task_count,
         }
 
         keys_with_annotations = self._apply_annotations(
@@ -4965,11 +4930,12 @@ class Scheduler(SchedulerState, ServerNode):
             task_state_created = time()
             metrics.update(
                 {
-                    "start": start,
-                    "duration_materialization": materialization_done - start,
-                    "duration_ordering": materialization_done - ordering_done,
-                    "duration_state_initialization": ordering_done - task_state_created,
-                    "duration_total": task_state_created - start,
+                    "start_timestamp_seconds": start,
+                    "materialization_duration_seconds": materialization_done - start,
+                    "ordering_duration_seconds": materialization_done - ordering_done,
+                    "state_initialization_duration_seconds": ordering_done
+                    - task_state_created,
+                    "duration_seconds": task_state_created - start,
                 }
             )
             evt_msg = {
