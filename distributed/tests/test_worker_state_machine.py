@@ -423,7 +423,7 @@ def test_computetask_dummy():
         nbytes={},
         priority=(0,),
         duration=1.0,
-        run_spec=ComputeTaskEvent.dummy_runspec(),
+        run_spec=ComputeTaskEvent.dummy_runspec("x"),
         resource_restrictions={},
         actor=False,
         annotations={},

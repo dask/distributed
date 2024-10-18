@@ -10,16 +10,17 @@ from typing import Generic, Literal, NoReturn, TypeVar
 
 from tornado.ioloop import IOLoop
 
+from dask._task_spec import TaskRef
+
 from distributed.client import Future
 from distributed.protocol import to_serialize
 from distributed.utils import LateLoopEvent, iscoroutinefunction, sync, thread_state
-from distributed.utils_comm import WrappedKey
 from distributed.worker import get_client, get_worker
 
 _T = TypeVar("_T")
 
 
-class Actor(WrappedKey):
+class Actor(TaskRef):
     """Controls an object on a remote worker
 
     An actor allows remote control of a stateful object living on a remote
