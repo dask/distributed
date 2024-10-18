@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import dask
 from dask.context import thread_state
@@ -327,13 +327,16 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         except P2PConsistencyError as e:
             return error_message(e)
 
-    async def shuffle_inputs_done(self, shuffle_id: ShuffleId, run_id: int) -> None:
+    async def shuffle_inputs_done(
+        self, shuffle_id: ShuffleId, run_id: int
+    ) -> Literal["OK"]:
         """
         Handler: Inform the extension that all input partitions have been handed off to extensions.
         Using an unknown ``shuffle_id`` is an error.
         """
         shuffle_run = await self._get_shuffle_run(shuffle_id, run_id)
         await shuffle_run.inputs_done()
+        return "OK"
 
     def shuffle_fail(self, shuffle_id: ShuffleId, run_id: int, message: str) -> None:
         """Fails the shuffle run with the message as exception and triggers cleanup.
