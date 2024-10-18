@@ -4949,7 +4949,7 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
         return (
             isinstance(msg, dict)
             and msg.get("action", None) == "update-graph"
-            and msg["metrics"]["key-collisions"] > 0
+            and msg["metrics"]["key_collisions"] > 0
         )
 
     def handler(ev):
