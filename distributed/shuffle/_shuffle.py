@@ -21,7 +21,7 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
-from dask._task_spec import GraphNode, Task
+from dask._task_spec import GraphNode, Task, TaskRef
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
@@ -292,7 +292,7 @@ class P2PShuffleLayer(Layer):
             t = Task(
                 (name, i),
                 shuffle_transfer,
-                (self.name_input, i),
+                TaskRef((self.name_input, i)),
                 token,
                 i,
                 self.npartitions,
