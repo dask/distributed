@@ -26,6 +26,7 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
 from dask.typing import Key
+from dask.utils import is_dataframe_like
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -586,9 +587,7 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
 
     def validate_data(self, data: pd.DataFrame) -> None:
-        import pandas as pd
-
-        if not isinstance(data, pd.DataFrame):
+        if not is_dataframe_like(data):
             raise TypeError(f"Expected {data=} to be a DataFrame, got {type(data)}.")
         if set(data.columns) != set(self.meta.columns):
             raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
