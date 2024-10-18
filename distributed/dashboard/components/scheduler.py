@@ -4045,7 +4045,7 @@ class WorkerTable(DashboardComponent):
         "spilled_bytes",
     }
 
-    def __init__(self, scheduler, width=800, **kwargs):
+    def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.names = [
             "name",
@@ -4138,7 +4138,7 @@ class WorkerTable(DashboardComponent):
             columns=[columns[n] for n in table_names],
             reorderable=True,
             sortable=True,
-            width=width,
+            width_policy="max",
             index_position=None,
             **_DATATABLE_STYLESHEETS_KWARGS,
         )
@@ -4158,7 +4158,7 @@ class WorkerTable(DashboardComponent):
             columns=[extra_columns[n] for n in extra_names],
             reorderable=True,
             sortable=True,
-            width=width,
+            width_policy="max",
             index_position=None,
             **_DATATABLE_STYLESHEETS_KWARGS,
         )
@@ -4185,7 +4185,6 @@ class WorkerTable(DashboardComponent):
             x_range=(0, 1),
             y_range=(-0.1, 0.1),
             height=60,
-            width=width,
             tools="",
             min_border_right=0,
             **kwargs,
@@ -4215,7 +4214,6 @@ class WorkerTable(DashboardComponent):
             x_range=(0, 1),
             y_range=(-0.1, 0.1),
             height=60,
-            width=width,
             tools="",
             min_border_right=0,
             **kwargs,
@@ -4626,7 +4624,7 @@ def exceptions_doc(scheduler, extra, doc):
 
 @log_errors
 def workers_doc(scheduler, extra, doc):
-    table = WorkerTable(scheduler)
+    table = WorkerTable(scheduler, sizing_mode="stretch_width")
     table.update()
     add_periodic_callback(doc, table, 500)
     doc.title = "Dask: Workers"

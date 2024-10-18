@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, overload
 
+import dask
 from dask.context import thread_state
 from dask.typing import Key
 from dask.utils import parse_bytes
@@ -38,6 +40,7 @@ class _ShuffleRunManager:
     closed: bool
     _active_runs: dict[ShuffleId, ShuffleRun]
     _runs: set[ShuffleRun]
+    _refresh_locks: defaultdict[ShuffleId, asyncio.Lock]
     #: Mapping of shuffle IDs to the largest stale run ID.
     #: This is used to prevent race conditions between fetching shuffle run data
     #: from the scheduler and failing a shuffle run.
@@ -50,6 +53,7 @@ class _ShuffleRunManager:
         self.closed = False
         self._active_runs = {}
         self._runs = set()
+        self._refresh_locks = defaultdict(asyncio.Lock)
         self._stale_run_ids = {}
         self._runs_cleanup_condition = asyncio.Condition()
         self._plugin = plugin
@@ -116,20 +120,21 @@ class _ShuffleRunManager:
         ShuffleClosedError
             If the run manager has been closed
         """
-        shuffle_run = self._active_runs.get(shuffle_id, None)
-        if shuffle_run is None or shuffle_run.run_id < run_id:
-            shuffle_run = await self._refresh(shuffle_id=shuffle_id)
+        async with self._refresh_locks[shuffle_id]:
+            shuffle_run = self._active_runs.get(shuffle_id, None)
+            if shuffle_run is None or shuffle_run.run_id < run_id:
+                shuffle_run = await self._refresh(shuffle_id=shuffle_id)
 
-        if shuffle_run.run_id > run_id:
-            raise P2PConsistencyError(f"{run_id=} stale, got {shuffle_run}")
-        elif shuffle_run.run_id < run_id:
-            raise P2PConsistencyError(f"{run_id=} invalid, got {shuffle_run}")
+            if shuffle_run.run_id > run_id:
+                raise P2PConsistencyError(f"{run_id=} stale, got {shuffle_run}")
+            elif shuffle_run.run_id < run_id:
+                raise P2PConsistencyError(f"{run_id=} invalid, got {shuffle_run}")
 
-        if self.closed:
-            raise ShuffleClosedError(f"{self} has already been closed")
-        if shuffle_run._exception:
-            raise shuffle_run._exception
-        return shuffle_run
+            if self.closed:
+                raise ShuffleClosedError(f"{self} has already been closed")
+            if shuffle_run._exception:
+                raise shuffle_run._exception
+            return shuffle_run
 
     async def get_or_create(self, spec: ShuffleSpec, key: Key) -> ShuffleRun:
         """Get or create a shuffle matching the ID and data spec.
@@ -143,13 +148,14 @@ class _ShuffleRunManager:
         key:
             Task key triggering the function
         """
-        shuffle_run = self._active_runs.get(spec.id, None)
-        if shuffle_run is None:
-            shuffle_run = await self._refresh(
-                shuffle_id=spec.id,
-                spec=spec,
-                key=key,
-            )
+        async with self._refresh_locks[spec.id]:
+            shuffle_run = self._active_runs.get(spec.id, None)
+            if shuffle_run is None:
+                shuffle_run = await self._refresh(
+                    shuffle_id=spec.id,
+                    spec=spec,
+                    key=key,
+                )
 
         if self.closed:
             raise ShuffleClosedError(f"{self} has already been closed")
@@ -283,14 +289,19 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         # Initialize
         self.worker = worker
         self.shuffle_runs = _ShuffleRunManager(self)
+        comm_limit = parse_bytes(dask.config.get("distributed.p2p.comm.buffer"))
         self.memory_limiter_comms = ResourceLimiter(
-            parse_bytes("100 MiB"), metrics_label="p2p-comms-limiter"
+            comm_limit, metrics_label="p2p-comms-limiter"
         )
+        storage_limit = parse_bytes(dask.config.get("distributed.p2p.storage.buffer"))
         self.memory_limiter_disk = ResourceLimiter(
-            parse_bytes("1 GiB"), metrics_label="p2p-disk-limiter"
+            storage_limit, metrics_label="p2p-disk-limiter"
         )
         self.closed = False
-        self._executor = ThreadPoolExecutor(self.worker.state.nthreads)
+        nthreads = (
+            dask.config.get("distributed.p2p.threads") or self.worker.state.nthreads
+        )
+        self._executor = ThreadPoolExecutor(nthreads)
 
     def __str__(self) -> str:
         return f"ShuffleWorkerPlugin on {self.worker.address}"
