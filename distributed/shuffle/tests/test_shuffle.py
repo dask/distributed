@@ -3065,6 +3065,7 @@ class BarrierInputsDoneOSErrorPlugin(ShuffleWorkerPlugin):
         ({0: (5, OSError), 1: (1, OSError)}, P2PConsistencyError),
     ],
 )
+@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_flaky_broadcast(c, s, a, b, failures, expected_exc):
     names_to_address = {w.name: w.address for w in [a, b]}
