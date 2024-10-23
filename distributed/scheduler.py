@@ -1036,7 +1036,7 @@ class TaskPrefix(TaskCollection):
         self._duration_us += duration_us
         self._all_durations_us[action] += duration_us
 
-        duration_s = max(round((stop - start) * 1e6), 0) / 1e6
+        duration_s = duration_us / 1e6
         if action == "compute":
             old = self.duration_average
             if old < 0:
