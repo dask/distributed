@@ -981,10 +981,6 @@ class TaskCollection:
         """The result types of this collection"""
         return self._types.keys()
 
-    @staticmethod
-    def _calculate_duration_us(start: float, stop: float) -> int:
-        return max(round((stop - start) * 1e6), 0)
-
     def __len__(self) -> int:
         return sum(self.states.values())
 
