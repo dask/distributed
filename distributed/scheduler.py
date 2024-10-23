@@ -948,6 +948,8 @@ class TaskCollection:
 
     _duration_us: int
 
+    _size: int
+
     _types: defaultdict[str, int]
 
     __slots__ = tuple(__annotations__)
