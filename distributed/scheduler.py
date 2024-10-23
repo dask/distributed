@@ -958,6 +958,7 @@ class TaskCollection:
         self._duration_us = 0
         self.nbytes_total = 0
         self.states = dict.fromkeys(ALL_TASK_STATES, 0)
+        self._size = 0
         self._types = defaultdict(int)
 
     @property
@@ -982,7 +983,7 @@ class TaskCollection:
         return self._types.keys()
 
     def __len__(self) -> int:
-        return sum(self.states.values())
+        return self._size
 
 
 class TaskPrefix(TaskCollection):
@@ -1048,6 +1049,7 @@ class TaskPrefix(TaskCollection):
         self._groups.pop(tg)
         for state, count in tg.states.items():
             self.states[state] -= count
+            self._size -= count
         self._duration_us -= tg._duration_us
         self.nbytes_total -= tg.nbytes_total
         for typename, count in tg._types.items():
@@ -1150,7 +1152,9 @@ class TaskGroup(TaskCollection):
 
     def add(self, other: TaskState) -> None:
         self.states[other.state] += 1
+        self._size += 1
         self.prefix.states[other.state] += 1
+        self.prefix._size += 1
         other.group = self
 
     def add_type(self, typename: str) -> None:
@@ -1486,11 +1490,13 @@ class TaskState:
         # function dispatch is adding notable overhead and this setter is called
         # *very* often
         gr_st = self.group.states
+        self.group._size += 1
         gr_st[self._state] -= 1
         gr_st[value] += 1
         pf = self.prefix
         pf.states[self._state] -= 1
         pf.states[value] += 1
+        pf._size += 1
         pf.state_counts[value] += 1
         self._state = value
 
