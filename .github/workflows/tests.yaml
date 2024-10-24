@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.10", "3.11", "3.12"]
+        environment: [mindeps, "3.10", "3.11", "3.12", "3.13"]
         label: [default]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
@@ -40,6 +40,8 @@ jobs:
             environment: "3.10"
           - os: macos-latest
             environment: "3.11"
+          - os: macos-latest
+            environment: "3.13"
 
           - os: windows-latest
             environment: mindeps
@@ -173,6 +175,12 @@ jobs:
                 && contains(github.event.pull_request.labels.*.name, 'skip-caching'))
             || steps.cache.outputs.cache-hit != 'true'
           )
+
+      - name: Install PyArrow nightlies for Python 3.13
+        if: ${{ matrix.environment == '3.13' }}
+        run: | 
+          pip install --extra-index-url https://pypi.fury.io/arrow-nightlies/ --prefer-binary --pre pyarrow
+          pip install git+https://github.com/dask/dask-expr          
 
       - name: Install
         shell: bash -l {0}
