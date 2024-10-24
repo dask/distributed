@@ -357,6 +357,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
         # Log metrics both in the "execute" and in the "p2p" contexts
+        self.validate_data(data)
         with self._capture_metrics("foreground"):
             with (
                 context_meter.meter("p2p-shard-partition-noncpu"),
@@ -401,6 +402,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     @abc.abstractmethod
     def deserialize(self, buffer: Any) -> Any:
         """Deserialize shards"""
+
+    def validate_data(self, data: Any) -> None:
+        """Validate payload data before shuffling"""
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:
@@ -474,9 +478,6 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
             run_spec=ShuffleRunSpec(spec=self, worker_for=worker_for, span_id=span_id),
             participating_workers=set(worker_for.values()),
         )
-
-    def validate_data(self, data: Any) -> None:
-        """Validate payload data before shuffling"""
 
     @abc.abstractmethod
     def create_run_on_worker(
