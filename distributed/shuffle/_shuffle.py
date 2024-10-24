@@ -21,10 +21,12 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
+from dask._task_spec import GraphNode, Task, TaskRef
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
 from dask.typing import Key
+from dask.utils import is_dataframe_like
 
 from distributed.core import PooledRPCCall
 from distributed.exceptions import Reschedule
@@ -161,7 +163,7 @@ def rearrange_by_column_p2p(
     )
 
 
-_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
+_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
 
 
 class P2PShuffleLayer(Layer):
@@ -226,7 +228,7 @@ class P2PShuffleLayer(Layer):
             self._cached_dict = dsk
         return self._cached_dict
 
-    def __getitem__(self, key: Key) -> tuple:
+    def __getitem__(self, key: Key) -> GraphNode:
         return self._dict[key]
 
     def __iter__(self) -> Iterator[Key]:
@@ -288,10 +290,10 @@ class P2PShuffleLayer(Layer):
         name = "shuffle-transfer-" + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
-            transfer_keys.append((name, i))
-            dsk[(name, i)] = (
+            t = Task(
+                (name, i),
                 shuffle_transfer,
-                (self.name_input, i),
+                TaskRef((self.name_input, i)),
                 token,
                 i,
                 self.npartitions,
@@ -301,17 +303,22 @@ class P2PShuffleLayer(Layer):
                 self.disk,
                 self.drop_column,
             )
+            dsk[t.key] = t
+            transfer_keys.append(t.ref())
 
-        dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
+        barrier = Task(_barrier_key, shuffle_barrier, token, transfer_keys)
+        dsk[barrier.key] = barrier
 
         name = self.name
         for part_out in self.parts_out:
-            dsk[(name, part_out)] = (
+            t = Task(
+                (name, part_out),
                 shuffle_unpack,
                 token,
                 part_out,
-                _barrier_key,
+                barrier.ref(),
             )
+            dsk[t.key] = t
         return dsk
 
 
@@ -580,6 +587,8 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
 
     def validate_data(self, data: pd.DataFrame) -> None:
+        if not is_dataframe_like(data):
+            raise TypeError(f"Expected {data=} to be a DataFrame, got {type(data)}.")
         if set(data.columns) != set(self.meta.columns):
             raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
 
