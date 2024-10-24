@@ -11,8 +11,13 @@ from dask.layers import Layer
 from dask.tokenize import tokenize
 
 from distributed.shuffle._arrow import check_minimal_arrow_version
-from distributed.shuffle._core import ShuffleId, barrier_key, get_worker_plugin
-from distributed.shuffle._shuffle import shuffle_barrier, shuffle_transfer
+from distributed.shuffle._core import (
+    ShuffleId,
+    barrier_key,
+    get_worker_plugin,
+    p2p_barrier,
+)
+from distributed.shuffle._shuffle import shuffle_transfer
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -411,8 +416,8 @@ class HashJoinP2PLayer(Layer):
 
         _barrier_key_left = barrier_key(ShuffleId(token_left))
         _barrier_key_right = barrier_key(ShuffleId(token_right))
-        dsk[_barrier_key_left] = (shuffle_barrier, token_left, transfer_keys_left)
-        dsk[_barrier_key_right] = (shuffle_barrier, token_right, transfer_keys_right)
+        dsk[_barrier_key_left] = (p2p_barrier, token_left, transfer_keys_left)
+        dsk[_barrier_key_right] = (p2p_barrier, token_right, transfer_keys_right)
 
         name = self.name
         for part_out in self.parts_out:

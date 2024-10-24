@@ -522,7 +522,7 @@ def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
     except P2POutOfDiskError:
         raise
     except Exception as e:
-        raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
+        raise RuntimeError(f"P2P {id} failed during transfer phase") from e
 
 
 @contextlib.contextmanager
@@ -538,7 +538,7 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
     except P2POutOfDiskError:
         raise
     except Exception as e:
-        raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
+        raise RuntimeError(f"P2P {id} failed during unpack phase") from e
 
 
 def _handle_datetime(buf: Any) -> Any:
@@ -561,3 +561,16 @@ def _mean_shard_size(shards: Iterable) -> int:
             if count == 10:
                 break
     return size // count if count else 0
+
+
+def p2p_barrier(id: ShuffleId, run_ids: list[int]) -> int:
+    try:
+        return get_worker_plugin().barrier(id, run_ids)
+    except Reschedule as e:
+        raise e
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"P2P {id} failed during barrier phase") from e
