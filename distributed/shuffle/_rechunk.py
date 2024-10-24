@@ -138,10 +138,11 @@ from distributed.shuffle._core import (
     get_worker_plugin,
     handle_transfer_errors,
     handle_unpack_errors,
+    p2p_barrier,
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import unpickle_bytestream
-from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
+from distributed.shuffle._shuffle import barrier_key
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
 
@@ -823,7 +824,7 @@ def partial_rechunk(
         transfer_keys.append(t.ref())
 
     dsk[_barrier_key] = barrier = Task(
-        _barrier_key, shuffle_barrier, partial_token, transfer_keys
+        _barrier_key, p2p_barrier, partial_token, transfer_keys
     )
 
     new_partial_offset = tuple(axis.start for axis in ndpartial.new)
