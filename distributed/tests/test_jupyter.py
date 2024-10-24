@@ -56,7 +56,6 @@ def test_jupyter_cli(loop):
             "--host",
             f"127.0.0.1:{port}",
         ],
-        capture_output=True,
     ):
         with Client(f"127.0.0.1:{port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/jupyter/api/status")
