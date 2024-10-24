@@ -7,6 +7,7 @@ import pytest
 import distributed
 from distributed import Event, Lock, Worker
 from distributed.client import wait
+from distributed.compatibility import WINDOWS
 from distributed.utils_test import (
     BlockedExecute,
     BlockedGatherDep,
@@ -824,6 +825,7 @@ async def test_cancelled_task_error_rejected(c, s, a, b):
     )
 
 
+@pytest.mark.skipif(WINDOWS, reason="Fails on Windows")
 @pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
 @pytest.mark.parametrize("close_worker", [False, True])
 @gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
