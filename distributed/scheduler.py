@@ -1492,13 +1492,11 @@ class TaskState:
         # function dispatch is adding notable overhead and this setter is called
         # *very* often
         gr_st = self.group.states
-        self.group._size += 1
         gr_st[self._state] -= 1
         gr_st[value] += 1
         pf = self.prefix
         pf.states[self._state] -= 1
         pf.states[value] += 1
-        pf._size += 1
         pf.state_counts[value] += 1
         self._state = value
 
