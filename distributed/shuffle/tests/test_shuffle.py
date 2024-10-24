@@ -2546,7 +2546,7 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
 
     with raises_with_cause(
         RuntimeError,
-        r"(shuffling \w*|shuffle_barrier) failed",
+        r"P2P \w* failed",
         pa.ArrowTypeError,
         "incompatible types",
     ):
