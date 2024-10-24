@@ -4833,7 +4833,16 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
         await y
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={
+        # In this test we want to make sure that the connections are severed
+        # before the timeout hits. Therefore, the connection timeout should be
+        # higher than the test timeout.
+        # At the time of writing, the test timeout was 30s
+        "distributed.comm.timeouts.connect": "120s"
+    },
+)
 async def test_tell_workers_when_peers_have_left(c, s, a, b):
     f = (await c.scatter({"f": 1}, workers=[a.address, b.address], broadcast=True))["f"]
 
