@@ -386,13 +386,6 @@ class ShuffleWorkerPlugin(WorkerPlugin):
             shuffle_id=shuffle_id, run_id=run_id
         )
 
-    async def _get_or_create_shuffle(
-        self,
-        spec: ShuffleSpec,
-        key: Key,
-    ) -> ShuffleRun:
-        return await self.shuffle_runs.get_or_create(spec=spec, key=key)
-
     async def teardown(self, worker: Worker) -> None:
         assert not self.closed
 
