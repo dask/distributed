@@ -6,7 +6,7 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  - bokeh
+  - bokeh>3
   - click
   - cloudpickle
   - coverage
