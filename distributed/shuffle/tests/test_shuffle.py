@@ -416,16 +416,23 @@ async def test_closed_worker_during_transfer(c, s, a, b):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_restarting_during_transfer_raises_killed_worker(c, s, a, b):
+    await c.register_plugin(BlockedShuffleReceiveShuffleWorkerPlugin(), name="shuffle")
     df = dask.datasets.timeseries(
         start="2000-01-01",
-        end="2000-03-01",
+        end="2000-02-01",
         dtypes={"x": float, "y": float},
         freq="10 s",
     )
+    shuffle_extA = a.plugins["shuffle"]
+    shuffle_extB = b.plugins["shuffle"]
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = df.shuffle("x")
     out = c.compute(out.x.size)
-    await wait_for_tasks_in_state("shuffle-transfer", "memory", 1, b)
+    await asyncio.gather(
+        shuffle_extA.in_shuffle_receive.wait(), shuffle_extB.in_shuffle_receive.wait()
+    )
+    shuffle_extA.block_shuffle_receive.set()
+    shuffle_extB.block_shuffle_receive.set()
     await assert_worker_cleanup(b, close=True)
 
     with pytest.raises(KilledWorker):
