@@ -4831,6 +4831,10 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
         await y
 
 
+@pytest.mark.skipif(
+    sys.version_info <= (3, 10),
+    reason="asyncio.wait_for is unreliable on 3.10 and below",
+)
 @gen_cluster(
     client=True,
     config={
