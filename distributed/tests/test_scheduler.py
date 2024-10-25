@@ -29,7 +29,6 @@ from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import parse_timedelta, tmpfile, typename
 
 from distributed import (
-    CancelledError,
     Client,
     Event,
     Lock,
@@ -4177,16 +4176,15 @@ async def test_transition_counter(c, s, a):
     assert a.state.transition_counter > 1
 
 
-@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_transition_counter_max_scheduler(c, s, a, b):
     # This is set by @gen_cluster; it's False in production
     assert s.transition_counter_max > 0
     s.transition_counter_max = 1
     with captured_logger("distributed.scheduler") as logger:
-        with pytest.raises(CancelledError):
+        with pytest.raises(AssertionError):
             await c.submit(inc, 2)
-    assert s.transition_counter > 1
+    assert s.transition_counter == 1
     with pytest.raises(AssertionError):
         s.validate_state()
     assert "transition_counter_max" in logger.getvalue()
@@ -4833,7 +4831,20 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
         await y
 
 
-@gen_cluster(client=True)
+@pytest.mark.skipif(
+    sys.version_info <= (3, 10),
+    reason="asyncio.wait_for is unreliable on 3.10 and below",
+)
+@gen_cluster(
+    client=True,
+    config={
+        # In this test we want to make sure that the connections are severed
+        # before the timeout hits. Therefore, the connection timeout should be
+        # higher than the test timeout.
+        # At the time of writing, the test timeout was 30s
+        "distributed.comm.timeouts.connect": "120s"
+    },
+)
 async def test_tell_workers_when_peers_have_left(c, s, a, b):
     f = (await c.scatter({"f": 1}, workers=[a.address, b.address], broadcast=True))["f"]
 
@@ -4950,8 +4961,8 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
         _, msg = event
         return (
             isinstance(msg, dict)
-            and msg.get("action", None) == "update_graph"
-            and msg["key-collisions"] > 0
+            and msg.get("action", None) == "update-graph"
+            and msg["metrics"]["key_collisions"] > 0
         )
 
     def handler(ev):
@@ -4959,7 +4970,7 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
             nonlocal seen
             seen = True
 
-    c.subscribe_topic("all", handler)
+    c.subscribe_topic("scheduler", handler)
 
     x1 = c.submit(inc, 1, key="x1")
     y_old = c.submit(inc, x1, key="y")

@@ -54,8 +54,14 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
-from dask.core import get_deps, iskey, validate_key
-from dask.tokenize import TokenizationError, normalize_token, tokenize
+from dask._task_spec import (
+    DependenciesMapping,
+    GraphNode,
+    convert_legacy_graph,
+    resolve_aliases,
+)
+from dask.base import TokenizationError, normalize_token, tokenize
+from dask.core import istask, reverse_dict, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
@@ -135,10 +141,8 @@ from distributed.utils_comm import (
     gather_from_workers,
     retry_operation,
     scatter_to_workers,
-    unpack_remotedata,
 )
 from distributed.variable import VariableExtension
-from distributed.worker import _normalize_task
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
@@ -169,7 +173,7 @@ Msgs: TypeAlias = dict[str, list[dict[str, Any]]]
 # (recommendations, client messages, worker messages)
 RecsMsgs: TypeAlias = tuple[Recs, Msgs, Msgs]
 
-T_runspec: TypeAlias = tuple[Callable, tuple, dict[str, Any]]
+T_runspec: TypeAlias = GraphNode
 
 logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -948,6 +952,8 @@ class TaskCollection:
 
     _duration_us: int
 
+    _size: int
+
     _types: defaultdict[str, int]
 
     __slots__ = tuple(__annotations__)
@@ -958,18 +964,8 @@ class TaskCollection:
         self._duration_us = 0
         self.nbytes_total = 0
         self.states = dict.fromkeys(ALL_TASK_STATES, 0)
+        self._size = 0
         self._types = defaultdict(int)
-
-    def add(self, other: TaskState) -> None:
-        self.states[other.state] += 1
-
-    def add_duration(self, action: str, start: float, stop: float) -> None:
-        duration_us = self._calculate_duration_us(start, stop)
-        self._duration_us += duration_us
-        self._all_durations_us[action] += duration_us
-
-    def add_type(self, typename: str) -> None:
-        self._types[typename] += 1
 
     @property
     def all_durations(self) -> defaultdict[str, float]:
@@ -987,24 +983,13 @@ class TaskCollection:
         """The total amount of time spent on all tasks belonging to this collection"""
         return self._duration_us / 1e6
 
-    def transition(self, old: TaskStateState, new: TaskStateState) -> None:
-        self.states[old] -= 1
-        self.states[new] += 1
-
     @property
     def types(self) -> Set[str]:
         """The result types of this collection"""
         return self._types.keys()
 
-    def update_nbytes(self, diff: int) -> None:
-        self.nbytes_total += diff
-
-    @staticmethod
-    def _calculate_duration_us(start: float, stop: float) -> int:
-        return max(round((stop - start) * 1e6), 0)
-
     def __len__(self) -> int:
-        return sum(self.states.values())
+        return self._size
 
 
 class TaskPrefix(TaskCollection):
@@ -1033,7 +1018,7 @@ class TaskPrefix(TaskCollection):
     __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str):
-        super().__init__(name)
+        TaskCollection.__init__(self, name)
         self.state_counts = defaultdict(int)
         task_durations = dask.config.get("distributed.scheduler.default-task-durations")
         if self.name in task_durations:
@@ -1050,18 +1035,17 @@ class TaskPrefix(TaskCollection):
             self.duration_average = -1
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
-        super().add_duration(action, start, stop)
-        duration_s = self._calculate_duration_us(start, stop) / 1e6
+        duration_us = max(round((stop - start) * 1e6), 0)
+        self._duration_us += duration_us
+        self._all_durations_us[action] += duration_us
+
+        duration_s = duration_us / 1e6
         if action == "compute":
             old = self.duration_average
             if old < 0:
                 self.duration_average = duration_s
             else:
                 self.duration_average = 0.5 * duration_s + 0.5 * old
-
-    def transition(self, old: TaskStateState, new: TaskStateState) -> None:
-        super().transition(old, new)
-        self.state_counts[new] += 1
 
     def add_group(self, tg: TaskGroup) -> None:
         self._groups[tg] = None
@@ -1071,6 +1055,7 @@ class TaskPrefix(TaskCollection):
         self._groups.pop(tg)
         for state, count in tg.states.items():
             self.states[state] -= count
+            self._size -= count
         self._duration_us -= tg._duration_us
         self.nbytes_total -= tg.nbytes_total
         for typename, count in tg._types.items():
@@ -1149,7 +1134,7 @@ class TaskGroup(TaskCollection):
     __slots__ = tuple(__annotations__)
 
     def __init__(self, name: str, prefix: TaskPrefix):
-        super().__init__(name)
+        TaskCollection.__init__(self, name)
         self.dependencies = set()
         self.start = 0.0
         self.stop = 0.0
@@ -1160,7 +1145,10 @@ class TaskGroup(TaskCollection):
         prefix.add_group(self)
 
     def add_duration(self, action: str, start: float, stop: float) -> None:
-        super().add_duration(action, start, stop)
+        duration_us = max(round((stop - start) * 1e6), 0)
+        self._duration_us += duration_us
+        self._all_durations_us[action] += duration_us
+
         if action == "compute":
             if self.stop < stop:
                 self.stop = stop
@@ -1169,21 +1157,19 @@ class TaskGroup(TaskCollection):
         self.prefix.add_duration(action, start, stop)
 
     def add(self, other: TaskState) -> None:
-        super().add(other)
-        self.prefix.add(other)
+        self.states[other.state] += 1
+        self._size += 1
+        self.prefix.states[other.state] += 1
+        self.prefix._size += 1
         other.group = self
 
     def add_type(self, typename: str) -> None:
-        super().add_type(typename)
-        self.prefix.add_type(typename)
-
-    def transition(self, old: TaskStateState, new: TaskStateState) -> None:
-        super().transition(old, new)
-        self.prefix.transition(old, new)
+        self._types[typename] += 1
+        self.prefix._types[typename] += 1
 
     def update_nbytes(self, diff: int) -> None:
-        super().update_nbytes(diff)
-        self.prefix.update_nbytes(diff)
+        self.nbytes_total += diff
+        self.prefix.nbytes_total += diff
 
     def __repr__(self) -> str:
         return (
@@ -1506,7 +1492,16 @@ class TaskState:
 
     @state.setter
     def state(self, value: TaskStateState) -> None:
-        self.group.transition(self._state, value)
+        # Note: It would be cleaner to move this to the subclasses but the
+        # function dispatch is adding notable overhead and this setter is called
+        # *very* often
+        gr_st = self.group.states
+        gr_st[self._state] -= 1
+        gr_st[value] += 1
+        pf = self.prefix
+        pf.states[self._state] -= 1
+        pf.states[value] += 1
+        pf.state_counts[value] += 1
         self._state = value
 
     def add_dependency(self, other: TaskState) -> None:
@@ -3185,13 +3180,14 @@ class SchedulerState:
         for this task, `distributed.scheduler.unknown-task-duration` is used
         instead.
         """
-        duration: float = ts.prefix.duration_average
+        prefix = ts.prefix
+        duration: float = prefix.duration_average
         if duration >= 0:
             return duration
 
-        s = self.unknown_durations.get(ts.prefix.name)
+        s = self.unknown_durations.get(prefix.name)
         if s is None:
-            self.unknown_durations[ts.prefix.name] = s = set()
+            self.unknown_durations[prefix.name] = s = set()
         s.add(ts)
         return self.UNKNOWN_TASK_DURATION
 
@@ -3589,7 +3585,7 @@ class SchedulerState:
             "duration": duration,
             "stimulus_id": f"compute-task-{time()}",
             "who_has": {
-                dts.key: [ws.address for ws in dts.who_has or ()]
+                dts.key: tuple(ws.address for ws in (dts.who_has or ()))
                 for dts in ts.dependencies
             },
             "nbytes": {dts.key: dts.nbytes for dts in ts.dependencies},
@@ -4616,58 +4612,33 @@ class Scheduler(SchedulerState, ServerNode):
                 self._starting_nannies.discard(address)
                 self._starting_nannies_cond.notify_all()
 
-    def _match_graph_with_tasks(
+    def _find_lost_dependencies(
         self,
         dsk: dict[Key, T_runspec],
         dependencies: dict[Key, set[Key]],
         keys: set[Key],
     ) -> set[Key]:
-        n = -1
         lost_keys = set()
-        while len(dsk) != n:  # walk through new tasks, cancel any bad deps
-            n = len(dsk)
-            for k, deps in list(dependencies.items()):
-                if (k not in self.tasks and k not in dsk) or any(
-                    dep not in self.tasks and dep not in dsk for dep in deps
-                ):  # bad key
-                    lost_keys.add(k)
-                    logger.info("User asked for computation on lost data, %s", k)
-                    dsk.pop(k, None)
-                    del dependencies[k]
-                    if k in keys:
-                        keys.remove(k)
-                del deps
-        # Avoid computation that is already finished
-        done = set()  # tasks that are already done
-        for k, v in dependencies.items():
-            if v and k in self.tasks:
-                ts = self.tasks[k]
-                if ts.state in ("memory", "erred"):
-                    done.add(k)
-
-        if done:
-            dependents = dask.core.reverse_dict(dependencies)
-            stack = list(done)
-            while stack:  # remove unnecessary dependencies
-                key = stack.pop()
-                try:
-                    deps = dependencies[key]
-                except KeyError:
-                    deps = {ts.key for ts in self.tasks[key].dependencies}
-                for dep in deps:
-                    if dep in dependents:
-                        child_deps = dependents[dep]
-                    elif dep in self.tasks:
-                        child_deps = {ts.key for ts in self.tasks[key].dependencies}
-                    else:
-                        child_deps = set()
-                    if all(d in done for d in child_deps):
-                        if dep in self.tasks and dep not in done:
-                            done.add(dep)
-                            stack.append(dep)
-        for anc in done:
-            dsk.pop(anc, None)
-            dependencies.pop(anc, None)
+        seen: set[Key] = set()
+        sadd = seen.add
+        for k in list(keys):
+            work = {k}
+            wpop = work.pop
+            wupdate = work.update
+            while work:
+                d = wpop()
+                if d in seen:
+                    continue
+                sadd(d)
+                if d not in dsk:
+                    if d not in self.tasks:
+                        lost_keys.add(d)
+                        lost_keys.add(k)
+                        logger.info("User asked for computation on lost data, %s", k)
+                        dependencies.pop(d, None)
+                        keys.discard(k)
+                    continue
+                wupdate(dsk[d].dependencies)
         return lost_keys
 
     def _create_taskstate_from_graph(
@@ -4688,7 +4659,7 @@ class Scheduler(SchedulerState, ServerNode):
         actors: bool | list[Key] | None = None,
         fifo_timeout: float = 0.0,
         code: tuple[SourceCode, ...] = (),
-    ) -> None:
+    ) -> dict[str, float]:
         """
         Take a low level graph and create the necessary scheduler state to
         compute it.
@@ -4699,14 +4670,6 @@ class Scheduler(SchedulerState, ServerNode):
         safe. All interactions with TaskState objects here should be happening
         in the same event loop tick.
         """
-
-        lost_keys = self._match_graph_with_tasks(dsk, dependencies, keys)
-
-        if lost_keys:
-            self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
-            self.client_releases_keys(
-                keys=lost_keys, client=client, stimulus_id=stimulus_id
-            )
 
         if not self.is_idle and self.computations:
             # Still working on something. Assign new tasks to same computation
@@ -4722,7 +4685,6 @@ class Scheduler(SchedulerState, ServerNode):
             # annotations.
             computation.annotations.update(global_annotations)
         del global_annotations
-
         (
             runnable,
             touched_tasks,
@@ -4735,15 +4697,11 @@ class Scheduler(SchedulerState, ServerNode):
             computation=computation,
         )
 
-        if len(dsk) > 1 or colliding_task_count:
-            self.log_event(
-                ["all", client],
-                {
-                    "action": "update_graph",
-                    "count": len(dsk),
-                    "key-collisions": colliding_task_count,
-                },
-            )
+        metrics = {
+            "tasks": len(dsk),
+            "new_tasks": len(new_tasks),
+            "key_collisions": colliding_task_count,
+        }
 
         keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
@@ -4832,6 +4790,44 @@ class Scheduler(SchedulerState, ServerNode):
             if ts.state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
+        return metrics
+
+    def _remove_done_tasks_from_dsk(
+        self,
+        dsk: dict[Key, T_runspec],
+        dependencies: dict[Key, set[Key]],
+    ) -> None:
+        # Avoid computation that is already finished
+        done = set()  # tasks that are already done
+        for k, v in dependencies.items():
+            if v and k in self.tasks:
+                ts = self.tasks[k]
+                if ts.state in ("memory", "erred"):
+                    done.add(k)
+        if done:
+            dependents = dask.core.reverse_dict(dependencies)
+            stack = list(done)
+            while stack:  # remove unnecessary dependencies
+                key = stack.pop()
+                try:
+                    deps = dependencies[key]
+                except KeyError:
+                    deps = {ts.key for ts in self.tasks[key].dependencies}
+                for dep in deps:
+                    if dep in dependents:
+                        child_deps = dependents[dep]
+                    elif dep in self.tasks:
+                        child_deps = {ts.key for ts in self.tasks[key].dependencies}
+                    else:
+                        child_deps = set()
+                    if all(d in done for d in child_deps):
+                        if dep in self.tasks and dep not in done:
+                            done.add(dep)
+                            stack.append(dep)
+        for anc in done:
+            dsk.pop(anc, None)
+            dependencies.pop(anc, None)
+
     @log_errors
     async def update_graph(
         self,
@@ -4852,6 +4848,7 @@ class Scheduler(SchedulerState, ServerNode):
         start = time()
         self._active_graph_updates += 1
         try:
+            logger.debug("Received new graph. Deserializing...")
             try:
                 graph = deserialize(graph_header, graph_frames).data
                 del graph_header, graph_frames
@@ -4871,9 +4868,23 @@ class Scheduler(SchedulerState, ServerNode):
                 _materialize_graph,
                 graph=graph,
                 global_annotations=annotations or {},
+                keys=keys,
                 validate=self.validate,
             )
+
+            materialization_done = time()
+            logger.debug("Materialization done. Got %i tasks.", len(dsk))
             del graph
+
+            lost_keys = self._find_lost_dependencies(dsk, dependencies, keys)
+
+            if lost_keys:
+                self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
+                self.client_releases_keys(
+                    keys=lost_keys, client=client, stimulus_id=stimulus_id
+                )
+            dsk = _cull(dsk, keys)
+
             if not internal_priority:
                 # Removing all non-local keys before calling order()
                 dsk_keys = set(
@@ -4884,12 +4895,18 @@ class Scheduler(SchedulerState, ServerNode):
                     for k, v in dependencies.items()
                     if k in dsk_keys
                 }
+
                 internal_priority = await offload(
                     dask.order.order, dsk=dsk, dependencies=stripped_deps
                 )
-            dsk = valmap(_normalize_task, dsk)
+            ordering_done = time()
+            logger.debug("Ordering done.")
 
-            self._create_taskstate_from_graph(
+            before = len(self.tasks)
+
+            self._remove_done_tasks_from_dsk(dsk, dependencies)
+
+            metrics = self._create_taskstate_from_graph(
                 dsk=dsk,
                 client=client,
                 dependencies=dependencies,
@@ -4908,7 +4925,32 @@ class Scheduler(SchedulerState, ServerNode):
                 start=start,
                 stimulus_id=stimulus_id or f"update-graph-{start}",
             )
-        except RuntimeError as e:
+            task_state_created = time()
+            metrics.update(
+                {
+                    "start_timestamp_seconds": start,
+                    "materialization_duration_seconds": materialization_done - start,
+                    "ordering_duration_seconds": materialization_done - ordering_done,
+                    "state_initialization_duration_seconds": ordering_done
+                    - task_state_created,
+                    "duration_seconds": task_state_created - start,
+                }
+            )
+            evt_msg = {
+                "action": "update-graph",
+                "stimulus_id": stimulus_id,
+                "metrics": metrics,
+                "status": "OK",
+            }
+            self.log_event(["scheduler", client], evt_msg)
+            logger.debug("Task state created. %i new tasks", len(self.tasks) - before)
+        except Exception as e:
+            evt_msg = {
+                "action": "update-graph",
+                "stimulus_id": stimulus_id,
+                "status": "error",
+            }
+            self.log_event(["scheduler", client], evt_msg)
             logger.error(str(e))
             err = error_message(e)
             for key in keys:
@@ -4937,7 +4979,7 @@ class Scheduler(SchedulerState, ServerNode):
         computation: Computation,
     ) -> tuple:
         # Get or create task states
-        runnable = []
+        runnable = list()
         new_tasks = []
         stack = list(keys)
         touched_keys = set()
@@ -5119,7 +5161,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority: int | dict[Key, int],
         fifo_timeout: int | float | str,
         start: float,
-        tasks: list[TaskState],
+        tasks: set[TaskState],
     ) -> None:
         fifo_timeout = parse_timedelta(fifo_timeout)
         if submitting_task:  # sub-tasks get better priority than parent tasks
@@ -5156,7 +5198,7 @@ class Scheduler(SchedulerState, ServerNode):
                     internal_priority[ts.key],
                 )
 
-            if self.validate and ts.run_spec:
+            if self.validate and istask(ts.run_spec):
                 assert isinstance(ts.priority, tuple) and all(
                     isinstance(el, (int, float)) for el in ts.priority
                 )
@@ -5980,7 +6022,8 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> None:
         if worker not in self.workers:
             return
-        self.validate_key(key)
+        if self.validate:
+            self.validate_key(key)
 
         r: tuple = self.stimulus_task_finished(
             key=key, worker=worker, stimulus_id=stimulus_id, **msg
@@ -9342,7 +9385,10 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 
 def _materialize_graph(
-    graph: HighLevelGraph, global_annotations: dict[str, Any], validate: bool
+    graph: HighLevelGraph,
+    global_annotations: dict[str, Any],
+    validate: bool,
+    keys: set[Key],
 ) -> tuple[dict[Key, T_runspec], dict[Key, set[Key]], dict[str, dict[Key, Any]]]:
     dsk: dict = ensure_dict(graph)
     if validate:
@@ -9361,33 +9407,35 @@ def _materialize_graph(
                 annotations_by_type[annot_type].update(
                     {k: (value(k) if callable(value) else value) for k in layer}
                 )
-    dependencies, _ = get_deps(dsk)
 
-    # Remove `Future` objects from graph and note any future dependencies
+    dsk2 = convert_legacy_graph(dsk)
+    dependents = reverse_dict(DependenciesMapping(dsk2))
+    # This is removing weird references like "x-foo": "foo" which often make up
+    # a substantial part of the graph
+    # This also performs culling!
+    dsk3 = resolve_aliases(dsk2, keys, dependents)
+
+    logger.debug(
+        "Removing aliases. Started with %i and got %i left", len(dsk2), len(dsk3)
+    )
+    # FIXME: There should be no need to fully materialize and copy this but some
+    # sections in the scheduler are mutating it.
+    dependencies = {k: set(v) for k, v in DependenciesMapping(dsk3).items()}
+    return dsk3, dependencies, annotations_by_type
+
+
+def _cull(dsk: dict[Key, GraphNode], keys: set[Key]) -> dict[Key, GraphNode]:
+    work = set(keys)
+    seen: set[Key] = set()
     dsk2 = {}
-    fut_deps = {}
-    for k, v in dsk.items():
-        v, futs = unpack_remotedata(v, byte_keys=True)
-        if futs:
-            fut_deps[k] = futs
-
-        # Remove aliases {x: x}.
-        # FIXME: This is an artifact generated by unpack_remotedata when using persisted
-        # collections. There should be a better way to achieve that tasks are not self
-        # referencing themselves.
-        if not iskey(v) or v != k:
-            dsk2[k] = v
-
-    dsk = dsk2
-
-    # - Add in deps for any tasks that depend on futures
-    for k, futures in fut_deps.items():
-        dependencies[k].update(f.key for f in futures)
-
-    # Remove any self-dependencies (happens on test_publish_bag() and others)
-    for k, v in dependencies.items():
-        deps = set(v)
-        deps.discard(k)
-        dependencies[k] = deps
-
-    return dsk, dependencies, annotations_by_type
+    wpop = work.pop
+    wupdate = work.update
+    sadd = seen.add
+    while work:
+        k = wpop()
+        if k in seen or k not in dsk:
+            continue
+        sadd(k)
+        dsk2[k] = v = dsk[k]
+        wupdate(v.dependencies)
+    return dsk2

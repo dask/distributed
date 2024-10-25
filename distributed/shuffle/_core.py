@@ -357,6 +357,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
         # Log metrics both in the "execute" and in the "p2p" contexts
+        self.validate_data(data)
         with self._capture_metrics("foreground"):
             with (
                 context_meter.meter("p2p-shard-partition-noncpu"),
@@ -401,6 +402,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     @abc.abstractmethod
     def deserialize(self, buffer: Any) -> Any:
         """Deserialize shards"""
+
+    def validate_data(self, data: Any) -> None:
+        """Validate payload data before shuffling"""
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:
@@ -475,9 +479,6 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
             participating_workers=set(worker_for.values()),
         )
 
-    def validate_data(self, data: Any) -> None:
-        """Validate payload data before shuffling"""
-
     @abc.abstractmethod
     def create_run_on_worker(
         self,
@@ -522,7 +523,7 @@ def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
     except P2POutOfDiskError:
         raise
     except Exception as e:
-        raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
+        raise RuntimeError(f"P2P {id} failed during transfer phase") from e
 
 
 @contextlib.contextmanager
@@ -538,7 +539,7 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
     except P2POutOfDiskError:
         raise
     except Exception as e:
-        raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
+        raise RuntimeError(f"P2P {id} failed during unpack phase") from e
 
 
 def _handle_datetime(buf: Any) -> Any:
@@ -561,3 +562,16 @@ def _mean_shard_size(shards: Iterable) -> int:
             if count == 10:
                 break
     return size // count if count else 0
+
+
+def p2p_barrier(id: ShuffleId, run_ids: list[int]) -> int:
+    try:
+        return get_worker_plugin().barrier(id, run_ids)
+    except Reschedule as e:
+        raise e
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"P2P {id} failed during barrier phase") from e

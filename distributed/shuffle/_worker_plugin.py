@@ -358,7 +358,6 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         spec: ShuffleSpec,
         **kwargs: Any,
     ) -> int:
-        spec.validate_data(data)
         shuffle_run = self.get_or_create_shuffle(spec)
         return shuffle_run.add_partition(
             data=data,
@@ -386,13 +385,6 @@ class ShuffleWorkerPlugin(WorkerPlugin):
         return await self.shuffle_runs.get_with_run_id(
             shuffle_id=shuffle_id, run_id=run_id
         )
-
-    async def _get_or_create_shuffle(
-        self,
-        spec: ShuffleSpec,
-        key: Key,
-    ) -> ShuffleRun:
-        return await self.shuffle_runs.get_or_create(spec=spec, key=key)
 
     async def teardown(self, worker: Worker) -> None:
         assert not self.closed
