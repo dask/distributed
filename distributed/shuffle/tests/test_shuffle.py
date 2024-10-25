@@ -252,12 +252,10 @@ async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = df.shuffle("x", npartitions=npartitions).values
 
-    if npartitions == 1:
-        # FIXME: distributed#7816
-        with pytest.raises(P2PConsistencyError, match="Barrier task"):
-            await c.compute(out)
-    else:
-        await c.compute(out)
+    # See distributed#7816. TaskSpec is currently blocking linear fusion. If
+    # that was implemented, this may raise a P2PConsistencyErrro
+
+    await c.compute(out)
 
     await assert_worker_cleanup(a)
     await assert_worker_cleanup(b)
