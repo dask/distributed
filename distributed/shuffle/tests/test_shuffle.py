@@ -3058,11 +3058,11 @@ class BarrierInputsDoneOSErrorPlugin(ShuffleWorkerPlugin):
     [
         ({}, None),
         ({0: (1, OSError)}, None),
-        ({0: (1, RuntimeError)}, P2PConsistencyError),
+        ({0: (1, RuntimeError)}, RuntimeError),
         ({0: (1, OSError), 1: (1, OSError)}, None),
-        ({0: (1, OSError), 1: (1, RuntimeError)}, P2PConsistencyError),
-        ({0: (5, OSError)}, P2PConsistencyError),
-        ({0: (5, OSError), 1: (1, OSError)}, P2PConsistencyError),
+        ({0: (1, OSError), 1: (1, RuntimeError)}, RuntimeError),
+        ({0: (5, OSError)}, RuntimeError),
+        ({0: (5, OSError), 1: (1, OSError)}, RuntimeError),
     ],
 )
 @pytest.mark.slow

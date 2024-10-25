@@ -123,17 +123,19 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                     shuffle.id,
                 )
                 if any(w not in self.scheduler.workers for w in workers):
-                    raise P2PConsistencyError(
+                    raise RuntimeError(
                         f"Worker {workers} left during shuffle {shuffle}"
                     )
                 await asyncio.sleep(0.1)
                 if len(workers) == before:
                     no_progress += 1
                     if no_progress >= 3:
-                        raise P2PConsistencyError(
+                        raise RuntimeError(
                             f"""Broadcast not making progress for {shuffle}.
                             Aborting. This is possibly due to overloaded
-                            workers. Increasing tcp.connect timeout may help."""
+                            workers. Increasing config
+                            `distributed.comm.timeouts.connect` timeout may
+                            help."""
                         )
 
     def restrict_task(
