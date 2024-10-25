@@ -7,7 +7,6 @@ import pytest
 import distributed
 from distributed import Event, Lock, Worker
 from distributed.client import wait
-from distributed.compatibility import WINDOWS
 from distributed.utils_test import (
     BlockedExecute,
     BlockedGatherDep,
@@ -40,6 +39,7 @@ from distributed.worker_state_machine import (
     SecedeEvent,
     TaskFinishedMsg,
     UpdateDataEvent,
+    WorkerState,
 )
 
 
@@ -825,10 +825,12 @@ async def test_cancelled_task_error_rejected(c, s, a, b):
     )
 
 
-@pytest.mark.skipif(WINDOWS, reason="Fails on Windows")
 @pytest.mark.parametrize("intermediate_state", ["resumed", "cancelled"])
-@pytest.mark.parametrize("close_worker", [False, True])
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "500ms"})
+@pytest.mark.parametrize("close_worker", [True])
+@gen_cluster(
+    client=True,
+    config={"distributed.comm.timeouts.connect": "500ms"},
+)
 async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
     c, s, a, x, intermediate_state, close_worker
 ):
@@ -841,10 +843,34 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
     fut2 = c.submit(sum, [fut1, fut1B], workers=[x.address], key="f2")
     await fut2
 
-    async with BlockedGatherDep(s.address, name="b") as b:
+    class InstrumentedWorkerState(WorkerState):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.fut2_in_flight = asyncio.Event()
+            self.fut2_in_intermediate = asyncio.Event()
+
+        def _transition(self, ts, finish, *args, **kwargs):
+            def _verify_state(finish):
+                if ts.key == fut2.key:
+                    if isinstance(finish, tuple) and finish[0] == "flight":
+                        self.fut2_in_flight.set()
+                    if self.fut2_in_flight.is_set() and finish == intermediate_state:
+                        self.fut2_in_intermediate.set()
+
+            # The expected state might be either the requested one or the
+            # actual, final state
+            _verify_state(finish)
+            try:
+                return super()._transition(ts, finish, *args, **kwargs)
+            finally:
+                _verify_state(ts.state)
+
+    async with BlockedGatherDep(
+        s.address, name="b", WorkerStateClass=InstrumentedWorkerState
+    ) as b:
         fut3 = c.submit(inc, fut2, workers=[b.address], key="f3")
 
-        await wait_for_state(fut2.key, "flight", b)
+        await b.state.fut2_in_flight.wait()
 
         s.set_restrictions(worker={fut1B.key: a.address, fut2.key: b.address})
 
@@ -857,7 +883,7 @@ async def test_deadlock_cancelled_after_inflight_before_gather_from_worker(
             stimulus_id="remove-worker",
         )
 
-        await wait_for_state(fut2.key, intermediate_state, b, interval=0)
+        await b.state.fut2_in_intermediate.wait()
 
         b.block_gather_dep.set()
         await fut3

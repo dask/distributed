@@ -524,6 +524,7 @@ class Worker(BaseWorker, ServerNode):
         ###################################
         # Parameters to Server
         scheduler_sni: str | None = None,
+        WorkerStateClass: type = WorkerState,
         **kwargs,
     ):
         if reconnect is not None:
@@ -770,7 +771,7 @@ class Worker(BaseWorker, ServerNode):
             transfer_incoming_bytes_limit = int(
                 self.memory_manager.memory_limit * transfer_incoming_bytes_fraction
             )
-        state = WorkerState(
+        state = WorkerStateClass(
             nthreads=nthreads,
             data=self.memory_manager.data,
             threads=self.threads,
