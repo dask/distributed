@@ -113,8 +113,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 if isinstance(r, OSError):
                     workers.append(w)
                 else:
-                    raise P2PConsistencyError(
-                        "Unexpected error encountered during barrier"
+                    raise RuntimeError(
+                        f"Unexpected error encountered during P2P barrier: {r!r}"
                     )
             workers = [w for w, r in res.items() if r is not None]
             if workers:
