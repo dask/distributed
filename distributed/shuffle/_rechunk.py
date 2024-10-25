@@ -132,9 +132,11 @@ from distributed.core import PooledRPCCall
 from distributed.metrics import context_meter
 from distributed.shuffle._core import (
     NDIndex,
+    P2PBarrierTask,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
+    barrier_key,
     get_worker_plugin,
     handle_transfer_errors,
     handle_unpack_errors,
@@ -142,7 +144,6 @@ from distributed.shuffle._core import (
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import unpickle_bytestream
-from distributed.shuffle._shuffle import barrier_key
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
 
@@ -164,15 +165,12 @@ def rechunk_transfer(
     input: np.ndarray,
     id: ShuffleId,
     input_chunk: NDIndex,
-    new: ChunkedAxes,
-    old: ChunkedAxes,
-    disk: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
-            spec=ArrayRechunkSpec(id=id, new=new, old=old, disk=disk),
+            id=id,
         )
 
 
@@ -815,16 +813,19 @@ def partial_rechunk(
             key,
             rechunk_transfer,
             input_key,
-            partial_token,
+            ShuffleId(partial_token),
             partial_index,
-            partial_new,
-            partial_old,
-            disk,
         )
         transfer_keys.append(t.ref())
 
-    dsk[_barrier_key] = barrier = Task(
-        _barrier_key, p2p_barrier, partial_token, transfer_keys
+    dsk[_barrier_key] = barrier = P2PBarrierTask(
+        _barrier_key,
+        p2p_barrier,
+        partial_token,
+        transfer_keys,
+        spec=ArrayRechunkSpec(
+            id=ShuffleId(partial_token), new=partial_new, old=partial_old, disk=disk
+        ),
     )
 
     new_partial_offset = tuple(axis.start for axis in ndpartial.new)
@@ -835,7 +836,7 @@ def partial_rechunk(
             dsk[k] = Task(
                 k,
                 rechunk_unpack,
-                partial_token,
+                ShuffleId(partial_token),
                 partial_index,
                 barrier.ref(),
             )

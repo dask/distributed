@@ -41,6 +41,7 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._core import (
     NDIndex,
+    P2PBarrierTask,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
@@ -70,26 +71,12 @@ def shuffle_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
     input_partition: int,
-    npartitions: int,
-    column: str,
-    meta: pd.DataFrame,
-    parts_out: set[int],
-    disk: bool,
-    drop_column: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             input_partition,
-            spec=DataFrameShuffleSpec(
-                id=id,
-                npartitions=npartitions,
-                column=column,
-                meta=meta,
-                parts_out=parts_out,
-                disk=disk,
-                drop_column=drop_column,
-            ),
+            id,
         )
 
 
@@ -268,8 +255,9 @@ class P2PShuffleLayer(Layer):
 
     def _construct_graph(self) -> _T_LowLevelGraph:
         token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
+        shuffle_id = ShuffleId(token)
         dsk: _T_LowLevelGraph = {}
-        _barrier_key = barrier_key(ShuffleId(token))
+        _barrier_key = barrier_key(shuffle_id)
         name = "shuffle-transfer-" + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
@@ -279,17 +267,25 @@ class P2PShuffleLayer(Layer):
                 TaskRef((self.name_input, i)),
                 token,
                 i,
-                self.npartitions,
-                self.column,
-                self.meta_input,
-                self.parts_out,
-                self.disk,
-                self.drop_column,
             )
             dsk[t.key] = t
             transfer_keys.append(t.ref())
 
-        barrier = Task(_barrier_key, p2p_barrier, token, transfer_keys)
+        barrier = P2PBarrierTask(
+            _barrier_key,
+            p2p_barrier,
+            token,
+            transfer_keys,
+            spec=DataFrameShuffleSpec(
+                id=shuffle_id,
+                npartitions=self.npartitions,
+                column=self.column,
+                meta=self.meta_input,
+                parts_out=self.parts_out,
+                disk=self.disk,
+                drop_column=self.drop_column,
+            ),
+        )
         dsk[barrier.key] = barrier
 
         name = self.name

@@ -14,6 +14,7 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._core import (
+    P2PBarrierTask,
     RunSpecMessage,
     SchedulerShuffleState,
     ShuffleId,
@@ -147,23 +148,29 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         state.participating_workers.add(worker)
         return state.run_spec
 
-    def _create(self, spec: ShuffleSpec, key: Key, worker: str) -> ShuffleRunSpec:
+    def _retrieve_spec(self, shuffle_id: ShuffleId) -> ShuffleSpec:
+        barrier_task_spec = self.scheduler.tasks[barrier_key(shuffle_id)].run_spec
+        assert isinstance(barrier_task_spec, P2PBarrierTask)
+        return barrier_task_spec.spec
+
+    def _create(self, shuffle_id: ShuffleId, key: Key, worker: str) -> ShuffleRunSpec:
         # FIXME: The current implementation relies on the barrier task to be
         # known by its name. If the name has been mangled, we cannot guarantee
         # that the shuffle works as intended and should fail instead.
-        self._raise_if_barrier_unknown(spec.id)
+        self._raise_if_barrier_unknown(shuffle_id)
         self._raise_if_task_not_processing(key)
+        spec = self._retrieve_spec(shuffle_id)
         worker_for = self._calculate_worker_for(spec)
         self._ensure_output_tasks_are_non_rootish(spec)
         state = spec.create_new_run(
             worker_for=worker_for, span_id=self.scheduler.tasks[key].group.span_id
         )
-        self.active_shuffles[spec.id] = state
-        self._shuffles[spec.id].add(state)
+        self.active_shuffles[shuffle_id] = state
+        self._shuffles[shuffle_id].add(state)
         state.participating_workers.add(worker)
         logger.warning(
             "Shuffle %s initialized by task %r executed on worker %s",
-            spec.id,
+            shuffle_id,
             key,
             worker,
         )
@@ -171,17 +178,17 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def get_or_create(
         self,
-        spec: ShuffleSpec,
+        shuffle_id: ShuffleId,
         key: Key,
         worker: str,
     ) -> RunSpecMessage | ErrorMessage:
         try:
-            run_spec = self._get(spec.id, worker)
+            run_spec = self._get(shuffle_id, worker)
         except P2PConsistencyError as e:
             return error_message(e)
         except KeyError:
             try:
-                run_spec = self._create(spec, key, worker)
+                run_spec = self._create(shuffle_id, key, worker)
             except P2PConsistencyError as e:
                 return error_message(e)
         return {"status": "OK", "run_spec": ToPickle(run_spec)}

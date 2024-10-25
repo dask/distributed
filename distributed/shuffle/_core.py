@@ -25,7 +25,9 @@ from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
 from tornado.ioloop import IOLoop
 
 import dask.config
+from dask._task_spec import Task, _inline_recursively
 from dask.core import flatten
+from dask.sizeof import sizeof
 from dask.typing import Key
 from dask.utils import parse_bytes, parse_timedelta
 
@@ -575,3 +577,60 @@ def p2p_barrier(id: ShuffleId, run_ids: list[int]) -> int:
         raise
     except Exception as e:
         raise RuntimeError(f"P2P {id} failed during barrier phase") from e
+
+
+class P2PBarrierTask(Task):
+    spec: ShuffleSpec
+
+    __slots__ = tuple(__annotations__)
+
+    def __init__(
+        self,
+        key: Any,
+        func: Callable[..., Any],
+        /,
+        *args: Any,
+        spec: ShuffleSpec,
+        **kwargs: Any,
+    ):
+        self.spec = spec
+        super().__init__(key, func, *args, **kwargs)
+
+    def copy(self):
+        self.unpack()
+        return P2PBarrierTask(
+            self.key, self.func, *self.args, spec=self.spec, **self.kwargs
+        )
+
+    def __sizeof__(self) -> int:
+        return super().__sizeof__() + sizeof(self.spec)
+
+    def __repr__(self) -> str:
+        return f"P2PBarrierTask({self.key!r})"
+
+    def inline(self, dsk) -> P2PBarrierTask:
+        self.unpack()
+        new_args = _inline_recursively(self.args, dsk)
+        new_kwargs = _inline_recursively(self.kwargs, dsk)
+        assert self.func is not None
+        return P2PBarrierTask(
+            self.key, self.func, *new_args, spec=self.spec, **new_kwargs
+        )
+
+    def __getstate__(self):
+        state = super().__getstate__()
+        state["spec"] = self.spec
+        return state
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        self.spec = state["spec"]
+
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, P2PBarrierTask):
+            return False
+        if not super().__eq__(value):
+            return False
+        if self.spec != value.spec:
+            return False
+        return True
