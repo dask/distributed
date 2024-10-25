@@ -2546,7 +2546,7 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
 
     with raises_with_cause(
         RuntimeError,
-        r"(shuffling \w*|shuffle_barrier) failed",
+        r"P2P \w* failed",
         pa.ArrowTypeError,
         "incompatible types",
     ):
@@ -2744,7 +2744,7 @@ async def test_flaky_connect_fails_without_retry(c, s, a, b):
     with mock.patch.object(a, "rpc", rpc):
         with raises_with_cause(
             expected_exception=RuntimeError,
-            match="P2P shuffling.*transfer",
+            match="P2P.*transfer",
             expected_cause=OSError,
             match_cause=None,
         ):
@@ -2899,7 +2899,7 @@ async def test_wrong_meta_provided(c, s, a, b):
 
     with raises_with_cause(
         RuntimeError,
-        r"shuffling \w* failed",
+        r"P2P \w* failed",
         ValueError,
         "meta",
     ):

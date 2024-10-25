@@ -29,7 +29,6 @@ from dask.typing import Key
 from dask.utils import is_dataframe_like
 
 from distributed.core import PooledRPCCall
-from distributed.exceptions import Reschedule
 from distributed.metrics import context_meter
 from distributed.shuffle._arrow import (
     buffers_to_table,
@@ -49,12 +48,9 @@ from distributed.shuffle._core import (
     get_worker_plugin,
     handle_transfer_errors,
     handle_unpack_errors,
+    p2p_barrier,
 )
-from distributed.shuffle._exceptions import (
-    DataUnavailable,
-    P2PConsistencyError,
-    P2POutOfDiskError,
-)
+from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -104,19 +100,6 @@ def shuffle_unpack(
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_partition
         )
-
-
-def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
-    try:
-        return get_worker_plugin().barrier(id, run_ids)
-    except Reschedule as e:
-        raise e
-    except P2PConsistencyError:
-        raise
-    except P2POutOfDiskError:
-        raise
-    except Exception as e:
-        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
 
 
 def rearrange_by_column_p2p(
@@ -306,7 +289,7 @@ class P2PShuffleLayer(Layer):
             dsk[t.key] = t
             transfer_keys.append(t.ref())
 
-        barrier = Task(_barrier_key, shuffle_barrier, token, transfer_keys)
+        barrier = Task(_barrier_key, p2p_barrier, token, transfer_keys)
         dsk[barrier.key] = barrier
 
         name = self.name
@@ -570,6 +553,12 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def deserialize(self, buffer: Any) -> Any:
         return deserialize_table(buffer)
 
+    def validate_data(self, data: pd.DataFrame) -> None:
+        if not is_dataframe_like(data):
+            raise TypeError(f"Expected {data=} to be a DataFrame, got {type(data)}.")
+        if set(data.columns) != set(self.meta.columns):
+            raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
+
 
 @dataclass(frozen=True)
 class DataFrameShuffleSpec(ShuffleSpec[int]):
@@ -585,12 +574,6 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
 
     def pick_worker(self, partition: int, workers: Sequence[str]) -> str:
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
-
-    def validate_data(self, data: pd.DataFrame) -> None:
-        if not is_dataframe_like(data):
-            raise TypeError(f"Expected {data=} to be a DataFrame, got {type(data)}.")
-        if set(data.columns) != set(self.meta.columns):
-            raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
 
     def create_run_on_worker(
         self,
