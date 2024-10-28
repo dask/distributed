@@ -21,6 +21,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import key_split
 
+from distributed.comm.core import Comm
 from distributed.shuffle._core import ShuffleId, ShuffleRun, barrier_key
 from distributed.shuffle._disk import DiskShardsBuffer
 from distributed.worker import Status
@@ -252,12 +253,10 @@ async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = df.shuffle("x", npartitions=npartitions).values
 
-    if npartitions == 1:
-        # FIXME: distributed#7816
-        with pytest.raises(P2PConsistencyError, match="Barrier task"):
-            await c.compute(out)
-    else:
-        await c.compute(out)
+    # See distributed#7816. TaskSpec is currently blocking linear fusion. If
+    # that was implemented, this may raise a P2PConsistencyErrro
+
+    await c.compute(out)
 
     await assert_worker_cleanup(a)
     await assert_worker_cleanup(b)
@@ -3034,3 +3033,61 @@ async def test_workers_do_not_spam_get_requests(c, s, a, b):
     await assert_worker_cleanup(a)
     await assert_worker_cleanup(b)
     await assert_scheduler_cleanup(s)
+
+
+class BarrierInputsDoneOSErrorPlugin(ShuffleWorkerPlugin):
+    def __init__(
+        self,
+        failures: dict[str, tuple[int, type]] | None = None,
+    ):
+        self.failures = failures or {}
+        super().__init__()
+
+    async def shuffle_inputs_done(self, comm: Comm, *args: Any, **kwargs: Any) -> None:  # type: ignore
+        if self.worker.address in self.failures:
+            nfailures, exc_type = self.failures[self.worker.address]
+            if nfailures > 0:
+                nfailures -= 1
+                self.failures[self.worker.address] = nfailures, exc_type
+                if issubclass(exc_type, OSError):
+                    # Aborting the Comm object triggers a different path in
+                    # error handling that resembles a genuine connection failure
+                    # like a timeout while an exception that is being raised by
+                    # the handler will be serialized and sent to the scheduler
+                    comm.abort()
+                raise exc_type  # type: ignore
+        return await super().shuffle_inputs_done(*args, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "failures, expected_exc",
+    [
+        ({}, None),
+        ({0: (1, OSError)}, None),
+        ({0: (1, RuntimeError)}, RuntimeError),
+        ({0: (1, OSError), 1: (1, OSError)}, None),
+        ({0: (1, OSError), 1: (1, RuntimeError)}, RuntimeError),
+        ({0: (5, OSError)}, RuntimeError),
+        ({0: (5, OSError), 1: (1, OSError)}, RuntimeError),
+    ],
+)
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_flaky_broadcast(c, s, a, b, failures, expected_exc):
+    names_to_address = {w.name: w.address for w in [a, b]}
+    failures = {names_to_address[name]: failures for name, failures in failures.items()}
+    plugin = BarrierInputsDoneOSErrorPlugin(failures)
+    await c.register_plugin(plugin, name="shuffle")
+
+    if expected_exc:
+        ctx = pytest.raises(expected_exc)
+    else:
+        ctx = contextlib.nullcontext()
+    pdf = pd.DataFrame({"x": [1, 2, 3], "y": [4, 5, 6]})
+    ddf = dd.from_pandas(pdf, npartitions=2)
+    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+        shuffled = ddf.shuffle("x")
+
+    res = c.compute(shuffled)
+    with ctx:
+        await c.gather(res)
