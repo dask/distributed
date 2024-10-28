@@ -596,7 +596,7 @@ class P2PBarrierTask(Task):
         self.spec = spec
         super().__init__(key, func, *args, **kwargs)
 
-    def copy(self):
+    def copy(self) -> P2PBarrierTask:
         self.unpack()
         return P2PBarrierTask(
             self.key, self.func, *self.args, spec=self.spec, **self.kwargs
