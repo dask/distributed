@@ -144,7 +144,7 @@ class P2PShuffleLayer(Layer):
     name_input: str
     meta_input: pd.DataFrame
     disk: bool
-    parts_out: set[int]
+    parts_out: tuple[int, ...]
     drop_column: bool
 
     def __init__(
@@ -168,9 +168,9 @@ class P2PShuffleLayer(Layer):
         self.meta_input = meta_input
         self.disk = disk
         if parts_out:
-            self.parts_out = set(parts_out)
+            self.parts_out = tuple(parts_out)
         else:
-            self.parts_out = set(range(self.npartitions))
+            self.parts_out = tuple(range(self.npartitions))
         self.npartitions_input = npartitions_input
         self.drop_column = drop_column
         super().__init__(annotations=annotations)
@@ -561,12 +561,16 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
     npartitions: int
     column: str
     meta: pd.DataFrame
-    parts_out: set[int]
+    parts_out: Sequence[int] | int
     drop_column: bool
 
     @property
     def output_partitions(self) -> Generator[int]:
-        yield from self.parts_out
+        parts_out = self.parts_out
+        if isinstance(parts_out, int):
+            parts_out = range(parts_out)
+
+        yield from parts_out
 
     def pick_worker(self, partition: int, workers: Sequence[str]) -> str:
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
