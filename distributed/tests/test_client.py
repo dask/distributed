@@ -5521,6 +5521,7 @@ async def test_call_stack_collections_all(c, s, a, b):
     assert result
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @pytest.mark.flaky(condition=WINDOWS, reruns=10, reruns_delay=5)
 @gen_cluster(
     client=True,
@@ -6374,6 +6375,7 @@ async def test_futures_of_sorted(c, s, a, b):
     assert [fut.key for fut in futures] == [k for k in b.__dask_keys__()]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={

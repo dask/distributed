@@ -1973,6 +1973,7 @@ async def test_profile_metadata(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2000,6 +2001,7 @@ async def test_profile_metadata_timeout(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2019,6 +2021,7 @@ async def test_profile_metadata_keys(c, s, a, b):
     )
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2036,6 +2039,7 @@ async def test_statistical_profiling(c, s, a, b):
     assert profile["count"]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={

@@ -312,7 +312,10 @@ class Server:
         self.io_loop = self.loop = IOLoop.current()
 
         if not hasattr(self.io_loop, "profile"):
-            if dask.config.get("distributed.worker.profile.enabled"):
+            if (
+                dask.config.get("distributed.worker.profile.enabled")
+                and sys.version_info.minor != 11
+            ):
                 ref = weakref.ref(self.io_loop)
 
                 def stop() -> bool:
