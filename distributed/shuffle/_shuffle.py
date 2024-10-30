@@ -41,6 +41,7 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._core import (
     NDIndex,
+    P2PBarrierTask,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
@@ -70,26 +71,12 @@ def shuffle_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
     input_partition: int,
-    npartitions: int,
-    column: str,
-    meta: pd.DataFrame,
-    parts_out: set[int],
-    disk: bool,
-    drop_column: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             input_partition,
-            spec=DataFrameShuffleSpec(
-                id=id,
-                npartitions=npartitions,
-                column=column,
-                meta=meta,
-                parts_out=parts_out,
-                disk=disk,
-                drop_column=drop_column,
-            ),
+            id,
         )
 
 
@@ -157,7 +144,7 @@ class P2PShuffleLayer(Layer):
     name_input: str
     meta_input: pd.DataFrame
     disk: bool
-    parts_out: set[int]
+    parts_out: tuple[int, ...]
     drop_column: bool
 
     def __init__(
@@ -181,9 +168,9 @@ class P2PShuffleLayer(Layer):
         self.meta_input = meta_input
         self.disk = disk
         if parts_out:
-            self.parts_out = set(parts_out)
+            self.parts_out = tuple(parts_out)
         else:
-            self.parts_out = set(range(self.npartitions))
+            self.parts_out = tuple(range(self.npartitions))
         self.npartitions_input = npartitions_input
         self.drop_column = drop_column
         super().__init__(annotations=annotations)
@@ -268,8 +255,9 @@ class P2PShuffleLayer(Layer):
 
     def _construct_graph(self) -> _T_LowLevelGraph:
         token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
+        shuffle_id = ShuffleId(token)
         dsk: _T_LowLevelGraph = {}
-        _barrier_key = barrier_key(ShuffleId(token))
+        _barrier_key = barrier_key(shuffle_id)
         name = "shuffle-transfer-" + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
@@ -279,17 +267,25 @@ class P2PShuffleLayer(Layer):
                 TaskRef((self.name_input, i)),
                 token,
                 i,
-                self.npartitions,
-                self.column,
-                self.meta_input,
-                self.parts_out,
-                self.disk,
-                self.drop_column,
             )
             dsk[t.key] = t
             transfer_keys.append(t.ref())
 
-        barrier = Task(_barrier_key, p2p_barrier, token, transfer_keys)
+        barrier = P2PBarrierTask(
+            _barrier_key,
+            p2p_barrier,
+            token,
+            transfer_keys,
+            spec=DataFrameShuffleSpec(
+                id=shuffle_id,
+                npartitions=self.npartitions,
+                column=self.column,
+                meta=self.meta_input,
+                parts_out=self.parts_out,
+                disk=self.disk,
+                drop_column=self.drop_column,
+            ),
+        )
         dsk[barrier.key] = barrier
 
         name = self.name
@@ -565,12 +561,16 @@ class DataFrameShuffleSpec(ShuffleSpec[int]):
     npartitions: int
     column: str
     meta: pd.DataFrame
-    parts_out: set[int]
+    parts_out: Sequence[int] | int
     drop_column: bool
 
     @property
     def output_partitions(self) -> Generator[int]:
-        yield from self.parts_out
+        parts_out = self.parts_out
+        if isinstance(parts_out, int):
+            parts_out = range(parts_out)
+
+        yield from parts_out
 
     def pick_worker(self, partition: int, workers: Sequence[str]) -> str:
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)

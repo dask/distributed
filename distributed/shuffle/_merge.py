@@ -1,30 +1,37 @@
 # mypy: ignore-errors
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 import dask
+from dask._task_spec import GraphNode, Task, TaskRef
 from dask.base import is_dask_collection
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
+from dask.typing import Key
 
 from distributed.shuffle._arrow import check_minimal_arrow_version
 from distributed.shuffle._core import (
+    P2PBarrierTask,
     ShuffleId,
     barrier_key,
     get_worker_plugin,
     p2p_barrier,
 )
-from distributed.shuffle._shuffle import shuffle_transfer
+from distributed.shuffle._shuffle import DataFrameShuffleSpec, shuffle_transfer
 
 if TYPE_CHECKING:
     import pandas as pd
     from pandas._typing import IndexLabel, MergeHow, Suffixes
 
+    # TODO import from typing (requires Python >=3.10)
+    from typing_extensions import TypeAlias
+
     from dask.dataframe.core import _Frame
 
+_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
 
 _HASH_COLUMN_NAME = "__hash_partition"
 
@@ -148,21 +155,11 @@ def merge_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
     input_partition: int,
-    npartitions: int,
-    meta: pd.DataFrame,
-    parts_out: set[int],
-    disk: bool,
 ):
     return shuffle_transfer(
         input=input,
         id=id,
         input_partition=input_partition,
-        npartitions=npartitions,
-        column=_HASH_COLUMN_NAME,
-        meta=meta,
-        parts_out=parts_out,
-        disk=disk,
-        drop_column=True,
     )
 
 
@@ -208,7 +205,7 @@ class HashJoinP2PLayer(Layer):
     suffixes: Suffixes
     indicator: bool
     meta_output: pd.DataFrame
-    parts_out: Sequence[int]
+    parts_out: set[int]
 
     name_input_left: str
     meta_input_left: pd.DataFrame
@@ -241,7 +238,7 @@ class HashJoinP2PLayer(Layer):
         how: MergeHow = "inner",
         suffixes: Suffixes = ("_x", "_y"),
         indicator: bool = False,
-        parts_out: Sequence | None = None,
+        parts_out: Iterable[int] | None = None,
         annotations: dict | None = None,
     ) -> None:
         check_minimal_arrow_version()
@@ -257,7 +254,10 @@ class HashJoinP2PLayer(Layer):
         self.suffixes = suffixes
         self.indicator = indicator
         self.meta_output = meta_output
-        self.parts_out = parts_out or list(range(npartitions))
+        if parts_out:
+            self.parts_out = set(parts_out)
+        else:
+            self.parts_out = set(range(npartitions))
         self.n_partitions_left = n_partitions_left
         self.n_partitions_right = n_partitions_right
         self.left_index = left_index
@@ -325,7 +325,7 @@ class HashJoinP2PLayer(Layer):
             self._cached_dict = dsk
         return self._cached_dict
 
-    def _cull(self, parts_out: Sequence[str]):
+    def _cull(self, parts_out: Iterable[int]):
         return HashJoinP2PLayer(
             name=self.name,
             name_input_left=self.name_input_left,
@@ -365,7 +365,7 @@ class HashJoinP2PLayer(Layer):
         else:
             return self, culled_deps
 
-    def _construct_graph(self) -> dict[tuple | str, tuple]:
+    def _construct_graph(self) -> _T_LowLevelGraph:
         token_left = tokenize(
             # Include self.name to ensure that shuffle IDs are unique for individual
             # merge operations. Reusing shuffles between merges is dangerous because of
@@ -375,6 +375,7 @@ class HashJoinP2PLayer(Layer):
             self.left_on,
             self.left_index,
         )
+        shuffle_id_left = ShuffleId(token_left)
         token_right = tokenize(
             # Include self.name to ensure that shuffle IDs are unique for individual
             # merge operations. Reusing shuffles between merges is dangerous because of
@@ -384,50 +385,79 @@ class HashJoinP2PLayer(Layer):
             self.right_on,
             self.right_index,
         )
-        dsk: dict[tuple | str, tuple] = {}
+        shuffle_id_right = ShuffleId(token_right)
+        dsk: _T_LowLevelGraph = {}
         name_left = "hash-join-transfer-" + token_left
         name_right = "hash-join-transfer-" + token_right
         transfer_keys_left = list()
-        transfer_keys_right = list()
         for i in range(self.n_partitions_left):
-            transfer_keys_left.append((name_left, i))
-            dsk[(name_left, i)] = (
+            t = Task(
+                (name_left, i),
                 merge_transfer,
-                (self.name_input_left, i),
-                token_left,
+                TaskRef((self.name_input_left, i)),
+                shuffle_id_left,
                 i,
-                self.npartitions,
-                self.meta_input_left,
-                self.parts_out,
-                self.disk,
             )
-        for i in range(self.n_partitions_right):
-            transfer_keys_right.append((name_right, i))
-            dsk[(name_right, i)] = (
-                merge_transfer,
-                (self.name_input_right, i),
-                token_right,
-                i,
-                self.npartitions,
-                self.meta_input_right,
-                self.parts_out,
-                self.disk,
-            )
+            dsk[t.key] = t
+            transfer_keys_left.append(t.ref())
 
-        _barrier_key_left = barrier_key(ShuffleId(token_left))
-        _barrier_key_right = barrier_key(ShuffleId(token_right))
-        dsk[_barrier_key_left] = (p2p_barrier, token_left, transfer_keys_left)
-        dsk[_barrier_key_right] = (p2p_barrier, token_right, transfer_keys_right)
+        transfer_keys_right = list()
+        for i in range(self.n_partitions_right):
+            t = Task(
+                (name_right, i),
+                merge_transfer,
+                TaskRef((self.name_input_right, i)),
+                shuffle_id_right,
+                i,
+            )
+            dsk[t.key] = t
+            transfer_keys_right.append(t.ref())
+
+        _barrier_key_left = barrier_key(shuffle_id_left)
+        barrier_left = P2PBarrierTask(
+            _barrier_key_left,
+            p2p_barrier,
+            token_left,
+            transfer_keys_left,
+            spec=DataFrameShuffleSpec(
+                id=shuffle_id_left,
+                npartitions=self.npartitions,
+                column=_HASH_COLUMN_NAME,
+                meta=self.meta_input_left,
+                parts_out=self.parts_out,
+                disk=self.disk,
+                drop_column=True,
+            ),
+        )
+        dsk[barrier_left.key] = barrier_left
+        _barrier_key_right = barrier_key(shuffle_id_right)
+        barrier_right = P2PBarrierTask(
+            _barrier_key_right,
+            p2p_barrier,
+            token_right,
+            transfer_keys_right,
+            spec=DataFrameShuffleSpec(
+                id=shuffle_id_right,
+                npartitions=self.npartitions,
+                column=_HASH_COLUMN_NAME,
+                meta=self.meta_input_right,
+                parts_out=self.parts_out,
+                disk=self.disk,
+                drop_column=True,
+            ),
+        )
+        dsk[barrier_right.key] = barrier_right
 
         name = self.name
         for part_out in self.parts_out:
-            dsk[(name, part_out)] = (
+            t = Task(
+                (name, part_out),
                 merge_unpack,
                 token_left,
                 token_right,
                 part_out,
-                _barrier_key_left,
-                _barrier_key_right,
+                barrier_left.ref(),
+                barrier_right.ref(),
                 self.how,
                 self.left_on,
                 self.right_on,
@@ -437,4 +467,5 @@ class HashJoinP2PLayer(Layer):
                 self.right_index,
                 self.indicator,
             )
+            dsk[t.key] = t
         return dsk

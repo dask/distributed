@@ -2349,7 +2349,7 @@ async def test_fail_fetch_race(c, s, a):
     assert shuffle_id not in run_manager._active_runs
 
     with pytest.raises(RuntimeError, match="Received stale shuffle run"):
-        await run_manager.get_or_create(spec.spec, "test-key")
+        await run_manager.get_or_create(shuffle_id, "test-key")
     assert shuffle_id not in run_manager._active_runs
 
     worker_plugin.block_barrier.set()
