@@ -598,6 +598,7 @@ class P2PBarrierTask(Task):
 
     def copy(self) -> P2PBarrierTask:
         self.unpack()
+        assert self.func is not None
         return P2PBarrierTask(
             self.key, self.func, *self.args, spec=self.spec, **self.kwargs
         )
@@ -608,7 +609,7 @@ class P2PBarrierTask(Task):
     def __repr__(self) -> str:
         return f"P2PBarrierTask({self.key!r})"
 
-    def inline(self, dsk) -> P2PBarrierTask:
+    def inline(self, dsk: dict[Key, Any]) -> P2PBarrierTask:
         self.unpack()
         new_args = _inline_recursively(self.args, dsk)
         new_kwargs = _inline_recursively(self.kwargs, dsk)
@@ -617,12 +618,12 @@ class P2PBarrierTask(Task):
             self.key, self.func, *new_args, spec=self.spec, **new_kwargs
         )
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict[str, Any]:
         state = super().__getstate__()
         state["spec"] = self.spec
         return state
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: dict[str, Any]) -> None:
         super().__setstate__(state)
         self.spec = state["spec"]
 
