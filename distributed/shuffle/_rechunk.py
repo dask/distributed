@@ -121,7 +121,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.config
-from dask._task_spec import Task, TaskRef
+from dask._task_spec import Task, TaskRef, parse_input
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
@@ -756,7 +756,9 @@ def partial_concatenate(
             rec_cat_arg[old_partial_index] = TaskRef((input_name,) + old_global_index)
 
     concat_task = Task(
-        (rechunk_name(token),) + global_new_index, concatenate3, rec_cat_arg.tolist()
+        (rechunk_name(token),) + global_new_index,
+        concatenate3,
+        parse_input(rec_cat_arg.tolist()),
     )
     dsk[concat_task.key] = concat_task
     return dsk
@@ -822,7 +824,7 @@ def partial_rechunk(
         _barrier_key,
         p2p_barrier,
         partial_token,
-        transfer_keys,
+        *transfer_keys,
         spec=ArrayRechunkSpec(
             id=ShuffleId(partial_token), new=partial_new, old=partial_old, disk=disk
         ),
