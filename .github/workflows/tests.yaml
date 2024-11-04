@@ -123,7 +123,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v3.0.3
+        uses: conda-incubator/setup-miniconda@v3.1.0
         with:
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
