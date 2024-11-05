@@ -4780,6 +4780,7 @@ class Scheduler(SchedulerState, ServerNode):
                     dependencies=dependencies,
                     annotations=dict(annotations_for_plugin),
                     priority=priority,
+                    stimulus_id=stimulus_id,
                 )
             except Exception as e:
                 logger.exception(e)
@@ -4846,6 +4847,7 @@ class Scheduler(SchedulerState, ServerNode):
         stimulus_id: str | None = None,
     ) -> None:
         start = time()
+        stimulus_id = stimulus_id or f"update-graph-{start}"
         self._active_graph_updates += 1
         try:
             logger.debug("Received new graph. Deserializing...")
@@ -4923,7 +4925,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # objects. This should be removed
                 global_annotations=annotations,
                 start=start,
-                stimulus_id=stimulus_id or f"update-graph-{start}",
+                stimulus_id=stimulus_id,
             )
             task_state_created = time()
             metrics.update(
