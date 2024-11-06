@@ -45,7 +45,7 @@ async def test_jupyter_server():
 
 
 @pytest.mark.slow
-def test_jupyter_cli(loop):
+def test_jupyter_cli(loop, requires_default_ports):
     port = open_port()
     with popen(
         [
