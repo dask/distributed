@@ -125,6 +125,8 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 )
                 if any(w not in self.scheduler.workers for w in workers):
                     if not shuffle.archived:
+                        # If the shuffle is not yet archived, this could mean that the barrier task fails
+                        # before the P2P restarting mechanism can kick in.
                         raise P2PIllegalStateError(
                             "Expected shuffle to be archived if participating worker is not known by scheduler"
                         )
