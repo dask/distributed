@@ -507,6 +507,10 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
     def run_id(self) -> int:
         return self.run_spec.run_id
 
+    @property
+    def archived(self) -> bool:
+        return self._archived_by is not None
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 

@@ -124,6 +124,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                     shuffle.id,
                 )
                 if any(w not in self.scheduler.workers for w in workers):
+                    if not shuffle.archived:
+                        raise P2PIllegalStateError(
+                            "Expected shuffle to be archived if participating worker is not known by scheduler"
+                        )
                     raise RuntimeError(
                         f"Worker {workers} left during shuffle {shuffle}"
                     )
