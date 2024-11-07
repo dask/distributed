@@ -1541,6 +1541,7 @@ def get_server_ssl_context(
     ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=get_cert(ca_file))
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
     ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
     return ctx
 
@@ -1551,6 +1552,7 @@ def get_client_ssl_context(
     ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=get_cert(ca_file))
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
     ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
     return ctx
 
