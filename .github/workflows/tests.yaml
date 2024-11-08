@@ -176,13 +176,6 @@ jobs:
             || steps.cache.outputs.cache-hit != 'true'
           )
 
-      - name: Install PyArrow nightlies for Python 3.13
-        if: ${{ matrix.environment == '3.13' }}
-        shell: bash -l {0}
-        run: | 
-          pip install --extra-index-url https://pypi.fury.io/arrow-nightlies/ --prefer-binary --pre pyarrow
-          pip install git+https://github.com/dask/dask-expr          
-
       - name: Install
         shell: bash -l {0}
         run: |
