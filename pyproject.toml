@@ -224,8 +224,7 @@ source = ["distributed"]
 omit = [
     "distributed/tests/test*",
     "distributed/*/tests/test*",
-    "distributed/cli/utils.py",
-    "distributed/cli/dask_spec.py",
+    "distributed/cli/*",
     "distributed/deploy/ssh.py",
     "distributed/_version.py",
     "distributed/pytest_resourceleaks.py",
