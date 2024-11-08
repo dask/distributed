@@ -1143,6 +1143,7 @@ async def test_https_support(c, s, a, b):
 
     ctx = ssl.create_default_context()
     ctx.load_verify_locations(get_cert("tls-ca-cert.pem"))
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
 
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(
