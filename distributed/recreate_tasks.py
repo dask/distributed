@@ -7,7 +7,6 @@ from dask.core import validate_key
 from distributed.client import Future, futures_of, wait
 from distributed.protocol.serialize import ToPickle
 from distributed.utils import sync
-from distributed.utils_comm import pack_data
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +39,8 @@ class ReplayTaskScheduler:
 
     def get_runspec(self, *args, key=None, **kwargs):
         key = self._process_key(key)
-        ts = self.scheduler.tasks.get(key)
-        return {
-            "task": ToPickle(ts.run_spec),
-            "deps": [dts.key for dts in ts.dependencies],
-        }
+        ts = self.scheduler.tasks[key]
+        return ToPickle(ts.run_spec)
 
 
 class ReplayTaskClient:
@@ -61,10 +57,8 @@ class ReplayTaskClient:
         self.client = client
         self.client.extensions["replay-tasks"] = self
         # monkey patch
-        self.client._get_raw_components_from_future = (
-            self._get_raw_components_from_future
-        )
-        self.client._prepare_raw_components = self._prepare_raw_components
+        self.client._get_raw_components_from_future = self._get_task_runspec
+        self.client._prepare_raw_components = self._get_dependencies
         self.client._get_components_from_future = self._get_components_from_future
         self.client._get_errored_future = self._get_errored_future
         self.client.recreate_task_locally = self.recreate_task_locally
@@ -74,7 +68,7 @@ class ReplayTaskClient:
     def scheduler(self):
         return self.client.scheduler
 
-    async def _get_raw_components_from_future(self, future):
+    async def _get_task_runspec(self, future):
         """
         For a given future return the func, args and kwargs and future
         deps that would be executed remotely.
@@ -85,19 +79,16 @@ class ReplayTaskClient:
         else:
             validate_key(future)
             key = future
-        spec = await self.scheduler.get_runspec(key=key)
-        return (*spec["task"], spec["deps"])
+        run_spec = await self.scheduler.get_runspec(key=key)
+        return run_spec
 
-    async def _prepare_raw_components(self, raw_components):
+    async def _get_dependencies(self, dependencies):
         """
         Take raw components and resolve future dependencies.
         """
-        function, args, kwargs, deps = raw_components
-        futures = self.client._graph_to_futures({}, deps, span_metadata={})
+        futures = self.client._graph_to_futures({}, dependencies, span_metadata={})
         data = await self.client._gather(futures)
-        args = pack_data(args, data)
-        kwargs = pack_data(kwargs, data)
-        return (function, args, kwargs)
+        return data
 
     async def _get_components_from_future(self, future):
         """
@@ -105,8 +96,8 @@ class ReplayTaskClient:
         executed remotely. Any args/kwargs that are themselves futures will
         be resolved to the return value of those futures.
         """
-        raw_components = await self._get_raw_components_from_future(future)
-        return await self._prepare_raw_components(raw_components)
+        runspec = await self._get_task_runspec(future)
+        return runspec, await self._get_dependencies(runspec.dependencies)
 
     def recreate_task_locally(self, future):
         """
@@ -137,10 +128,10 @@ class ReplayTaskClient:
         -------
         Any; will return the result of the task future.
         """
-        func, args, kwargs = sync(
+        runspec, dependencies = sync(
             self.client.loop, self._get_components_from_future, future
         )
-        return func(*args, **kwargs)
+        return runspec(dependencies)
 
     async def _get_errored_future(self, future):
         """

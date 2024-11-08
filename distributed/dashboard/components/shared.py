@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import weakref
 
 import tlz as toolz
@@ -275,6 +276,12 @@ class ProfileTimePlot(DashboardComponent):
         self.profile_plot.add_layout(self.subtitle, "above")
         if not dask.config.get("distributed.worker.profile.enabled"):
             self.subtitle.text = "Profiling is disabled."
+
+            self.select.disabled = True
+            self.reset_button.disabled = True
+            self.update_button.disabled = True
+        elif sys.version_info.minor == 11:
+            self.subtitle.text = "Profiling is disabled due to a known deadlock in CPython 3.11 that can be triggered by the profiler. See https://github.com/dask/distributed/issues/8616 for more information."
             self.select.disabled = True
             self.reset_button.disabled = True
             self.update_button.disabled = True
@@ -401,6 +408,10 @@ class ProfileServer(DashboardComponent):
         self.profile_plot.add_layout(self.subtitle, "above")
         if not dask.config.get("distributed.worker.profile.enabled"):
             self.subtitle.text = "Profiling is disabled."
+            self.reset_button.disabled = True
+            self.update_button.disabled = True
+        elif sys.version_info.minor == 11:
+            self.subtitle.text = "Profiling is disabled due to a known deadlock in CPython 3.11 that can be triggered by the profiler. See https://github.com/dask/distributed/issues/8616 for more information."
             self.reset_button.disabled = True
             self.update_button.disabled = True
 

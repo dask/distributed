@@ -1010,6 +1010,7 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
     assert not any(tgg.arrows_source.data.values())
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={

@@ -1161,6 +1161,7 @@ async def test_scheduler_delay(c, s, a, b):
     assert a.scheduler_delay != old
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(
     client=True,
@@ -1176,6 +1177,7 @@ async def test_statistical_profiling(c, s, a, b):
     assert profile["count"]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @pytest.mark.slow
 @nodebug
 @gen_cluster(
@@ -1202,6 +1204,7 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={

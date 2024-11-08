@@ -36,7 +36,6 @@ from distributed.utils import (
     RateLimiterFilter,
     TimeoutError,
     TupleComparable,
-    _maybe_complex,
     ensure_ip,
     ensure_memoryview,
     format_dashboard_link,
@@ -232,15 +231,6 @@ def test_get_traceback():
     except Exception as e:
         tb = get_traceback()
         assert type(tb).__name__ == "traceback"
-
-
-def test_maybe_complex():
-    assert not _maybe_complex(1)
-    assert not _maybe_complex("x")
-    assert _maybe_complex((inc, 1))
-    assert _maybe_complex([(inc, 1)])
-    assert _maybe_complex([(inc, 1)])
-    assert _maybe_complex({"x": (inc, 1)})
 
 
 def test_read_block():

@@ -121,6 +121,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.config
+from dask._task_spec import Task, TaskRef
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
@@ -131,19 +132,20 @@ from distributed.core import PooledRPCCall
 from distributed.metrics import context_meter
 from distributed.shuffle._core import (
     NDIndex,
+    P2PBarrierTask,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
+    barrier_key,
     get_worker_plugin,
     handle_transfer_errors,
     handle_unpack_errors,
+    p2p_barrier,
 )
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._pickle import unpickle_bytestream
-from distributed.shuffle._shuffle import barrier_key, shuffle_barrier
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
-from distributed.utils_comm import DoNotUnpack
 
 if TYPE_CHECKING:
     import numpy as np
@@ -163,15 +165,12 @@ def rechunk_transfer(
     input: np.ndarray,
     id: ShuffleId,
     input_chunk: NDIndex,
-    new: ChunkedAxes,
-    old: ChunkedAxes,
-    disk: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             partition_id=input_chunk,
-            spec=ArrayRechunkSpec(id=id, new=new, old=old, disk=disk),
+            id=id,
         )
 
 
@@ -746,19 +745,20 @@ def partial_concatenate(
         )
         if _slicing_is_necessary(old_slice, original_shape):
             key = (slice_group,) + ndpartial.ix + old_global_index
-            rec_cat_arg[old_partial_index] = key
-            dsk[key] = (
+            dsk[key] = t = Task(
+                key,
                 getitem,
-                (input_name,) + old_global_index,
+                TaskRef((input_name,) + old_global_index),
                 old_slice,
             )
+            rec_cat_arg[old_partial_index] = t.ref()
         else:
-            rec_cat_arg[old_partial_index] = (input_name,) + old_global_index
+            rec_cat_arg[old_partial_index] = TaskRef((input_name,) + old_global_index)
 
-    dsk[(rechunk_name(token),) + global_new_index] = (
-        concatenate3,
-        rec_cat_arg.tolist(),
+    concat_task = Task(
+        (rechunk_name(token),) + global_new_index, concatenate3, rec_cat_arg.tolist()
     )
+    dsk[concat_task.key] = concat_task
     return dsk
 
 
@@ -806,31 +806,39 @@ def partial_rechunk(
     for global_index in _ndindices_of_slice(ndpartial.old):
         partial_index = _partial_index(global_index, old_partial_offset)
 
-        input_key = (input_name,) + global_index
+        input_key = TaskRef((input_name,) + global_index)
 
         key = (transfer_group,) + ndpartial.ix + global_index
-        transfer_keys.append(key)
-        dsk[key] = (
+        dsk[key] = t = Task(
+            key,
             rechunk_transfer,
             input_key,
-            partial_token,
-            DoNotUnpack(partial_index),
-            DoNotUnpack(partial_new),
-            DoNotUnpack(partial_old),
-            disk,
+            ShuffleId(partial_token),
+            partial_index,
         )
+        transfer_keys.append(t.ref())
 
-    dsk[_barrier_key] = (shuffle_barrier, partial_token, transfer_keys)
+    dsk[_barrier_key] = barrier = P2PBarrierTask(
+        _barrier_key,
+        p2p_barrier,
+        partial_token,
+        transfer_keys,
+        spec=ArrayRechunkSpec(
+            id=ShuffleId(partial_token), new=partial_new, old=partial_old, disk=disk
+        ),
+    )
 
     new_partial_offset = tuple(axis.start for axis in ndpartial.new)
     for global_index in _ndindices_of_slice(ndpartial.new):
         partial_index = _partial_index(global_index, new_partial_offset)
         if keepmap[global_index]:
-            dsk[(unpack_group,) + global_index] = (
+            k = (unpack_group,) + global_index
+            dsk[k] = Task(
+                k,
                 rechunk_unpack,
-                partial_token,
+                ShuffleId(partial_token),
                 partial_index,
-                _barrier_key,
+                barrier.ref(),
             )
     return dsk
 

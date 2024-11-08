@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
 from tornado.ioloop import IOLoop
 
 import dask.config
+from dask._task_spec import Task, _inline_recursively
 from dask.core import flatten
 from dask.typing import Key
 from dask.utils import parse_bytes, parse_timedelta
@@ -357,6 +358,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
         # Log metrics both in the "execute" and in the "p2p" contexts
+        self.validate_data(data)
         with self._capture_metrics("foreground"):
             with (
                 context_meter.meter("p2p-shard-partition-noncpu"),
@@ -401,6 +403,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     @abc.abstractmethod
     def deserialize(self, buffer: Any) -> Any:
         """Deserialize shards"""
+
+    def validate_data(self, data: Any) -> None:
+        """Validate payload data before shuffling"""
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:
@@ -475,9 +480,6 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
             participating_workers=set(worker_for.values()),
         )
 
-    def validate_data(self, data: Any) -> None:
-        """Validate payload data before shuffling"""
-
     @abc.abstractmethod
     def create_run_on_worker(
         self,
@@ -504,6 +506,10 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
     def run_id(self) -> int:
         return self.run_spec.run_id
 
+    @property
+    def archived(self) -> bool:
+        return self._archived_by is not None
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 
@@ -522,7 +528,7 @@ def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
     except P2POutOfDiskError:
         raise
     except Exception as e:
-        raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
+        raise RuntimeError(f"P2P {id} failed during transfer phase") from e
 
 
 @contextlib.contextmanager
@@ -538,7 +544,7 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
     except P2POutOfDiskError:
         raise
     except Exception as e:
-        raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
+        raise RuntimeError(f"P2P {id} failed during unpack phase") from e
 
 
 def _handle_datetime(buf: Any) -> Any:
@@ -561,3 +567,50 @@ def _mean_shard_size(shards: Iterable) -> int:
             if count == 10:
                 break
     return size // count if count else 0
+
+
+def p2p_barrier(id: ShuffleId, run_ids: list[int]) -> int:
+    try:
+        return get_worker_plugin().barrier(id, run_ids)
+    except Reschedule as e:
+        raise e
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"P2P {id} failed during barrier phase") from e
+
+
+class P2PBarrierTask(Task):
+    spec: ShuffleSpec
+
+    __slots__ = tuple(__annotations__)
+
+    def __init__(
+        self,
+        key: Any,
+        func: Callable[..., Any],
+        /,
+        *args: Any,
+        spec: ShuffleSpec,
+        **kwargs: Any,
+    ):
+        self.spec = spec
+        super().__init__(key, func, *args, **kwargs)
+
+    def copy(self) -> P2PBarrierTask:
+        return P2PBarrierTask(
+            self.key, self.func, *self.args, spec=self.spec, **self.kwargs
+        )
+
+    def __repr__(self) -> str:
+        return f"P2PBarrierTask({self.key!r})"
+
+    def inline(self, dsk: dict[Key, Any]) -> P2PBarrierTask:
+        new_args = _inline_recursively(self.args, dsk)
+        new_kwargs = _inline_recursively(self.kwargs, dsk)
+        assert self.func is not None
+        return P2PBarrierTask(
+            self.key, self.func, *new_args, spec=self.spec, **new_kwargs
+        )

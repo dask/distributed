@@ -10,7 +10,7 @@ import pytest
 from dask.typing import Key
 
 from distributed import Worker
-from distributed.shuffle._core import ShuffleId, ShuffleSpec, id_from_key
+from distributed.shuffle._core import ShuffleId, id_from_key
 from distributed.shuffle._worker_plugin import ShuffleRun, _ShuffleRunManager
 from distributed.utils_test import gen_cluster
 
@@ -421,12 +421,12 @@ class LimitedGetOrCreateShuffleRunManager(_ShuffleRunManager):
         self.blocking_get_or_create = asyncio.Event()
         self.block_get_or_create = asyncio.Event()
 
-    async def get_or_create(self, spec: ShuffleSpec, key: Key) -> ShuffleRun:
-        if len(self.seen) >= self.limit and spec.id not in self.seen:
+    async def get_or_create(self, shuffle_id: ShuffleId, key: Key) -> ShuffleRun:
+        if len(self.seen) >= self.limit and shuffle_id not in self.seen:
             self.blocking_get_or_create.set()
             await self.block_get_or_create.wait()
-        self.seen.add(spec.id)
-        return await super().get_or_create(spec, key)
+        self.seen.add(shuffle_id)
+        return await super().get_or_create(shuffle_id, key)
 
 
 @mock.patch(

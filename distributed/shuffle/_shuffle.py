@@ -21,13 +21,14 @@ import toolz
 from tornado.ioloop import IOLoop
 
 import dask
+from dask._task_spec import GraphNode, Task, TaskRef
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
 from dask.typing import Key
+from dask.utils import is_dataframe_like
 
 from distributed.core import PooledRPCCall
-from distributed.exceptions import Reschedule
 from distributed.metrics import context_meter
 from distributed.shuffle._arrow import (
     buffers_to_table,
@@ -40,6 +41,7 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._core import (
     NDIndex,
+    P2PBarrierTask,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
@@ -47,12 +49,9 @@ from distributed.shuffle._core import (
     get_worker_plugin,
     handle_transfer_errors,
     handle_unpack_errors,
+    p2p_barrier,
 )
-from distributed.shuffle._exceptions import (
-    DataUnavailable,
-    P2PConsistencyError,
-    P2POutOfDiskError,
-)
+from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
@@ -72,26 +71,12 @@ def shuffle_transfer(
     input: pd.DataFrame,
     id: ShuffleId,
     input_partition: int,
-    npartitions: int,
-    column: str,
-    meta: pd.DataFrame,
-    parts_out: set[int],
-    disk: bool,
-    drop_column: bool,
 ) -> int:
     with handle_transfer_errors(id):
         return get_worker_plugin().add_partition(
             input,
             input_partition,
-            spec=DataFrameShuffleSpec(
-                id=id,
-                npartitions=npartitions,
-                column=column,
-                meta=meta,
-                parts_out=parts_out,
-                disk=disk,
-                drop_column=drop_column,
-            ),
+            id,
         )
 
 
@@ -102,19 +87,6 @@ def shuffle_unpack(
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_partition
         )
-
-
-def shuffle_barrier(id: ShuffleId, run_ids: list[int]) -> int:
-    try:
-        return get_worker_plugin().barrier(id, run_ids)
-    except Reschedule as e:
-        raise e
-    except P2PConsistencyError:
-        raise
-    except P2POutOfDiskError:
-        raise
-    except Exception as e:
-        raise RuntimeError(f"shuffle_barrier failed during shuffle {id}") from e
 
 
 def rearrange_by_column_p2p(
@@ -161,7 +133,7 @@ def rearrange_by_column_p2p(
     )
 
 
-_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
+_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
 
 
 class P2PShuffleLayer(Layer):
@@ -172,7 +144,7 @@ class P2PShuffleLayer(Layer):
     name_input: str
     meta_input: pd.DataFrame
     disk: bool
-    parts_out: set[int]
+    parts_out: tuple[int, ...]
     drop_column: bool
 
     def __init__(
@@ -196,9 +168,9 @@ class P2PShuffleLayer(Layer):
         self.meta_input = meta_input
         self.disk = disk
         if parts_out:
-            self.parts_out = set(parts_out)
+            self.parts_out = tuple(parts_out)
         else:
-            self.parts_out = set(range(self.npartitions))
+            self.parts_out = tuple(range(self.npartitions))
         self.npartitions_input = npartitions_input
         self.drop_column = drop_column
         super().__init__(annotations=annotations)
@@ -226,7 +198,7 @@ class P2PShuffleLayer(Layer):
             self._cached_dict = dsk
         return self._cached_dict
 
-    def __getitem__(self, key: Key) -> tuple:
+    def __getitem__(self, key: Key) -> GraphNode:
         return self._dict[key]
 
     def __iter__(self) -> Iterator[Key]:
@@ -283,35 +255,49 @@ class P2PShuffleLayer(Layer):
 
     def _construct_graph(self) -> _T_LowLevelGraph:
         token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
+        shuffle_id = ShuffleId(token)
         dsk: _T_LowLevelGraph = {}
-        _barrier_key = barrier_key(ShuffleId(token))
+        _barrier_key = barrier_key(shuffle_id)
         name = "shuffle-transfer-" + token
         transfer_keys = list()
         for i in range(self.npartitions_input):
-            transfer_keys.append((name, i))
-            dsk[(name, i)] = (
+            t = Task(
+                (name, i),
                 shuffle_transfer,
-                (self.name_input, i),
+                TaskRef((self.name_input, i)),
                 token,
                 i,
-                self.npartitions,
-                self.column,
-                self.meta_input,
-                self.parts_out,
-                self.disk,
-                self.drop_column,
             )
+            dsk[t.key] = t
+            transfer_keys.append(t.ref())
 
-        dsk[_barrier_key] = (shuffle_barrier, token, transfer_keys)
+        barrier = P2PBarrierTask(
+            _barrier_key,
+            p2p_barrier,
+            token,
+            transfer_keys,
+            spec=DataFrameShuffleSpec(
+                id=shuffle_id,
+                npartitions=self.npartitions,
+                column=self.column,
+                meta=self.meta_input,
+                parts_out=self.parts_out,
+                disk=self.disk,
+                drop_column=self.drop_column,
+            ),
+        )
+        dsk[barrier.key] = barrier
 
         name = self.name
         for part_out in self.parts_out:
-            dsk[(name, part_out)] = (
+            t = Task(
+                (name, part_out),
                 shuffle_unpack,
                 token,
                 part_out,
-                _barrier_key,
+                barrier.ref(),
             )
+            dsk[t.key] = t
         return dsk
 
 
@@ -563,25 +549,31 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     def deserialize(self, buffer: Any) -> Any:
         return deserialize_table(buffer)
 
+    def validate_data(self, data: pd.DataFrame) -> None:
+        if not is_dataframe_like(data):
+            raise TypeError(f"Expected {data=} to be a DataFrame, got {type(data)}.")
+        if set(data.columns) != set(self.meta.columns):
+            raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
+
 
 @dataclass(frozen=True)
 class DataFrameShuffleSpec(ShuffleSpec[int]):
     npartitions: int
     column: str
     meta: pd.DataFrame
-    parts_out: set[int]
+    parts_out: Sequence[int] | int
     drop_column: bool
 
     @property
     def output_partitions(self) -> Generator[int]:
-        yield from self.parts_out
+        parts_out = self.parts_out
+        if isinstance(parts_out, int):
+            parts_out = range(parts_out)
+
+        yield from parts_out
 
     def pick_worker(self, partition: int, workers: Sequence[str]) -> str:
         return _get_worker_for_range_sharding(self.npartitions, partition, workers)
-
-    def validate_data(self, data: pd.DataFrame) -> None:
-        if set(data.columns) != set(self.meta.columns):
-            raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
 
     def create_run_on_worker(
         self,
