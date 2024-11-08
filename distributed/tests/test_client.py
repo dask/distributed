@@ -42,7 +42,6 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.bag as db
 from dask import delayed
-from dask._task_spec import no_function_cache
 from dask.optimization import SubgraphCallable
 from dask.tokenize import tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
@@ -4934,29 +4933,27 @@ async def test_robust_undeserializable(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_robust_undeserializable_function(c, s, a, b, monkeypatch):
-    with no_function_cache():
+    class Foo:
+        def __getstate__(self):
+            return 1
 
-        class Foo:
-            def __getstate__(self):
-                return 1
+        def __setstate__(self, state):
+            raise MyException("hello")
 
-            def __setstate__(self, state):
-                raise MyException("hello")
+        def __call__(self, *args):
+            return 1
 
-            def __call__(self, *args):
-                return 1
+    future = c.submit(Foo(), 1)
+    await wait(future)
+    assert future.status == "error"
+    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
+        await future
 
-        future = c.submit(Foo(), 1)
-        await wait(future)
-        assert future.status == "error"
-        with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
-            await future
+    futures = c.map(inc, range(10))
+    results = await c.gather(futures)
 
-        futures = c.map(inc, range(10))
-        results = await c.gather(futures)
-
-        assert results == list(map(inc, range(10)))
-        assert a.data and b.data
+    assert results == list(map(inc, range(10)))
+    assert a.data and b.data
 
 
 @gen_cluster(client=True)
