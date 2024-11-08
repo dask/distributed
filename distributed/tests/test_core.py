@@ -17,7 +17,7 @@ from tornado.ioloop import IOLoop
 import dask
 
 from distributed.batched import BatchedSend
-from distributed.comm.core import CommClosedError
+from distributed.comm.core import CommClosedError, FatalCommClosedError
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend, TCPListener
 from distributed.core import (
@@ -705,6 +705,47 @@ async def test_connection_pool_outside_cancellation(monkeypatch):
 
         done, _ = await asyncio.wait(tasks)
         assert all(t.cancelled() for t in tasks)
+
+
+@gen_test()
+async def test_connection_pool_catch_all_cancellederrors(monkeypatch):
+    from distributed.comm.registry import backends
+    from distributed.comm.tcp import TCPBackend, TCPConnector
+
+    in_connect = asyncio.Event()
+    block_connect = asyncio.Event()
+
+    class BlockedConnector(TCPConnector):
+        async def connect(self, address, deserialize, **connection_args):
+            # This is extremely artificial and assumes that something further
+            # down in the stack would block a cancellation. We want to make sure
+            # that our ConnectionPool closes regardless of this.
+            in_connect.set()
+            try:
+                await block_connect.wait()
+            except asyncio.CancelledError:
+                await asyncio.sleep(30)
+                raise
+            raise FatalCommClosedError()
+
+    class BlockedConnectBackend(TCPBackend):
+        _connector_class = BlockedConnector
+
+    monkeypatch.setitem(backends, "tcp", BlockedConnectBackend())
+
+    async with Server({}) as server:
+        await server.listen("tcp://")
+        pool = await ConnectionPool(limit=2)
+        pool._connecting_close_timeout = 0
+
+        t = asyncio.create_task(pool.connect(server.address))
+
+        await in_connect.wait()
+        while not pool._connecting_count:
+            await asyncio.sleep(0.1)
+        with captured_logger("distributed.core") as sio:
+            await pool.close()
+        assert "Pending connections refuse to cancel" in sio.getvalue()
 
 
 @gen_test()

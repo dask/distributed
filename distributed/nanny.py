@@ -623,6 +623,7 @@ class Nanny(ServerNode):
         self.status = Status.closed
         await super().close()
         self.__exit_stack.__exit__(None, None, None)
+        logger.info("Nanny at %r closed.", self.address_safe)
         return "OK"
 
     async def _log_event(self, topic, msg):
