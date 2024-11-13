@@ -5304,3 +5304,17 @@ async def test_concurrent_close_requests(c, s, *workers):
 async def test_rootish_taskgroup_configuration(c, s, *workers):
     assert s.rootish_tg_threshold == 10
     assert s.rootish_tg_dependencies_threshold == 15
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_alias_resolving_break_queuing(c, s, a):
+    pytest.importorskip("numpy")
+    import dask.array as da
+
+    arr = da.random.random((90, 100), chunks=(10, 50))
+    result = arr.rechunk(((10, 7, 7, 6) * 3, (50, 50)))
+    result = result.sum(split_every=1000)
+    x = result.persist()
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+    assert sum([s.is_rootish(v) for v in s.tasks.values()]) == 18
