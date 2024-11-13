@@ -28,7 +28,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 3.0.0",
-    "dask == 2024.10.0",
+    "dask == 2024.11.2",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.2",
@@ -225,8 +225,7 @@ source = ["distributed"]
 omit = [
     "distributed/tests/test*",
     "distributed/*/tests/test*",
-    "distributed/cli/utils.py",
-    "distributed/cli/dask_spec.py",
+    "distributed/cli/*",
     "distributed/deploy/ssh.py",
     "distributed/_version.py",
     "distributed/pytest_resourceleaks.py",

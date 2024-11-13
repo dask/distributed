@@ -54,14 +54,9 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
-from dask._task_spec import (
-    DependenciesMapping,
-    GraphNode,
-    convert_legacy_graph,
-    resolve_aliases,
-)
+from dask._task_spec import DependenciesMapping, GraphNode, convert_legacy_graph
 from dask.base import TokenizationError, normalize_token, tokenize
-from dask.core import istask, reverse_dict, validate_key
+from dask.core import istask, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
@@ -9411,19 +9406,10 @@ def _materialize_graph(
                 )
 
     dsk2 = convert_legacy_graph(dsk)
-    dependents = reverse_dict(DependenciesMapping(dsk2))
-    # This is removing weird references like "x-foo": "foo" which often make up
-    # a substantial part of the graph
-    # This also performs culling!
-    dsk3 = resolve_aliases(dsk2, keys, dependents)
-
-    logger.debug(
-        "Removing aliases. Started with %i and got %i left", len(dsk2), len(dsk3)
-    )
     # FIXME: There should be no need to fully materialize and copy this but some
     # sections in the scheduler are mutating it.
-    dependencies = {k: set(v) for k, v in DependenciesMapping(dsk3).items()}
-    return dsk3, dependencies, annotations_by_type
+    dependencies = {k: set(v) for k, v in DependenciesMapping(dsk2).items()}
+    return dsk2, dependencies, annotations_by_type
 
 
 def _cull(dsk: dict[Key, GraphNode], keys: set[Key]) -> dict[Key, GraphNode]:
