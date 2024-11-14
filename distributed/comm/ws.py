@@ -443,8 +443,6 @@ class WSConnector(Connector):
             sock = await websocket_connect(request, max_message_size=MAX_MESSAGE_SIZE)
             if sock.stream.closed() and sock.stream.error:
                 raise StreamClosedError(sock.stream.error)
-        except StreamClosedError as e:
-            convert_stream_closed_error(self, e)
         except SSLError as err:
             raise FatalCommClosedError(
                 "TLS expects a `ssl_context` argument of type "
@@ -452,6 +450,8 @@ class WSConnector(Connector):
             ) from err
         except HTTPClientError as e:
             raise CommClosedError(f"in {self}: {e}") from e
+        except OSError as e:
+            convert_stream_closed_error(self, e)
         return self.comm_class(sock, deserialize=deserialize)
 
     def _get_connect_args(self, **connection_args):

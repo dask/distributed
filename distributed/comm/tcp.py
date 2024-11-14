@@ -230,7 +230,7 @@ class TCP(Comm):
                 buffer = await read_bytes_rw(stream, buffer_nbytes)
                 frames.append(buffer)
 
-        except StreamClosedError as e:
+        except OSError as e:
             self.stream = None
             self._closed = True
             convert_stream_closed_error(self, e)
@@ -301,7 +301,7 @@ class TCP(Comm):
 
             # start writing frames
             stream.write(b"")
-        except StreamClosedError as e:
+        except OSError as e:
             self.stream = None
             self._closed = True
             convert_stream_closed_error(self, e)
@@ -554,9 +554,6 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             if stream.closed() and stream.error:
                 raise StreamClosedError(stream.error)
 
-        except StreamClosedError as e:
-            # The socket connect() call failed
-            convert_stream_closed_error(self, e)
         except SSLCertVerificationError as err:
             raise FatalCommClosedError(
                 "TLS certificate does not match. Check your security settings. "
@@ -564,6 +561,9 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             ) from err
         except SSLError as err:
             raise FatalCommClosedError() from err
+        except OSError as e:
+            # The socket connect() call failed
+            convert_stream_closed_error(self, e)
 
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(
