@@ -1704,10 +1704,6 @@ async def test_upload_file_no_extension(c, s, a, b):
         await c.upload_file(fn)
 
 
-@pytest.mark.skipif(
-    sys.version_info >= (3, 13),
-    reason="Upstream issue in CPython. See https://github.com/dask/distributed/issues/8708 and https://github.com/python/cpython/issues/121342.",
-)
 @gen_cluster(client=True)
 async def test_upload_file_zip(c, s, a, b):
     def g():
