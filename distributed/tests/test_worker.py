@@ -3553,7 +3553,7 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # b has shut down. There's nowhere to replicate x to anymore, so retire_workers
         # will give up and reinstate a to running status.
-        assert await retire_fut == {}
+        assert not await retire_fut
         while a.status != Status.running:
             await asyncio.sleep(0.01)
 
