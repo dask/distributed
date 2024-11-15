@@ -54,7 +54,7 @@ from distributed.core import (
 )
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
-from distributed.metrics import context_meter, time
+from distributed.metrics import _WindowsTime, context_meter, time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
@@ -2607,14 +2607,14 @@ def no_time_resync():
     """Temporarily disable the automatic resync of distributed.metrics._WindowsTime
     which, every 10 minutes, can cause time() to go backwards a few milliseconds.
 
-    On Linux and MacOSX, this fixture is a no-op.
+    On Linux, MacOSX, and Windows with Python 3.13+ this fixture is a no-op.
 
     See also
     --------
     NoSchedulerDelayWorker
     padded_time
     """
-    if WINDOWS:
+    if isinstance(time, _WindowsTime):
         time()  # Initialize or refresh delta
         bak = time.__self__.next_resync
         time.__self__.next_resync = float("inf")
