@@ -4571,7 +4571,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
-        logger.info("Register worker %s", ws)
+        logger.info("Register worker addr: %s name: %s", ws.address, ws.name)
 
         msg = {
             "status": "OK",
@@ -5428,7 +5428,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws = self.workers[address]
 
-        logger.info(f"Remove worker {ws} ({stimulus_id=})")
+        logger.info(f"Remove worker addr:{ws.address} name: {ws.name} ({stimulus_id=})")
         if close:
             with suppress(AttributeError, CommClosedError):
                 self.stream_comms[address].send(
