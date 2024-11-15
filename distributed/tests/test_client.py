@@ -4385,7 +4385,11 @@ async def test_scatter_type(c, s, a, b):
 async def test_retire_workers_2(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
-    await s.retire_workers(workers=[a.address])
+    info = await s.retire_workers(workers=[a.address])
+    assert info
+    assert info[a.address]
+    assert "name" in info[a.address]
+    assert a.address not in s.workers
     assert b.data == {x.key: 1}
 
     assert {ws.address for ws in s.tasks[x.key].who_has} == {b.address}
@@ -4398,7 +4402,8 @@ async def test_retire_workers_2(c, s, a, b):
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
-    await s.retire_workers(workers=[w.address for w in workers[:7]])
+    info = await s.retire_workers(workers=[w.address for w in workers[:7]])
+    assert len(info) == 7
 
     results = await c.gather(futures)
     assert results == list(range(100))
@@ -4760,7 +4765,15 @@ def test_recreate_task_sync(c):
 @gen_cluster(client=True)
 async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
-    await c.retire_workers(workers=[a.address], close_workers=True)
+    info = await c.retire_workers(workers=[a.address], close_workers=True)
+
+    # Deployment tooling is sometimes relying on this information to be returned
+    # This represents WorkerState.idenity() right now but may be slimmed down in
+    # the future
+    assert info
+    assert info[a.address]
+    assert "name" in info[a.address]
+
     assert set(s.workers) == {b.address}
 
     while a.status != Status.closed:
