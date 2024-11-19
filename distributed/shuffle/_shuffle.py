@@ -275,7 +275,7 @@ class P2PShuffleLayer(Layer):
             _barrier_key,
             p2p_barrier,
             token,
-            transfer_keys,
+            *transfer_keys,
             spec=DataFrameShuffleSpec(
                 id=shuffle_id,
                 npartitions=self.npartitions,
