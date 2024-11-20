@@ -12,4 +12,3 @@ distributed/widgets/*  @jacobtomlinson
 
 # GPU Support
 distributed/diagnostics/nvml.py  @jacobtomlinson @quasiben
-continuous_integration/gpuci/*  @jacobtomlinson @quasiben
