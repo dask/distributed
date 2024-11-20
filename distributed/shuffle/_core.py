@@ -584,6 +584,7 @@ def p2p_barrier(id: ShuffleId, *run_ids: int) -> int:
 
 class P2PBarrierTask(Task):
     spec: ShuffleSpec
+    block_fusion: bool
 
     __slots__ = tuple(__annotations__)
 
@@ -598,6 +599,7 @@ class P2PBarrierTask(Task):
     ):
         self.spec = spec
         super().__init__(key, func, *args, **kwargs)
+        self.block_fusion = True
 
     def __repr__(self) -> str:
         return f"P2PBarrierTask({self.key!r})"
