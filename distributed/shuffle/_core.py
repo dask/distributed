@@ -601,3 +601,7 @@ class P2PBarrierTask(Task):
 
     def __repr__(self) -> str:
         return f"P2PBarrierTask({self.key!r})"
+
+    @property
+    def block_fusion(self) -> bool:
+        return True
