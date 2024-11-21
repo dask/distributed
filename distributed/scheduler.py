@@ -4571,7 +4571,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
-        logger.info("Register worker %s", ws)
+        logger.info("Register worker addr: %s name: %s", ws.address, ws.name)
 
         msg = {
             "status": "OK",
@@ -5428,7 +5428,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws = self.workers[address]
 
-        logger.info(f"Remove worker {ws} ({stimulus_id=})")
+        logger.info(
+            f"Remove worker addr: {ws.address} name: {ws.name} ({stimulus_id=})"
+        )
         if close:
             with suppress(AttributeError, CommClosedError):
                 self.stream_comms[address].send(
@@ -7548,7 +7550,11 @@ class Scheduler(SchedulerState, ServerNode):
                 names_set = {str(name) for name in names}
                 wss = {ws for ws in self.workers.values() if str(ws.name) in names_set}
             elif workers is not None:
-                logger.info("Retire worker addresses %s", workers)
+                logger.info(
+                    "Retire worker addresses (stimulus_id='%s') %s",
+                    stimulus_id,
+                    workers,
+                )
                 wss = {
                     self.workers[address]
                     for address in workers
@@ -7572,8 +7578,6 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 coros = []
                 for ws in wss:
-                    logger.info(f"Retiring worker {ws.address!r} ({stimulus_id=!r})")
-
                     policy = RetireWorker(ws.address)
                     amm.add_policy(policy)
 

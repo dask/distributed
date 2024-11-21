@@ -418,7 +418,7 @@ class HashJoinP2PLayer(Layer):
             _barrier_key_left,
             p2p_barrier,
             token_left,
-            transfer_keys_left,
+            *transfer_keys_left,
             spec=DataFrameShuffleSpec(
                 id=shuffle_id_left,
                 npartitions=self.npartitions,
@@ -435,7 +435,7 @@ class HashJoinP2PLayer(Layer):
             _barrier_key_right,
             p2p_barrier,
             token_right,
-            transfer_keys_right,
+            *transfer_keys_right,
             spec=DataFrameShuffleSpec(
                 id=shuffle_id_right,
                 npartitions=self.npartitions,
