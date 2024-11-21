@@ -70,7 +70,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from dask._task_spec import DataNode, GraphNode, Task, TaskRef
+from dask._task_spec import DataNode, GraphNode, Task, TaskRef, parse_input
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -622,6 +622,9 @@ class Future(TaskRef):
     def __hash__(self):
         return hash(self._id)
 
+    def __eq__(self, other):
+        return self is other
+
 
 class FutureState:
     """A Future's internal state.
@@ -850,12 +853,10 @@ class _MapLayer(Layer):
         **kwargs,
     ):
         self.func: Callable = func
-        self.iterables: Iterable[Any] = (
-            list(zip(*zip(*iterables))) if _is_nested(iterables) else [iterables]
-        )
+        self.iterables = [tuple(map(parse_input, iterable)) for iterable in iterables]
         self.key: str | Iterable[str] | None = key
         self.pure: bool = pure
-        self.kwargs = kwargs
+        self.kwargs = {k: parse_input(v) for k, v in kwargs.items()}
         super().__init__(annotations=annotations)
 
     def __repr__(self) -> str:
@@ -2163,13 +2164,12 @@ class Client(SyncMethodMixin):
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-
         dsk = {
             key: Task(
                 key,
                 func,
-                *args,
-                **kwargs,
+                *(parse_input(a) for a in args),
+                **{k: parse_input(v) for k, v in kwargs.items()},
             )
         }
         futures = self._graph_to_futures(

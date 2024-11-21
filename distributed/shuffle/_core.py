@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
 from tornado.ioloop import IOLoop
 
 import dask.config
-from dask._task_spec import Task, _inline_recursively
+from dask._task_spec import Task
 from dask.core import flatten
 from dask.typing import Key
 from dask.utils import parse_bytes, parse_timedelta
@@ -569,7 +569,7 @@ def _mean_shard_size(shards: Iterable) -> int:
     return size // count if count else 0
 
 
-def p2p_barrier(id: ShuffleId, run_ids: list[int]) -> int:
+def p2p_barrier(id: ShuffleId, *run_ids: int) -> int:
     try:
         return get_worker_plugin().barrier(id, run_ids)
     except Reschedule as e:
@@ -599,18 +599,9 @@ class P2PBarrierTask(Task):
         self.spec = spec
         super().__init__(key, func, *args, **kwargs)
 
-    def copy(self) -> P2PBarrierTask:
-        return P2PBarrierTask(
-            self.key, self.func, *self.args, spec=self.spec, **self.kwargs
-        )
-
     def __repr__(self) -> str:
         return f"P2PBarrierTask({self.key!r})"
 
-    def inline(self, dsk: dict[Key, Any]) -> P2PBarrierTask:
-        new_args = _inline_recursively(self.args, dsk)
-        new_kwargs = _inline_recursively(self.kwargs, dsk)
-        assert self.func is not None
-        return P2PBarrierTask(
-            self.key, self.func, *new_args, spec=self.spec, **new_kwargs
-        )
+    @property
+    def block_fusion(self) -> bool:
+        return True
