@@ -326,6 +326,8 @@ class Security:
             # IP addresses rather than hostnames
             ctx.check_hostname = False
 
+            ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+
             if tls.get("ciphers"):
                 ctx.set_ciphers(tls.get("ciphers"))
 
