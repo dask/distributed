@@ -40,7 +40,7 @@ dependencies:
   - sortedcollections
   - tblib
   - toolz
-  - tornado # overridden by git tip below
+  # - tornado # Using pip below until 6.4.2 is on conda-forge
   - zict  # overridden by git tip below
   - zstandard
   # Temporary fix for https://github.com/pypa/setuptools/issues/4496
@@ -53,4 +53,4 @@ dependencies:
       # - git+https://github.com/dask/s3fs
       # - git+https://github.com/fsspec/filesystem_spec
       - keras
-      - git+https://github.com/tornadoweb/tornado
+      - tornado>=6.4.2
