@@ -54,7 +54,7 @@ from distributed.core import (
 )
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
-from distributed.metrics import context_meter, time
+from distributed.metrics import _WindowsTime, context_meter, time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
@@ -1541,6 +1541,7 @@ def get_server_ssl_context(
     ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=get_cert(ca_file))
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
     ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
     return ctx
 
@@ -1551,6 +1552,7 @@ def get_client_ssl_context(
     ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=get_cert(ca_file))
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
     ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
     return ctx
 
@@ -2605,14 +2607,14 @@ def no_time_resync():
     """Temporarily disable the automatic resync of distributed.metrics._WindowsTime
     which, every 10 minutes, can cause time() to go backwards a few milliseconds.
 
-    On Linux and MacOSX, this fixture is a no-op.
+    On Linux, MacOSX, and Windows with Python 3.13+ this fixture is a no-op.
 
     See also
     --------
     NoSchedulerDelayWorker
     padded_time
     """
-    if WINDOWS:
+    if isinstance(time, _WindowsTime):
         time()  # Initialize or refresh delta
         bak = time.__self__.next_resync
         time.__self__.next_resync = float("inf")

@@ -1,0 +1,56 @@
+name: dask-distributed-313
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - packaging
+  - pip
+  - asyncssh
+  - bokeh>3
+  - click
+  - cloudpickle
+  - coverage
+  - dask  # overridden by git tip below
+  - filesystem-spec  # overridden by git tip below
+  - gilknocker
+  - h5py
+  - ipykernel
+  - ipywidgets
+  - jinja2
+  - jupyter-server-proxy
+  - jupyterlab
+  - locket
+  - msgpack-python
+  - netcdf4
+  - paramiko
+  - pre-commit
+  - prometheus_client
+  - psutil
+  - pyarrow
+  - pytest
+  - pytest-cov
+  - pytest-faulthandler
+  - pytest-repeat
+  - pytest-rerunfailures
+  - pytest-timeout
+  - requests
+  - s3fs  # overridden by git tip below
+  - scikit-learn
+  - scipy
+  - sortedcollections
+  - tblib
+  - toolz
+  # - tornado # Using pip below until 6.4.2 is on conda-forge
+  - zict  # overridden by git tip below
+  - zstandard
+  # Temporary fix for https://github.com/pypa/setuptools/issues/4496
+  - setuptools < 71
+  - pip:
+      - git+https://github.com/dask/dask
+      - git+https://github.com/dask/dask-expr
+      - git+https://github.com/dask/zict
+      # Revert after https://github.com/dask/distributed/issues/8614 is fixed
+      # - git+https://github.com/dask/s3fs
+      # - git+https://github.com/fsspec/filesystem_spec
+      - keras
+      - tornado>=6.4.2
