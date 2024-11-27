@@ -493,6 +493,7 @@ async def test_update_graph_hook_simple(c, s, a, b):
             annotations,
             priority,
             dependencies,
+            stimulus_id,
             **kwargs,
         ) -> None:
             assert scheduler is s
@@ -505,6 +506,7 @@ async def test_update_graph_hook_simple(c, s, a, b):
             assert len(priority) == 1
             assert isinstance(priority["foo"], tuple)
             assert dependencies == {"foo": set()}
+            assert stimulus_id is not None
             self.success = True
 
     plugin = UpdateGraph()
@@ -533,6 +535,7 @@ async def test_update_graph_hook_complex(c, s, a, b):
             annotations,
             priority,
             dependencies,
+            stimulus_id,
             **kwargs,
         ) -> None:
             assert scheduler is s
@@ -553,6 +556,7 @@ async def test_update_graph_hook_complex(c, s, a, b):
                 assert k in dependencies
             assert dependencies["f1"] == set()
             assert dependencies["sum"] == {"f1", "f3"}
+            assert stimulus_id is not None
 
             self.success = True
 

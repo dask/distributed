@@ -312,7 +312,10 @@ class Server:
         self.io_loop = self.loop = IOLoop.current()
 
         if not hasattr(self.io_loop, "profile"):
-            if dask.config.get("distributed.worker.profile.enabled"):
+            if (
+                dask.config.get("distributed.worker.profile.enabled")
+                and sys.version_info.minor != 11
+            ):
                 ref = weakref.ref(self.io_loop)
 
                 def stop() -> bool:
@@ -1355,6 +1358,7 @@ class ConnectionPool:
         )
         self._pending_count = 0
         self._connecting_count = 0
+        self._connecting_close_timeout = 5
         self.status = Status.init
 
     def _validate(self) -> None:
@@ -1534,7 +1538,9 @@ class ConnectionPool:
             try:
                 return connect_attempt.result()
             except asyncio.CancelledError:
-                raise CommClosedError(reason)
+                if reason:
+                    raise CommClosedError(reason)
+                raise
 
     def reuse(self, addr: str, comm: Comm) -> None:
         """
@@ -1612,8 +1618,15 @@ class ConnectionPool:
             for _ in comms:
                 self.semaphore.release()
 
+        start = time()
         while self._connecting:
-            await asyncio.sleep(0.005)
+            if time() - start > self._connecting_close_timeout:
+                logger.warning(
+                    "Pending connections refuse to cancel. %d connections pending. Closing anyway.",
+                    len(self._connecting),
+                )
+                break
+            await asyncio.sleep(0.01)
 
 
 def coerce_to_address(o):

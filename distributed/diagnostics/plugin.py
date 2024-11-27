@@ -101,6 +101,7 @@ class SchedulerPlugin:
         annotations: dict[str, dict[Key, Any]],
         priority: dict[Key, tuple[int | float, ...]],
         dependencies: dict[Key, set[Key]],
+        stimulus_id: str,
         **kwargs: Any,
     ) -> None:
         """Run when a new graph / tasks enter the scheduler
@@ -129,6 +130,8 @@ class SchedulerPlugin:
                 Task calculated priorities as assigned to the tasks.
             dependencies:
                 A mapping that maps a key to its dependencies.
+            stimulus_id:
+                ID of the stimulus causing the graph update
             **kwargs:
                 It is recommended to allow plugins to accept more parameters to
                 ensure future compatibility.

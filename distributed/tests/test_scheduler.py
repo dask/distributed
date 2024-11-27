@@ -29,7 +29,6 @@ from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import parse_timedelta, tmpfile, typename
 
 from distributed import (
-    CancelledError,
     Client,
     Event,
     Lock,
@@ -1500,7 +1499,6 @@ async def test_retire_workers(c, s, a, b):
 
     workers = await s.retire_workers()
     assert list(workers) == [a.address]
-    assert workers[a.address]["nthreads"] == a.state.nthreads
     assert list(s.workers) == [b.address]
 
     assert s.workers_to_close() == []
@@ -1974,6 +1972,7 @@ async def test_profile_metadata(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2001,6 +2000,7 @@ async def test_profile_metadata_timeout(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2020,6 +2020,7 @@ async def test_profile_metadata_keys(c, s, a, b):
     )
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2037,6 +2038,7 @@ async def test_statistical_profiling(c, s, a, b):
     assert profile["count"]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -4177,16 +4179,15 @@ async def test_transition_counter(c, s, a):
     assert a.state.transition_counter > 1
 
 
-@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_transition_counter_max_scheduler(c, s, a, b):
     # This is set by @gen_cluster; it's False in production
     assert s.transition_counter_max > 0
     s.transition_counter_max = 1
     with captured_logger("distributed.scheduler") as logger:
-        with pytest.raises(CancelledError):
+        with pytest.raises(AssertionError):
             await c.submit(inc, 2)
-    assert s.transition_counter > 1
+    assert s.transition_counter == 1
     with pytest.raises(AssertionError):
         s.validate_state()
     assert "transition_counter_max" in logger.getvalue()
@@ -4833,7 +4834,20 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
         await y
 
 
-@gen_cluster(client=True)
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="asyncio.wait_for is unreliable on 3.10 and below",
+)
+@gen_cluster(
+    client=True,
+    config={
+        # In this test we want to make sure that the connections are severed
+        # before the timeout hits. Therefore, the connection timeout should be
+        # higher than the test timeout.
+        # At the time of writing, the test timeout was 30s
+        "distributed.comm.timeouts.connect": "120s"
+    },
+)
 async def test_tell_workers_when_peers_have_left(c, s, a, b):
     f = (await c.scatter({"f": 1}, workers=[a.address, b.address], broadcast=True))["f"]
 
@@ -4950,8 +4964,8 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
         _, msg = event
         return (
             isinstance(msg, dict)
-            and msg.get("action", None) == "update_graph"
-            and msg["key-collisions"] > 0
+            and msg.get("action", None) == "update-graph"
+            and msg["metrics"]["key_collisions"] > 0
         )
 
     def handler(ev):
@@ -4959,7 +4973,7 @@ async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, de
             nonlocal seen
             seen = True
 
-    c.subscribe_topic("all", handler)
+    c.subscribe_topic("scheduler", handler)
 
     x1 = c.submit(inc, 1, key="x1")
     y_old = c.submit(inc, x1, key="y")
@@ -5277,3 +5291,29 @@ async def test_concurrent_close_requests(c, s, *workers):
     assert s.plugins["before_close"].call_count == 1
     lines = caplog.getvalue().split("\n")
     assert sum("Closing scheduler" in line for line in lines) == 1
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.rootish-taskgroup": 10,
+        "distributed.scheduler.rootish-taskgroup-dependencies": 15,
+    },
+)
+async def test_rootish_taskgroup_configuration(c, s, *workers):
+    assert s.rootish_tg_threshold == 10
+    assert s.rootish_tg_dependencies_threshold == 15
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_alias_resolving_break_queuing(c, s, a):
+    pytest.importorskip("numpy")
+    import dask.array as da
+
+    arr = da.random.random((90, 100), chunks=(10, 50))
+    result = arr.rechunk(((10, 7, 7, 6) * 3, (50, 50)))
+    result = result.sum(split_every=1000)
+    x = result.persist()
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+    assert sum([s.is_rootish(v) for v in s.tasks.values()]) == 18

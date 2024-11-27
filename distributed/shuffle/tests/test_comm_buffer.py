@@ -20,7 +20,12 @@ async def test_basic(tmp_path):
     async def send(address, shards):
         d[address].extend(shards)
 
-    mc = CommShardsBuffer(send=send, memory_limiter=ResourceLimiter(None))
+    mc = CommShardsBuffer(
+        send=send,
+        max_message_size=parse_bytes("2 MiB"),
+        memory_limiter=ResourceLimiter(None),
+        concurrency_limit=10,
+    )
     await mc.write({"x": b"0" * 1000, "y": b"1" * 500})
     await mc.write({"x": b"0" * 1000, "y": b"1" * 500})
 
@@ -37,7 +42,12 @@ async def test_exceptions(tmp_path):
     async def send(address, shards):
         raise Exception(123)
 
-    mc = CommShardsBuffer(send=send, memory_limiter=ResourceLimiter(None))
+    mc = CommShardsBuffer(
+        send=send,
+        max_message_size=parse_bytes("2 MiB"),
+        memory_limiter=ResourceLimiter(None),
+        concurrency_limit=10,
+    )
     await mc.write({"x": b"0" * 1000, "y": b"1" * 500})
 
     while not mc._exception:
@@ -65,7 +75,10 @@ async def test_slow_send(tmp_path):
         return {"status": "OK"}
 
     mc = CommShardsBuffer(
-        send=send, concurrency_limit=1, memory_limiter=ResourceLimiter(None)
+        send=send,
+        max_message_size=parse_bytes("2 MiB"),
+        concurrency_limit=1,
+        memory_limiter=ResourceLimiter(None),
     )
     await mc.write({"x": b"0", "y": b"1"})
     await mc.write({"x": b"0", "y": b"1"})
@@ -96,7 +109,10 @@ async def test_concurrent_puts():
     nshards = 10
     nputs = 20
     comm_buffer = CommShardsBuffer(
-        send=send, memory_limiter=ResourceLimiter(parse_bytes("100 MiB"))
+        send=send,
+        max_message_size=parse_bytes("2 MiB"),
+        memory_limiter=ResourceLimiter(parse_bytes("100 MiB")),
+        concurrency_limit=10,
     )
     payload = {
         x: gen_bytes(frac, comm_buffer.memory_limiter.limit) for x in range(nshards)
@@ -138,7 +154,10 @@ async def test_concurrent_puts_error():
     nshards = 10
     nputs = 20
     comm_buffer = CommShardsBuffer(
-        send=send, memory_limiter=ResourceLimiter(parse_bytes("100 MiB"))
+        send=send,
+        max_message_size=parse_bytes("2 MiB"),
+        memory_limiter=ResourceLimiter(parse_bytes("100 MiB")),
+        concurrency_limit=10,
     )
     payload = {
         x: gen_bytes(frac, comm_buffer.memory_limiter.limit) for x in range(nshards)

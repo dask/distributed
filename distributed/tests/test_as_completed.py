@@ -131,20 +131,21 @@ def test_as_completed_is_empty(client):
     assert ac.is_empty()
 
 
-def test_as_completed_cancel(client):
-    x = client.submit(inc, 1)
-    y = client.submit(inc, 1)
+@gen_cluster(client=True)
+async def test_as_completed_cancel(c, s, a, b):
+    x = c.submit(inc, 1)
+    y = c.submit(inc, 1)
 
     ac = as_completed([x, y])
-    x.cancel()
+    await x.cancel()
 
-    assert next(ac) is x or y
-    assert next(ac) is y or x
+    async for fut in ac:
+        assert fut is y or fut is x
 
     with pytest.raises(queue.Empty):
         ac.queue.get(timeout=0.1)
 
-    res = list(as_completed([x, y, x]))
+    res = [fut async for fut in as_completed([x, y, x])]
     assert len(res) == 3
     assert set(res) == {x, y}
     assert res.count(x) == 2

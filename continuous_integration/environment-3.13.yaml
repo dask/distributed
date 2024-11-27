@@ -1,13 +1,12 @@
-name: dask-distributed
+name: dask-distributed-313
 channels:
   - conda-forge
-  - defaults
 dependencies:
-  - python=3.11
+  - python=3.13
   - packaging
   - pip
   - asyncssh
-  - bokeh
+  - bokeh>3
   - click
   - cloudpickle
   - coverage
@@ -27,7 +26,7 @@ dependencies:
   - pre-commit
   - prometheus_client
   - psutil
-  - pyarrow=14
+  - pyarrow
   - pytest
   - pytest-cov
   - pytest-faulthandler

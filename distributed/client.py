@@ -37,9 +37,6 @@ from typing import (
     cast,
 )
 
-if TYPE_CHECKING:
-    from typing_extensions import TypeAlias
-
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 
@@ -50,9 +47,8 @@ from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.optimization import SubgraphCallable
 from dask.tokenize import tokenize
-from dask.typing import Key, NoDefault, no_default
+from dask.typing import Key, NestedKeys, NoDefault, no_default
 from dask.utils import (
-    apply,
     ensure_dict,
     format_bytes,
     funcname,
@@ -73,6 +69,8 @@ except ImportError:
     single_key = first
 from tornado import gen
 from tornado.ioloop import IOLoop
+
+from dask._task_spec import DataNode, GraphNode, List, Task, TaskRef, parse_input
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -123,7 +121,6 @@ from distributed.utils import (
     thread_state,
 )
 from distributed.utils_comm import (
-    WrappedKey,
     gather_from_workers,
     pack_data,
     retry_operation,
@@ -131,6 +128,9 @@ from distributed.utils_comm import (
     unpack_remotedata,
 )
 from distributed.worker import get_client, get_worker, secede
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +250,7 @@ def _del_global_client(c: Client) -> None:
             pass
 
 
-class Future(WrappedKey):
+class Future(TaskRef):
     """A remotely running computation
 
     A Future is a local proxy to a result running on a remote worker.  A user
@@ -598,6 +598,9 @@ class Future(WrappedKey):
         except RuntimeError:  # closed event loop
             pass
 
+    def __str__(self):
+        return repr(self)
+
     def __repr__(self):
         if self.type:
             return (
@@ -615,6 +618,12 @@ class Future(WrappedKey):
 
     def __await__(self):
         return self.result().__await__()
+
+    def __hash__(self):
+        return hash(self._id)
+
+    def __eq__(self, other):
+        return self is other
 
 
 class FutureState:
@@ -813,7 +822,7 @@ class VersionsDict(TypedDict):
     client: dict[str, dict[str, Any]]
 
 
-_T_LowLevelGraph: TypeAlias = dict[Key, tuple]
+_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
 
 
 def _is_nested(iterable):
@@ -844,12 +853,10 @@ class _MapLayer(Layer):
         **kwargs,
     ):
         self.func: Callable = func
-        self.iterables: Iterable[Any] = (
-            list(zip(*zip(*iterables))) if _is_nested(iterables) else [iterables]
-        )
+        self.iterables = [tuple(map(parse_input, iterable)) for iterable in iterables]
         self.key: str | Iterable[str] | None = key
         self.pure: bool = pure
-        self.kwargs = kwargs
+        self.kwargs = {k: parse_input(v) for k, v in kwargs.items()}
         super().__init__(annotations=annotations)
 
     def __repr__(self) -> str:
@@ -905,7 +912,7 @@ class _MapLayer(Layer):
     def is_materialized(self) -> bool:
         return hasattr(self, "_cached_dict")
 
-    def __getitem__(self, key: Key) -> tuple:
+    def __getitem__(self, key: Key) -> GraphNode:
         return self._dict[key]
 
     def __iter__(self) -> Iterator[Key]:
@@ -919,7 +926,7 @@ class _MapLayer(Layer):
 
         if not self.kwargs:
             dsk = {
-                key: (self.func,) + args
+                key: Task(key, self.func, *args)
                 for key, args in zip(self._keys, zip(*self.iterables))
             }
 
@@ -928,15 +935,15 @@ class _MapLayer(Layer):
             dsk = {}
             for k, v in self.kwargs.items():
                 if sizeof(v) > 1e5:
-                    vv = dask.delayed(v)
-                    kwargs2[k] = vv._key
-                    dsk.update(vv.dask)
+                    vv = DataNode(k, v)
+                    kwargs2[k] = vv.ref()
+                    dsk[vv.key] = vv
                 else:
                     kwargs2[k] = v
 
                 dsk.update(
                     {
-                        key: (apply, self.func, (tuple, list(args)), kwargs2)
+                        key: Task(key, self.func, *args, **kwargs2)
                         for key, args in zip(self._keys, zip(*self.iterables))
                     }
                 )
@@ -2157,11 +2164,14 @@ class Client(SyncMethodMixin):
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-
-        if kwargs:
-            dsk = {key: (apply, func, list(args), kwargs)}
-        else:
-            dsk = {key: (func,) + tuple(args)}
+        dsk = {
+            key: Task(
+                key,
+                func,
+                *(parse_input(a) for a in args),
+                **{k: parse_input(v) for k, v in kwargs.items()},
+            )
+        }
         futures = self._graph_to_futures(
             dsk,
             [key],
@@ -3374,7 +3384,7 @@ class Client(SyncMethodMixin):
                     "op": "update-graph",
                     "graph_header": header,
                     "graph_frames": frames,
-                    "keys": list(keys),
+                    "keys": set(keys),
                     "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
@@ -3665,7 +3675,8 @@ class Client(SyncMethodMixin):
             if func is single_key and len(keys) == 1 and not extra_args:
                 names[i] = keys[0]
             else:
-                dsk2[name] = (func, keys) + extra_args
+                t = Task(name, func, _convert_dask_keys(keys), *extra_args)
+                dsk2[t.key] = t
 
         if not isinstance(dsk, HighLevelGraph):
             dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
@@ -4460,7 +4471,7 @@ class Client(SyncMethodMixin):
         self,
         filename: str = "dask-cluster-dump",
         write_from_scheduler: bool | None = None,
-        exclude: Collection[str] = ("run_spec",),
+        exclude: Collection[str] = (),
         format: Literal["msgpack", "yaml"] = "msgpack",
         **storage_options,
     ):
@@ -5607,6 +5618,17 @@ class Client(SyncMethodMixin):
         return self.unregister_worker_plugin(plugin_name)
 
 
+def _convert_dask_keys(keys: NestedKeys) -> List:
+    assert isinstance(keys, list)
+    new_keys: list[List | TaskRef] = []
+    for key in keys:
+        if isinstance(key, list):
+            new_keys.append(_convert_dask_keys(key))
+        else:
+            new_keys.append(TaskRef(key))
+    return List(*new_keys)
+
+
 class _WorkerSetupPlugin(WorkerPlugin):
     """This is used to support older setup functions as callbacks"""
 
@@ -6100,7 +6122,7 @@ def futures_of(o, client=None):
             stack.extend(x.values())
         elif type(x) is SubgraphCallable:
             stack.extend(x.dsk.values())
-        elif isinstance(x, WrappedKey):
+        elif isinstance(x, TaskRef):
             if x not in seen:
                 seen.add(x)
                 futures.append(x)

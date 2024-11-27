@@ -683,7 +683,9 @@ async def test_get(c, s, a, b):
     assert result == []
 
     result = await c.get(
-        {("x", 1): (inc, 1), ("x", 2): (inc, ("x", 1))}, ("x", 2), sync=False
+        {("x", 1): (inc, 1), ("x", 2): (inc, ("x", 1))},
+        ("x", 2),
+        sync=False,
     )
     assert result == 3
 
@@ -1702,6 +1704,10 @@ async def test_upload_file_no_extension(c, s, a, b):
         await c.upload_file(fn)
 
 
+@pytest.mark.skipif(
+    sys.version_info >= (3, 13),
+    reason="Upstream issue in CPython. See https://github.com/dask/distributed/issues/8708 and https://github.com/python/cpython/issues/121342.",
+)
 @gen_cluster(client=True)
 async def test_upload_file_zip(c, s, a, b):
     def g():
@@ -2883,8 +2889,9 @@ def test_persist_get_sync(c):
     assert xxyy3.compute() == ((1 + 1) + (2 + 2)) + 10
 
 
+@pytest.mark.parametrize("do_wait", [True, False])
 @gen_cluster(client=True)
-async def test_persist_get(c, s, a, b):
+async def test_persist_get(c, s, a, b, do_wait):
     x, y = delayed(1), delayed(2)
     xx = delayed(add)(x, x)
     yy = delayed(add)(y, y)
@@ -2892,8 +2899,8 @@ async def test_persist_get(c, s, a, b):
 
     xxyy2 = c.persist(xxyy)
     xxyy3 = delayed(add)(xxyy2, 10)
-
-    await asyncio.sleep(0.5)
+    if do_wait:
+        await wait(xxyy2)
     result = await c.gather(c.get(xxyy3.dask, xxyy3.__dask_keys__(), sync=False))
     assert result[0] == ((1 + 1) + (2 + 2)) + 10
 
@@ -4382,7 +4389,11 @@ async def test_scatter_type(c, s, a, b):
 async def test_retire_workers_2(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
-    await s.retire_workers(workers=[a.address])
+    info = await s.retire_workers(workers=[a.address])
+    assert info
+    assert info[a.address]
+    assert "name" in info[a.address]
+    assert a.address not in s.workers
     assert b.data == {x.key: 1}
 
     assert {ws.address for ws in s.tasks[x.key].who_has} == {b.address}
@@ -4395,7 +4406,8 @@ async def test_retire_workers_2(c, s, a, b):
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
-    await s.retire_workers(workers=[w.address for w in workers[:7]])
+    info = await s.retire_workers(workers=[w.address for w in workers[:7]])
+    assert len(info) == 7
 
     results = await c.gather(futures)
     assert results == list(range(100))
@@ -4712,8 +4724,8 @@ async def test_submit_list_kwargs(c, s, a, b):
     assert result == 1 + 2 + 3
 
 
-@gen_cluster(client=True)
-async def test_map_list_kwargs(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_map_list_kwargs(c, s, a):
     futures = await c.scatter([1, 2, 3])
 
     def f(i, L=None):
@@ -4722,97 +4734,6 @@ async def test_map_list_kwargs(c, s, a, b):
     futures = c.map(f, range(10), L=futures)
     results = await c.gather(futures)
     assert results == [i + 6 for i in range(10)]
-
-
-@gen_cluster(client=True)
-async def test_recreate_error_delayed(c, s, a, b):
-    x0 = delayed(dec)(2)
-    y0 = delayed(dec)(1)
-    x = delayed(div)(1, x0)
-    y = delayed(div)(1, y0)
-    tot = delayed(sum)(x, y)
-
-    f = c.compute(tot)
-
-    assert f.status == "pending"
-
-    error_f = await c._get_errored_future(f)
-    function, args, kwargs = await c._get_components_from_future(error_f)
-    assert f.status == "error"
-    assert function.__name__ == "div"
-    assert args == (1, 0)
-    with pytest.raises(ZeroDivisionError):
-        function(*args, **kwargs)
-
-
-@gen_cluster(client=True)
-async def test_recreate_error_futures(c, s, a, b):
-    x0 = c.submit(dec, 2)
-    y0 = c.submit(dec, 1)
-    x = c.submit(div, 1, x0)
-    y = c.submit(div, 1, y0)
-    tot = c.submit(sum, x, y)
-    f = c.compute(tot)
-
-    assert f.status == "pending"
-
-    error_f = await c._get_errored_future(f)
-    function, args, kwargs = await c._get_components_from_future(error_f)
-    assert f.status == "error"
-    assert function.__name__ == "div"
-    assert args == (1, 0)
-    with pytest.raises(ZeroDivisionError):
-        function(*args, **kwargs)
-
-
-@gen_cluster(client=True)
-async def test_recreate_error_collection(c, s, a, b):
-    pd = pytest.importorskip("pandas")
-    dd = pytest.importorskip("dask.dataframe")
-
-    b = db.range(10, npartitions=4)
-    b = b.map(lambda x: 1 / x)
-    b = b.persist()
-    f = c.compute(b)
-
-    error_f = await c._get_errored_future(f)
-    function, args, kwargs = await c._get_components_from_future(error_f)
-    with pytest.raises(ZeroDivisionError):
-        function(*args, **kwargs)
-
-    df = dd.from_pandas(pd.DataFrame({"a": [0, 1, 2, 3, 4]}), chunksize=2)
-
-    def make_err(x):
-        # because pandas would happily work with NaN
-        if x == 0:
-            raise ValueError
-        return x
-
-    df2 = df.a.map(make_err, meta=df.a)
-    f = c.compute(df2)
-    error_f = await c._get_errored_future(f)
-    function, args, kwargs = await c._get_components_from_future(error_f)
-    with pytest.raises(ValueError):
-        function(*args, **kwargs)
-
-    # with persist
-    df3 = c.persist(df2)
-    error_f = await c._get_errored_future(df3)
-    function, args, kwargs = await c._get_components_from_future(error_f)
-    with pytest.raises(ValueError):
-        function(*args, **kwargs)
-
-
-@gen_cluster(client=True)
-async def test_recreate_error_array(c, s, a, b):
-    pytest.importorskip("numpy")
-    da = pytest.importorskip("dask.array")
-    pytest.importorskip("scipy")
-    z = (da.linalg.inv(da.zeros((10, 10), chunks=10)) + 1).sum()
-    zz = z.persist()
-    error_f = await c._get_errored_future(zz)
-    function, args, kwargs = await c._get_components_from_future(error_f)
-    assert "0.,0.,0." in str(args).replace(" ", "")  # args contain actual arrays
 
 
 def test_recreate_error_sync(c):
@@ -4834,97 +4755,6 @@ def test_recreate_error_not_error(c):
         c.recreate_error_locally(f)
 
 
-@gen_cluster(client=True)
-async def test_recreate_task_delayed(c, s, a, b):
-    x0 = delayed(dec)(2)
-    y0 = delayed(dec)(2)
-    x = delayed(div)(1, x0)
-    y = delayed(div)(1, y0)
-    tot = delayed(sum)([x, y])
-
-    f = c.compute(tot)
-
-    assert f.status == "pending"
-
-    function, args, kwargs = await c._get_components_from_future(f)
-    assert f.status == "finished"
-    assert function.__name__ == "sum"
-    assert args == ([1, 1],)
-    assert function(*args, **kwargs) == 2
-
-
-@gen_cluster(client=True)
-async def test_recreate_task_futures(c, s, a, b):
-    x0 = c.submit(dec, 2)
-    y0 = c.submit(dec, 2)
-    x = c.submit(div, 1, x0)
-    y = c.submit(div, 1, y0)
-    tot = c.submit(sum, [x, y])
-    f = c.compute(tot)
-
-    assert f.status == "pending"
-
-    function, args, kwargs = await c._get_components_from_future(f)
-    assert f.status == "finished"
-    assert function.__name__ == "sum"
-    assert args == ([1, 1],)
-    assert function(*args, **kwargs) == 2
-
-
-@gen_cluster(client=True)
-async def test_recreate_task_collection(c, s, a, b):
-    pd = pytest.importorskip("pandas")
-    dd = pytest.importorskip("dask.dataframe")
-
-    b = db.range(10, npartitions=4)
-    b = b.map(lambda x: int(3628800 / (x + 1)))
-    b = b.persist()
-    f = c.compute(b)
-
-    function, args, kwargs = await c._get_components_from_future(f)
-    assert function(*args, **kwargs) == [
-        3628800,
-        1814400,
-        1209600,
-        907200,
-        725760,
-        604800,
-        518400,
-        453600,
-        403200,
-        362880,
-    ]
-
-    df = dd.from_pandas(pd.DataFrame({"a": [0, 1, 2, 3, 4]}), chunksize=2)
-
-    df2 = df.a.map(inc, meta=df.a)
-    f = c.compute(df2)
-
-    function, args, kwargs = await c._get_components_from_future(f)
-    expected = pd.DataFrame({"a": [1, 2, 3, 4, 5]})["a"]
-    assert function(*args, **kwargs).equals(expected)
-
-    # with persist
-    df3 = c.persist(df2)
-    # recreate_task_locally only works with futures
-    with pytest.raises(TypeError, match="key"):
-        function, args, kwargs = await c._get_components_from_future(df3)
-
-    f = c.compute(df3)
-    function, args, kwargs = await c._get_components_from_future(f)
-    assert function(*args, **kwargs).equals(expected)
-
-
-@gen_cluster(client=True)
-async def test_recreate_task_array(c, s, a, b):
-    pytest.importorskip("numpy")
-    da = pytest.importorskip("dask.array")
-    z = (da.zeros((10, 10), chunks=10) + 1).sum()
-    f = c.compute(z)
-    function, args, kwargs = await c._get_components_from_future(f)
-    assert function(*args, **kwargs) == 100
-
-
 def test_recreate_task_sync(c):
     x0 = c.submit(dec, 2)
     y0 = c.submit(dec, 2)
@@ -4939,7 +4769,15 @@ def test_recreate_task_sync(c):
 @gen_cluster(client=True)
 async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
-    await c.retire_workers(workers=[a.address], close_workers=True)
+    info = await c.retire_workers(workers=[a.address], close_workers=True)
+
+    # Deployment tooling is sometimes relying on this information to be returned
+    # This represents WorkerState.idenity() right now but may be slimmed down in
+    # the future
+    assert info
+    assert info[a.address]
+    assert "name" in info[a.address]
+
     assert set(s.workers) == {b.address}
 
     while a.status != Status.closed:
@@ -5111,7 +4949,7 @@ async def test_robust_undeserializable(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_robust_undeserializable_function(c, s, a, b):
+async def test_robust_undeserializable_function(c, s, a, b, monkeypatch):
     class Foo:
         def __getstate__(self):
             return 1
@@ -5697,6 +5535,7 @@ async def test_call_stack_collections_all(c, s, a, b):
     assert result
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @pytest.mark.flaky(condition=WINDOWS, reruns=10, reruns_delay=5)
 @gen_cluster(
     client=True,
@@ -6221,7 +6060,7 @@ async def test_mixing_clients_same_scheduler(s, a, b):
 @gen_cluster()
 async def test_mixing_clients_different_scheduler(s, a, b):
     async with (
-        Scheduler(port=open_port()) as s2,
+        Scheduler(port=open_port(), dashboard_address=":0") as s2,
         Worker(s2.address) as w1,
         Client(s.address, asynchronous=True) as c1,
         Client(s2.address, asynchronous=True) as c2,
@@ -6265,7 +6104,7 @@ async def test_map_large_kwargs_in_graph(c, s, a, b):
         await asyncio.sleep(0.01)
 
     assert len(s.tasks) == 101
-    assert any(k.startswith("ndarray") for k in s.tasks)
+    assert sum(sizeof(ts.run_spec) > sizeof(x) for ts in s.tasks.values()) == 1
 
 
 @gen_cluster(client=True)
@@ -6341,14 +6180,21 @@ async def test_profile_bokeh(c, s, a, b):
         assert os.path.exists(fn)
 
 
-@gen_cluster(client=True)
-async def test_get_mix_futures_and_SubgraphCallable(c, s, a, b):
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_get_mix_futures_and_SubgraphCallable(c, s, a):
     future = c.submit(add, 1, 2)
 
     subgraph = SubgraphCallable(
-        {"_2": (add, "_0", "_1"), "_3": (add, future, "_2")}, "_3", ("_0", "_1")
+        {"_2": (add, "_0", "_1"), "_3": (add, future, "_2")},
+        "_3",
+        ("_0", "_1"),
     )
-    dsk = {"a": 1, "b": 2, "c": (subgraph, "a", "b"), "d": (subgraph, "c", "b")}
+    dsk = {
+        "a": 1,
+        "b": 2,
+        "c": (subgraph, "a", "b"),
+        "d": (subgraph, "c", "b"),
+    }
 
     future2 = c.get(dsk, "d", sync=False)
     result = await future2
@@ -6543,6 +6389,7 @@ async def test_futures_of_sorted(c, s, a, b):
     assert [fut.key for fut in futures] == [k for k in b.__dask_keys__()]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -7993,9 +7840,9 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
     futs = c.map(inc, range(10))
     while len(s.tasks) != len(futs):
         await asyncio.sleep(0.01)
-    excluded_by_default = [
-        "run_spec",
-    ]
+    # GraphNode / callables are never included
+    always_excluded = ["run_spec"]
+    exclude = ["state"]
 
     filename = tmp_path / "foo"
     await c.dump_cluster_state(
@@ -8010,20 +7857,22 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
     assert len(state["workers"]) == len(s.workers)
     for worker_dump in state["workers"].values():
         for k, task_dump in worker_dump["tasks"].items():
-            assert not any(blocked in task_dump for blocked in excluded_by_default)
+            assert not any(blocked in task_dump for blocked in always_excluded)
+            assert any(blocked in task_dump for blocked in exclude)
             assert k in s.tasks
     assert "scheduler" in state
     assert "tasks" in state["scheduler"]
     tasks = state["scheduler"]["tasks"]
     assert len(tasks) == len(futs)
     for k, task_dump in tasks.items():
-        assert not any(blocked in task_dump for blocked in excluded_by_default)
+        assert not any(blocked in task_dump for blocked in always_excluded)
+        assert any(blocked in task_dump for blocked in exclude)
         assert k in s.tasks
 
     await c.dump_cluster_state(
         filename=filename,
         format="yaml",
-        exclude=(),
+        exclude=exclude,
     )
 
     with open(f"{filename}.yaml") as fd:
@@ -8033,14 +7882,16 @@ async def test_dump_cluster_state_exclude_default(c, s, a, b, tmp_path):
     assert len(state["workers"]) == len(s.workers)
     for worker_dump in state["workers"].values():
         for k, task_dump in worker_dump["tasks"].items():
-            assert all(blocked in task_dump for blocked in excluded_by_default)
+            assert not any(blocked in task_dump for blocked in always_excluded)
+            assert not any(blocked in task_dump for blocked in exclude)
             assert k in s.tasks
     assert "scheduler" in state
     assert "tasks" in state["scheduler"]
     tasks = state["scheduler"]["tasks"]
     assert len(tasks) == len(futs)
     for k, task_dump in tasks.items():
-        assert all(blocked in task_dump for blocked in excluded_by_default)
+        assert not any(blocked in task_dump for blocked in always_excluded)
+        assert not any(blocked in task_dump for blocked in exclude)
         assert k in s.tasks
 
 

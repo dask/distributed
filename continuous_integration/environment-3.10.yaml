@@ -54,7 +54,7 @@ dependencies:
   - setuptools < 71
   - pip:
       - git+https://github.com/dask/dask
-      - git+https://github.com/dask-contrib/dask-expr
+      - git+https://github.com/dask/dask-expr
       - git+https://github.com/dask/zict
       - git+https://github.com/dask/crick  # Only tested here
       # Revert after https://github.com/dask/distributed/issues/8614 is fixed

@@ -19,6 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Topic :: System :: Distributed Computing",
 ]
@@ -27,7 +28,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 3.0.0",
-    "dask == 2024.9.1",
+    "dask == 2024.11.2",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.2",
@@ -112,7 +113,7 @@ filterwarnings = [
     # xref: https://github.com/jupyter/jupyter_core/pull/292
     # xref: https://github.com/jupyter/jupyter_core/issues/309
     '''ignore:Jupyter is migrating its paths to use standard platformdirs''',
-    # https://github.com/dask-contrib/dask-expr/issues/945
+    # https://github.com/dask/dask-expr/issues/945
     '''ignore:dask_expr does not support the DataFrameIOFunction''',
     '''ignore:Please use `dok_matrix` from the `scipy\.sparse` namespace, the `scipy\.sparse\.dok` namespace is deprecated.:DeprecationWarning''',
     '''ignore:elementwise comparison failed. this will raise an error in the future:DeprecationWarning''',
@@ -224,8 +225,7 @@ source = ["distributed"]
 omit = [
     "distributed/tests/test*",
     "distributed/*/tests/test*",
-    "distributed/cli/utils.py",
-    "distributed/cli/dask_spec.py",
+    "distributed/cli/*",
     "distributed/deploy/ssh.py",
     "distributed/_version.py",
     "distributed/pytest_resourceleaks.py",

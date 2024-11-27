@@ -4,6 +4,8 @@ import pytest
 
 pytest.importorskip("bokeh")
 
+import sys
+
 from bokeh.models import ColumnDataSource, Model
 
 from distributed.dashboard.components.shared import (
@@ -21,6 +23,7 @@ def test_basic(Component):
     assert isinstance(c.root, Model)
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     clean_kwargs={"threads": False},
@@ -34,6 +37,7 @@ async def test_profile_plot(c, s, a, b):
         p.update(a.profile_recent)
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     clean_kwargs={"threads": False},
