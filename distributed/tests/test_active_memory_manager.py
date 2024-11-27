@@ -1250,7 +1250,7 @@ async def test_RetireWorker_with_actor_proxy(c, s, a, b):
     assert "y" in b.data
 
     out = await c.retire_workers([b.address])
-    assert out == (b.address,)
+    assert b.address in out
     assert "x" in a.state.actors
     assert "y" in a.data
 

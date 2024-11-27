@@ -7445,7 +7445,7 @@ class Scheduler(SchedulerState, ServerNode):
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-    ) -> list[str]: ...
+    ) -> dict[str, Any]: ...
 
     @overload
     async def retire_workers(
@@ -7455,7 +7455,7 @@ class Scheduler(SchedulerState, ServerNode):
         close_workers: bool = False,
         remove: bool = True,
         stimulus_id: str | None = None,
-    ) -> list[str]: ...
+    ) -> dict[str, Any]: ...
 
     @overload
     async def retire_workers(
@@ -7471,7 +7471,7 @@ class Scheduler(SchedulerState, ServerNode):
         minimum: int | None = None,
         target: int | None = None,
         attribute: str = "address",
-    ) -> list[str]: ...
+    ) -> dict[str, Any]: ...
 
     @log_errors
     async def retire_workers(
@@ -7483,7 +7483,7 @@ class Scheduler(SchedulerState, ServerNode):
         remove: bool = True,
         stimulus_id: str | None = None,
         **kwargs: Any,
-    ) -> list[str]:
+    ) -> dict[str, Any]:
         """Gracefully retire workers from cluster. Any key that is in memory exclusively
         on the retired workers is replicated somewhere else.
 
@@ -7565,7 +7565,7 @@ class Scheduler(SchedulerState, ServerNode):
                     self.workers[address] for address in self.workers_to_close(**kwargs)
                 }
             if not wss:
-                return []
+                return {}
 
             stop_amm = False
             amm: ActiveMemoryManagerExtension | None = self.extensions.get("amm")
@@ -7613,13 +7613,13 @@ class Scheduler(SchedulerState, ServerNode):
                 # time (depending on interval settings)
                 amm.run_once()
 
-                workers_info_ok = []
-                workers_info_abort = []
-                for addr, result in await asyncio.gather(*coros):
+                workers_info_ok = {}
+                workers_info_abort = {}
+                for addr, result, info in await asyncio.gather(*coros):
                     if result == "OK":
-                        workers_info_ok.append(addr)
+                        workers_info_ok[addr] = info
                     else:
-                        workers_info_abort.append(addr)
+                        workers_info_abort[addr] = info
 
             finally:
                 if stop_amm:
@@ -7653,7 +7653,7 @@ class Scheduler(SchedulerState, ServerNode):
         close: bool,
         remove: bool,
         stimulus_id: str,
-    ) -> tuple[str, Literal["OK", "no-recipients"]]:
+    ) -> tuple[str, Literal["OK", "no-recipients"], dict]:
         while not policy.done():
             # Sleep 0.01s when there are 4 tasks or less
             # Sleep 0.5s when there are 200 or more
@@ -7675,7 +7675,7 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Could not retire worker {ws.address!r}: unique data could not be "
                 f"moved to any other worker ({stimulus_id=!r})"
             )
-            return ws.address, "no-recipients"
+            return ws.address, "no-recipients", ws.identity()
 
         logger.debug(
             f"All unique keys on worker {ws.address!r} have been replicated elsewhere"
@@ -7689,7 +7689,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.close_worker(ws.address)
 
         logger.info(f"Retired worker {ws.address!r} ({stimulus_id=!r})")
-        return ws.address, "OK"
+        return ws.address, "OK", ws.identity()
 
     def add_keys(
         self, worker: str, keys: Collection[Key] = (), stimulus_id: str | None = None
