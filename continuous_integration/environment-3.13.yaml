@@ -45,6 +45,8 @@ dependencies:
   - zstandard
   # Temporary fix for https://github.com/pypa/setuptools/issues/4496
   - setuptools < 71
+  # Temporary fix for https://github.com/jupyterlab/jupyterlab/issues/17012
+  - httpx<0.28.0
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/dask-expr
