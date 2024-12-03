@@ -3081,6 +3081,10 @@ class SchedulerState:
         and have few or no dependencies. Tasks may also be explicitly marked as rootish
         to override this heuristic.
         """
+        # Check explicitly marked IO tasks
+        if ts.run_spec and ts.run_spec.io_task:
+            return True
+
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
             return False
         tg = ts.group
