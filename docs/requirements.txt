@@ -2,7 +2,7 @@ numpydoc
 tornado
 toolz
 cloudpickle
-git+https://github.com/dask/dask
+git+https://github.com/fjetter/dask@remove_subgraph_callable
 sphinx
 dask-sphinx-theme>=3.0.0
 # FIXME: `sphinxcontrib-*` pins are a workaround until we have sphinx>=5.
