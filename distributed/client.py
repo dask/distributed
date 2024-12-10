@@ -45,7 +45,6 @@ from dask.base import collections_to_dsk
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
-from dask.optimization import SubgraphCallable
 from dask.tokenize import tokenize
 from dask.typing import Key, NestedKeys, NoDefault, no_default
 from dask.utils import (
@@ -6120,8 +6119,6 @@ def futures_of(o, client=None):
             stack.extend(x)
         elif type(x) is dict:
             stack.extend(x.values())
-        elif type(x) is SubgraphCallable:
-            stack.extend(x.dsk.values())
         elif isinstance(x, TaskRef):
             if x not in seen:
                 seen.add(x)

@@ -7,7 +7,6 @@ from unittest import mock
 import pytest
 
 from dask._task_spec import TaskRef
-from dask.optimization import SubgraphCallable
 
 from distributed import wait
 from distributed.compatibility import asyncio_run
@@ -246,18 +245,3 @@ def test_unpack_remotedata():
     res, keys = unpack_remotedata(TaskRef("mykey"))
     assert res == "mykey"
     assert_eq(keys, {TaskRef("mykey")})
-
-    # Check unpack of SC that contains a wrapped key
-    sc = SubgraphCallable({"key": (TaskRef("data"),)}, outkey="key", inkeys=["arg1"])
-    dsk = (sc, "arg1")
-    res, keys = unpack_remotedata(dsk)
-    assert res[0] != sc  # Notice, the first item (the SC) has been changed
-    assert res[1:] == ("arg1", "data")
-    assert_eq(keys, {TaskRef("data")})
-
-    # Check unpack of SC when it takes a wrapped key as argument
-    sc = SubgraphCallable({"key": ("arg1",)}, outkey="key", inkeys=[TaskRef("arg1")])
-    dsk = (sc, "arg1")
-    res, keys = unpack_remotedata(dsk)
-    assert res == (sc, "arg1")  # Notice, the first item (the SC) has NOT been changed
-    assert_eq(keys, set())
