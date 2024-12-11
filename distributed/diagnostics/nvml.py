@@ -68,6 +68,11 @@ def _in_wsl():
     return "microsoft-standard" in uname().release
 
 
+def _maybe_decode(value):
+    """Decode if bytes instance"""
+    return value.decode() if isinstance(value, bytes) else value
+
+
 def init_once():
     """Idempotent (per-process) initialization of PyNVML
 
@@ -104,11 +109,9 @@ def init_once():
             NVML_STATE = NVMLState.DISABLED_LIBRARY_NOT_FOUND
             return
 
-        try:
-            driver_vsn = pynvml.nvmlSystemGetDriverVersion().decode()
-        except AttributeError:
-            driver_vsn = pynvml.nvmlSystemGetDriverVersion()
-        if _in_wsl() and parse_version(driver_vsn) < parse_version(MINIMUM_WSL_VERSION):
+        if _in_wsl() and parse_version(
+            _maybe_decode(pynvml.nvmlSystemGetDriverVersion())
+        ) < parse_version(MINIMUM_WSL_VERSION):
             NVML_STATE = NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER
             return
         else:
