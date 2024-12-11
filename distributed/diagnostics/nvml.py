@@ -104,9 +104,11 @@ def init_once():
             NVML_STATE = NVMLState.DISABLED_LIBRARY_NOT_FOUND
             return
 
-        if _in_wsl() and parse_version(
-            pynvml.nvmlSystemGetDriverVersion().decode()
-        ) < parse_version(MINIMUM_WSL_VERSION):
+        try:
+            driver_vsn = pynvml.nvmlSystemGetDriverVersion().decode()
+        except AttributeError:
+            driver_vsn = pynvml.nvmlSystemGetDriverVersion()
+        if _in_wsl() and parse_version(driver_vsn) < parse_version(MINIMUM_WSL_VERSION):
             NVML_STATE = NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER
             return
         else:
