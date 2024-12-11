@@ -8,6 +8,7 @@ from typing import NamedTuple
 from packaging.version import parse as parse_version
 
 import dask
+from dask.utils import ensure_unicode
 
 try:
     import pynvml
@@ -105,7 +106,7 @@ def init_once():
             return
 
         if _in_wsl() and parse_version(
-            pynvml.nvmlSystemGetDriverVersion().decode()
+            ensure_unicode(pynvml.nvmlSystemGetDriverVersion())
         ) < parse_version(MINIMUM_WSL_VERSION):
             NVML_STATE = NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER
             return
