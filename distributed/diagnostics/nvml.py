@@ -8,6 +8,7 @@ from typing import NamedTuple
 from packaging.version import parse as parse_version
 
 import dask
+from dask.utils import ensure_unicode
 
 try:
     import pynvml
@@ -68,11 +69,6 @@ def _in_wsl():
     return "microsoft-standard" in uname().release
 
 
-def _maybe_decode(value):
-    """Decode if bytes instance"""
-    return value.decode() if isinstance(value, bytes) else value
-
-
 def init_once():
     """Idempotent (per-process) initialization of PyNVML
 
@@ -110,7 +106,7 @@ def init_once():
             return
 
         if _in_wsl() and parse_version(
-            _maybe_decode(pynvml.nvmlSystemGetDriverVersion())
+            ensure_unicode(pynvml.nvmlSystemGetDriverVersion())
         ) < parse_version(MINIMUM_WSL_VERSION):
             NVML_STATE = NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER
             return
