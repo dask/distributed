@@ -1428,6 +1428,7 @@ class TaskState:
         run_spec: T_runspec | None,
         state: TaskStateState,
         group: TaskGroup,
+        validate: bool,
     ):
         # Most of the attributes below are not initialized since there are not
         # always required for every tasks. Particularly for large graphs, these
@@ -1468,7 +1469,8 @@ class TaskState:
         self.run_id = None
         self.group = group
         group.add(self)
-        TaskState._instances.add(self)
+        if validate:
+            TaskState._instances.add(self)
 
     def __hash__(self) -> int:
         return self._hash
@@ -1890,7 +1892,7 @@ class SchedulerState:
             if computation:
                 computation.groups.add(tg)
 
-        ts = TaskState(key, spec, state, tg)
+        ts = TaskState(key, spec, state, tg, validate=self.validate)
 
         self.tasks[key] = ts
 
