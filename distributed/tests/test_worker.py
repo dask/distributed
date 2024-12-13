@@ -505,7 +505,7 @@ async def test_plugin_multiple_exceptions():
 
 @gen_test()
 async def test_plugin_internal_exception():
-    async with Scheduler(port=0) as s:
+    async with Scheduler(port=0, dashboard_address=":0") as s:
         with raises_with_cause(
             RuntimeError,
             "Worker failed to start",
