@@ -9290,9 +9290,9 @@ class NoValidWorkerError(Exception):
         return (
             f"Attempted to run task {self.task!r} but timed out after {format_time(self.timeout)} "
             "waiting for a valid worker matching all restrictions.\n\nRestrictions:\n"
-            "host_restrictions={self.host_restrictions!s}\n"
-            "worker_restrictions={self.worker_restrictions!s}\n"
-            "resource_restrictions={self.resource_restrictions!s}\n"
+            f"host_restrictions={self.host_restrictions!s}\n"
+            f"worker_restrictions={self.worker_restrictions!s}\n"
+            f"resource_restrictions={self.resource_restrictions!s}\n"
         )
 
 
