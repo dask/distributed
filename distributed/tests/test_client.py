@@ -42,7 +42,6 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.bag as db
 from dask import delayed
-from dask._task_spec import no_function_cache
 from dask.optimization import SubgraphCallable
 from dask.tokenize import tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
@@ -1705,6 +1704,10 @@ async def test_upload_file_no_extension(c, s, a, b):
         await c.upload_file(fn)
 
 
+@pytest.mark.skipif(
+    sys.version_info >= (3, 13),
+    reason="Upstream issue in CPython. See https://github.com/dask/distributed/issues/8708 and https://github.com/python/cpython/issues/121342.",
+)
 @gen_cluster(client=True)
 async def test_upload_file_zip(c, s, a, b):
     def g():
@@ -4386,7 +4389,11 @@ async def test_scatter_type(c, s, a, b):
 async def test_retire_workers_2(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
-    await s.retire_workers(workers=[a.address])
+    info = await s.retire_workers(workers=[a.address])
+    assert info
+    assert info[a.address]
+    assert "name" in info[a.address]
+    assert a.address not in s.workers
     assert b.data == {x.key: 1}
 
     assert {ws.address for ws in s.tasks[x.key].who_has} == {b.address}
@@ -4399,7 +4406,8 @@ async def test_retire_workers_2(c, s, a, b):
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
-    await s.retire_workers(workers=[w.address for w in workers[:7]])
+    info = await s.retire_workers(workers=[w.address for w in workers[:7]])
+    assert len(info) == 7
 
     results = await c.gather(futures)
     assert results == list(range(100))
@@ -4761,7 +4769,15 @@ def test_recreate_task_sync(c):
 @gen_cluster(client=True)
 async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
-    await c.retire_workers(workers=[a.address], close_workers=True)
+    info = await c.retire_workers(workers=[a.address], close_workers=True)
+
+    # Deployment tooling is sometimes relying on this information to be returned
+    # This represents WorkerState.idenity() right now but may be slimmed down in
+    # the future
+    assert info
+    assert info[a.address]
+    assert "name" in info[a.address]
+
     assert set(s.workers) == {b.address}
 
     while a.status != Status.closed:
@@ -4934,29 +4950,27 @@ async def test_robust_undeserializable(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_robust_undeserializable_function(c, s, a, b, monkeypatch):
-    with no_function_cache():
+    class Foo:
+        def __getstate__(self):
+            return 1
 
-        class Foo:
-            def __getstate__(self):
-                return 1
+        def __setstate__(self, state):
+            raise MyException("hello")
 
-            def __setstate__(self, state):
-                raise MyException("hello")
+        def __call__(self, *args):
+            return 1
 
-            def __call__(self, *args):
-                return 1
+    future = c.submit(Foo(), 1)
+    await wait(future)
+    assert future.status == "error"
+    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
+        await future
 
-        future = c.submit(Foo(), 1)
-        await wait(future)
-        assert future.status == "error"
-        with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
-            await future
+    futures = c.map(inc, range(10))
+    results = await c.gather(futures)
 
-        futures = c.map(inc, range(10))
-        results = await c.gather(futures)
-
-        assert results == list(map(inc, range(10)))
-        assert a.data and b.data
+    assert results == list(map(inc, range(10)))
+    assert a.data and b.data
 
 
 @gen_cluster(client=True)

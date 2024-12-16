@@ -54,14 +54,9 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
-from dask._task_spec import (
-    DependenciesMapping,
-    GraphNode,
-    convert_legacy_graph,
-    resolve_aliases,
-)
+from dask._task_spec import DependenciesMapping, GraphNode, convert_legacy_graph
 from dask.base import TokenizationError, normalize_token, tokenize
-from dask.core import istask, reverse_dict, validate_key
+from dask.core import istask, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
@@ -1433,6 +1428,7 @@ class TaskState:
         run_spec: T_runspec | None,
         state: TaskStateState,
         group: TaskGroup,
+        validate: bool,
     ):
         # Most of the attributes below are not initialized since there are not
         # always required for every tasks. Particularly for large graphs, these
@@ -1473,7 +1469,8 @@ class TaskState:
         self.run_id = None
         self.group = group
         group.add(self)
-        TaskState._instances.add(self)
+        if validate:
+            TaskState._instances.add(self)
 
     def __hash__(self) -> int:
         return self._hash
@@ -1895,7 +1892,7 @@ class SchedulerState:
             if computation:
                 computation.groups.add(tg)
 
-        ts = TaskState(key, spec, state, tg)
+        ts = TaskState(key, spec, state, tg, validate=self.validate)
 
         self.tasks[key] = ts
 
@@ -4576,7 +4573,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
 
-        logger.info("Register worker %s", ws)
+        logger.info("Register worker addr: %s name: %s", ws.address, ws.name)
 
         msg = {
             "status": "OK",
@@ -4780,6 +4777,7 @@ class Scheduler(SchedulerState, ServerNode):
                     dependencies=dependencies,
                     annotations=dict(annotations_for_plugin),
                     priority=priority,
+                    stimulus_id=stimulus_id,
                 )
             except Exception as e:
                 logger.exception(e)
@@ -4846,6 +4844,7 @@ class Scheduler(SchedulerState, ServerNode):
         stimulus_id: str | None = None,
     ) -> None:
         start = time()
+        stimulus_id = stimulus_id or f"update-graph-{start}"
         self._active_graph_updates += 1
         try:
             logger.debug("Received new graph. Deserializing...")
@@ -4923,7 +4922,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # objects. This should be removed
                 global_annotations=annotations,
                 start=start,
-                stimulus_id=stimulus_id or f"update-graph-{start}",
+                stimulus_id=stimulus_id,
             )
             task_state_created = time()
             metrics.update(
@@ -5431,7 +5430,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws = self.workers[address]
 
-        logger.info(f"Remove worker {ws} ({stimulus_id=})")
+        logger.info(
+            f"Remove worker addr: {ws.address} name: {ws.name} ({stimulus_id=})"
+        )
         if close:
             with suppress(AttributeError, CommClosedError):
                 self.stream_comms[address].send(
@@ -7551,7 +7552,11 @@ class Scheduler(SchedulerState, ServerNode):
                 names_set = {str(name) for name in names}
                 wss = {ws for ws in self.workers.values() if str(ws.name) in names_set}
             elif workers is not None:
-                logger.info("Retire worker addresses %s", workers)
+                logger.info(
+                    "Retire worker addresses (stimulus_id='%s') %s",
+                    stimulus_id,
+                    workers,
+                )
                 wss = {
                     self.workers[address]
                     for address in workers
@@ -7575,8 +7580,6 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 coros = []
                 for ws in wss:
-                    logger.info(f"Retiring worker {ws.address!r} ({stimulus_id=!r})")
-
                     policy = RetireWorker(ws.address)
                     amm.add_policy(policy)
 
@@ -7628,8 +7631,8 @@ class Scheduler(SchedulerState, ServerNode):
             "all",
             {
                 "action": "retire-workers",
-                "retired": workers_info_ok,
-                "could-not-retire": workers_info_abort,
+                "retired": list(workers_info_ok),
+                "could-not-retire": list(workers_info_abort),
                 "stimulus_id": stimulus_id,
             },
         )
@@ -9287,9 +9290,9 @@ class NoValidWorkerError(Exception):
         return (
             f"Attempted to run task {self.task!r} but timed out after {format_time(self.timeout)} "
             "waiting for a valid worker matching all restrictions.\n\nRestrictions:\n"
-            "host_restrictions={self.host_restrictions!s}\n"
-            "worker_restrictions={self.worker_restrictions!s}\n"
-            "resource_restrictions={self.resource_restrictions!s}\n"
+            f"host_restrictions={self.host_restrictions!s}\n"
+            f"worker_restrictions={self.worker_restrictions!s}\n"
+            f"resource_restrictions={self.resource_restrictions!s}\n"
         )
 
 
@@ -9409,19 +9412,10 @@ def _materialize_graph(
                 )
 
     dsk2 = convert_legacy_graph(dsk)
-    dependents = reverse_dict(DependenciesMapping(dsk2))
-    # This is removing weird references like "x-foo": "foo" which often make up
-    # a substantial part of the graph
-    # This also performs culling!
-    dsk3 = resolve_aliases(dsk2, keys, dependents)
-
-    logger.debug(
-        "Removing aliases. Started with %i and got %i left", len(dsk2), len(dsk3)
-    )
     # FIXME: There should be no need to fully materialize and copy this but some
     # sections in the scheduler are mutating it.
-    dependencies = {k: set(v) for k, v in DependenciesMapping(dsk3).items()}
-    return dsk3, dependencies, annotations_by_type
+    dependencies = {k: set(v) for k, v in DependenciesMapping(dsk2).items()}
+    return dsk2, dependencies, annotations_by_type
 
 
 def _cull(dsk: dict[Key, GraphNode], keys: set[Key]) -> dict[Key, GraphNode]:

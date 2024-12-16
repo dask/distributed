@@ -505,7 +505,7 @@ async def test_plugin_multiple_exceptions():
 
 @gen_test()
 async def test_plugin_internal_exception():
-    async with Scheduler(port=0) as s:
+    async with Scheduler(port=0, dashboard_address=":0") as s:
         with raises_with_cause(
             RuntimeError,
             "Worker failed to start",
@@ -2985,19 +2985,15 @@ async def test_log_remove_worker(c, s, a, b):
 
     assert log.getvalue().splitlines() == [
         # Successful graceful
-        f"Retire worker addresses ['{a.address}']",
-        f"Retiring worker '{a.address}' (stimulus_id='graceful')",
-        f"Remove worker <WorkerState '{a.address}', name: 0, status: "
-        "closing_gracefully, memory: 2, processing: 1> (stimulus_id='graceful')",
+        f"Retire worker addresses (stimulus_id='graceful') ['{a.address}']",
+        f"Remove worker addr: {a.address} name: {a.name} (stimulus_id='graceful')",
         f"Retired worker '{a.address}' (stimulus_id='graceful')",
         # Aborted graceful
-        f"Retire worker addresses ['{b.address}']",
-        f"Retiring worker '{b.address}' (stimulus_id='graceful_abort')",
+        f"Retire worker addresses (stimulus_id='graceful_abort') ['{b.address}']",
         f"Could not retire worker '{b.address}': unique data could not be "
         "moved to any other worker (stimulus_id='graceful_abort')",
         # Ungraceful
-        f"Remove worker <WorkerState '{b.address}', name: 1, status: "
-        "running, memory: 2, processing: 1> (stimulus_id='ungraceful')",
+        f"Remove worker addr: {b.address} name: {b.name} (stimulus_id='ungraceful')",
         f"Removing worker '{b.address}' caused the cluster to lose already "
         "computed task(s), which will be recomputed elsewhere: {'x'} "
         "(stimulus_id='ungraceful')",
@@ -3553,7 +3549,7 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # b has shut down. There's nowhere to replicate x to anymore, so retire_workers
         # will give up and reinstate a to running status.
-        assert await retire_fut == {}
+        assert not await retire_fut
         while a.status != Status.running:
             await asyncio.sleep(0.01)
 

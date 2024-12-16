@@ -1499,7 +1499,6 @@ async def test_retire_workers(c, s, a, b):
 
     workers = await s.retire_workers()
     assert list(workers) == [a.address]
-    assert workers[a.address]["nthreads"] == a.state.nthreads
     assert list(s.workers) == [b.address]
 
     assert s.workers_to_close() == []
@@ -4524,7 +4523,7 @@ def test_runspec_regression_sync(loop):
     # https://github.com/dask/distributed/issues/6624
     np = pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
-    with Client(loop=loop):
+    with Client(loop=loop, dashboard_address=":0"):
         v = da.random.random((20, 20), chunks=(5, 5))
 
         overlapped = da.map_overlap(np.sum, v, depth=2, boundary="reflect")
@@ -4836,7 +4835,7 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
 
 
 @pytest.mark.skipif(
-    sys.version_info <= (3, 10),
+    sys.version_info < (3, 11),
     reason="asyncio.wait_for is unreliable on 3.10 and below",
 )
 @gen_cluster(
@@ -5304,3 +5303,17 @@ async def test_concurrent_close_requests(c, s, *workers):
 async def test_rootish_taskgroup_configuration(c, s, *workers):
     assert s.rootish_tg_threshold == 10
     assert s.rootish_tg_dependencies_threshold == 15
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_alias_resolving_break_queuing(c, s, a):
+    pytest.importorskip("numpy")
+    import dask.array as da
+
+    arr = da.random.random((90, 100), chunks=(10, 50))
+    result = arr.rechunk(((10, 7, 7, 6) * 3, (50, 50)))
+    result = result.sum(split_every=1000)
+    x = result.persist()
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+    assert sum([s.is_rootish(v) for v in s.tasks.values()]) == 18

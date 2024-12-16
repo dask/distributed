@@ -45,7 +45,7 @@ async def test_jupyter_server():
 
 
 @pytest.mark.slow
-def test_jupyter_cli(loop):
+def test_jupyter_cli(loop, requires_default_ports):
     port = open_port()
     with popen(
         [
@@ -56,6 +56,8 @@ def test_jupyter_cli(loop):
             "--host",
             f"127.0.0.1:{port}",
         ],
+        terminate_timeout=120,
+        kill_timeout=60,
     ):
         with Client(f"127.0.0.1:{port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/jupyter/api/status")
