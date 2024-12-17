@@ -24,7 +24,6 @@ dependencies:
   - pip
   - pip:
       - git+https://github.com/phofl/dask@remove-legacy-implementation
-      - git+https://github.com/phofl/dask-expr@legacy-conversion
     # test dependencies
   - pytest
   - pytest-cov
