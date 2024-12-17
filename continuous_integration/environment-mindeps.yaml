@@ -23,8 +23,9 @@ dependencies:
   # Distributed depends on the latest version of Dask
   - pip
   - pip:
-    - git+https://github.com/dask/dask
-  # test dependencies
+      - git+https://github.com/phofl/dask@remove-legacy-implementation
+      - git+https://github.com/phofl/dask-expr@legacy-conversion
+    # test dependencies
   - pytest
   - pytest-cov
   - pytest-faulthandler
