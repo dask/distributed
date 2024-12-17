@@ -6733,7 +6733,7 @@ def test_futures_in_subgraphs(loop_in_thread):
         ddf = ddf[ddf.uid.isin(range(29))].persist()
         ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
         ddf["day"] = ddf.enter_time.dt.day_name()
-        ddf = dd.categorical.categorize(ddf, columns=["day"], index=False)
+        ddf = dd.categorize(ddf, columns=["day"], index=False)
         ddf.compute()
 
 
