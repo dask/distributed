@@ -3081,7 +3081,7 @@ class SchedulerState:
         and have few or no dependencies. Tasks may also be explicitly marked as rootish
         to override this heuristic.
         """
-        # Check explicitly marked IO tasks
+        # Check explicitly marked data producer tasks
         if ts.run_spec and ts.run_spec.data_producer_task:
             return True
 
