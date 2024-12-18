@@ -3082,7 +3082,7 @@ class SchedulerState:
         to override this heuristic.
         """
         # Check explicitly marked IO tasks
-        if ts.run_spec and ts.run_spec.io_task:
+        if ts.run_spec and ts.run_spec.data_producer_task:
             return True
 
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
