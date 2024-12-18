@@ -124,28 +124,6 @@ async def assert_scheduler_cleanup(
     assert not plugin.heartbeats
 
 
-@pytest.mark.skipif(dd._dask_expr_enabled(), reason="pyarrow>=7.0.0 already required")
-@gen_cluster(client=True)
-async def test_minimal_version(c, s, a, b):
-    no_pyarrow_ctx = (
-        mock.patch.dict("sys.modules", {"pyarrow": None})
-        if pa is not None
-        else contextlib.nullcontext()
-    )
-    with no_pyarrow_ctx:
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-01-10",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        with (
-            pytest.raises(ModuleNotFoundError, match="requires pyarrow"),
-            dask.config.set({"dataframe.shuffle.method": "p2p"}),
-        ):
-            await c.compute(df.shuffle("x"))
-
-
 @pytest.mark.gpu
 @pytest.mark.filterwarnings(
     "ignore:Ignoring the following arguments to `from_pyarrow_table_dispatch`."

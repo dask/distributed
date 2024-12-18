@@ -57,16 +57,6 @@ jobs:
             label: no_queue
             partition: "not ci1"
 
-          # Set dataframe.query-planning: false
-          - os: ubuntu-latest
-            environment: "3.10"
-            label: no_expr
-            partition: "ci1"
-          - os: ubuntu-latest
-            environment: "3.10"
-            label: no_expr
-            partition: "not ci1"
-
           # dask.array P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
@@ -83,12 +73,12 @@ jobs:
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1, dask-expr]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1, dask-expr]
             partition: "not ci1"
 
           - os: ubuntu-latest
@@ -220,11 +210,6 @@ jobs:
         shell: bash -l {0}
         if: ${{ matrix.label == 'no_queue' }}
         run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
-
-      - name: Set up dask env to disable dask-expr
-        shell: bash -l {0}
-        if: ${{ matrix.label == 'no_expr' }}
-        run: echo "DASK_DATAFRAME__QUERY_PLANNING=False" >> $GITHUB_ENV
 
       - name: Print host info
         # host_info.py imports numpy, which isn't a direct dependency of distributed
