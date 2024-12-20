@@ -56,13 +56,10 @@ async def test_basic_merge(c, s, a, b, how):
 
     joined = a.merge(b, left_on="y", right_on="y", how=how)
 
-    if dd._dask_expr_enabled():
-        # Ensure we're using a hash join
-        from dask_expr._merge import HashJoinP2P
+    # Ensure we're using a hash join
+    from dask_expr._merge import HashJoinP2P
 
-        assert any(
-            isinstance(expr, HashJoinP2P) for expr in joined.optimize()._expr.walk()
-        )
+    assert any(isinstance(expr, HashJoinP2P) for expr in joined.optimize()._expr.walk())
 
     expected = pd.merge(A, B, how, "y")
     await list_eq(joined, expected)
