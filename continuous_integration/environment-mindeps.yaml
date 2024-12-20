@@ -24,7 +24,7 @@ dependencies:
   - pip
   - pip:
       - git+https://github.com/phofl/dask@remove-legacy-implementation
-    # test dependencies
+  # test dependencies
   - pytest
   - pytest-cov
   - pytest-faulthandler
