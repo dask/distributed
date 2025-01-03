@@ -3,15 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
-from collections.abc import (
-    Callable,
-    Collection,
-    Generator,
-    Hashable,
-    Iterable,
-    Iterator,
-    Sequence,
-)
+from collections.abc import Callable, Generator, Hashable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,11 +12,7 @@ from typing import TYPE_CHECKING, Any
 import toolz
 from tornado.ioloop import IOLoop
 
-import dask
-from dask._task_spec import GraphNode, Task, TaskRef
-from dask.highlevelgraph import HighLevelGraph
-from dask.layers import Layer
-from dask.tokenize import tokenize
+from dask._task_spec import GraphNode
 from dask.typing import Key
 from dask.utils import is_dataframe_like
 
@@ -32,8 +20,6 @@ from distributed.core import PooledRPCCall
 from distributed.metrics import context_meter
 from distributed.shuffle._arrow import (
     buffers_to_table,
-    check_dtype_support,
-    check_minimal_arrow_version,
     convert_shards,
     deserialize_table,
     read_from_disk,
@@ -41,15 +27,12 @@ from distributed.shuffle._arrow import (
 )
 from distributed.shuffle._core import (
     NDIndex,
-    P2PBarrierTask,
     ShuffleId,
     ShuffleRun,
     ShuffleSpec,
-    barrier_key,
     get_worker_plugin,
     handle_transfer_errors,
     handle_unpack_errors,
-    p2p_barrier,
 )
 from distributed.shuffle._exceptions import DataUnavailable
 from distributed.shuffle._limiter import ResourceLimiter
@@ -63,8 +46,6 @@ if TYPE_CHECKING:
 
     # TODO import from typing (requires Python >=3.10)
     from typing_extensions import TypeAlias
-
-    from dask.dataframe import DataFrame
 
 
 def shuffle_transfer(
@@ -89,216 +70,7 @@ def shuffle_unpack(
         )
 
 
-def rearrange_by_column_p2p(
-    df: DataFrame,
-    column: str,
-    npartitions: int | None = None,
-) -> DataFrame:
-    import pandas as pd
-
-    from dask.dataframe.core import new_dd_object
-
-    meta = df._meta
-    if not pd.api.types.is_integer_dtype(meta[column].dtype):
-        raise TypeError(
-            f"Expected meta {column=} to be an integer column, is {meta[column].dtype}."
-        )
-    check_dtype_support(meta)
-    npartitions = npartitions or df.npartitions
-    token = tokenize(df, column, npartitions)
-
-    if any(not isinstance(c, str) for c in meta.columns):
-        unsupported = {c: type(c) for c in meta.columns if not isinstance(c, str)}
-        raise TypeError(
-            f"p2p requires all column names to be str, found: {unsupported}",
-        )
-
-    name = f"shuffle_p2p-{token}"
-    disk: bool = dask.config.get("distributed.p2p.storage.disk")
-
-    layer = P2PShuffleLayer(
-        name,
-        column,
-        npartitions,
-        npartitions_input=df.npartitions,
-        name_input=df._name,
-        meta_input=meta,
-        disk=disk,
-    )
-    return new_dd_object(
-        HighLevelGraph.from_collections(name, layer, [df]),
-        name,
-        meta,
-        [None] * (npartitions + 1),
-    )
-
-
 _T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
-
-
-class P2PShuffleLayer(Layer):
-    name: str
-    column: str
-    npartitions: int
-    npartitions_input: int
-    name_input: str
-    meta_input: pd.DataFrame
-    disk: bool
-    parts_out: tuple[int, ...]
-    drop_column: bool
-
-    def __init__(
-        self,
-        name: str,
-        column: str,
-        npartitions: int,
-        npartitions_input: int,
-        name_input: str,
-        meta_input: pd.DataFrame,
-        disk: bool,
-        parts_out: Iterable[int] | None = None,
-        annotations: dict | None = None,
-        drop_column: bool = False,
-    ):
-        check_minimal_arrow_version()
-        self.name = name
-        self.column = column
-        self.npartitions = npartitions
-        self.name_input = name_input
-        self.meta_input = meta_input
-        self.disk = disk
-        if parts_out:
-            self.parts_out = tuple(parts_out)
-        else:
-            self.parts_out = tuple(range(self.npartitions))
-        self.npartitions_input = npartitions_input
-        self.drop_column = drop_column
-        super().__init__(annotations=annotations)
-
-    def __repr__(self) -> str:
-        return (
-            f"{type(self).__name__}<name='{self.name}', npartitions={self.npartitions}>"
-        )
-
-    def get_output_keys(self) -> set[Key]:
-        return {(self.name, part) for part in self.parts_out}
-
-    def is_materialized(self) -> bool:
-        return hasattr(self, "_cached_dict")
-
-    @property
-    def _dict(self) -> _T_LowLevelGraph:
-        """Materialize full dict representation"""
-        self._cached_dict: _T_LowLevelGraph
-        dsk: _T_LowLevelGraph
-        if hasattr(self, "_cached_dict"):
-            return self._cached_dict
-        else:
-            dsk = self._construct_graph()
-            self._cached_dict = dsk
-        return self._cached_dict
-
-    def __getitem__(self, key: Key) -> GraphNode:
-        return self._dict[key]
-
-    def __iter__(self) -> Iterator[Key]:
-        return iter(self._dict)
-
-    def __len__(self) -> int:
-        return len(self._dict)
-
-    def _cull(self, parts_out: Iterable[int]) -> P2PShuffleLayer:
-        return P2PShuffleLayer(
-            self.name,
-            self.column,
-            self.npartitions,
-            self.npartitions_input,
-            self.name_input,
-            self.meta_input,
-            self.disk,
-            parts_out=parts_out,
-        )
-
-    def _keys_to_parts(self, keys: Iterable[Key]) -> set[int]:
-        """Simple utility to convert keys to partition indices."""
-        parts = set()
-        for key in keys:
-            if isinstance(key, tuple) and len(key) == 2:
-                name, part = key
-                if name == self.name:
-                    assert isinstance(part, int)
-                    parts.add(part)
-        return parts
-
-    def cull(
-        self, keys: set[Key], all_keys: Collection[Key]
-    ) -> tuple[P2PShuffleLayer, dict]:
-        """Cull a P2PShuffleLayer HighLevelGraph layer.
-
-        The underlying graph will only include the necessary
-        tasks to produce the keys (indices) included in `parts_out`.
-        Therefore, "culling" the layer only requires us to reset this
-        parameter.
-        """
-        parts_out = self._keys_to_parts(keys)
-        # Protect against mutations later on with frozenset
-        input_parts = frozenset(
-            {(self.name_input, i) for i in range(self.npartitions_input)}
-        )
-        culled_deps = {(self.name, part): input_parts for part in parts_out}
-
-        if parts_out != set(self.parts_out):
-            culled_layer = self._cull(parts_out)
-            return culled_layer, culled_deps
-        else:
-            return self, culled_deps
-
-    def _construct_graph(self) -> _T_LowLevelGraph:
-        token = tokenize(self.name_input, self.column, self.npartitions, self.parts_out)
-        shuffle_id = ShuffleId(token)
-        dsk: _T_LowLevelGraph = {}
-        _barrier_key = barrier_key(shuffle_id)
-        name = "shuffle-transfer-" + token
-        transfer_keys = list()
-        for i in range(self.npartitions_input):
-            t = Task(
-                (name, i),
-                shuffle_transfer,
-                TaskRef((self.name_input, i)),
-                token,
-                i,
-            )
-            dsk[t.key] = t
-            transfer_keys.append(t.ref())
-
-        barrier = P2PBarrierTask(
-            _barrier_key,
-            p2p_barrier,
-            token,
-            *transfer_keys,
-            spec=DataFrameShuffleSpec(
-                id=shuffle_id,
-                npartitions=self.npartitions,
-                column=self.column,
-                meta=self.meta_input,
-                parts_out=self.parts_out,
-                disk=self.disk,
-                drop_column=self.drop_column,
-            ),
-        )
-        dsk[barrier.key] = barrier
-
-        name = self.name
-        for part_out in self.parts_out:
-            t = Task(
-                (name, part_out),
-                shuffle_unpack,
-                token,
-                part_out,
-                barrier.ref(),
-            )
-            dsk[t.key] = t
-        return dsk
 
 
 def split_by_worker(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import Any
 from unittest import mock
 
@@ -46,28 +45,6 @@ async def list_eq(a, b):
     dd._compat.assert_numpy_array_equal(av, bv)
 
 
-@pytest.mark.skipif(dd._dask_expr_enabled(), reason="pyarrow>=7.0.0 already required")
-@gen_cluster(client=True)
-async def test_minimal_version(c, s, a, b):
-    no_pyarrow_ctx = (
-        mock.patch.dict("sys.modules", {"pyarrow": None})
-        if pa is not None
-        else contextlib.nullcontext()
-    )
-    with no_pyarrow_ctx:
-        A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
-        a = dd.repartition(A, [0, 4, 5])
-
-        B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
-        b = dd.repartition(B, [0, 2, 5])
-
-        with (
-            pytest.raises(ModuleNotFoundError, match="requires pyarrow"),
-            dask.config.set({"dataframe.shuffle.method": "p2p"}),
-        ):
-            await c.compute(dd.merge(a, b, left_on="x", right_on="z"))
-
-
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 @gen_cluster(client=True)
 async def test_basic_merge(c, s, a, b, how):
@@ -79,13 +56,10 @@ async def test_basic_merge(c, s, a, b, how):
 
     joined = a.merge(b, left_on="y", right_on="y", how=how)
 
-    if dd._dask_expr_enabled():
-        # Ensure we're using a hash join
-        from dask_expr._merge import HashJoinP2P
+    # Ensure we're using a hash join
+    from dask_expr._merge import HashJoinP2P
 
-        assert any(
-            isinstance(expr, HashJoinP2P) for expr in joined.optimize()._expr.walk()
-        )
+    assert any(isinstance(expr, HashJoinP2P) for expr in joined.optimize()._expr.walk())
 
     expected = pd.merge(A, B, how, "y")
     await list_eq(joined, expected)
