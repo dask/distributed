@@ -753,7 +753,7 @@ def partial_concatenate(
             )
             rec_cat_arg[old_partial_index] = t.ref()
         else:
-            rec_cat_arg[old_partial_index] = TaskRef((input_name,) + old_global_index)  # type: ignore[call-overload]
+            rec_cat_arg[old_partial_index] = TaskRef((input_name,) + old_global_index)
 
     concat_task = Task(
         (rechunk_name(token),) + global_new_index,
