@@ -1,7 +1,7 @@
 from __future__ import annotations
-from packaging.version import Version
 
 import pytest
+from packaging.version import Version
 
 from distributed.protocol import deserialize, serialize
 
@@ -12,6 +12,7 @@ scipy_sparse = pytest.importorskip("scipy.sparse")
 
 SCIPY_VERSION = Version(scipy.__version__)
 SCIPY_GE_1_15_0 = SCIPY_VERSION.release >= (1, 15, 0)
+
 
 @pytest.mark.parametrize(
     "sparse_type",
@@ -28,10 +29,20 @@ SCIPY_GE_1_15_0 = SCIPY_VERSION.release >= (1, 15, 0)
 @pytest.mark.parametrize(
     "dtype",
     [
-        numpy.dtype("<f4"), 
-        pytest.param(numpy.dtype(">f4"), marks=pytest.mark.skipif(SCIPY_GE_1_15_0, reason="https://github.com/scipy/scipy/issues/22258")), 
+        numpy.dtype("<f4"),
+        pytest.param(
+            numpy.dtype(">f4"),
+            marks=pytest.mark.skipif(
+                SCIPY_GE_1_15_0, reason="https://github.com/scipy/scipy/issues/22258"
+            ),
+        ),
         numpy.dtype("<f8"),
-        pytest.param(numpy.dtype(">f8"), marks=pytest.mark.skipif(SCIPY_GE_1_15_0, reason="https://github.com/scipy/scipy/issues/22258")), 
+        pytest.param(
+            numpy.dtype(">f8"),
+            marks=pytest.mark.skipif(
+                SCIPY_GE_1_15_0, reason="https://github.com/scipy/scipy/issues/22258"
+            ),
+        ),
     ],
 )
 def test_serialize_scipy_sparse(sparse_type, dtype):
