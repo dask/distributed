@@ -3764,7 +3764,9 @@ async def test_reconnect():
     port = open_port()
 
     stack = ExitStack()
-    proc = popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"])
+    proc = popen(
+        [sys.executable, "-m", "dask", "scheduler", "--no-dashboard", f"--port={port}"]
+    )
     stack.enter_context(proc)
     async with (
         Client(f"127.0.0.1:{port}", asynchronous=True) as c,
@@ -3784,7 +3786,16 @@ async def test_reconnect():
         with pytest.raises(CancelledError):
             await x
 
-        with popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"]):
+        with popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--no-dashboard",
+                f"--port={port}",
+            ]
+        ):
             start = time()
             while c.status != "running":
                 await asyncio.sleep(0.1)

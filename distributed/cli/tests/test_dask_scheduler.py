@@ -40,7 +40,7 @@ def _get_dashboard_port(client: Client) -> int:
 
 
 def test_defaults(loop, requires_default_ports):
-    with popen(["dask", "scheduler"]):
+    with popen([sys.executable, "-m", "dask", "scheduler"]):
 
         async def f():
             # Default behaviour is to listen on all addresses
@@ -53,7 +53,17 @@ def test_defaults(loop, requires_default_ports):
 
 def test_hostport(loop):
     port = open_port()
-    with popen(["dask", "scheduler", "--no-dashboard", "--host", f"127.0.0.1:{port}"]):
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
+            "--no-dashboard",
+            "--host",
+            f"127.0.0.1:{port}",
+        ]
+    ):
 
         async def f():
             # The scheduler's main port can't be contacted from the outside
@@ -65,7 +75,7 @@ def test_hostport(loop):
 
 
 def test_no_dashboard(loop, requires_default_ports):
-    with popen(["dask", "scheduler", "--no-dashboard"]):
+    with popen([sys.executable, "-m", "dask", "scheduler", "--no-dashboard"]):
         with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/status/")
             assert response.status_code == 404
@@ -76,7 +86,7 @@ def test_dashboard(loop):
     port = open_port()
 
     with popen(
-        ["dask", "scheduler", "--host", f"127.0.0.1:{port}"],
+        [sys.executable, "-m", "dask", "scheduler", "--host", f"127.0.0.1:{port}"],
     ):
         with Client(f"127.0.0.1:{port}", loop=loop) as c:
             dashboard_port = _get_dashboard_port(c)
@@ -109,6 +119,8 @@ def test_dashboard_non_standard_ports(loop):
     port2 = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             f"--port={port1}",
@@ -137,6 +149,8 @@ def test_multiple_protocols(loop):
     port2 = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             "--protocol=tcp,ws",
@@ -158,6 +172,8 @@ def test_dashboard_allowlist(loop):
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             f"--port={port}",
@@ -198,6 +214,8 @@ def test_interface(loop):
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             f"--port={port}",
@@ -208,6 +226,8 @@ def test_interface(loop):
     ) as s:
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "worker",
                 f"127.0.0.1:{port}",
@@ -252,12 +272,24 @@ def test_pid_file(loop):
             assert proc.pid == pid
 
     with tmpfile() as s:
-        with popen(["dask", "scheduler", "--pid-file", s, "--no-dashboard"]) as sched:
+        with popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--pid-file",
+                s,
+                "--no-dashboard",
+            ]
+        ) as sched:
             check_pidfile(sched, s)
 
         with tmpfile() as w:
             with popen(
                 [
+                    sys.executable,
+                    "-m",
                     "dask",
                     "worker",
                     f"127.0.0.1:{port}",
@@ -273,6 +305,8 @@ def test_scheduler_port_zero(loop):
     with tmpfile() as fn:
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "scheduler",
                 "--no-dashboard",
@@ -292,6 +326,8 @@ def test_dashboard_port_zero(loop):
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             "--host",
@@ -329,6 +365,8 @@ def test_preload_file(loop, tmp_path):
     with tmpfile() as fn:
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "scheduler",
                 "--scheduler-file",
@@ -359,6 +397,8 @@ def test_preload_module(loop, tmp_path):
     with tmpfile() as fn:
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "scheduler",
                 "--scheduler-file",
@@ -382,6 +422,8 @@ def test_preload_remote_module(loop, tmp_path):
     ):
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "scheduler",
                 "--scheduler-file",
@@ -408,7 +450,9 @@ def test_preload_config(loop):
     with tmpfile() as fn:
         env = os.environ.copy()
         env["DASK_DISTRIBUTED__SCHEDULER__PRELOAD"] = PRELOAD_TEXT
-        with popen(["dask", "scheduler", "--scheduler-file", fn], env=env):
+        with popen(
+            [sys.executable, "-m", "dask", "scheduler", "--scheduler-file", fn], env=env
+        ):
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert (
                     c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.foo)
@@ -446,6 +490,8 @@ def test_preload_command(loop):
             print(fn)
             with popen(
                 [
+                    sys.executable,
+                    "-m",
                     "dask",
                     "scheduler",
                     "--scheduler-file",
@@ -477,7 +523,16 @@ def test_preload_command_default(loop):
         with tmpfile() as fn2:
             print(fn2)
             with popen(
-                ["dask", "scheduler", "--scheduler-file", fn2, "--preload", path],
+                [
+                    sys.executable,
+                    "-m",
+                    "dask",
+                    "scheduler",
+                    "--scheduler-file",
+                    fn2,
+                    "--preload",
+                    path,
+                ],
                 stdout=sys.stdout,
                 stderr=sys.stderr,
             ):
@@ -530,10 +585,20 @@ def dask_setup(worker):
 """
     port = open_port()
     with popen(
-        ["dask", "scheduler", "--no-dashboard", "--host", f"127.0.0.1:{port}"]
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
+            "--no-dashboard",
+            "--host",
+            f"127.0.0.1:{port}",
+        ]
     ) as s:
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "worker",
                 f"localhost:{port}",
@@ -555,9 +620,37 @@ def dask_setup(worker):
 def test_multiple_workers(loop):
     scheduler_address = f"127.0.0.1:{open_port()}"
     with (
-        popen(["dask", "scheduler", "--no-dashboard", "--host", scheduler_address]),
-        popen(["dask", "worker", scheduler_address, "--no-dashboard"]),
-        popen(["dask", "worker", scheduler_address, "--no-dashboard"]),
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--no-dashboard",
+                "--host",
+                scheduler_address,
+            ]
+        ),
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "worker",
+                scheduler_address,
+                "--no-dashboard",
+            ]
+        ),
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "worker",
+                scheduler_address,
+                "--no-dashboard",
+            ]
+        ),
         Client(scheduler_address, loop=loop) as c,
     ):
         start = time()

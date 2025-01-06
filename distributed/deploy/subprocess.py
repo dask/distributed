@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -82,6 +83,8 @@ class SubprocessScheduler(Subprocess):
 
     async def _start(self):
         cmd = [
+            sys.executable,
+            "-m",
             "dask",
             "spec",
             "--spec",
@@ -153,6 +156,8 @@ class SubprocessWorker(Subprocess):
 
     async def _start(self) -> None:
         cmd = [
+            sys.executable,
+            "-m",
             "dask",
             "spec",
             self.scheduler,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
@@ -49,6 +50,8 @@ def test_jupyter_cli(loop, requires_default_ports):
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             "--jupyter",
@@ -120,6 +123,8 @@ def test_shutsdown_cleanly(requires_default_ports):
         subprocess_fut = tpe.submit(
             subprocess.run,
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "scheduler",
                 "--jupyter",
