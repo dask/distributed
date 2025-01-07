@@ -5321,7 +5321,7 @@ async def test_alias_resolving_break_queuing(c, s, a):
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
-async def test_data_producer_tasks(c, s, a):
+async def test_data_producers(c, s, a):
     from dask._task_spec import DataNode, Task, TaskRef
 
     def func(*args):
@@ -5331,7 +5331,7 @@ async def test_data_producer_tasks(c, s, a):
         def __dask_graph__(self):
             return {
                 "a": DataNode("a", 10),
-                "b": Task("b", func, TaskRef("a"), data_producer_task=True),
+                "b": Task("b", func, TaskRef("a"), data_producer=True),
                 "c": Task("c", func, TaskRef("b")),
                 "d": Task("d", func, TaskRef("c")),
             }
@@ -5347,11 +5347,6 @@ async def test_data_producer_tasks(c, s, a):
     while not s.tasks:
         await asyncio.sleep(0.01)
     assert (
-        sum(
-            [
-                s.is_rootish(v) and v.run_spec.data_producer_task
-                for v in s.tasks.values()
-            ]
-        )
+        sum([s.is_rootish(v) and v.run_spec.data_producer for v in s.tasks.values()])
         == 2
     )

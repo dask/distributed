@@ -3084,7 +3084,7 @@ class SchedulerState:
         to override this heuristic.
         """
         # Check explicitly marked data producer tasks
-        if ts.run_spec and ts.run_spec.data_producer_task:
+        if ts.run_spec and ts.run_spec.data_producer:
             return True
 
         if ts.resource_restrictions or ts.worker_restrictions or ts.host_restrictions:
