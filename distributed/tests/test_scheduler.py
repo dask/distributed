@@ -5344,8 +5344,7 @@ async def test_data_producers(c, s, a):
 
     arr = MyArray()
     x = c.compute(arr)
-    while not s.tasks:
-        await asyncio.sleep(0.01)
+    await async_poll_for(lambda: s.tasks, 5)
     assert (
         sum([s.is_rootish(v) and v.run_spec.data_producer for v in s.tasks.values()])
         == 2
