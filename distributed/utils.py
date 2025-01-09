@@ -1283,7 +1283,7 @@ palette = [
 
 @toolz.memoize
 def color_of(x, palette=palette):
-    h = md5(str(x).encode())
+    h = md5(str(x).encode(), usedforsecurity=False)
     n = int(h.hexdigest()[:8], 16)
     return palette[n % len(palette)]
 
