@@ -32,7 +32,8 @@ class NVMLState(IntEnum):
 
 
 class CudaDeviceInfo(NamedTuple):
-    uuid: bytes | None = None
+    # Older versions of pynvml returned bytes, newer versions return str.
+    uuid: str | bytes | None = None
     device_index: int | None = None
     mig_index: int | None = None
 
@@ -278,13 +279,13 @@ def get_device_index_and_uuid(device):
     Examples
     --------
     >>> get_device_index_and_uuid(0)  # doctest: +SKIP
-    {'device-index': 0, 'uuid': b'GPU-e1006a74-5836-264f-5c26-53d19d212dfe'}
+    {'device-index': 0, 'uuid': 'GPU-e1006a74-5836-264f-5c26-53d19d212dfe'}
 
     >>> get_device_index_and_uuid('GPU-e1006a74-5836-264f-5c26-53d19d212dfe')  # doctest: +SKIP
-    {'device-index': 0, 'uuid': b'GPU-e1006a74-5836-264f-5c26-53d19d212dfe'}
+    {'device-index': 0, 'uuid': 'GPU-e1006a74-5836-264f-5c26-53d19d212dfe'}
 
     >>> get_device_index_and_uuid('MIG-7feb6df5-eccf-5faa-ab00-9a441867e237')  # doctest: +SKIP
-    {'device-index': 0, 'uuid': b'MIG-7feb6df5-eccf-5faa-ab00-9a441867e237'}
+    {'device-index': 0, 'uuid': 'MIG-7feb6df5-eccf-5faa-ab00-9a441867e237'}
     """
     init_once()
     try:
