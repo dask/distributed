@@ -5331,7 +5331,7 @@ async def test_data_producers(c, s, a):
         def __dask_graph__(self):
             return {
                 "a": DataNode("a", 10),
-                "b": Task("b", func, TaskRef("a"), data_producer=True),
+                "b": Task("b", func, TaskRef("a"), _data_producer=True),
                 "c": Task("c", func, TaskRef("b")),
                 "d": Task("d", func, TaskRef("c")),
             }
