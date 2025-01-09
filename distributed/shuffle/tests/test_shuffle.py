@@ -1637,33 +1637,6 @@ async def test_multi(c, s, a, b):
     await assert_scheduler_cleanup(s)
 
 
-@pytest.mark.skipif(reason="worker restrictions are not supported in dask-expr")
-@gen_cluster(client=True)
-async def test_restrictions(c, s, a, b):
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-10",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
-    ).persist(workers=a.address)
-    await df
-    assert a.data
-    assert not b.data
-
-    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = df.shuffle("x")
-        y = df.shuffle("y")
-
-    x = x.persist(workers=b.address)
-    y = y.persist(workers=a.address)
-
-    await x
-    assert all(key in b.data for key in x.__dask_keys__())
-
-    await y
-    assert all(key in a.data for key in y.__dask_keys__())
-
-
 @gen_cluster(client=True)
 async def test_delete_some_results(c, s, a, b):
     df = dask.datasets.timeseries(

@@ -803,7 +803,7 @@ async def test_spans_are_visible_from_tasks(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_span_on_persist(c, s, a, b):
-    """As a workaround to lack of annotations support in dask-expr and loss of
+    """As a workaround to lack of annotations support in dask.dataframe and loss of
     annotations due to low level optimization in dask.array, you can use span() to wrap
     calls to persist() and compute()
     """
