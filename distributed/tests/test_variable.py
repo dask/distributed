@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import pickle
 import random
+import sys
 from datetime import timedelta
 from time import sleep
 
@@ -44,8 +45,18 @@ def test_variable_in_task(loop):
     port = open_port()
     # Ensure that we can create a Variable inside a task on a
     # worker in a separate Python process than the client
-    with popen(["dask", "scheduler", "--no-dashboard", "--port", str(port)]):
-        with popen(["dask", "worker", f"127.0.0.1:{port}"]):
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
+            "--no-dashboard",
+            "--port",
+            str(port),
+        ]
+    ):
+        with popen([sys.executable, "-m", "dask", "worker", f"127.0.0.1:{port}"]):
             with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)
 

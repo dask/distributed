@@ -142,7 +142,7 @@ def get_jobs(run, session, repo):
     # this to the JXML results.
 
     if repo.endswith("/dask"):
-        # example name: "test (windows-latest, 3.9)" or "test (ubuntu-latest, 3.12, dask-expr)"
+        # example name: "test (windows-latest, 3.9)" or "test (ubuntu-latest, 3.12)"
         df_jobs = df_jobs[~df_jobs.name.str.contains("Event File")]
 
         def format(row):
@@ -387,10 +387,6 @@ def download_and_parse_artifacts(
                 # Between time https://github.com/dask/dask/pull/10769 was merged and
                 # then https://github.com/dask/dask/pull/10781 which changed the name
                 if a["name"].startswith("test-results") and repo.endswith("/dask"):
-                    continue
-
-                # NOTE: Temporarily ignore reporting dask-expr related test cases
-                if "dask-expr" in a["name"]:
                     continue
 
                 # Note: we assign a column with the workflow run timestamp rather

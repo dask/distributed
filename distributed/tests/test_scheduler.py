@@ -2830,9 +2830,7 @@ async def test_default_task_duration_splits(c, s, a, b):
     await wait(fut)
 
     split_prefix = [pre for pre in s.task_prefixes.keys() if "split" in pre]
-    # dask-expr enabled: ['split-taskshuffle', 'split-stage']
-    # dask-expr disabled: ['split-shuffle']
-    assert split_prefix
+    assert split_prefix == ["split-taskshuffle", "split-stage"]
     default_times = dask.config.get("distributed.scheduler.default-task-durations")
     for p in split_prefix:
         default_time = parse_timedelta(default_times[p])

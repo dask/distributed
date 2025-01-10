@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from time import sleep
 
 from distributed import Client
@@ -32,8 +33,18 @@ def wait_for_cores(c, nthreads=1):
 
 def test_basic(loop, requires_default_ports):
     with (
-        popen(["dask", "scheduler", "--no-dashboard"] + tls_args),
-        popen(["dask", "worker", "--no-dashboard", "tls://127.0.0.1:8786"] + tls_args),
+        popen([sys.executable, "-m", "dask", "scheduler", "--no-dashboard"] + tls_args),
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "worker",
+                "--no-dashboard",
+                "tls://127.0.0.1:8786",
+            ]
+            + tls_args
+        ),
         Client("tls://127.0.0.1:8786", loop=loop, security=tls_security()) as c,
     ):
         wait_for_cores(c)
@@ -42,10 +53,13 @@ def test_basic(loop, requires_default_ports):
 def test_sni(loop):
     port = open_port()
     with popen(
-        ["dask", "scheduler", "--no-dashboard", f"--port={port}"] + tls_args
+        [sys.executable, "-m", "dask", "scheduler", "--no-dashboard", f"--port={port}"]
+        + tls_args
     ) as s:
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "worker",
                 "--no-dashboard",
@@ -65,6 +79,8 @@ def test_nanny(loop):
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             "--no-dashboard",
@@ -73,7 +89,15 @@ def test_nanny(loop):
         + tls_args
     ) as s:
         with popen(
-            ["dask", "worker", "--no-dashboard", "--nanny", f"tls://127.0.0.1:{port}"]
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "worker",
+                "--no-dashboard",
+                "--nanny",
+                f"tls://127.0.0.1:{port}",
+            ]
             + tls_args
         ) as w:
             with Client(
@@ -86,6 +110,8 @@ def test_separate_key_cert(loop):
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             "--no-dashboard",
@@ -94,7 +120,15 @@ def test_separate_key_cert(loop):
         + tls_args_2
     ) as s:
         with popen(
-            ["dask", "worker", "--no-dashboard", f"tls://127.0.0.1:{port}"] + tls_args_2
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "worker",
+                "--no-dashboard",
+                f"tls://127.0.0.1:{port}",
+            ]
+            + tls_args_2
         ) as w:
             with Client(
                 f"tls://127.0.0.1:{port}", loop=loop, security=tls_security()
@@ -107,6 +141,8 @@ def test_use_config_file(loop):
     with new_config_file(tls_only_config()):
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "scheduler",
                 "--no-dashboard",
@@ -117,7 +153,14 @@ def test_use_config_file(loop):
             ]
         ) as s:
             with popen(
-                ["dask", "worker", "--no-dashboard", f"tls://127.0.0.1:{port}"]
+                [
+                    sys.executable,
+                    "-m",
+                    "dask",
+                    "worker",
+                    "--no-dashboard",
+                    f"tls://127.0.0.1:{port}",
+                ]
             ) as w:
                 with Client(
                     f"tls://127.0.0.1:{port}", loop=loop, security=tls_security()
