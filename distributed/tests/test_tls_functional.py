@@ -215,6 +215,7 @@ async def test_security_bool_input_disabled_security():
         async with Worker(s.address, security=False):
             async with Client(s.address, security=False, asynchronous=True) as c:
                 result = await c.submit(inc, 1)
+                assert c.security.require_encryption is False
                 assert result == 2
 
 
