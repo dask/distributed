@@ -129,17 +129,18 @@ def get_stream_address(comm):
 
 def convert_stream_closed_error(obj, exc):
     """
-    Re-raise StreamClosedError as CommClosedError.
+    Re-raise StreamClosedError or SSLError as CommClosedError.
     """
-    if exc.real_error is not None:
+    if hasattr(exc, "real_error"):
         # The stream was closed because of an underlying OS error
+        if exc.real_error is None:
+            raise CommClosedError(f"in {obj}: {exc}") from exc
         exc = exc.real_error
-        if isinstance(exc, ssl.SSLError):
-            if exc.reason and "UNKNOWN_CA" in exc.reason:
-                raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
-        raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
-    else:
-        raise CommClosedError(f"in {obj}: {exc}") from exc
+
+    if isinstance(exc, ssl.SSLError):
+        if exc.reason and "UNKNOWN_CA" in exc.reason:
+            raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
+    raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
 
 
 def _close_comm(ref):
@@ -230,7 +231,7 @@ class TCP(Comm):
                 buffer = await read_bytes_rw(stream, buffer_nbytes)
                 frames.append(buffer)
 
-        except StreamClosedError as e:
+        except (StreamClosedError, SSLError) as e:
             self.stream = None
             self._closed = True
             convert_stream_closed_error(self, e)
