@@ -1146,7 +1146,7 @@ class Client(SyncMethodMixin):
         if security is None and isinstance(address, str):
             security = _maybe_call_security_loader(address)
 
-        if security is None:
+        if security is None or security is False:
             security = Security()
         elif isinstance(security, dict):
             security = Security(**security)

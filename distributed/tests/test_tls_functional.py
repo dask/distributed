@@ -210,6 +210,16 @@ async def test_security_dict_input_no_security():
 
 
 @gen_test()
+async def test_security_bool_input_disabled_security():
+    async with Scheduler(dashboard_address=":0", security=False) as s:
+        async with Worker(s.address, security=False):
+            async with Client(s.address, security=False, asynchronous=True) as c:
+                result = await c.submit(inc, 1)
+                assert c.security.require_encryption is False
+                assert result == 2
+
+
+@gen_test()
 async def test_security_dict_input():
     conf = tls_config()
     ca_file = conf["distributed"]["comm"]["tls"]["ca-file"]
