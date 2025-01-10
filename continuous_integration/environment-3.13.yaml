@@ -49,8 +49,7 @@ dependencies:
   # Temporary fix for https://github.com/jupyterlab/jupyterlab/issues/17012
   - httpx<0.28.0
   - pip:
-      - git+https://github.com/phofl/dask.git@io-tasks
-      # - git+https://github.com/dask/dask
+      - git+https://github.com/dask/dask
       - git+https://github.com/dask/zict
       # Revert after https://github.com/dask/distributed/issues/8614 is fixed
       # - git+https://github.com/dask/s3fs
