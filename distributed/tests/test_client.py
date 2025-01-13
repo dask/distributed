@@ -80,7 +80,8 @@ from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import Status
-from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.deploy.subprocess import SubprocessCluster
+from distributed.diagnostics.plugin import UploadDirectory, WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.shuffle import check_minimal_arrow_version
@@ -7408,7 +7409,6 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     assert comp.code[0][-1].code == test_function_code
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_upload_directory(c, s, a, b, tmp_path):
     from dask.distributed import UploadDirectory
@@ -7421,7 +7421,7 @@ async def test_upload_directory(c, s, a, b, tmp_path):
     with open(tmp_path / "bar.py", "w") as f:
         f.write("from foo import x")
 
-    plugin = UploadDirectory(tmp_path, restart=True, update_path=True)
+    plugin = UploadDirectory(tmp_path, restart_workers=True, update_path=True)
     await c.register_plugin(plugin)
 
     [name] = a.plugins
@@ -7442,6 +7442,47 @@ async def test_upload_directory(c, s, a, b, tmp_path):
 
     files_end = {f for f in os.listdir() if not f.startswith(".coverage")}
     assert files_start == files_end  # no change
+
+
+def test_upload_directory_invalid_mode():
+    with pytest.raises(ValueError, match="mode"):
+        UploadDirectory(".", mode="invalid")
+
+
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
+@pytest.mark.parametrize("mode", ["all", "scheduler"])
+@gen_test()
+async def test_upload_directory_to_scheduler(mode, tmp_path):
+    from dask.distributed import UploadDirectory
+
+    # Be sure to exclude code coverage reports
+    files_start = {f for f in os.listdir() if not f.startswith(".coverage")}
+
+    with open(tmp_path / "foo.py", "w") as f:
+        f.write("x = 123")
+    with open(tmp_path / "bar.py", "w") as f:
+        f.write("from foo import x")
+
+    def f():
+        import bar
+
+        return bar.x
+
+    async with SubprocessCluster(
+        asynchronous=True,
+        dashboard_address=":0",
+        scheduler_kwargs={"idle_timeout": "5s"},
+        worker_kwargs={"death_timeout": "5s"},
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            with pytest.raises(ModuleNotFoundError, match="'bar'"):
+                res = await client.run_on_scheduler(f)
+
+            plugin = UploadDirectory(
+                tmp_path, mode=mode, restart_workers=True, update_path=True
+            )
+            await client.register_plugin(plugin)
+            assert await client.run_on_scheduler(f) == 123
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
