@@ -42,7 +42,6 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.bag as db
 from dask import delayed
-from dask.optimization import SubgraphCallable
 from dask.tokenize import tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
@@ -2626,13 +2625,6 @@ async def test_futures_of_get(c, s, a, b):
 
     b = db.Bag({("b", i): f for i, f in enumerate([x, y, z])}, "b", 3)
     assert set(futures_of(b)) == {x, y, z}
-
-    sg = SubgraphCallable(
-        {"x": x, "y": y, "z": z, "out": (add, (add, (add, x, y), z), "in")},
-        "out",
-        ("in",),
-    )
-    assert set(futures_of(sg)) == {x, y, z}
 
 
 def test_futures_of_class():
@@ -6190,43 +6182,6 @@ async def test_profile_bokeh(c, s, a, b):
             if WINDOWS:
                 pytest.xfail()
         assert os.path.exists(fn)
-
-
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_get_mix_futures_and_SubgraphCallable(c, s, a):
-    future = c.submit(add, 1, 2)
-
-    subgraph = SubgraphCallable(
-        {"_2": (add, "_0", "_1"), "_3": (add, future, "_2")},
-        "_3",
-        ("_0", "_1"),
-    )
-    dsk = {
-        "a": 1,
-        "b": 2,
-        "c": (subgraph, "a", "b"),
-        "d": (subgraph, "c", "b"),
-    }
-
-    future2 = c.get(dsk, "d", sync=False)
-    result = await future2
-    assert result == 11
-
-    # Nested subgraphs
-    subgraph2 = SubgraphCallable(
-        {
-            "_2": (subgraph, "_0", "_1"),
-            "_3": (subgraph, "_2", "_1"),
-            "_4": (add, "_3", future2),
-        },
-        "_4",
-        ("_0", "_1"),
-    )
-
-    dsk2 = {"e": 1, "f": 2, "g": (subgraph2, "e", "f")}
-
-    result = await c.get(dsk2, "g", sync=False)
-    assert result == 22
 
 
 @gen_cluster(client=True)

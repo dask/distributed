@@ -30,19 +30,7 @@ SCIPY_GE_1_15_0 = SCIPY_VERSION.release >= (1, 15, 0)
     "dtype",
     [
         numpy.dtype("<f4"),
-        pytest.param(
-            numpy.dtype(">f4"),
-            marks=pytest.mark.skipif(
-                SCIPY_GE_1_15_0, reason="https://github.com/scipy/scipy/issues/22258"
-            ),
-        ),
         numpy.dtype("<f8"),
-        pytest.param(
-            numpy.dtype(">f8"),
-            marks=pytest.mark.skipif(
-                SCIPY_GE_1_15_0, reason="https://github.com/scipy/scipy/issues/22258"
-            ),
-        ),
     ],
 )
 def test_serialize_scipy_sparse(sparse_type, dtype):

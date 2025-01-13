@@ -13,7 +13,6 @@ from tlz import drop, groupby, merge
 
 import dask.config
 from dask._task_spec import TaskRef
-from dask.optimization import SubgraphCallable
 from dask.typing import Key
 from dask.utils import is_namedtuple_instance, parse_timedelta
 
@@ -197,30 +196,6 @@ def _unpack_remotedata_inner(
     if typ is tuple:
         if not o:
             return o
-        if type(o[0]) is SubgraphCallable:
-            # Unpack futures within the arguments of the subgraph callable
-            futures: set[TaskRef] = set()
-            args = tuple(_unpack_remotedata_inner(i, byte_keys, futures) for i in o[1:])
-            found_futures.update(futures)
-
-            # Unpack futures within the subgraph callable itself
-            sc: SubgraphCallable = o[0]
-            futures = set()
-            dsk = {
-                k: _unpack_remotedata_inner(v, byte_keys, futures)
-                for k, v in sc.dsk.items()
-            }
-            future_keys: tuple = ()
-            if futures:  # If no futures is in the subgraph, we just use `sc` as-is
-                found_futures.update(futures)
-                future_keys = (
-                    tuple(f.key for f in futures)
-                    if byte_keys
-                    else tuple(f.key for f in futures)
-                )
-                inkeys = tuple(sc.inkeys) + future_keys
-                sc = SubgraphCallable(dsk, sc.outkey, inkeys, sc.name)
-            return (sc,) + args + future_keys
         else:
             return tuple(
                 _unpack_remotedata_inner(item, byte_keys, found_futures) for item in o
