@@ -15,7 +15,7 @@ from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from dask.typing import Key
-from dask.utils import funcname, tmpfile
+from dask.utils import _deprecated_kwarg, funcname, tmpfile
 
 from distributed.protocol.pickle import dumps
 
@@ -896,35 +896,45 @@ class Environ(NannyPlugin):
         nanny.env.update(self.environ)
 
 
-class UploadDirectory(NannyPlugin):
-    """A NannyPlugin to upload a local file to workers.
+UPLOAD_DIRECTORY_MODES = ["all", "scheduler", "workers"]
+
+
+class UploadDirectory(SchedulerPlugin):
+    """Scheduler to upload a local directory to the cluster.
 
     Parameters
     ----------
-    path: str
-        A path to the directory to upload
+    path:
+        Path to the directory to upload
+    scheduler:
+        Whether to upload the directory to the scheduler
 
     Examples
     --------
     >>> from distributed.diagnostics.plugin import UploadDirectory
-    >>> client.register_plugin(UploadDirectory("/path/to/directory"), nanny=True)  # doctest: +SKIP
+    >>> client.register_plugin(UploadDirectory("/path/to/directory"))  # doctest: +SKIP
     """
 
+    @_deprecated_kwarg("restart", "restart_workers")
     def __init__(
         self,
         path,
-        restart=False,
+        restart_workers=False,
         update_path=False,
         skip_words=(".git", ".github", ".pytest_cache", "tests", "docs"),
         skip=(lambda fn: os.path.splitext(fn)[1] == ".pyc",),
+        mode="workers",
     ):
-        """
-        Initialize the plugin by reading in the data from the given file.
-        """
         path = os.path.expanduser(path)
         self.path = os.path.split(path)[-1]
-        self.restart = restart
+        self.restart_workers = restart_workers
         self.update_path = update_path
+
+        if mode not in UPLOAD_DIRECTORY_MODES:
+            raise ValueError(
+                f"{mode=} not supported, expected one of {UPLOAD_DIRECTORY_MODES}"
+            )
+        self.mode = mode
 
         self.name = "upload-directory-" + os.path.split(path)[-1]
 
@@ -944,25 +954,66 @@ class UploadDirectory(NannyPlugin):
                         )
                         z.write(filename, archive_name)
 
-            with open(fn, "rb") as f:
+            with open(fn, mode="rb") as f:
                 self.data = f.read()
 
-    async def setup(self, nanny):
-        fn = os.path.join(nanny.local_directory, f"tmp-{uuid.uuid4()}.zip")
-        with open(fn, "wb") as f:
-            f.write(self.data)
+    async def start(self, scheduler):
+        from distributed.core import clean_exception
+        from distributed.protocol.serialize import Serialized, deserialize
+
+        if self.mode in ("all", "scheduler"):
+            _extract_data(
+                scheduler.local_directory, self.path, self.data, self.update_graph
+            )
+
+        if self.mode in ("all", "workers"):
+            nanny_plugin = _UploadDirectoryNannyPlugin(
+                self.path, self.data, self.restart_workers, self.update_path, self.name
+            )
+            responses = await scheduler.register_nanny_plugin(
+                comm=None,
+                plugin=dumps(nanny_plugin),
+                name=self.name,
+                idempotent=False,
+            )
+
+            for response in responses.values():
+                if response["status"] == "error":
+                    response = {
+                        k: deserialize(v.header, v.frames)
+                        for k, v in response.items()
+                        if isinstance(v, Serialized)
+                    }
+                    _, exc, tb = clean_exception(**response)
+                    raise exc.with_traceback(tb)
+
+
+class _UploadDirectoryNannyPlugin(NannyPlugin):
+    def __init__(self, path, data, restart, update_path, name):
+        self.path = path
+        self.data = data
+        self.name = name
+        self.restart = restart
+        self.update_path = update_path
+
+    def setup(self, nanny):
+        _extract_data(nanny.local_directory, self.path, self.data, self.update_path)
+
+
+def _extract_data(base_path, path, data, update_path):
+    with tmpfile(extension="zip") as fn:
+        with open(fn, mode="wb") as f:
+            f.write(data)
 
         import zipfile
 
         with zipfile.ZipFile(fn) as z:
-            z.extractall(path=nanny.local_directory)
+            z.extractall(path=base_path)
 
-        if self.update_path:
-            path = os.path.join(nanny.local_directory, self.path)
+        if update_path:
+            path = os.path.join(base_path, path)
             if path not in sys.path:
                 sys.path.insert(0, path)
-
-        os.remove(fn)
 
 
 class forward_stream:
