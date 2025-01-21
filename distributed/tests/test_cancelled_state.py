@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -14,6 +15,7 @@ from distributed.utils_test import (
     _LockedCommPool,
     assert_story,
     async_poll_for,
+    captured_logger,
     freeze_batched_send,
     gen_cluster,
     inc,
@@ -1290,6 +1292,121 @@ def test_secede_cancelled_or_resumed_workerstate(
     ws.handle_stimulus(done_ev_cls.dummy(key="x", stimulus_id="s7"))
     assert ts not in ws.executing
     assert ts not in ws.long_running
+
+
+@gen_cluster(client=True, nthreads=[("", 1), ("", 1)], timeout=2)
+async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a, b):
+    wsA = s.workers[a.address]
+    in_long_running = Event()
+    block_secede = Event()
+    seceded = Event()
+    block_long_running = Event()
+    handled_long_running = Event()
+
+    def f(ev1, block_secede, seceded, block_long_running):
+        in_long_running.set()
+        block_secede.wait()
+        distributed.secede()
+        seceded.set()
+        block_long_running.wait()
+        return 123
+
+    # Instrument long-running handler
+    original_handler = s.stream_handlers["long-running"]
+
+    async def instrumented_handle_long_running(*args, **kwargs):
+        try:
+            return original_handler(*args, **kwargs)
+        finally:
+            await handled_long_running.set()
+
+    s.stream_handlers["long-running"] = instrumented_handle_long_running
+
+    # Submit task and wait until it executes on a
+    x = c.submit(
+        f,
+        in_long_running,
+        block_secede,
+        seceded,
+        block_long_running,
+        key="x",
+        workers=[a.address],
+    )
+    await in_long_running.wait()
+    ts = a.state.tasks["x"]
+    assert ts.state == "executing"
+    assert wsA.processing
+    assert not wsA.long_running
+
+    with captured_logger("distributed.scheduler", logging.ERROR) as caplog:
+        with freeze_batched_send(a.batched_stream):
+            # Let x secede (and later succeed) without informing the scheduler
+            await block_secede.set()
+            await wait_for_state("x", "long-running", a)
+            assert not a.state.executing
+            assert a.state.long_running
+            await block_long_running.set()
+
+            await wait_for_state("x", "memory", a)
+
+            # Cancel x while the scheduler does not know that it seceded
+            x.release()
+            await async_poll_for(lambda: not s.tasks, timeout=5)
+            assert not wsA.processing
+            assert not wsA.long_running
+
+            # Reset all events
+            await in_long_running.clear()
+            await block_secede.clear()
+            await seceded.clear()
+            await block_long_running.clear()
+
+            # Resubmit task and wait until it executes on b
+            x = c.submit(
+                f,
+                in_long_running,
+                block_secede,
+                seceded,
+                block_long_running,
+                key="x",
+                workers=[b.address],
+            )
+            await in_long_running.wait()
+            ts = b.state.tasks["x"]
+            wsB = s.workers[b.address]
+            assert ts.state == "executing"
+            assert wsB.processing
+            assert not wsB.long_running
+
+        # Unblock the stream from a to the scheduler and handle the long-running message
+        await handled_long_running.wait()
+        assert ts.state == "executing"
+
+        assert wsB.processing
+        assert wsB.task_prefix_count
+        assert not wsB.long_running
+
+        assert not wsA.processing
+        assert not wsA.task_prefix_count
+        assert not wsA.long_running
+
+        # Clear the handler and let x secede on b
+        await handled_long_running.clear()
+
+        await block_secede.set()
+        await wait_for_state("x", "long-running", b)
+
+        assert not b.state.executing
+        assert b.state.long_running
+        await handled_long_running.wait()
+
+    # Assert that the handler did not fail and no state was corrupted
+    logs = caplog.getvalue()
+    assert not logs
+    assert not wsB.task_prefix_count
+
+    await block_long_running.set()
+    assert await x.result() == 123
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], timeout=2)

@@ -6064,9 +6064,16 @@ class Scheduler(SchedulerState, ServerNode):
         We stop the task from being stolen in the future, and change task
         duration accounting as if the task has stopped.
         """
+        if worker not in self.workers:
+            logger.debug(
+                "Received long-running signal from unknown worker %s. Ignoring.", worker
+            )
+            return
+
         if key not in self.tasks:
             logger.debug("Skipping long_running since key %s was already released", key)
             return
+
         ts = self.tasks[key]
         steal = self.extensions.get("stealing")
         if steal is not None:
@@ -6075,6 +6082,14 @@ class Scheduler(SchedulerState, ServerNode):
         ws = ts.processing_on
         if ws is None:
             logger.debug("Received long-running signal from duplicate task. Ignoring.")
+            return
+
+        if ws.address != worker:
+            logger.debug(
+                "Received stale long-running signal from worker %s for task %s. Ignoring.",
+                worker,
+                ts,
+            )
             return
 
         if compute_duration is not None:
