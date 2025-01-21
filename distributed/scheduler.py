@@ -6075,9 +6075,6 @@ class Scheduler(SchedulerState, ServerNode):
             return
 
         ts = self.tasks[key]
-        steal = self.extensions.get("stealing")
-        if steal is not None:
-            steal.remove_key_from_stealable(ts)
 
         ws = ts.processing_on
         if ws is None:
@@ -6091,6 +6088,10 @@ class Scheduler(SchedulerState, ServerNode):
                 ts,
             )
             return
+
+        steal = self.extensions.get("stealing")
+        if steal is not None:
+            steal.remove_key_from_stealable(ts)
 
         if compute_duration is not None:
             old_duration = ts.prefix.duration_average
