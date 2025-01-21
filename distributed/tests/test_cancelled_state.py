@@ -1297,17 +1297,13 @@ def test_secede_cancelled_or_resumed_workerstate(
 @gen_cluster(client=True, nthreads=[("", 1), ("", 1)], timeout=2)
 async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a, b):
     wsA = s.workers[a.address]
-    in_long_running = Event()
     block_secede = Event()
-    seceded = Event()
     block_long_running = Event()
     handled_long_running = Event()
 
-    def f(ev1, block_secede, seceded, block_long_running):
-        in_long_running.set()
+    def f(block_secede, block_long_running):
         block_secede.wait()
         distributed.secede()
-        seceded.set()
         block_long_running.wait()
         return 123
 
@@ -1325,18 +1321,12 @@ async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a
     # Submit task and wait until it executes on a
     x = c.submit(
         f,
-        in_long_running,
         block_secede,
-        seceded,
         block_long_running,
         key="x",
         workers=[a.address],
     )
-    await in_long_running.wait()
-    ts = a.state.tasks["x"]
-    assert ts.state == "executing"
-    assert wsA.processing
-    assert not wsA.long_running
+    await wait_for_state("x", "executing", a)
 
     with captured_logger("distributed.scheduler", logging.ERROR) as caplog:
         with freeze_batched_send(a.batched_stream):
@@ -1356,30 +1346,25 @@ async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a
             assert not wsA.long_running
 
             # Reset all events
-            await in_long_running.clear()
             await block_secede.clear()
-            await seceded.clear()
             await block_long_running.clear()
 
             # Resubmit task and wait until it executes on b
             x = c.submit(
                 f,
-                in_long_running,
                 block_secede,
-                seceded,
                 block_long_running,
                 key="x",
                 workers=[b.address],
             )
-            await in_long_running.wait()
-            ts = b.state.tasks["x"]
+            await wait_for_state("x", "executing", b)
             wsB = s.workers[b.address]
-            assert ts.state == "executing"
             assert wsB.processing
             assert not wsB.long_running
 
         # Unblock the stream from a to the scheduler and handle the long-running message
         await handled_long_running.wait()
+        ts = b.state.tasks["x"]
         assert ts.state == "executing"
 
         assert wsB.processing
