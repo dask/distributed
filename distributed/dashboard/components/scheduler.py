@@ -4711,30 +4711,25 @@ def status_doc(scheduler, extra, doc):
         processing_root = processing.root
 
     current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-    occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
     workers_transfer_bytes = WorkersTransferBytes(scheduler, sizing_mode="stretch_both")
 
     cpu_root = current_load.cpu_figure
-    occupancy_root = occupancy.root
 
     workers_memory.update()
     workers_transfer_bytes.update()
     processing.update()
     current_load.update()
-    occupancy.update()
 
     add_periodic_callback(doc, workers_memory, 100)
     add_periodic_callback(doc, workers_transfer_bytes, 100)
     add_periodic_callback(doc, processing, 100)
     add_periodic_callback(doc, current_load, 100)
-    add_periodic_callback(doc, occupancy, 100)
 
     doc.add_root(workers_memory.root)
 
     tabs = [
         TabPanel(child=processing_root, title="Processing"),
         TabPanel(child=cpu_root, title="CPU"),
-        TabPanel(child=occupancy_root, title="Occupancy"),
         TabPanel(child=workers_transfer_bytes.root, title="Data Transfer"),
     ]
 
