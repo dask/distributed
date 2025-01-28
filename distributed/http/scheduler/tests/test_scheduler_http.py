@@ -732,6 +732,7 @@ async def test_retire_workers_with_tuple_keys(c, s, a, b):
     aiohttp = pytest.importorskip("aiohttp")
 
     worker_address = "tcp://172.17.0.3:39571"
+
     async def mock_retire_workers(*args, **kwargs):
         # Return problematic data structure
         # tuple are not json serializable
@@ -740,10 +741,16 @@ async def test_retire_workers_with_tuple_keys(c, s, a, b):
                 "type": "Worker",
                 "metrics": {
                     "digests_total_since_heartbeat": {
-                        ("execute", "slowadd", "thread-cpu", "seconds"): 0.0003396660000000093,
+                        (
+                            "execute",
+                            "slowadd",
+                            "thread-cpu",
+                            "seconds",
+                        ): 0.0003396660000000093,
                     },
-                }
-            }}
+                },
+            }
+        }
 
     # Replace the method with our mock
     s.retire_workers = mock_retire_workers

@@ -30,9 +30,7 @@ class RetireWorkersHandler(RequestHandler):
                 if not isinstance(d, dict):
                     return d
                 return {
-                    k: clean_dict(v)
-                    for k, v in d.items()
-                    if not isinstance(k, tuple)
+                    k: clean_dict(v) for k, v in d.items() if not isinstance(k, tuple)
                 }
 
             workers_info = clean_dict(workers_info)
