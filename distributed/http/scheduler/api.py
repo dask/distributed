@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from distributed.http.utils import RequestHandler
+from distributed.utils import recursive_to_dict
 
 
 class APIHandler(RequestHandler):
@@ -24,17 +25,7 @@ class RetireWorkersHandler(RequestHandler):
             else:
                 workers = params.get("workers", {})
                 workers_info = await scheduler.retire_workers(workers=workers)
-
-            # digests_total_since_heartbeat contains tuples as keys which are not json serializable
-            def clean_dict(d):
-                if not isinstance(d, dict):
-                    return d
-                return {
-                    k: clean_dict(v) for k, v in d.items() if not isinstance(k, tuple)
-                }
-
-            workers_info = clean_dict(workers_info)
-            self.write(json.dumps(workers_info))
+            self.write(json.dumps(recursive_to_dict(workers_info)))
         except Exception as e:
             self.set_status(500, str(e))
             self.write(json.dumps({"Error": "Internal Server Error"}))
