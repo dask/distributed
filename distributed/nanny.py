@@ -240,7 +240,6 @@ class Nanny(ServerNode):
             # https://github.com/dask/dask/issues/6640.
             self.pre_spawn_env.update({"PYTHONHASHSEED": "6640"})
 
-
         self.env = merge(
             self.pre_spawn_env,
             _get_env_variables("distributed.nanny.environ"),
