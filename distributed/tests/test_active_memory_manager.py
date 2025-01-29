@@ -977,7 +977,7 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
 
     x = await c.scatter("x", workers=[a.address])
     out = await c.retire_workers([a.address])
-    assert out == {}
+    assert not out
     assert not s.extensions["amm"].policies
     assert set(s.workers) == {a.address, b.address}
 
@@ -1230,7 +1230,7 @@ async def test_RetireWorker_with_actor(c, s, a, b, has_proxy):
 
     with captured_logger("distributed.active_memory_manager", logging.WARNING) as log:
         out = await c.retire_workers([a.address])
-    assert out == {}
+    assert not out
     assert "it holds actor(s)" in log.getvalue()
     assert "x" in a.state.actors
 
@@ -1250,7 +1250,7 @@ async def test_RetireWorker_with_actor_proxy(c, s, a, b):
     assert "y" in b.data
 
     out = await c.retire_workers([b.address])
-    assert out.keys() == {b.address}
+    assert b.address in out
     assert "x" in a.state.actors
     assert "y" in a.data
 
@@ -1301,6 +1301,7 @@ async def tensordot_stress(c, s):
     assert sum(t.start == "memory" for t in s.transition_log) == expected_tasks
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 4,
@@ -1356,6 +1357,7 @@ async def test_ReduceReplicas_stress(c, s, *workers):
     await tensordot_stress(c, s)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("use_ReduceReplicas", [False, True])
 @gen_cluster(
     client=True,

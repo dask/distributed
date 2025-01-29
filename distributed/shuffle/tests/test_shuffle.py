@@ -124,28 +124,6 @@ async def assert_scheduler_cleanup(
     assert not plugin.heartbeats
 
 
-@pytest.mark.skipif(dd._dask_expr_enabled(), reason="pyarrow>=7.0.0 already required")
-@gen_cluster(client=True)
-async def test_minimal_version(c, s, a, b):
-    no_pyarrow_ctx = (
-        mock.patch.dict("sys.modules", {"pyarrow": None})
-        if pa is not None
-        else contextlib.nullcontext()
-    )
-    with no_pyarrow_ctx:
-        df = dask.datasets.timeseries(
-            start="2000-01-01",
-            end="2000-01-10",
-            dtypes={"x": float, "y": float},
-            freq="10 s",
-        )
-        with (
-            pytest.raises(ModuleNotFoundError, match="requires pyarrow"),
-            dask.config.set({"dataframe.shuffle.method": "p2p"}),
-        ):
-            await c.compute(df.shuffle("x"))
-
-
 @pytest.mark.gpu
 @pytest.mark.filterwarnings(
     "ignore:Ignoring the following arguments to `from_pyarrow_table_dispatch`."
@@ -1659,35 +1637,6 @@ async def test_multi(c, s, a, b):
     await assert_scheduler_cleanup(s)
 
 
-@pytest.mark.skipif(
-    dd._dask_expr_enabled(), reason="worker restrictions are not supported in dask-expr"
-)
-@gen_cluster(client=True)
-async def test_restrictions(c, s, a, b):
-    df = dask.datasets.timeseries(
-        start="2000-01-01",
-        end="2000-01-10",
-        dtypes={"x": float, "y": float},
-        freq="10 s",
-    ).persist(workers=a.address)
-    await df
-    assert a.data
-    assert not b.data
-
-    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        x = df.shuffle("x")
-        y = df.shuffle("y")
-
-    x = x.persist(workers=b.address)
-    y = y.persist(workers=a.address)
-
-    await x
-    assert all(key in b.data for key in x.__dask_keys__())
-
-    await y
-    assert all(key in a.data for key in y.__dask_keys__())
-
-
 @gen_cluster(client=True)
 async def test_delete_some_results(c, s, a, b):
     df = dask.datasets.timeseries(
@@ -2349,7 +2298,7 @@ async def test_fail_fetch_race(c, s, a):
     assert shuffle_id not in run_manager._active_runs
 
     with pytest.raises(RuntimeError, match="Received stale shuffle run"):
-        await run_manager.get_or_create(spec.spec, "test-key")
+        await run_manager.get_or_create(shuffle_id, "test-key")
     assert shuffle_id not in run_manager._active_runs
 
     worker_plugin.block_barrier.set()

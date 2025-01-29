@@ -17,7 +17,7 @@ from tornado.ioloop import IOLoop
 import dask
 
 from distributed.batched import BatchedSend
-from distributed.comm.core import CommClosedError
+from distributed.comm.core import CommClosedError, FatalCommClosedError
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend, TCPListener
 from distributed.core import (
@@ -708,6 +708,47 @@ async def test_connection_pool_outside_cancellation(monkeypatch):
 
 
 @gen_test()
+async def test_connection_pool_catch_all_cancellederrors(monkeypatch):
+    from distributed.comm.registry import backends
+    from distributed.comm.tcp import TCPBackend, TCPConnector
+
+    in_connect = asyncio.Event()
+    block_connect = asyncio.Event()
+
+    class BlockedConnector(TCPConnector):
+        async def connect(self, address, deserialize, **connection_args):
+            # This is extremely artificial and assumes that something further
+            # down in the stack would block a cancellation. We want to make sure
+            # that our ConnectionPool closes regardless of this.
+            in_connect.set()
+            try:
+                await block_connect.wait()
+            except asyncio.CancelledError:
+                await asyncio.sleep(30)
+                raise
+            raise FatalCommClosedError()
+
+    class BlockedConnectBackend(TCPBackend):
+        _connector_class = BlockedConnector
+
+    monkeypatch.setitem(backends, "tcp", BlockedConnectBackend())
+
+    async with Server({}) as server:
+        await server.listen("tcp://")
+        pool = await ConnectionPool(limit=2)
+        pool._connecting_close_timeout = 0
+
+        t = asyncio.create_task(pool.connect(server.address))
+
+        await in_connect.wait()
+        while not pool._connecting_count:
+            await asyncio.sleep(0.1)
+        with captured_logger("distributed.core") as sio:
+            await pool.close()
+        assert "Pending connections refuse to cancel" in sio.getvalue()
+
+
+@gen_test()
 async def test_remove_cancels_connect_attempts():
     loop = asyncio.get_running_loop()
     connect_started = asyncio.Event()
@@ -1052,9 +1093,12 @@ async def test_server_comms_mark_active_handlers():
     ensure this is properly reflected and released. The sentinel for
     "open comm but no active handler" is `None`
     """
+    in_handler = asyncio.Event()
+    unblock_handler = asyncio.Event()
 
     async def long_handler(comm):
-        await asyncio.sleep(0.2)
+        in_handler.set()
+        await unblock_handler.wait()
         return "done"
 
     async with Server({"wait": long_handler}) as server:
@@ -1063,9 +1107,9 @@ async def test_server_comms_mark_active_handlers():
 
         comm = await connect(server.address)
         await comm.write({"op": "wait"})
-        while not server._comms:
-            await asyncio.sleep(0.05)
+        await in_handler.wait()
         assert set(server._comms.values()) == {"wait"}
+        unblock_handler.set()
 
         assert server.incoming_comms_open == 1
         assert server.incoming_comms_active == 1
@@ -1106,9 +1150,12 @@ async def test_server_comms_mark_active_handlers():
 
         async with Server({}) as server2:
             rpc_ = server2.rpc(server.address)
+            in_handler.clear()
+            unblock_handler.clear()
             task = asyncio.create_task(rpc_.wait())
-            while not server.incoming_comms_active:
-                await asyncio.sleep(0.1)
+
+            await in_handler.wait()
+
             assert server.incoming_comms_active == 1
             assert server.incoming_comms_open == 1
             assert server.outgoing_comms_active == 0
@@ -1120,6 +1167,7 @@ async def test_server_comms_mark_active_handlers():
             assert server2.outgoing_comms_open == 1
             validate_dict(server)
 
+            unblock_handler.set()
             await task
             assert server.incoming_comms_active == 0
             assert server.incoming_comms_open == 1

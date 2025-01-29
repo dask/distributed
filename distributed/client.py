@@ -45,9 +45,8 @@ from dask.base import collections_to_dsk
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
-from dask.optimization import SubgraphCallable
 from dask.tokenize import tokenize
-from dask.typing import Key, NoDefault, no_default
+from dask.typing import Key, NestedKeys, NoDefault, no_default
 from dask.utils import (
     ensure_dict,
     format_bytes,
@@ -70,7 +69,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from dask._task_spec import DataNode, GraphNode, Task, TaskRef
+from dask._task_spec import DataNode, GraphNode, List, Task, TaskRef, parse_input
 
 import distributed.utils
 from distributed import cluster_dump, preloading
@@ -622,6 +621,9 @@ class Future(TaskRef):
     def __hash__(self):
         return hash(self._id)
 
+    def __eq__(self, other):
+        return self is other
+
 
 class FutureState:
     """A Future's internal state.
@@ -850,12 +852,10 @@ class _MapLayer(Layer):
         **kwargs,
     ):
         self.func: Callable = func
-        self.iterables: Iterable[Any] = (
-            list(zip(*zip(*iterables))) if _is_nested(iterables) else [iterables]
-        )
+        self.iterables = [tuple(map(parse_input, iterable)) for iterable in iterables]
         self.key: str | Iterable[str] | None = key
         self.pure: bool = pure
-        self.kwargs = kwargs
+        self.kwargs = {k: parse_input(v) for k, v in kwargs.items()}
         super().__init__(annotations=annotations)
 
     def __repr__(self) -> str:
@@ -1146,7 +1146,7 @@ class Client(SyncMethodMixin):
         if security is None and isinstance(address, str):
             security = _maybe_call_security_loader(address)
 
-        if security is None:
+        if security is None or security is False:
             security = Security()
         elif isinstance(security, dict):
             security = Security(**security)
@@ -2163,13 +2163,12 @@ class Client(SyncMethodMixin):
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-
         dsk = {
             key: Task(
                 key,
                 func,
-                *args,
-                **kwargs,
+                *(parse_input(a) for a in args),
+                **{k: parse_input(v) for k, v in kwargs.items()},
             )
         }
         futures = self._graph_to_futures(
@@ -3675,7 +3674,8 @@ class Client(SyncMethodMixin):
             if func is single_key and len(keys) == 1 and not extra_args:
                 names[i] = keys[0]
             else:
-                dsk2[name] = (func, keys) + extra_args
+                t = Task(name, func, _convert_dask_keys(keys), *extra_args)
+                dsk2[t.key] = t
 
         if not isinstance(dsk, HighLevelGraph):
             dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
@@ -5617,6 +5617,17 @@ class Client(SyncMethodMixin):
         return self.unregister_worker_plugin(plugin_name)
 
 
+def _convert_dask_keys(keys: NestedKeys) -> List:
+    assert isinstance(keys, list)
+    new_keys: list[List | TaskRef] = []
+    for key in keys:
+        if isinstance(key, list):
+            new_keys.append(_convert_dask_keys(key))
+        else:
+            new_keys.append(TaskRef(key))
+    return List(*new_keys)
+
+
 class _WorkerSetupPlugin(WorkerPlugin):
     """This is used to support older setup functions as callbacks"""
 
@@ -6108,8 +6119,6 @@ def futures_of(o, client=None):
             stack.extend(x)
         elif type(x) is dict:
             stack.extend(x.values())
-        elif type(x) is SubgraphCallable:
-            stack.extend(x.dsk.values())
         elif isinstance(x, TaskRef):
             if x not in seen:
                 seen.add(x)

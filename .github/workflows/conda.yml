@@ -30,7 +30,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Set up Python
-        uses: conda-incubator/setup-miniconda@v3.0.3
+        uses: conda-incubator/setup-miniconda@v3.1.1
         with:
           miniforge-version: latest
           use-mamba: true
@@ -50,11 +50,9 @@ jobs:
 
           # conda search for the latest dask-core pre-release
           dask_core_arr=($(conda search --override-channels -c dask/label/dev dask-core | tail -n 1))
-          dask_expr_arr=($(conda search --override-channels -c dask/label/dev dask-expr | tail -n 1))
 
-          # extract dask-core & dask-expr pre-release versions
+          # extract dask-core pre-release version
           export DASK_CORE_VERSION=${dask_core_arr[1]}
-          export DASK_EXPR_VERSION=${dask_expr_arr[1]}
 
           # distributed pre-release build
           conda mambabuild continuous_integration/recipes/distributed \

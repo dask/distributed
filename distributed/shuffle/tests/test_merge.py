@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import Any
 from unittest import mock
 
@@ -10,7 +9,7 @@ import pytest
 from dask.typing import Key
 
 from distributed import Worker
-from distributed.shuffle._core import ShuffleId, ShuffleSpec, id_from_key
+from distributed.shuffle._core import ShuffleId, id_from_key
 from distributed.shuffle._worker_plugin import ShuffleRun, _ShuffleRunManager
 from distributed.utils_test import gen_cluster
 
@@ -46,28 +45,6 @@ async def list_eq(a, b):
     dd._compat.assert_numpy_array_equal(av, bv)
 
 
-@pytest.mark.skipif(dd._dask_expr_enabled(), reason="pyarrow>=7.0.0 already required")
-@gen_cluster(client=True)
-async def test_minimal_version(c, s, a, b):
-    no_pyarrow_ctx = (
-        mock.patch.dict("sys.modules", {"pyarrow": None})
-        if pa is not None
-        else contextlib.nullcontext()
-    )
-    with no_pyarrow_ctx:
-        A = pd.DataFrame({"x": [1, 2, 3, 4, 5, 6], "y": [1, 1, 2, 2, 3, 4]})
-        a = dd.repartition(A, [0, 4, 5])
-
-        B = pd.DataFrame({"y": [1, 3, 4, 4, 5, 6], "z": [6, 5, 4, 3, 2, 1]})
-        b = dd.repartition(B, [0, 2, 5])
-
-        with (
-            pytest.raises(ModuleNotFoundError, match="requires pyarrow"),
-            dask.config.set({"dataframe.shuffle.method": "p2p"}),
-        ):
-            await c.compute(dd.merge(a, b, left_on="x", right_on="z"))
-
-
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 @gen_cluster(client=True)
 async def test_basic_merge(c, s, a, b, how):
@@ -79,13 +56,10 @@ async def test_basic_merge(c, s, a, b, how):
 
     joined = a.merge(b, left_on="y", right_on="y", how=how)
 
-    if dd._dask_expr_enabled():
-        # Ensure we're using a hash join
-        from dask_expr._merge import HashJoinP2P
-
-        assert any(
-            isinstance(expr, HashJoinP2P) for expr in joined.optimize()._expr.walk()
-        )
+    # Ensure we're using a hash join
+    assert any(
+        expr._name.startswith("hashjoinp2p") for expr in joined.optimize()._expr.walk()
+    )
 
     expected = pd.merge(A, B, how, "y")
     await list_eq(joined, expected)
@@ -421,12 +395,12 @@ class LimitedGetOrCreateShuffleRunManager(_ShuffleRunManager):
         self.blocking_get_or_create = asyncio.Event()
         self.block_get_or_create = asyncio.Event()
 
-    async def get_or_create(self, spec: ShuffleSpec, key: Key) -> ShuffleRun:
-        if len(self.seen) >= self.limit and spec.id not in self.seen:
+    async def get_or_create(self, shuffle_id: ShuffleId, key: Key) -> ShuffleRun:
+        if len(self.seen) >= self.limit and shuffle_id not in self.seen:
             self.blocking_get_or_create.set()
             await self.block_get_or_create.wait()
-        self.seen.add(spec.id)
-        return await super().get_or_create(spec, key)
+        self.seen.add(shuffle_id)
+        return await super().get_or_create(shuffle_id, key)
 
 
 @mock.patch(

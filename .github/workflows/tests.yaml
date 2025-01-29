@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.10", "3.11", "3.12"]
+        environment: [mindeps, "3.10", "3.11", "3.12", "3.13"]
         label: [default]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
@@ -40,6 +40,8 @@ jobs:
             environment: "3.10"
           - os: macos-latest
             environment: "3.11"
+          - os: macos-latest
+            environment: "3.13"
 
           - os: windows-latest
             environment: mindeps
@@ -53,16 +55,6 @@ jobs:
           - os: ubuntu-latest
             environment: "3.10"
             label: no_queue
-            partition: "not ci1"
-
-          # Set dataframe.query-planning: false
-          - os: ubuntu-latest
-            environment: "3.10"
-            label: no_expr
-            partition: "ci1"
-          - os: ubuntu-latest
-            environment: "3.10"
-            label: no_expr
             partition: "not ci1"
 
           # dask.array P2P shuffle
@@ -123,7 +115,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v3.0.3
+        uses: conda-incubator/setup-miniconda@v3.1.1
         with:
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
@@ -219,11 +211,6 @@ jobs:
         if: ${{ matrix.label == 'no_queue' }}
         run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
 
-      - name: Set up dask env to disable dask-expr
-        shell: bash -l {0}
-        if: ${{ matrix.label == 'no_expr' }}
-        run: echo "DASK_DATAFRAME__QUERY_PLANNING=False" >> $GITHUB_ENV
-
       - name: Print host info
         # host_info.py imports numpy, which isn't a direct dependency of distributed
         if: matrix.environment != 'mindeps'
@@ -242,7 +229,7 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed \
+          python -m pytest distributed \
             -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \

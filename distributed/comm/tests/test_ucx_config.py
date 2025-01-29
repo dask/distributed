@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from time import sleep
 
 import pytest
@@ -118,11 +119,23 @@ def test_ucx_config_w_env_var(ucx_loop, cleanup, loop):
     sched_addr = f"ucx://127.0.0.1:{port}"
 
     with popen(
-        ["dask", "scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port],
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
+            "--no-dashboard",
+            "--protocol",
+            "ucx",
+            "--port",
+            port,
+        ],
         env=env,
     ):
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "worker",
                 sched_addr,

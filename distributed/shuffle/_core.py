@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
 from tornado.ioloop import IOLoop
 
 import dask.config
+from dask._task_spec import Task
 from dask.core import flatten
 from dask.typing import Key
 from dask.utils import parse_bytes, parse_timedelta
@@ -505,6 +506,10 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
     def run_id(self) -> int:
         return self.run_spec.run_id
 
+    @property
+    def archived(self) -> bool:
+        return self._archived_by is not None
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 
@@ -564,7 +569,7 @@ def _mean_shard_size(shards: Iterable) -> int:
     return size // count if count else 0
 
 
-def p2p_barrier(id: ShuffleId, run_ids: list[int]) -> int:
+def p2p_barrier(id: ShuffleId, *run_ids: int) -> int:
     try:
         return get_worker_plugin().barrier(id, run_ids)
     except Reschedule as e:
@@ -575,3 +580,28 @@ def p2p_barrier(id: ShuffleId, run_ids: list[int]) -> int:
         raise
     except Exception as e:
         raise RuntimeError(f"P2P {id} failed during barrier phase") from e
+
+
+class P2PBarrierTask(Task):
+    spec: ShuffleSpec
+
+    __slots__ = tuple(__annotations__)
+
+    def __init__(
+        self,
+        key: Any,
+        func: Callable[..., Any],
+        /,
+        *args: Any,
+        spec: ShuffleSpec,
+        **kwargs: Any,
+    ):
+        self.spec = spec
+        super().__init__(key, func, *args, **kwargs)
+
+    def __repr__(self) -> str:
+        return f"P2PBarrierTask({self.key!r})"
+
+    @property
+    def block_fusion(self) -> bool:
+        return True

@@ -1008,9 +1008,9 @@ def test_sizeof_error(input, exc, msg):
 @gen_test()
 async def test_ensure_no_new_clients():
     with ensure_no_new_clients():
-        async with Scheduler() as s:
+        async with Scheduler(dashboard_address=":0") as s:
             pass
-    async with Scheduler() as s:
+    async with Scheduler(dashboard_address=":0") as s:
         with ensure_no_new_clients():
             pass
         with pytest.raises(AssertionError):

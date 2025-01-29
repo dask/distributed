@@ -9,22 +9,8 @@ dd = pytest.importorskip("dask.dataframe")
 pytest.importorskip("pyarrow")
 
 import dask
-from dask.blockwise import Blockwise
-from dask.utils_test import hlg_layer_topological
 
 from distributed.utils_test import gen_cluster
-
-
-@pytest.mark.skipif(condition=dd._dask_expr_enabled(), reason="no HLG")
-def test_basic(client):
-    df = dd.demo.make_timeseries(freq="15D", partition_freq="30D")
-    df["name"] = df["name"].astype("string[python]")
-    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        p2p_shuffled = df.shuffle("id")
-
-    (opt,) = dask.optimize(p2p_shuffled)
-    assert isinstance(hlg_layer_topological(opt.dask, 0), Blockwise)
-    # blockwise -> barrier -> unpack -> drop_by_shallow_copy
 
 
 @pytest.mark.parametrize("dtype", ["csingle", "cdouble", "clongdouble"])

@@ -42,8 +42,6 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.bag as db
 from dask import delayed
-from dask._task_spec import no_function_cache
-from dask.optimization import SubgraphCallable
 from dask.tokenize import tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
@@ -81,7 +79,8 @@ from distributed.cluster_dump import load_cluster_dump
 from distributed.comm import CommClosedError
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import Status
-from distributed.diagnostics.plugin import WorkerPlugin
+from distributed.deploy.subprocess import SubprocessCluster
+from distributed.diagnostics.plugin import UploadDirectory, WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.shuffle import check_minimal_arrow_version
@@ -1705,6 +1704,10 @@ async def test_upload_file_no_extension(c, s, a, b):
         await c.upload_file(fn)
 
 
+@pytest.mark.skipif(
+    sys.version_info >= (3, 13),
+    reason="Upstream issue in CPython. See https://github.com/dask/distributed/issues/8708 and https://github.com/python/cpython/issues/121342.",
+)
 @gen_cluster(client=True)
 async def test_upload_file_zip(c, s, a, b):
     def g():
@@ -2622,13 +2625,6 @@ async def test_futures_of_get(c, s, a, b):
 
     b = db.Bag({("b", i): f for i, f in enumerate([x, y, z])}, "b", 3)
     assert set(futures_of(b)) == {x, y, z}
-
-    sg = SubgraphCallable(
-        {"x": x, "y": y, "z": z, "out": (add, (add, (add, x, y), z), "in")},
-        "out",
-        ("in",),
-    )
-    assert set(futures_of(sg)) == {x, y, z}
 
 
 def test_futures_of_class():
@@ -3761,7 +3757,9 @@ async def test_reconnect():
     port = open_port()
 
     stack = ExitStack()
-    proc = popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"])
+    proc = popen(
+        [sys.executable, "-m", "dask", "scheduler", "--no-dashboard", f"--port={port}"]
+    )
     stack.enter_context(proc)
     async with (
         Client(f"127.0.0.1:{port}", asynchronous=True) as c,
@@ -3781,7 +3779,16 @@ async def test_reconnect():
         with pytest.raises(CancelledError):
             await x
 
-        with popen(["dask", "scheduler", "--no-dashboard", f"--port={port}"]):
+        with popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--no-dashboard",
+                f"--port={port}",
+            ]
+        ):
             start = time()
             while c.status != "running":
                 await asyncio.sleep(0.1)
@@ -4386,7 +4393,11 @@ async def test_scatter_type(c, s, a, b):
 async def test_retire_workers_2(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
-    await s.retire_workers(workers=[a.address])
+    info = await s.retire_workers(workers=[a.address])
+    assert info
+    assert info[a.address]
+    assert "name" in info[a.address]
+    assert a.address not in s.workers
     assert b.data == {x.key: 1}
 
     assert {ws.address for ws in s.tasks[x.key].who_has} == {b.address}
@@ -4399,7 +4410,8 @@ async def test_retire_workers_2(c, s, a, b):
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
-    await s.retire_workers(workers=[w.address for w in workers[:7]])
+    info = await s.retire_workers(workers=[w.address for w in workers[:7]])
+    assert len(info) == 7
 
     results = await c.gather(futures)
     assert results == list(range(100))
@@ -4761,7 +4773,15 @@ def test_recreate_task_sync(c):
 @gen_cluster(client=True)
 async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
-    await c.retire_workers(workers=[a.address], close_workers=True)
+    info = await c.retire_workers(workers=[a.address], close_workers=True)
+
+    # Deployment tooling is sometimes relying on this information to be returned
+    # This represents WorkerState.idenity() right now but may be slimmed down in
+    # the future
+    assert info
+    assert info[a.address]
+    assert "name" in info[a.address]
+
     assert set(s.workers) == {b.address}
 
     while a.status != Status.closed:
@@ -4934,29 +4954,27 @@ async def test_robust_undeserializable(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_robust_undeserializable_function(c, s, a, b, monkeypatch):
-    with no_function_cache():
+    class Foo:
+        def __getstate__(self):
+            return 1
 
-        class Foo:
-            def __getstate__(self):
-                return 1
+        def __setstate__(self, state):
+            raise MyException("hello")
 
-            def __setstate__(self, state):
-                raise MyException("hello")
+        def __call__(self, *args):
+            return 1
 
-            def __call__(self, *args):
-                return 1
+    future = c.submit(Foo(), 1)
+    await wait(future)
+    assert future.status == "error"
+    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
+        await future
 
-        future = c.submit(Foo(), 1)
-        await wait(future)
-        assert future.status == "error"
-        with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
-            await future
+    futures = c.map(inc, range(10))
+    results = await c.gather(futures)
 
-        futures = c.map(inc, range(10))
-        results = await c.gather(futures)
-
-        assert results == list(map(inc, range(10)))
-        assert a.data and b.data
+    assert results == list(map(inc, range(10)))
+    assert a.data and b.data
 
 
 @gen_cluster(client=True)
@@ -5521,6 +5539,7 @@ async def test_call_stack_collections_all(c, s, a, b):
     assert result
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @pytest.mark.flaky(condition=WINDOWS, reruns=10, reruns_delay=5)
 @gen_cluster(
     client=True,
@@ -6165,43 +6184,6 @@ async def test_profile_bokeh(c, s, a, b):
         assert os.path.exists(fn)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_get_mix_futures_and_SubgraphCallable(c, s, a):
-    future = c.submit(add, 1, 2)
-
-    subgraph = SubgraphCallable(
-        {"_2": (add, "_0", "_1"), "_3": (add, future, "_2")},
-        "_3",
-        ("_0", "_1"),
-    )
-    dsk = {
-        "a": 1,
-        "b": 2,
-        "c": (subgraph, "a", "b"),
-        "d": (subgraph, "c", "b"),
-    }
-
-    future2 = c.get(dsk, "d", sync=False)
-    result = await future2
-    assert result == 11
-
-    # Nested subgraphs
-    subgraph2 = SubgraphCallable(
-        {
-            "_2": (subgraph, "_0", "_1"),
-            "_3": (subgraph, "_2", "_1"),
-            "_4": (add, "_3", future2),
-        },
-        "_4",
-        ("_0", "_1"),
-    )
-
-    dsk2 = {"e": 1, "f": 2, "g": (subgraph2, "e", "f")}
-
-    result = await c.get(dsk2, "g", sync=False)
-    assert result == 22
-
-
 @gen_cluster(client=True)
 async def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
     pd = pytest.importorskip("pandas")
@@ -6374,6 +6356,7 @@ async def test_futures_of_sorted(c, s, a, b):
     assert [fut.key for fut in futures] == [k for k in b.__dask_keys__()]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -6717,7 +6700,7 @@ def test_futures_in_subgraphs(loop_in_thread):
         ddf = ddf[ddf.uid.isin(range(29))].persist()
         ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
         ddf["day"] = ddf.enter_time.dt.day_name()
-        ddf = dd.categorical.categorize(ddf, columns=["day"], index=False)
+        ddf = ddf.categorize(columns=["day"], index=False)
         ddf.compute()
 
 
@@ -7381,7 +7364,6 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     assert comp.code[0][-1].code == test_function_code
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny)
 async def test_upload_directory(c, s, a, b, tmp_path):
     from dask.distributed import UploadDirectory
@@ -7394,7 +7376,7 @@ async def test_upload_directory(c, s, a, b, tmp_path):
     with open(tmp_path / "bar.py", "w") as f:
         f.write("from foo import x")
 
-    plugin = UploadDirectory(tmp_path, restart=True, update_path=True)
+    plugin = UploadDirectory(tmp_path, restart_workers=True, update_path=True)
     await c.register_plugin(plugin)
 
     [name] = a.plugins
@@ -7415,6 +7397,47 @@ async def test_upload_directory(c, s, a, b, tmp_path):
 
     files_end = {f for f in os.listdir() if not f.startswith(".coverage")}
     assert files_start == files_end  # no change
+
+
+def test_upload_directory_invalid_mode():
+    with pytest.raises(ValueError, match="mode"):
+        UploadDirectory(".", mode="invalid")
+
+
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
+@pytest.mark.parametrize("mode", ["all", "scheduler"])
+@gen_test()
+async def test_upload_directory_to_scheduler(mode, tmp_path):
+    from dask.distributed import UploadDirectory
+
+    # Be sure to exclude code coverage reports
+    files_start = {f for f in os.listdir() if not f.startswith(".coverage")}
+
+    with open(tmp_path / "foo.py", "w") as f:
+        f.write("x = 123")
+    with open(tmp_path / "bar.py", "w") as f:
+        f.write("from foo import x")
+
+    def f():
+        import bar
+
+        return bar.x
+
+    async with SubprocessCluster(
+        asynchronous=True,
+        dashboard_address=":0",
+        scheduler_kwargs={"idle_timeout": "5s"},
+        worker_kwargs={"death_timeout": "5s"},
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            with pytest.raises(ModuleNotFoundError, match="'bar'"):
+                res = await client.run_on_scheduler(f)
+
+            plugin = UploadDirectory(
+                tmp_path, mode=mode, restart_workers=True, update_path=True
+            )
+            await client.register_plugin(plugin)
+            assert await client.run_on_scheduler(f) == 123
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

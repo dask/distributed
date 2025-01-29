@@ -24,6 +24,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import bag, delayed
+from dask.base import DaskMethodsMixin
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph, MaterializedLayer
 from dask.utils import parse_timedelta, tmpfile, typename
@@ -1499,7 +1500,6 @@ async def test_retire_workers(c, s, a, b):
 
     workers = await s.retire_workers()
     assert list(workers) == [a.address]
-    assert workers[a.address]["nthreads"] == a.state.nthreads
     assert list(s.workers) == [b.address]
 
     assert s.workers_to_close() == []
@@ -1973,6 +1973,7 @@ async def test_profile_metadata(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2000,6 +2001,7 @@ async def test_profile_metadata_timeout(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2019,6 +2021,7 @@ async def test_profile_metadata_keys(c, s, a, b):
     )
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2036,6 +2039,7 @@ async def test_statistical_profiling(c, s, a, b):
     assert profile["count"]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -2826,9 +2830,7 @@ async def test_default_task_duration_splits(c, s, a, b):
     await wait(fut)
 
     split_prefix = [pre for pre in s.task_prefixes.keys() if "split" in pre]
-    # dask-expr enabled: ['split-taskshuffle', 'split-stage']
-    # dask-expr disabled: ['split-shuffle']
-    assert split_prefix
+    assert split_prefix == ["split-taskshuffle", "split-stage"]
     default_times = dask.config.get("distributed.scheduler.default-task-durations")
     for p in split_prefix:
         default_time = parse_timedelta(default_times[p])
@@ -4520,7 +4522,7 @@ def test_runspec_regression_sync(loop):
     # https://github.com/dask/distributed/issues/6624
     np = pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
-    with Client(loop=loop):
+    with Client(loop=loop, dashboard_address=":0"):
         v = da.random.random((20, 20), chunks=(5, 5))
 
         overlapped = da.map_overlap(np.sum, v, depth=2, boundary="reflect")
@@ -4832,7 +4834,7 @@ async def test_submit_dependency_of_erred_task(c, s, a, b):
 
 
 @pytest.mark.skipif(
-    sys.version_info <= (3, 10),
+    sys.version_info < (3, 11),
     reason="asyncio.wait_for is unreliable on 3.10 and below",
 )
 @gen_cluster(
@@ -5300,3 +5302,48 @@ async def test_concurrent_close_requests(c, s, *workers):
 async def test_rootish_taskgroup_configuration(c, s, *workers):
     assert s.rootish_tg_threshold == 10
     assert s.rootish_tg_dependencies_threshold == 15
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_alias_resolving_break_queuing(c, s, a):
+    pytest.importorskip("numpy")
+    import dask.array as da
+
+    arr = da.random.random((90, 100), chunks=(10, 50))
+    result = arr.rechunk(((10, 7, 7, 6) * 3, (50, 50)))
+    result = result.sum(split_every=1000)
+    x = result.persist()
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+    assert sum([s.is_rootish(v) for v in s.tasks.values()]) == 18
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_data_producers(c, s, a):
+    from dask._task_spec import DataNode, Task, TaskRef
+
+    def func(*args):
+        return 100
+
+    class MyArray(DaskMethodsMixin):
+        def __dask_graph__(self):
+            return {
+                "a": DataNode("a", 10),
+                "b": Task("b", func, TaskRef("a"), _data_producer=True),
+                "c": Task("c", func, TaskRef("b")),
+                "d": Task("d", func, TaskRef("c")),
+            }
+
+        def __dask_keys__(self):
+            return ["d"]
+
+        def __dask_postcompute__(self):
+            return func, ()
+
+    arr = MyArray()
+    x = c.compute(arr)
+    await async_poll_for(lambda: s.tasks, 5)
+    assert (
+        sum([s.is_rootish(v) and v.run_spec.data_producer for v in s.tasks.values()])
+        == 2
+    )

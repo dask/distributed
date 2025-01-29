@@ -8,7 +8,6 @@ import time
 import pytest
 
 from distributed import metrics
-from distributed.compatibility import WINDOWS
 from distributed.utils import offload
 from distributed.utils_test import gen_test
 
@@ -30,7 +29,8 @@ def test_wall_clock(name):
 
 @pytest.mark.slow
 @pytest.mark.skipif(
-    not WINDOWS, reason="WindowsTime doesn't work with high accuracy base timer"
+    not isinstance(metrics.time, metrics._WindowsTime),
+    reason="WindowsTime doesn't work with high accuracy base timer",
 )
 def test_monotonic():
     t = metrics._WindowsTime(time.monotonic, is_monotonic=True, resync_every=0.1).time

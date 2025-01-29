@@ -441,7 +441,10 @@ async def test_local_directory(s):
                 assert n.process.worker_dir.count("dask-scratch-space") == 1
 
 
-@pytest.mark.skipif(WINDOWS, reason="Need POSIX filesystem permissions and UIDs")
+@pytest.mark.skipif(
+    WINDOWS or os.getuid() == 0,
+    reason="Need POSIX filesystem permissions and UIDs and Must not be root",
+)
 @gen_cluster(nthreads=[])
 async def test_unwriteable_dask_worker_space(s, tmp_path):
     os.mkdir(f"{tmp_path}/dask-scratch-space", mode=0o500)

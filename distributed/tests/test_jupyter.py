@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
@@ -45,10 +46,12 @@ async def test_jupyter_server():
 
 
 @pytest.mark.slow
-def test_jupyter_cli(loop):
+def test_jupyter_cli(loop, requires_default_ports):
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             "--jupyter",
@@ -56,6 +59,8 @@ def test_jupyter_cli(loop):
             "--host",
             f"127.0.0.1:{port}",
         ],
+        terminate_timeout=120,
+        kill_timeout=60,
     ):
         with Client(f"127.0.0.1:{port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/jupyter/api/status")
@@ -118,6 +123,8 @@ def test_shutsdown_cleanly(requires_default_ports):
         subprocess_fut = tpe.submit(
             subprocess.run,
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "scheduler",
                 "--jupyter",

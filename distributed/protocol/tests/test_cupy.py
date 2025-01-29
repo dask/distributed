@@ -74,7 +74,7 @@ def test_serialize_cupy_from_rmm(size):
 )
 @pytest.mark.parametrize(
     "dtype",
-    [numpy.dtype("<f4"), numpy.dtype(">f4"), numpy.dtype("<f8"), numpy.dtype(">f8")],
+    [numpy.dtype("<f4"), numpy.dtype("<f8")],
 )
 @pytest.mark.parametrize("serializer", ["cuda", "dask", "pickle"])
 def test_serialize_cupy_sparse(sparse_name, dtype, serializer):

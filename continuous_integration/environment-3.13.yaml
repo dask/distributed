@@ -1,17 +1,15 @@
-name: dask-distributed
+name: dask-distributed-313
 channels:
   - conda-forge
-  - defaults
 dependencies:
-  - python=3.10
+  - python=3.13
   - packaging
   - pip
   - asyncssh
-  - bokeh
+  - bokeh>3
   - click
   - cloudpickle
   - coverage
-  - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
   - filesystem-spec  # overridden by git tip below
   - gilknocker
@@ -23,7 +21,6 @@ dependencies:
   - jupyter-server-proxy
   - jupyterlab
   - locket
-  - lz4  # Only tested here
   - msgpack-python
   - netcdf4
   - paramiko
@@ -31,15 +28,12 @@ dependencies:
   - prometheus_client
   - psutil
   - pyarrow
-  - pynvml  # Only tested here
   - pytest
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
-  - python-snappy  # Only tested here
-  - pytorch  # Only tested here
   - requests
   - s3fs  # overridden by git tip below
   - scikit-learn
@@ -47,7 +41,6 @@ dependencies:
   - sortedcollections
   - tblib
   - toolz
-  - torchvision  # Only tested here
   - tornado
   - zict  # overridden by git tip below
   - zstandard
@@ -58,7 +51,6 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/zict
-      - git+https://github.com/dask/crick  # Only tested here
       # Revert after https://github.com/dask/distributed/issues/8614 is fixed
       # - git+https://github.com/dask/s3fs
       # - git+https://github.com/fsspec/filesystem_spec
