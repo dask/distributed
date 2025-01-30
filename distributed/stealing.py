@@ -450,7 +450,7 @@ class WorkStealing(SchedulerPlugin):
                         stealable.discard(ts)
                         continue
                     i += 1
-                    if not (thief := _get_thief(s, ts, potential_thieves)):
+                    if not (thief := self._get_thief(s, ts, potential_thieves)):
                         continue
 
                     occ_thief = self._combined_occupancy(thief)
@@ -528,18 +528,33 @@ class WorkStealing(SchedulerPlugin):
                     out.append(t)
         return out
 
+    def stealing_objective(
+        self, scheduler: SchedulerState, ts: TaskState, ws: WorkerState
+    ) -> tuple[float, ...]:
+        occupancy = self._combined_occupancy(
+            ws
+        ) / ws.nthreads + scheduler.get_comm_cost(ts, ws)
+        if ts.actor:
+            return (len(ws.actors), occupancy, ws.nbytes)
+        else:
+            return (occupancy, ws.nbytes)
 
-def _get_thief(
-    scheduler: SchedulerState, ts: TaskState, potential_thieves: set[WorkerState]
-) -> WorkerState | None:
-    valid_workers = scheduler.valid_workers(ts)
-    if valid_workers is not None:
-        valid_thieves = potential_thieves & valid_workers
-        if valid_thieves:
-            potential_thieves = valid_thieves
-        elif not ts.loose_restrictions:
-            return None
-    return min(potential_thieves, key=partial(scheduler.worker_objective, ts))
+    def _get_thief(
+        self,
+        scheduler: SchedulerState,
+        ts: TaskState,
+        potential_thieves: set[WorkerState],
+    ) -> WorkerState | None:
+        valid_workers = scheduler.valid_workers(ts)
+        if valid_workers is not None:
+            valid_thieves = potential_thieves & valid_workers
+            if valid_thieves:
+                potential_thieves = valid_thieves
+            elif not ts.loose_restrictions:
+                return None
+        return min(
+            potential_thieves, key=partial(self.stealing_objective, scheduler, ts)
+        )
 
 
 fast_tasks = {

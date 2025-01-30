@@ -3168,7 +3168,7 @@ class SchedulerState:
             deps = {dep for dep in ts.dependencies if dep not in ws.has_what}
         else:
             deps = (ts.dependencies or set()).difference(ws.has_what)
-        nbytes = sum(dts.nbytes for dts in deps)
+        nbytes = sum(dts.get_nbytes() for dts in deps)
         return nbytes / self.bandwidth
 
     def get_task_duration(self, ts: TaskState) -> float:
@@ -3284,12 +3284,8 @@ class SchedulerState:
 
         Minimize expected start time.  If a tie then break with data storage.
         """
-        comm_bytes = sum(
-            dts.get_nbytes() for dts in ts.dependencies if ws not in (dts.who_has or ())
-        )
-
         stack_time = ws.occupancy / ws.nthreads
-        start_time = stack_time + comm_bytes / self.bandwidth
+        start_time = stack_time + self.get_comm_cost(ts, ws)
 
         if ts.actor:
             return (len(ws.actors), start_time, ws.nbytes)
