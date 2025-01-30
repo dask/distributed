@@ -137,7 +137,9 @@ async def test_counters(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True, config={"distributed.scheduler.work-stealing-interval": "100ms"}
+)
 async def test_stealing_events(c, s, a, b):
     se = StealingEvents(s)
 
