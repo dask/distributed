@@ -416,12 +416,7 @@ async def test_new_worker_steals(c, s, a):
     client=True,
     config={"distributed.scheduler.work-stealing-interval": "100ms"},
 )
-async def test_work_steal_allow_other_workers(
-    c,
-    s,
-    a,
-    b,
-):
+async def test_work_steal_allow_other_workers(c, s, a, b):
     # Note: this test also verifies the baseline for all other tests below
     futures = c.map(
         slowinc, range(100), workers=a.address, allow_other_workers=True, delay=0.05
@@ -552,11 +547,7 @@ async def test_steal_resource_restrictions(c, s, a):
     nthreads=[("", 1, {"resources": {"A": 2, "C": 1}})],
     config={"distributed.scheduler.work-stealing-interval": "100ms"},
 )
-async def test_steal_resource_restrictions_asym_diff(
-    c,
-    s,
-    a,
-):
+async def test_steal_resource_restrictions_asym_diff(c, s, a):
     # See https://github.com/dask/distributed/issues/5565
     future = c.submit(slowinc, 1, delay=0.1, workers=a.address)
     await future
@@ -856,12 +847,7 @@ async def test_restart(c, s, a, b):
     client=True,
     config={"distributed.scheduler.work-stealing-interval": "100ms"},
 )
-async def test_steal_twice(
-    c,
-    s,
-    a,
-    b,
-):
+async def test_steal_twice(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
     await wait(x)
 
@@ -960,12 +946,7 @@ async def test_dont_steal_already_released(c, s, a, b):
     nthreads=[("127.0.0.1", 1)] * 2,
     config={"distributed.scheduler.work-stealing-interval": "100ms"},
 )
-async def test_dont_steal_long_running_tasks(
-    c,
-    s,
-    a,
-    b,
-):
+async def test_dont_steal_long_running_tasks(c, s, a, b):
     def long(delay):
         with worker_client() as c:
             sleep(delay)
