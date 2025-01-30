@@ -104,7 +104,11 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)] * 2, config=NO_AMM)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "100ms", **NO_AMM},
+)
 async def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
 
@@ -974,7 +978,7 @@ async def test_lose_task(c, s, a, b):
     assert "Error" not in out
 
 
-@pytest.mark.parametrize("interval, expected", [(None, 100), ("500ms", 500), (2, 2)])
+@pytest.mark.parametrize("interval, expected", [(None, 1000), ("500ms", 500), (2, 2)])
 @gen_cluster(nthreads=[], config={"distributed.scheduler.work-stealing": False})
 async def test_parse_stealing_interval(s, interval, expected):
     from distributed.scheduler import WorkStealing
