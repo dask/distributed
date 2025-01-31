@@ -57,6 +57,7 @@ deprecations = {
     "distributed.scheduler.events-log-length": "distributed.admin.low-level-log-length",
     "recent-messages-log-length": "distributed.admin.low-level-log-length",
     "distributed.comm.recent-messages-log-length": "distributed.admin.low-level-log-length",
+    "distributed.p2p.disk": "distributed.p2p.storage.disk",
 }
 
 # Affects yaml and env variables configs, as well as calls to dask.config.set()
@@ -97,6 +98,7 @@ def _initialize_logging_old_style(config: dict[Any, Any]) -> None:
     loggers: dict[str, str | int] = {  # default values
         "distributed": "info",
         "distributed.client": "warning",
+        "distributed.gc": "warning",
         "bokeh": "error",
         "tornado": "critical",
         "tornado.application": "error",

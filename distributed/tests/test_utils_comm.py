@@ -6,15 +6,13 @@ from unittest import mock
 
 import pytest
 
-from dask.optimization import SubgraphCallable
+from dask._task_spec import TaskRef
 
 from distributed import wait
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import ConnectionPool, Status
 from distributed.utils_comm import (
-    DoNotUnpack,
-    WrappedKey,
     gather_from_workers,
     pack_data,
     retry,
@@ -232,53 +230,18 @@ def test_retry_does_retry_and_sleep(cleanup):
 
 
 def test_unpack_remotedata():
-    def assert_eq(keys1: set[WrappedKey], keys2: set[WrappedKey]) -> None:
+    def assert_eq(keys1: set[TaskRef], keys2: set[TaskRef]) -> None:
         if len(keys1) != len(keys2):
             assert False
         if not keys1:
             assert True
-        if not all(isinstance(k, WrappedKey) for k in keys1 & keys2):
+        if not all(isinstance(k, TaskRef) for k in keys1 & keys2):
             assert False
         assert sorted([k.key for k in keys1]) == sorted([k.key for k in keys2])
 
     assert unpack_remotedata(1) == (1, set())
     assert unpack_remotedata(()) == ((), set())
 
-    res, keys = unpack_remotedata(WrappedKey("mykey"))
+    res, keys = unpack_remotedata(TaskRef("mykey"))
     assert res == "mykey"
-    assert_eq(keys, {WrappedKey("mykey")})
-
-    # Check unpack of SC that contains a wrapped key
-    sc = SubgraphCallable({"key": (WrappedKey("data"),)}, outkey="key", inkeys=["arg1"])
-    dsk = (sc, "arg1")
-    res, keys = unpack_remotedata(dsk)
-    assert res[0] != sc  # Notice, the first item (the SC) has been changed
-    assert res[1:] == ("arg1", "data")
-    assert_eq(keys, {WrappedKey("data")})
-
-    # Check unpack of SC when it takes a wrapped key as argument
-    sc = SubgraphCallable({"key": ("arg1",)}, outkey="key", inkeys=[WrappedKey("arg1")])
-    dsk = (sc, "arg1")
-    res, keys = unpack_remotedata(dsk)
-    assert res == (sc, "arg1")  # Notice, the first item (the SC) has NOT been changed
-    assert_eq(keys, set())
-
-
-def test_unpack_remotedata_custom_tuple():
-    # We don't want to recurse into custom tuples. This is used as a sentinel to
-    # avoid recursion for performance reasons if we know that there are no
-    # nested futures. This test case is not how this feature should be used in
-    # practice.
-
-    akey = WrappedKey("a")
-
-    ordinary_tuple = (1, 2, akey)
-    dont_recurse = DoNotUnpack(ordinary_tuple)
-
-    res, keys = unpack_remotedata(ordinary_tuple)
-    assert res is not ordinary_tuple
-    assert any(left != right for left, right in zip(ordinary_tuple, res))
-    assert keys == {akey}
-    res, keys = unpack_remotedata(dont_recurse)
-    assert not keys
-    assert res is dont_recurse
+    assert_eq(keys, {TaskRef("mykey")})

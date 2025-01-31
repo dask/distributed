@@ -38,6 +38,7 @@ from bokeh.models import (
     Range1d,
     ResetTool,
     Select,
+    TabPanel,
     Tabs,
     TapTool,
     Title,
@@ -73,10 +74,8 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.core import TabPanel
 from distributed.dashboard.utils import (
     _DATATABLE_STYLESHEETS_KWARGS,
-    BOKEH_VERSION,
     PROFILING,
     transpose,
     update,
@@ -2271,18 +2270,8 @@ class TaskGraph(DashboardComponent):
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
         filter = GroupFilter(column_name="visible", group="True")
-        if BOKEH_VERSION.major < 3:
-            filter_kwargs = {"filters": [filter]}
-        else:
-            filter_kwargs = {"filter": filter}
-        node_view = CDSView(**filter_kwargs)
-        edge_view = CDSView(**filter_kwargs)
-
-        # Bokeh >= 3.0 automatically infers the source to use
-        if BOKEH_VERSION.major < 3:
-            node_view.source = self.node_source
-            edge_view.source = self.edge_source
-
+        node_view = CDSView(filter=filter)
+        edge_view = CDSView(filter=filter)
         node_colors = factor_cmap(
             "state",
             factors=["waiting", "queued", "processing", "memory", "released", "erred"],
@@ -3923,9 +3912,11 @@ class Contention(DashboardComponent):
 
         # Format event loop as time and GIL (if configured) as %
         self.data["text"] = [
-            f"{x * 100:.1f}%"
-            if i % 2 and s.monitor.monitor_gil_contention
-            else format_time(x)
+            (
+                f"{x * 100:.1f}%"
+                if i % 2 and s.monitor.monitor_gil_contention
+                else format_time(x)
+            )
             for i, x in enumerate(self.data["values"])
         ]
         update(self.source, self.data)
@@ -4054,7 +4045,7 @@ class WorkerTable(DashboardComponent):
         "spilled_bytes",
     }
 
-    def __init__(self, scheduler, width=800, **kwargs):
+    def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.names = [
             "name",
@@ -4147,7 +4138,7 @@ class WorkerTable(DashboardComponent):
             columns=[columns[n] for n in table_names],
             reorderable=True,
             sortable=True,
-            width=width,
+            width_policy="max",
             index_position=None,
             **_DATATABLE_STYLESHEETS_KWARGS,
         )
@@ -4167,7 +4158,7 @@ class WorkerTable(DashboardComponent):
             columns=[extra_columns[n] for n in extra_names],
             reorderable=True,
             sortable=True,
-            width=width,
+            width_policy="max",
             index_position=None,
             **_DATATABLE_STYLESHEETS_KWARGS,
         )
@@ -4194,7 +4185,6 @@ class WorkerTable(DashboardComponent):
             x_range=(0, 1),
             y_range=(-0.1, 0.1),
             height=60,
-            width=width,
             tools="",
             min_border_right=0,
             **kwargs,
@@ -4224,7 +4214,6 @@ class WorkerTable(DashboardComponent):
             x_range=(0, 1),
             y_range=(-0.1, 0.1),
             height=60,
-            width=width,
             tools="",
             min_border_right=0,
             **kwargs,
@@ -4513,10 +4502,6 @@ _STYLES = {
     "box-shadow": "inset 1px 0 8px 0 lightgray",
     "overflow": "auto",
 }
-if BOKEH_VERSION.major < 3:
-    _BOKEH_STYLES_KWARGS = {"style": _STYLES}
-else:
-    _BOKEH_STYLES_KWARGS = {"styles": _STYLES}
 
 
 class SchedulerLogs:
@@ -4536,7 +4521,7 @@ class SchedulerLogs:
                 )
             )._repr_html_()
 
-        self.root = Div(text=logs_html, **_BOKEH_STYLES_KWARGS)
+        self.root = Div(text=logs_html, styles=_STYLES)
 
 
 @log_errors
@@ -4639,7 +4624,7 @@ def exceptions_doc(scheduler, extra, doc):
 
 @log_errors
 def workers_doc(scheduler, extra, doc):
-    table = WorkerTable(scheduler)
+    table = WorkerTable(scheduler, sizing_mode="stretch_width")
     table.update()
     add_periodic_callback(doc, table, 500)
     doc.title = "Dask: Workers"
@@ -4726,30 +4711,25 @@ def status_doc(scheduler, extra, doc):
         processing_root = processing.root
 
     current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-    occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
     workers_transfer_bytes = WorkersTransferBytes(scheduler, sizing_mode="stretch_both")
 
     cpu_root = current_load.cpu_figure
-    occupancy_root = occupancy.root
 
     workers_memory.update()
     workers_transfer_bytes.update()
     processing.update()
     current_load.update()
-    occupancy.update()
 
     add_periodic_callback(doc, workers_memory, 100)
     add_periodic_callback(doc, workers_transfer_bytes, 100)
     add_periodic_callback(doc, processing, 100)
     add_periodic_callback(doc, current_load, 100)
-    add_periodic_callback(doc, occupancy, 100)
 
     doc.add_root(workers_memory.root)
 
     tabs = [
         TabPanel(child=processing_root, title="Processing"),
         TabPanel(child=cpu_root, title="CPU"),
-        TabPanel(child=occupancy_root, title="Occupancy"),
         TabPanel(child=workers_transfer_bytes.root, title="Data Transfer"),
     ]
 

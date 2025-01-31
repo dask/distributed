@@ -126,8 +126,7 @@ class ShardsBuffer(Generic[ShardType]):
             self.bytes_memory -= size
 
     @abc.abstractmethod
-    async def _process(self, id: str, shards: list[ShardType]) -> None:
-        ...
+    async def _process(self, id: str, shards: list[ShardType]) -> None: ...
 
     def read(self, id: str) -> ShardType:
         raise NotImplementedError()  # pragma: nocover
@@ -150,6 +149,7 @@ class ShardsBuffer(Generic[ShardType]):
                     if self.max_message_size > 0:
                         size = 0
                         shards = []
+                        # FIXME: We always exceed the limit, not just on the first shard.
                         while size < self.max_message_size:
                             try:
                                 shard = self.shards[part_id].pop()

@@ -137,7 +137,9 @@ async def test_counters(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True, config={"distributed.scheduler.work-stealing-interval": "100ms"}
+)
 async def test_stealing_events(c, s, a, b):
     se = StealingEvents(s)
 
@@ -1010,6 +1012,7 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
     assert not any(tgg.arrows_source.data.values())
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -1143,6 +1146,7 @@ async def test_https_support(c, s, a, b):
 
     ctx = ssl.create_default_context()
     ctx.load_verify_locations(get_cert("tls-ca-cert.pem"))
+    ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
 
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(
@@ -1349,10 +1353,10 @@ async def test_shuffling(c, s, a, b):
         df2 = df.shuffle("x").persist()
     start = time()
     while not ss.source.data["comm_written"]:
+        await asyncio.gather(*[a.heartbeat(), b.heartbeat()])
         ss.update()
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         assert time() < start + 10
-    await df2
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)

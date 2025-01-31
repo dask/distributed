@@ -25,9 +25,10 @@ from typing import TYPE_CHECKING, Any, Generic, NewType, TypeVar, cast
 from tornado.ioloop import IOLoop
 
 import dask.config
+from dask._task_spec import Task
 from dask.core import flatten
 from dask.typing import Key
-from dask.utils import parse_timedelta
+from dask.utils import parse_bytes, parse_timedelta
 
 from distributed.core import ErrorMessage, OKMessage, PooledRPCCall, error_message
 from distributed.exceptions import Reschedule
@@ -36,7 +37,11 @@ from distributed.protocol import to_serialize
 from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._comms import CommShardsBuffer
 from distributed.shuffle._disk import DiskShardsBuffer
-from distributed.shuffle._exceptions import P2PConsistencyError, ShuffleClosedError
+from distributed.shuffle._exceptions import (
+    P2PConsistencyError,
+    P2POutOfDiskError,
+    ShuffleClosedError,
+)
 from distributed.shuffle._limiter import ResourceLimiter
 from distributed.shuffle._memory import MemoryShardsBuffer
 from distributed.utils import run_in_executor_with_context, sync
@@ -128,8 +133,15 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
                     self._disk_buffer = MemoryShardsBuffer(deserialize=self.deserialize)
 
             with self._capture_metrics("background-comms"):
+                max_message_size = parse_bytes(
+                    dask.config.get("distributed.p2p.comm.message-bytes-limit")
+                )
+                concurrency_limit = dask.config.get("distributed.p2p.comm.concurrency")
                 self._comm_buffer = CommShardsBuffer(
-                    send=self.send, memory_limiter=memory_limiter_comms
+                    send=self.send,
+                    max_message_size=max_message_size,
+                    memory_limiter=memory_limiter_comms,
+                    concurrency_limit=concurrency_limit,
                 )
 
         # TODO: reduce number of connections to number of workers
@@ -346,6 +358,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         if self.transferred:
             raise RuntimeError(f"Cannot add more partitions to {self}")
         # Log metrics both in the "execute" and in the "p2p" contexts
+        self.validate_data(data)
         with self._capture_metrics("foreground"):
             with (
                 context_meter.meter("p2p-shard-partition-noncpu"),
@@ -390,6 +403,9 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
     @abc.abstractmethod
     def deserialize(self, buffer: Any) -> Any:
         """Deserialize shards"""
+
+    def validate_data(self, data: Any) -> None:
+        """Validate payload data before shuffling"""
 
 
 def get_worker_plugin() -> ShuffleWorkerPlugin:
@@ -447,7 +463,7 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
 
     @property
     @abc.abstractmethod
-    def output_partitions(self) -> Generator[_T_partition_id, None, None]:
+    def output_partitions(self) -> Generator[_T_partition_id]:
         """Output partitions"""
 
     @abc.abstractmethod
@@ -463,9 +479,6 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
             run_spec=ShuffleRunSpec(spec=self, worker_for=worker_for, span_id=span_id),
             participating_workers=set(worker_for.values()),
         )
-
-    def validate_data(self, data: Any) -> None:
-        """Validate payload data before shuffling"""
 
     @abc.abstractmethod
     def create_run_on_worker(
@@ -493,6 +506,10 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
     def run_id(self) -> int:
         return self.run_spec.run_id
 
+    @property
+    def archived(self) -> bool:
+        return self._archived_by is not None
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__}<{self.id}[{self.run_id}]>"
 
@@ -506,8 +523,12 @@ def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
         yield
     except ShuffleClosedError:
         raise Reschedule()
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
     except Exception as e:
-        raise RuntimeError(f"P2P shuffling {id} failed during transfer phase") from e
+        raise RuntimeError(f"P2P {id} failed during transfer phase") from e
 
 
 @contextlib.contextmanager
@@ -518,8 +539,18 @@ def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
         raise e
     except ShuffleClosedError:
         raise Reschedule()
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
     except Exception as e:
-        raise RuntimeError(f"P2P shuffling {id} failed during unpack phase") from e
+        raise RuntimeError(f"P2P {id} failed during unpack phase") from e
+
+
+def _handle_datetime(buf: Any) -> Any:
+    if hasattr(buf, "dtype") and buf.dtype.kind in "Mm":
+        return buf.view("u8")
+    return buf
 
 
 def _mean_shard_size(shards: Iterable) -> int:
@@ -530,8 +561,47 @@ def _mean_shard_size(shards: Iterable) -> int:
         if not isinstance(shard, int):
             # This also asserts that shard is a Buffer and that we didn't forget
             # a container or metadata type above
+            shard = _handle_datetime(shard)
             size += memoryview(shard).nbytes
             count += 1
             if count == 10:
                 break
     return size // count if count else 0
+
+
+def p2p_barrier(id: ShuffleId, *run_ids: int) -> int:
+    try:
+        return get_worker_plugin().barrier(id, run_ids)
+    except Reschedule as e:
+        raise e
+    except P2PConsistencyError:
+        raise
+    except P2POutOfDiskError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"P2P {id} failed during barrier phase") from e
+
+
+class P2PBarrierTask(Task):
+    spec: ShuffleSpec
+
+    __slots__ = tuple(__annotations__)
+
+    def __init__(
+        self,
+        key: Any,
+        func: Callable[..., Any],
+        /,
+        *args: Any,
+        spec: ShuffleSpec,
+        **kwargs: Any,
+    ):
+        self.spec = spec
+        super().__init__(key, func, *args, **kwargs)
+
+    def __repr__(self) -> str:
+        return f"P2PBarrierTask({self.key!r})"
+
+    @property
+    def block_fusion(self) -> bool:
+        return True

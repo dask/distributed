@@ -4,6 +4,7 @@ import asyncio
 import json
 import signal
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -19,6 +20,8 @@ async def test_text():
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "spec",
             "--spec",
@@ -27,6 +30,8 @@ async def test_text():
     ):
         with popen(
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "spec",
                 "tcp://localhost:%d" % port,
@@ -55,6 +60,8 @@ async def test_file(c, s, tmp_path):
         )
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "spec",
             s.address,
@@ -72,6 +79,8 @@ async def test_file(c, s, tmp_path):
 def test_errors():
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "spec",
             "--spec",
@@ -85,7 +94,7 @@ def test_errors():
         assert "exactly one" in line
         assert "--spec" in line and "--spec-file" in line
 
-    with popen(["dask", "spec"], capture_output=True) as proc:
+    with popen([sys.executable, "-m", "dask", "spec"], capture_output=True) as proc:
         line = proc.stdout.readline().decode()
         assert "exactly one" in line
         assert "--spec" in line and "--spec-file" in line
@@ -97,6 +106,8 @@ def test_errors():
 @gen_cluster(client=True, nthreads=[])
 async def test_signal_handling_worker(c, s, worker_type, sig):
     worker = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
         "dask",
         "spec",
         "--spec",
@@ -136,6 +147,8 @@ async def test_signal_handling_worker(c, s, worker_type, sig):
 async def test_signal_handling_scheduler(sig):
     port = open_port()
     scheduler = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
         "dask",
         "spec",
         "--spec",

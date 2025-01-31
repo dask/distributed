@@ -10,16 +10,17 @@ from typing import Generic, Literal, NoReturn, TypeVar
 
 from tornado.ioloop import IOLoop
 
+from dask._task_spec import TaskRef
+
 from distributed.client import Future
 from distributed.protocol import to_serialize
 from distributed.utils import LateLoopEvent, iscoroutinefunction, sync, thread_state
-from distributed.utils_comm import WrappedKey
 from distributed.worker import get_client, get_worker
 
 _T = TypeVar("_T")
 
 
-class Actor(WrappedKey):
+class Actor(TaskRef):
     """Controls an object on a remote worker
 
     An actor allows remote control of a stateful object living on a remote
@@ -77,7 +78,7 @@ class Actor(WrappedKey):
         if not self._client:
             try:
                 self._client = get_client()
-                self._future = Future(self._key, inform=False)
+                self._future = Future(self._key, self._client)
                 # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
@@ -245,12 +246,10 @@ class BaseActorFuture(abc.ABC, Awaitable[_T]):
     """
 
     @abc.abstractmethod
-    def result(self, timeout: str | timedelta | float | None = None) -> _T:
-        ...
+    def result(self, timeout: str | timedelta | float | None = None) -> _T: ...
 
     @abc.abstractmethod
-    def done(self) -> bool:
-        ...
+    def done(self) -> bool: ...
 
     def __repr__(self) -> Literal["<ActorFuture>"]:
         return "<ActorFuture>"

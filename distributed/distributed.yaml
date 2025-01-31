@@ -3,6 +3,7 @@ distributed:
   # logging:
   #   distributed: info
   #   distributed.client: warning
+  #   distributed.gc: warning
   #   bokeh: error
   #   # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
   #   tornado: critical
@@ -18,10 +19,12 @@ distributed:
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
     idle-timeout: null       # Shut down after this duration, like "1h" or "30 minutes"
-    no-workers-timeout: null # Shut down if there are tasks but no workers to process them
+    no-workers-timeout: null # If a task remains unrunnable for longer than this, it fails.
     work-stealing: True     # workers should steal tasks from each other
-    work-stealing-interval: 100ms  # Callback time for work stealing
+    work-stealing-interval: 1s  # Callback time for work stealing
     worker-saturation: 1.1  # Send this fraction of nthreads root tasks to workers
+    rootish-taskgroup: 5  # number of dependencies of a rootish tg
+    rootish-taskgroup-dependencies: 5  # number of dependencies of the dependencies of the rootish tg
     worker-ttl: "5 minutes" # like '60s'. Time to live for workers.  They must heartbeat faster than this
     preload: []             # Run custom modules with Scheduler
     preload-argv: []        # See https://docs.dask.org/en/latest/how-to/customize-initialization.html
@@ -289,6 +292,8 @@ distributed:
         - xarray
         - xgboost
         - xdist
+        - __channelexec__  # more xdist
+        - execnet  # more xdist
       ignore-files:
         - runpy\.py  # `python -m pytest` (or other module) shell command
         - pytest  # `pytest` shell command
@@ -303,12 +308,18 @@ distributed:
 
   p2p:
     comm:
+      buffer: 1 GiB
+      concurrency: 10
+      message-bytes-limit: 2 MiB
       retry:
         count: 10
         delay:
           min: 1s  # the first non-zero delay between re-tries
           max: 30s  # the maximum delay between re-tries
-    disk: True
+    storage:
+      buffer: 100 MiB
+      disk: True
+    threads: null
 
   ###################
   # Bokeh dashboard #

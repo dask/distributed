@@ -4,9 +4,11 @@ import asyncio
 import math
 import random
 import warnings
+from collections import defaultdict
 
 import pytest
-from packaging.version import parse as parse_version
+
+from distributed.diagnostics.plugin import SchedulerPlugin
 
 np = pytest.importorskip("numpy")
 da = pytest.importorskip("dask.array")
@@ -31,12 +33,11 @@ from distributed.shuffle._rechunk import (
     ArrayRechunkRun,
     ArrayRechunkSpec,
     Split,
+    _calculate_prechunking,
     split_axes,
 )
 from distributed.shuffle.tests.utils import AbstractShuffleTestPool
 from distributed.utils_test import async_poll_for, gen_cluster, gen_test
-
-NUMPY_GE_124 = parse_version(np.__version__) >= parse_version("1.24")
 
 
 class ArrayRechunkTestPool(AbstractShuffleTestPool):
@@ -174,7 +175,7 @@ async def test_lowlevel_rechunk(tmp_path, n_workers, barrier_first_worker, disk)
         np.testing.assert_array_equal(
             concatenate3(old_cs.tolist()),
             concatenate3(all_chunks.tolist()),
-            **({"strict": True} if NUMPY_GE_124 else {}),
+            strict=True,
         )
 
 
@@ -188,17 +189,51 @@ async def test_rechunk_configuration(c, s, *ws, config_value, keyword):
     --------
     dask.array.tests.test_rechunk.test_rechunk_1d
     """
-    a = np.random.default_rng().uniform(0, 1, 30)
-    x = da.from_array(a, chunks=((10,) * 3,))
-    new = ((6,) * 5,)
+    a = np.random.default_rng().uniform(0, 1, 100).reshape((10, 10))
+    x = da.from_array(a, chunks=(10, 1))
+    new = ((1,) * 10, (10,))
     config = {"array.rechunk.method": config_value} if config_value is not None else {}
     with dask.config.set(config):
         x2 = rechunk(x, chunks=new, method=keyword)
     expected_algorithm = keyword if keyword is not None else config_value
     if expected_algorithm == "p2p":
-        assert all(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+        assert all(key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+    elif expected_algorithm == "tasks":
+        assert not any(
+            key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__()
+        )
+    # Neither is specified, so we choose the best one (see test_rechunk_heuristic for a full test of the heuristic)
     else:
-        assert not any(key[0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+        assert all(key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+
+    assert x2.chunks == new
+    assert np.all(await c.compute(x2) == a)
+
+
+@pytest.mark.parametrize(
+    ["new", "expected_algorithm"],
+    [
+        # All-to-all rechunking defaults to P2P
+        (((1,) * 100, (100,)), "p2p"),
+        # Localized rechunking defaults to tasks
+        (((50, 50), (2,) * 50), "tasks"),
+        # Less local rechunking first defaults to tasks,
+        (((25, 25, 25, 25), (4,) * 25), "tasks"),
+        # then switches to p2p
+        (((10,) * 10, (10,) * 10), "p2p"),
+    ],
+)
+@gen_cluster(client=True)
+async def test_rechunk_heuristic(c, s, a, b, new, expected_algorithm):
+    a = np.random.default_rng().uniform(0, 1, 10000).reshape((100, 100))
+    x = da.from_array(a, chunks=(100, 1))
+    x2 = rechunk(x, chunks=new)
+    if expected_algorithm == "p2p":
+        assert all(key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__())
+    else:
+        assert not any(
+            key[0][0].startswith("rechunk-p2p") for key in x2.__dask_keys__()
+        )
 
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
@@ -230,6 +265,37 @@ async def test_cull_p2p_rechunk_independent_partitions(c, s, *ws):
     assert len(dsk_culled.dask) < len(dsk.dask) / 4
 
     assert np.all(await c.compute(culled) == a[:5, :2])
+
+
+@gen_cluster(client=True)
+async def test_cull_p2p_rechunking_single_chunk(c, s, *ws):
+    a = np.random.default_rng().uniform(0, 1, 1000).reshape((10, 10, 10))
+    x = da.from_array(a, chunks=(1, 5, 1))
+    new = (5, 1, -1)
+    rechunked = rechunk(x, chunks=new, method="p2p")
+    (dsk,) = dask.optimize(rechunked)
+    culled = rechunked[:5, 1:2]
+    (dsk_culled,) = dask.optimize(culled)
+
+    # The culled graph requires only 1/2 of the input tasks
+    n_inputs = len(
+        [1 for key in dsk.dask.get_all_dependencies() if key[0].startswith("array-")]
+    )
+
+    assert n_inputs > 0
+
+    n_culled_inputs = len(
+        [
+            1
+            for key in dsk_culled.dask.get_all_dependencies()
+            if key[0].startswith("array-")
+        ]
+    )
+    assert n_culled_inputs == n_inputs / 4
+    # The culled graph should also have less than 1/4 the tasks
+    assert len(dsk_culled.dask) < len(dsk.dask) / 4
+
+    assert np.all(await c.compute(culled) == a[:5, 1:2])
 
 
 @gen_cluster(client=True)
@@ -272,7 +338,7 @@ async def test_rechunk_2d(c, s, *ws, disk):
     a = np.random.default_rng().uniform(0, 1, 300).reshape((10, 30))
     x = da.from_array(a, chunks=((1, 2, 3, 4), (5,) * 6))
     new = ((5, 5), (15,) * 2)
-    with dask.config.set({"distributed.p2p.disk": disk}):
+    with dask.config.set({"distributed.p2p.storage.disk": disk}):
         x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     assert np.all(await c.compute(x2) == a)
@@ -291,7 +357,7 @@ async def test_rechunk_4d(c, s, *ws, disk):
     a = np.random.default_rng().uniform(0, 1, 10000).reshape((10,) * 4)
     x = da.from_array(a, chunks=old)
     new = ((10,),) * 4
-    with dask.config.set({"distributed.p2p.disk": disk}):
+    with dask.config.set({"distributed.p2p.storage.disk": disk}):
         x2 = rechunk(x, chunks=new, method="p2p")
     assert x2.chunks == new
     await c.compute(x2)
@@ -816,7 +882,8 @@ async def test_rechunk_avoid_needless_chunking(c, s, *ws):
     x = da.ones(16, chunks=2)
     y = x.rechunk(8, method="p2p")
     dsk = y.__dask_graph__()
-    assert len(dsk) <= 8 + 2
+    # 8 inputs, 2 concatenations of small inputs, 2 outputs
+    assert len(dsk) <= 8 + 2 + 2
 
 
 @pytest.mark.parametrize(
@@ -1205,7 +1272,7 @@ async def test_preserve_writeable_flag(c, s, a, b):
     assert out.tolist() == [True, True]
 
 
-@gen_cluster(client=True, config={"distributed.p2p.disk": False})
+@gen_cluster(client=True, config={"distributed.p2p.storage.disk": False})
 async def test_rechunk_in_memory_shards_dont_share_buffer(c, s, a, b):
     """Test that, if two shards are sent in the same RPC call and they contribute to
     different output chunks, downstream tasks don't need to consume all output chunks in
@@ -1284,30 +1351,17 @@ async def test_partial_rechunk_homogeneous_distribution(c, s, *workers):
 async def test_partial_rechunk_taskgroups(c, s):
     """Regression test for https://github.com/dask/distributed/issues/8656"""
     arr = da.random.random(
-        (10, 10, 10),
+        (10, 10),
         chunks=(
-            (
-                2,
-                2,
-                2,
-                2,
-                2,
-            ),
-        )
-        * 3,
+            (1,) * 10,
+            (2,) * 5,
+        ),
     )
     arr = arr.rechunk(
         (
-            (
-                1,
-                2,
-                2,
-                2,
-                2,
-                1,
-            ),
-        )
-        * 3,
+            (2,) * 5,
+            (1,) * 10,
+        ),
         method="p2p",
     )
 
@@ -1320,3 +1374,165 @@ async def test_partial_rechunk_taskgroups(c, s):
         timeout=5,
     )
     assert len(s.task_groups) < 7
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2),), ((2, 2),), ((2, 2),)],
+        [((2, 2),), ((4,),), ((2, 2),)],
+        [((2, 2),), ((1, 1, 1, 1),), ((2, 2),)],
+        [((2, 2, 2),), ((1, 2, 2, 1),), ((1, 1, 1, 1, 1, 1),)],
+        [((1, np.nan),), ((1, np.nan),), ((1, np.nan),)],
+    ],
+)
+def test_calculate_prechunking_1d(old, new, expected):
+    actual = _calculate_prechunking(old, new, np.dtype, None)
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2), (3, 3)), ((2, 2), (3, 3)), ((2, 2), (3, 3))],
+        [((2, 2), (3, 3)), ((4,), (3, 3)), ((4,), (3, 3))],
+        [((2, 2), (3, 3)), ((1, 1, 1, 1), (3, 3)), ((2, 2), (3, 3))],
+        [
+            ((2, 2, 2), (3, 3, 3)),
+            ((1, 2, 2, 1), (2, 3, 4)),
+            ((1, 2, 2, 1), (2, 3, 4)),
+        ],
+        [((1, np.nan), (3, 3)), ((1, np.nan), (2, 2, 2)), ((1, np.nan), (2, 1, 1, 2))],
+        [((4,), (1, 1, 1)), ((1, 1, 1, 1), (3,)), ((4,), (3,))],
+    ],
+)
+def test_calculate_prechunking_2d(old, new, expected):
+    actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        (
+            ((2, 2), (1, 1, 1, 1), (1, 1, 1, 1)),
+            ((1, 1, 1, 1), (4,), (2, 2)),
+            ((2, 2), (4,), (1, 1, 1, 1)),
+        ),
+        (
+            ((2, 2), (1, 1, 1, 1), (1, 1, 1, 1)),
+            ((1, 1, 1, 1), (2, 2), (2, 2)),
+            ((2, 2), (2, 2), (2, 2)),
+        ),
+        (
+            ((2, 2), (1, 1, 1, 1), (1, 1, 1, 1)),
+            ((1, 1, 1, 1), (2, 2), (4,)),
+            ((2, 2), (2, 2), (2, 2)),
+        ),
+        (
+            ((1, 1, 1, 1), (1, 1, 1, 1), (2, 2)),
+            ((2, 2), (4,), (1, 1, 1, 1)),
+            ((2, 2), (2, 2), (2, 2)),
+        ),
+    ],
+)
+def test_calculate_prechunking_3d(old, new, expected):
+    with dask.config.set({"array.chunk-size": "16 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ["chunk_size", "expected"],
+    [
+        ("1 B", ((10,), (1,) * 10)),
+        ("20 B", ((10,), (1,) * 10)),
+        ("40 B", ((10,), (2, 2, 1, 2, 2, 1))),
+        ("100 B", ((10,), (5, 5))),
+    ],
+)
+def test_calculate_prechunking_concatenation(chunk_size, expected):
+    old = ((10,), (1,) * 10)
+    new = ((2,) * 5, (5, 5))
+    with dask.config.set({"array.chunk-size": chunk_size}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
+    assert actual == expected
+
+
+def test_calculate_prechunking_does_not_concatenate_object_type():
+    old = ((10,), (1,) * 10)
+    new = ((2,) * 5, (5, 5))
+
+    # Ensure that int dtypes get concatenated
+    new = ((2,) * 5, (5, 5))
+    with dask.config.set({"array.chunk-size": "100 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(np.int16), None)
+    assert actual == ((10,), (5, 5))
+
+    # Ensure object dtype chunks do not get concatenated
+    with dask.config.set({"array.chunk-size": "100 B"}):
+        actual = _calculate_prechunking(old, new, np.dtype(object), None)
+    assert actual == old
+
+
+@pytest.mark.parametrize(
+    ["old", "new", "expected"],
+    [
+        [((2, 2), (3, 3)), ((4,), (3, 3)), ((2, 2), (3, 3))],
+        [
+            ((2, 2, 2), (3, 3, 3)),
+            ((1, 2, 2, 1), (2, 3, 4)),
+            ((1, 1, 1, 1, 1, 1), (2, 1, 2, 1, 3)),
+        ],
+        [((4,), (1, 1, 1)), ((1, 1, 1, 1), (3,)), ((4,), (1, 1, 1))],
+    ],
+)
+def test_calculate_prechunking_splitting(old, new, expected):
+    # _calculate_prechunking does not concatenate on object
+    actual = _calculate_prechunking(old, new, np.dtype(object), None)
+    assert actual == expected
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 4, config={"array.chunk-size": "1 B"})
+async def test_homogeneously_schedule_unpack(c, s, *ws):
+    class SchedulingTrackerPlugin(SchedulerPlugin):
+        async def start(self, scheduler):
+            self.scheduler = scheduler
+            self.counts = defaultdict(int)
+            self.seen = set()
+
+        def transition(self, key, start, finish, *args, stimulus_id, **kwargs):
+            if key in self.seen:
+                return
+
+            if not isinstance(key, tuple) or not isinstance(key[0], str):
+                return
+
+            if not key[0].startswith("rechunk-p2p"):
+                return
+
+            if start != "waiting" or finish != "processing":
+                return
+
+            self.seen.add(key)
+            self.counts[self.scheduler.tasks[key].processing_on.address] += 1
+
+    await c.register_plugin(SchedulingTrackerPlugin(), name="tracker")
+    res = da.random.random((100, 100), chunks=(1, -1)).rechunk((-1, 1))
+    await c.compute(res)
+    counts = s.plugins["tracker"].counts
+    min_count = min(counts.values())
+    max_count = max(counts.values())
+    assert min_count >= max_count, counts
+
+
+@pytest.mark.parametrize("method", ["tasks", "p2p"])
+@gen_cluster(client=True)
+async def test_rechunk_datetime(c, s, *ws, method):
+    pd = pytest.importorskip("pandas")
+
+    x = pd.date_range("2005-01-01", "2005-01-10").to_numpy(dtype="datetime64[ns]")
+    dx = da.from_array(x, chunks=10)
+    result = dx.rechunk(2, method=method)
+    result = await c.compute(result)
+    np.testing.assert_array_equal(x, result)

@@ -8,8 +8,8 @@ import re
 
 import pytest
 
+from distributed.gc import FractionalTimer, GCDiagnosis, disable_gc_diagnosis
 from distributed.metrics import thread_time
-from distributed.utils_perf import FractionalTimer, GCDiagnosis, disable_gc_diagnosis
 from distributed.utils_test import captured_logger, run_for
 
 
@@ -48,14 +48,20 @@ def test_fractional_timer():
 
     timer = RandomTimer()
     ft = FractionalTimer(n_samples=N, timer=timer)
+    assert ft.duration_total == 0
     for _ in range(N):
         ft.start_timing()
         ft.stop_timing()
+    expected_total = sum(ft._durations)
+    assert ft.duration_total == pytest.approx(expected_total / ft.MULT)
     assert len(timer.timings) == N * 2
     assert ft.running_fraction is None
+    assert ft.duration_total > 0
 
     ft.start_timing()
     ft.stop_timing()
+    expected_total += ft._durations[-1]
+    assert ft.duration_total == pytest.approx(expected_total / ft.MULT)
     assert len(timer.timings) == (N + 1) * 2
     assert ft.running_fraction is not None
     check_fraction(timer, ft)
@@ -72,7 +78,7 @@ def enable_gc_diagnosis_and_log(diag, level="INFO"):
     if gc.callbacks:
         print("Unexpected gc.callbacks", gc.callbacks)
 
-    with captured_logger("distributed.utils_perf", level=level, propagate=False) as sio:
+    with captured_logger("distributed.gc", level=level, propagate=False) as sio:
         gc.disable()
         gc.collect()  # drain any leftover from previous tests
         diag.enable()
@@ -83,16 +89,17 @@ def enable_gc_diagnosis_and_log(diag, level="INFO"):
             gc.enable()
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 def test_gc_diagnosis_cpu_time():
-    diag = GCDiagnosis(warn_over_frac=0.75)
+    diag = GCDiagnosis(info_over_frac=0.75)
     diag.N_SAMPLES = 3  # shorten tests
 
-    with enable_gc_diagnosis_and_log(diag, level="WARN") as sio:
+    with enable_gc_diagnosis_and_log(diag, level="INFO") as sio:
         # Spend some CPU time doing only full GCs
         for _ in range(diag.N_SAMPLES):
             gc.collect()
         assert not sio.getvalue()
+        gc.collect()
         gc.collect()
         lines = sio.getvalue().splitlines()
         assert len(lines) == 1
@@ -102,7 +109,7 @@ def test_gc_diagnosis_cpu_time():
             lines[0],
         )
 
-    with enable_gc_diagnosis_and_log(diag, level="WARN") as sio:
+    with enable_gc_diagnosis_and_log(diag, level="INFO") as sio:
         # Spend half the CPU time doing full GCs
         for _ in range(diag.N_SAMPLES + 1):
             t1 = thread_time()

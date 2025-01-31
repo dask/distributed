@@ -208,25 +208,47 @@ async def test_scheduler_file():
         s.stop()
 
 
-@pytest.mark.xfail(
-    os.environ.get("MINDEPS") == "true",
-    reason="Timeout errors with mindeps environment",
-)
-@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 2)])
-async def test_nanny_timeout(c, s, a):
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_nanny_restart(c, s, a):
+    x = await c.scatter(123)
+    assert await c.submit(lambda: 1) == 1
+
+    await a.restart()
+
+    while x.status != "cancelled":
+        await asyncio.sleep(0.1)
+
+    assert await c.submit(lambda: 1) == 1
+
+
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_nanny_restart_timeout(c, s, a):
     x = await c.scatter(123)
     with captured_logger(
         logging.getLogger("distributed.nanny"), level=logging.ERROR
     ) as logger:
-        await a.restart(timeout=0.1)
+        await a.restart(timeout=0)
 
     out = logger.getvalue()
     assert "timed out" in out.lower()
 
-    start = time()
     while x.status != "cancelled":
         await asyncio.sleep(0.1)
-        assert time() < start + 7
+
+    assert await c.submit(lambda: 1) == 1
+
+
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_nanny_restart_timeout_stress(c, s, a):
+    x = await c.scatter(123)
+    restarts = [a.restart(timeout=random.random()) for _ in range(100)]
+    await asyncio.gather(*restarts)
+
+    while x.status != "cancelled":
+        await asyncio.sleep(0.1)
+
+    assert await c.submit(lambda: 1) == 1
+    assert len(s.workers) == 1
 
 
 @gen_cluster(
@@ -406,7 +428,10 @@ async def test_local_directory(s):
                 assert n.process.worker_dir.count("dask-scratch-space") == 1
 
 
-@pytest.mark.skipif(WINDOWS, reason="Need POSIX filesystem permissions and UIDs")
+@pytest.mark.skipif(
+    WINDOWS or os.getuid() == 0,
+    reason="Need POSIX filesystem permissions and UIDs and Must not be root",
+)
 @gen_cluster(nthreads=[])
 async def test_unwriteable_dask_worker_space(s, tmp_path):
     os.mkdir(f"{tmp_path}/dask-scratch-space", mode=0o500)
@@ -574,6 +599,34 @@ async def test_worker_start_exception(s):
         ):
             async with nanny:
                 pass
+    assert nanny.status == Status.failed
+    # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
+    assert nanny.process is None
+    assert "Restarting worker" not in logs.getvalue()
+    # Avoid excessive spewing. (It's also printed once extra within the subprocess, which is okay.)
+    assert logs.getvalue().count("ValueError: broken") == 1, logs.getvalue()
+
+
+@gen_cluster(nthreads=[])
+async def test_worker_start_exception_while_killing(s):
+    nanny = Nanny(s.address, worker_class=BrokenWorker)
+
+    async def try_to_kill_nanny():
+        while not nanny.process or nanny.process.status != Status.starting:
+            await asyncio.sleep(0)
+        await nanny.kill()
+
+    kill_task = asyncio.create_task(try_to_kill_nanny())
+    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
+        with raises_with_cause(
+            RuntimeError,
+            "Nanny failed to start",
+            RuntimeError,
+            "BrokenWorker failed to start",
+        ):
+            async with nanny:
+                pass
+    await kill_task
     assert nanny.status == Status.failed
     # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
     assert nanny.process is None

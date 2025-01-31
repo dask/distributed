@@ -11,6 +11,7 @@ pytestmark = pytest.mark.gpu
 pynvml = pytest.importorskip("pynvml")
 
 import dask
+from dask.utils import ensure_unicode
 
 from distributed.diagnostics import nvml
 from distributed.utils_test import gen_cluster
@@ -66,7 +67,7 @@ def run_has_cuda_context(queue):
         assert (
             ctx.has_context
             and ctx.device_info.device_index == 0
-            and isinstance(ctx.device_info.uuid, bytes)
+            and isinstance(ctx.device_info.uuid, str)
         )
 
         queue.put(None)
@@ -127,7 +128,7 @@ def test_visible_devices_uuid():
     assert info.uuid
 
     with mock.patch.dict(
-        os.environ, {"CUDA_VISIBLE_DEVICES": info.uuid.decode("utf-8")}
+        os.environ, {"CUDA_VISIBLE_DEVICES": ensure_unicode(info.uuid)}
     ):
         h = nvml._pynvml_handles()
         h_expected = pynvml.nvmlDeviceGetHandleByIndex(0)
@@ -147,7 +148,7 @@ def test_visible_devices_uuid_2(index):
     assert info.uuid
 
     with mock.patch.dict(
-        os.environ, {"CUDA_VISIBLE_DEVICES": info.uuid.decode("utf-8")}
+        os.environ, {"CUDA_VISIBLE_DEVICES": ensure_unicode(info.uuid)}
     ):
         h = nvml._pynvml_handles()
         h_expected = pynvml.nvmlDeviceGetHandleByIndex(index)
@@ -162,9 +163,10 @@ def test_visible_devices_bad_uuid():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 
-    with mock.patch.dict(
-        os.environ, {"CUDA_VISIBLE_DEVICES": "NOT-A-GPU-UUID"}
-    ), pytest.raises(ValueError, match="Devices in CUDA_VISIBLE_DEVICES"):
+    with (
+        mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "NOT-A-GPU-UUID"}),
+        pytest.raises(ValueError, match="Devices in CUDA_VISIBLE_DEVICES"),
+    ):
         nvml._pynvml_handles()
 
 

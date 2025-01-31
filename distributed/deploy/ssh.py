@@ -434,13 +434,15 @@ def SSHCluster(
         "cls": Scheduler,
         "options": {
             "address": hosts[0],
-            "connect_options": connect_options
-            if isinstance(connect_options, dict)
-            else connect_options[0],
+            "connect_options": (
+                connect_options
+                if isinstance(connect_options, dict)
+                else connect_options[0]
+            ),
             "kwargs": scheduler_options,
-            "remote_python": remote_python[0]
-            if isinstance(remote_python, list)
-            else remote_python,
+            "remote_python": (
+                remote_python[0] if isinstance(remote_python, list) else remote_python
+            ),
         },
     }
     workers = {
@@ -448,14 +450,18 @@ def SSHCluster(
             "cls": Worker,
             "options": {
                 "address": host,
-                "connect_options": connect_options
-                if isinstance(connect_options, dict)
-                else connect_options[i + 1],
+                "connect_options": (
+                    connect_options
+                    if isinstance(connect_options, dict)
+                    else connect_options[i + 1]
+                ),
                 "kwargs": worker_options,
                 "worker_class": worker_class,
-                "remote_python": remote_python[i + 1]
-                if isinstance(remote_python, list)
-                else remote_python,
+                "remote_python": (
+                    remote_python[i + 1]
+                    if isinstance(remote_python, list)
+                    else remote_python
+                ),
             },
         }
         for i, host in enumerate(hosts[1:])

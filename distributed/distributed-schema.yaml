@@ -81,15 +81,14 @@ properties:
             - string
             - "null"
             description: |
-              Shut down the scheduler after this duration if there are pending tasks,
-              but no workers that can process them. This can either mean that there are
-              no workers running at all, or that there are idle workers but they've been
-              excluded through worker or resource restrictions.
+              Timeout for tasks in an unrunnable state.
+
+              If task remains unrunnable for longer than this, it fails. A task is considered unrunnable IFF
+              it has no pending dependencies, and the task has restrictions that are not satisfied by 
+              any available worker or no workers are running at all.
 
               In adaptive clusters, this timeout must be set to be safely higher than
               the time it takes for workers to spin up.
-
-              Works in conjunction with idle-timeout.
 
           work-stealing:
             type: boolean
@@ -133,6 +132,32 @@ properties:
               Compute-bound workloads may benefit from oversaturation. Memory-bound workloads should
               generally leave `worker-saturation` at 1.0, though 1.25-1.5 could slightly improve
               performance if ample memory is available.
+
+          rootish-taskgroup:
+            type:
+            - integer
+
+            description: |
+              Controls when a specific task group is identified as rootish when
+              worker saturation is set.
+            
+              A task group is identifier as rootish if it has only up to a certain number
+              of dependencies (5 by default). This can be faulty for very large datasets
+              where the number of data tasks from xarray can be higher than 5.
+              
+              Increasing this limit will capture these root tasks successfully but increase
+              the risk of misidentifying task groups as rootish, which can have
+              performance implications.
+
+          rootish-taskgroup-dependencies:
+            type:
+              - integer
+
+            description: |
+              Controls the number of transitive dependencies a task group can have to be considered rootish.
+              It checks the number of dependencies each dependency of a rootish task groups has.
+              
+              The same caveats as for `rootish-taskgroup` apply.
 
           worker-ttl:
             type:
@@ -1047,6 +1072,28 @@ properties:
             description: Configuration settings for Dask communications specific to P2P
             properties:
 
+              buffer:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum amount of data for P2P's comm buffers to buffer in-memory per worker. 
+                  This limit is not absolute but used to apply back pressure.
+              concurrency:
+                type: integer
+                description: Number of concurrent background tasks used for IO-intensive operations in per P2P comm buffer.
+              message-bytes-limit:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum amount of data for P2P to send to another worker in a single operation
+
+                  Data is sent in batches, and if the first shard is larger than this value,
+                  the task shard still be sent to ensure progress. Hence, this limit is not absolute.
+                  Note that this limit applies to a single send operation and a worker may send data to
+                  multiple workers in parallel.
+
               retry:
                 type: object
                 description: |
@@ -1068,10 +1115,28 @@ properties:
                       max:
                         type: string
                         description: The maximum delay between retries
-          disk:
-            type: boolean
-            description: |
-              Whether or not P2P stores intermediate data on disk instead of memory
+          
+          storage:
+            type: object
+            description: Configuration settings for P2P storage
+            properties:
+
+              buffer:
+                type:
+                  - string
+                  - integer
+                description: |
+                  The maximum amount of data for P2P's disk buffers to buffer in-memory per worker 
+                  This limit is not absolute but used to apply back pressure.
+              disk:
+                type: boolean
+                description: | 
+                  Whether or not P2P stores intermediate data on disk instead of memory
+          threads:
+            type: 
+              - integer
+              - "null"
+            description: Number of threads used for CPU-intensive operations per worker. Defaults to number of worker threads.
 
       dashboard:
         type: object

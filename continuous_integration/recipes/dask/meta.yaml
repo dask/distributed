@@ -2,7 +2,6 @@
 {% set new_patch = major_minor_patch[2] | int + 1 %}
 {% set version = (major_minor_patch[:2] + [new_patch]) | join('.') + environ.get('VERSION_SUFFIX', '') %}
 {% set dask_version = environ.get('DASK_CORE_VERSION', '0.0.0.dev') %}
-{% set dask_expr_version = environ.get('DASK_EXPR_VERSION', '0.0.0.dev') %}
 
 
 package:
@@ -19,20 +18,18 @@ build:
 
 requirements:
   host:
-    - python >=3.9
+    - python >=3.10
     - dask-core {{ dask_version }}
-    - dask-expr {{ dask_expr_version }}
     - distributed {{ version }}
   run:
-    - python >=3.9
+    - python >=3.10
     - {{ pin_compatible('dask-core', max_pin='x.x.x.x') }}
-    - {{ pin_compatible('dask-expr', max_pin='x.x.x.x') }}
     - {{ pin_compatible('distributed', exact=True) }}
-    - cytoolz >=0.8.2
+    - cytoolz >=0.11.2
     - lz4 >=4.3.2
     - numpy >=1.21
-    - pandas >=1.3
-    - bokeh >=2.4.2,!=3.0.*
+    - pandas >=2
+    - bokeh >=3.1.0
     - jinja2 >=2.10.3
     - pyarrow >=7.0
 

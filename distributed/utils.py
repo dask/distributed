@@ -20,6 +20,7 @@ import traceback
 import warnings
 import weakref
 import xml.etree.ElementTree
+from asyncio import Event as LateLoopEvent
 from asyncio import TimeoutError
 from collections import deque
 from collections.abc import (
@@ -49,7 +50,6 @@ from typing import TYPE_CHECKING
 from typing import Any as AnyType
 from typing import ClassVar, TypeVar, overload
 
-import click
 import psutil
 import tblib.pickling_support
 from tornado import escape
@@ -67,7 +67,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import istask
 from dask.utils import ensure_bytes as _ensure_bytes
 from dask.utils import key_split
 from dask.utils import parse_timedelta as _parse_timedelta
@@ -442,36 +441,6 @@ def sync(
         return result
 
 
-if sys.version_info >= (3, 10):
-    from asyncio import Event as LateLoopEvent
-else:
-    # In python 3.10 asyncio.Lock and other primitives no longer support
-    # passing a loop kwarg to bind to a loop running in another thread
-    # e.g. calling from Client(asynchronous=False). Instead the loop is bound
-    # as late as possible: when calling any methods that wait on or wake
-    # Future instances. See: https://bugs.python.org/issue42392
-    class LateLoopEvent:
-        _event: asyncio.Event | None
-
-        def __init__(self) -> None:
-            self._event = None
-
-        def set(self) -> None:
-            if self._event is None:
-                self._event = asyncio.Event()
-
-            self._event.set()
-
-        def is_set(self) -> bool:
-            return self._event is not None and self._event.is_set()
-
-        async def wait(self) -> bool:
-            if self._event is None:
-                self._event = asyncio.Event()
-
-            return await self._event.wait()
-
-
 class _CollectErrorThread:
     def __init__(self, target: Callable[[], None], daemon: bool, name: str):
         self._exception: BaseException | None = None
@@ -479,7 +448,7 @@ class _CollectErrorThread:
         def wrapper() -> None:
             try:
                 target()
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 self._exception = e
 
         self._thread = thread = threading.Thread(
@@ -753,13 +722,11 @@ def key_split_group(x: object) -> str:
 
 
 @overload
-def log_errors(func: Callable[P, T], /) -> Callable[P, T]:
-    ...
+def log_errors(func: Callable[P, T], /) -> Callable[P, T]: ...
 
 
 @overload
-def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors:
-    ...
+def log_errors(*, pdb: bool = False, unroll_stack: int = 1) -> _LogErrors: ...
 
 
 def log_errors(func=None, /, *, pdb=False, unroll_stack=0):
@@ -895,7 +862,7 @@ def silence_logging(level, root="distributed"):
 @contextlib.contextmanager
 def silence_logging_cmgr(
     level: str | int, root: str = "distributed"
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """
     Temporarily change all StreamHandlers for the given logger to the given level
     """
@@ -954,6 +921,7 @@ def get_traceback():
         os.path.join("distributed", "scheduler"),
         os.path.join("tornado", "gen.py"),
         os.path.join("concurrent", "futures"),
+        os.path.join("dask", "_task_spec"),
     ]
     while exc_traceback and any(
         b in exc_traceback.tb_frame.f_code.co_filename for b in bad
@@ -971,17 +939,6 @@ def truncate_exception(e, n=10000):
             return Exception("Long error message", type(e), str(e)[:n])
     else:
         return e
-
-
-def _maybe_complex(task):
-    """Possibly contains a nested task"""
-    return (
-        istask(task)
-        or type(task) is list
-        and any(map(_maybe_complex, task))
-        or type(task) is dict
-        and any(map(_maybe_complex, task.values()))
-    )
 
 
 def seek_delimiter(file, delimiter, blocksize):
@@ -1274,6 +1231,10 @@ def has_keyword(func, keyword):
 
 @functools.lru_cache(1000)
 def command_has_keyword(cmd, k):
+    # Click is a relatively expensive import
+    # That hurts startup time a little
+    import click
+
     if cmd is not None:
         if isinstance(cmd, str):
             try:
@@ -1322,7 +1283,7 @@ palette = [
 
 @toolz.memoize
 def color_of(x, palette=palette):
-    h = md5(str(x).encode())
+    h = md5(str(x).encode(), usedforsecurity=False)
     n = int(h.hexdigest()[:8], 16)
     return palette[n % len(palette)]
 
@@ -1989,7 +1950,7 @@ class TupleComparable:
         return self.obj < other.obj
 
 
-@functools.lru_cache
+@functools.cache
 def url_escape(url, *args, **kwargs):
     """
     Escape a URL path segment. Cache results for better performance.

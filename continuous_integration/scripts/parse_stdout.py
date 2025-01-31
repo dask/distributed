@@ -1,6 +1,7 @@
 """On Windows, pytest-timeout kills off the whole test suite, leaving no junit report
 behind. Parse the stdout of pytest to generate one.
 """
+
 from __future__ import annotations
 
 import html

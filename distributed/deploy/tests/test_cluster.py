@@ -10,9 +10,11 @@ from distributed.utils_test import gen_test
 
 @gen_test()
 async def test_eq():
-    async with Cluster(asynchronous=True, name="A") as clusterA, Cluster(
-        asynchronous=True, name="A2"
-    ) as clusterA2, Cluster(asynchronous=True, name="B") as clusterB:
+    async with (
+        Cluster(asynchronous=True, name="A") as clusterA,
+        Cluster(asynchronous=True, name="A2") as clusterA2,
+        Cluster(asynchronous=True, name="B") as clusterB,
+    ):
         assert clusterA != "A"
         assert not (clusterA == "A")
         assert clusterA == clusterA
@@ -34,7 +36,9 @@ async def test_repr():
 
 @gen_test()
 async def test_cluster_wait_for_worker():
-    async with LocalCluster(n_workers=2, asynchronous=True) as cluster:
+    async with LocalCluster(
+        n_workers=2, asynchronous=True, dashboard_address=":0"
+    ) as cluster:
         assert len(cluster.scheduler.workers) == 2
         cluster.scale(4)
         await cluster.wait_for_workers(4)
@@ -75,8 +79,11 @@ def test_exponential_backoff():
 @gen_test()
 async def test_sync_context_manager_used_with_async_cluster():
     async with Cluster(asynchronous=True, name="A") as cluster:
-        with pytest.raises(
-            TypeError,
-            match=r"Used 'with' with asynchronous class; please use 'async with'",
-        ), cluster:
+        with (
+            pytest.raises(
+                TypeError,
+                match=r"Used 'with' with asynchronous class; please use 'async with'",
+            ),
+            cluster,
+        ):
             pass

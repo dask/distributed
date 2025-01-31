@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.9", "3.10", "3.11", "3.12"]
+        environment: [mindeps, "3.10", "3.11", "3.12", "3.13"]
         label: [default]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
@@ -37,11 +37,11 @@ jobs:
           - os: macos-latest
             environment: mindeps
           - os: macos-latest
-            environment: "3.9"
-          - os: macos-latest
             environment: "3.10"
           - os: macos-latest
             environment: "3.11"
+          - os: macos-latest
+            environment: "3.13"
 
           - os: windows-latest
             environment: mindeps
@@ -49,46 +49,36 @@ jobs:
         include:
           # Set distributed.scheduler.worker-saturation: .inf
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_queue
             partition: "ci1"
           - os: ubuntu-latest
-            environment: "3.9"
+            environment: "3.10"
             label: no_queue
-            partition: "not ci1"
-
-          # Set dataframe.query-planning: false
-          - os: ubuntu-latest
-            environment: "3.9"
-            label: no_expr
-            partition: "ci1"
-          - os: ubuntu-latest
-            environment: "3.9"
-            label: no_expr
             partition: "not ci1"
 
           # dask.array P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
             label: numpy
-            extra_packages: [numpy=1.21]
+            extra_packages: [numpy=1.24]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: numpy
-            extra_packages: [numpy=1.21]
+            extra_packages: [numpy=1.24]
             partition: "not ci1"
 
           # dask.dataframe P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=2.0, pyarrow=7, pyarrow-hotfix]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.21, pandas=2.0, pyarrow=7, pyarrow-hotfix]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
             partition: "not ci1"
 
           - os: ubuntu-latest
@@ -125,9 +115,8 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v3.0.3
+        uses: conda-incubator/setup-miniconda@v3.1.1
         with:
-          miniforge-variant: Mambaforge
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
           use-mamba: true
@@ -164,7 +153,7 @@ jobs:
           # Increase this value to reset cache if
           # continuous_integration/environment-${{ matrix.environment }}.yaml has not
           # changed. See also same variable in .pre-commit-config.yaml
-          CACHE_NUMBER: 2
+          CACHE_NUMBER: 0
         id: cache
 
       - name: Update environment
@@ -222,11 +211,6 @@ jobs:
         if: ${{ matrix.label == 'no_queue' }}
         run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
 
-      - name: Set up dask env to disable dask-expr
-        shell: bash -l {0}
-        if: ${{ matrix.label == 'no_expr' }}
-        run: echo "DASK_DATAFRAME__QUERY_PLANNING=False" >> $GITHUB_ENV
-
       - name: Print host info
         # host_info.py imports numpy, which isn't a direct dependency of distributed
         if: matrix.environment != 'mindeps'
@@ -245,7 +229,7 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pytest distributed \
+          python -m pytest distributed \
             -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --leaks=fds,processes,threads \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \

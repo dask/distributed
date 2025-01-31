@@ -171,9 +171,9 @@ async def test_worker_bad_args(c, s, a, b):
 
     tb = await y._traceback()
     assert any("1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line)
-    assert "Compute Failed" in hdlr.messages["warning"][0]
-    assert y.key in hdlr.messages["warning"][0]
-    assert "executing" in hdlr.messages["warning"][0]
+    assert "Compute Failed" in hdlr.messages["error"][0]
+    assert y.key in hdlr.messages["error"][0]
+    assert "executing" in hdlr.messages["error"][0]
     logger.setLevel(old_level)
 
     # Now we check that both workers are still alive.
@@ -450,6 +450,7 @@ async def test_base_exception_in_task(c, s, a, sync, exc_type):
         # Prevent test failure from killing the whole pytest process
         traceback.print_exc()
         pytest.fail(f"BaseException propagated back to test: {e!r}. See stdout.")
+        raise
 
     # Nanny restarts it
     await c.wait_for_workers(1)
@@ -504,7 +505,7 @@ async def test_plugin_multiple_exceptions():
 
 @gen_test()
 async def test_plugin_internal_exception():
-    async with Scheduler(port=0) as s:
+    async with Scheduler(port=0, dashboard_address=":0") as s:
         with raises_with_cause(
             RuntimeError,
             "Worker failed to start",
@@ -663,9 +664,12 @@ async def test_close_on_disconnect(s, w):
 
 @gen_cluster(nthreads=[])
 async def test_memory_limit_auto(s):
-    async with Worker(s.address, nthreads=1) as a, Worker(
-        s.address, nthreads=2
-    ) as b, Worker(s.address, nthreads=100) as c, Worker(s.address, nthreads=200) as d:
+    async with (
+        Worker(s.address, nthreads=1) as a,
+        Worker(s.address, nthreads=2) as b,
+        Worker(s.address, nthreads=100) as c,
+        Worker(s.address, nthreads=200) as d,
+    ):
         assert isinstance(a.memory_manager.memory_limit, Number)
         assert isinstance(b.memory_manager.memory_limit, Number)
 
@@ -1111,7 +1115,7 @@ async def test_service_hosts_match_worker(s):
 
     async with Worker(s.address, host="tcp://127.0.0.1") as w:
         sock = first(w.http_server._sockets.values())
-        assert sock.getsockname()[0] in ("::", "0.0.0.0")
+        assert sock.getsockname()[0] in ("::", "127.0.0.1")
 
     # See what happens with e.g. `dask worker --listen-address tcp://:8811`
     async with Worker(s.address, host="") as w:
@@ -1157,6 +1161,7 @@ async def test_scheduler_delay(c, s, a, b):
     assert a.scheduler_delay != old
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(
     client=True,
@@ -1172,6 +1177,7 @@ async def test_statistical_profiling(c, s, a, b):
     assert profile["count"]
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @pytest.mark.slow
 @nodebug
 @gen_cluster(
@@ -1198,6 +1204,7 @@ async def test_statistical_profiling_2(c, s, a, b):
             break
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     config={
@@ -1768,11 +1775,10 @@ async def test_heartbeat_missing_real_cluster(s, a):
 
     assumption_msg = "Test assumptions have changed. Race condition may have been fixed; this test may be removable."
 
-    with captured_logger(
-        "distributed.worker", level=logging.WARNING
-    ) as wlogger, captured_logger(
-        "distributed.scheduler", level=logging.WARNING
-    ) as slogger:
+    with (
+        captured_logger("distributed.worker", level=logging.WARNING) as wlogger,
+        captured_logger("distributed.scheduler", level=logging.WARNING) as slogger,
+    ):
         with freeze_batched_send(s.stream_comms[a.address]):
             await s.remove_worker(a.address, stimulus_id="foo")
             assert not s.workers
@@ -2979,19 +2985,15 @@ async def test_log_remove_worker(c, s, a, b):
 
     assert log.getvalue().splitlines() == [
         # Successful graceful
-        f"Retire worker addresses ['{a.address}']",
-        f"Retiring worker '{a.address}' (stimulus_id='graceful')",
-        f"Remove worker <WorkerState '{a.address}', name: 0, status: "
-        "closing_gracefully, memory: 2, processing: 1> (stimulus_id='graceful')",
+        f"Retire worker addresses (stimulus_id='graceful') ['{a.address}']",
+        f"Remove worker addr: {a.address} name: {a.name} (stimulus_id='graceful')",
         f"Retired worker '{a.address}' (stimulus_id='graceful')",
         # Aborted graceful
-        f"Retire worker addresses ['{b.address}']",
-        f"Retiring worker '{b.address}' (stimulus_id='graceful_abort')",
+        f"Retire worker addresses (stimulus_id='graceful_abort') ['{b.address}']",
         f"Could not retire worker '{b.address}': unique data could not be "
         "moved to any other worker (stimulus_id='graceful_abort')",
         # Ungraceful
-        f"Remove worker <WorkerState '{b.address}', name: 1, status: "
-        "running, memory: 2, processing: 1> (stimulus_id='ungraceful')",
+        f"Remove worker addr: {b.address} name: {b.name} (stimulus_id='ungraceful')",
         f"Removing worker '{b.address}' caused the cluster to lose already "
         "computed task(s), which will be recomputed elsewhere: {'x'} "
         "(stimulus_id='ungraceful')",
@@ -3003,7 +3005,7 @@ async def test_log_remove_worker(c, s, a, b):
     events = {topic: [ev for _, ev in evs] for topic, evs in s.get_events().items()}
     for evs in events.values():
         for ev in evs:
-            if ev["action"] == "retire-workers":
+            if ev.get("action", None) == "retire-workers":
                 for k in ("retired", "could-not-retire"):
                     ev[k] = {addr: "snip" for addr in ev[k]}
             if "stimulus_id" in ev:  # Strip timestamp
@@ -3083,6 +3085,7 @@ async def test_log_remove_worker(c, s, a, b):
                 "worker": b.address,
             },
         ],
+        "worker-get-client": [{"client": c.id, "timeout": 5, "worker": b.address}],
     }
 
 
@@ -3546,7 +3549,7 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # b has shut down. There's nowhere to replicate x to anymore, so retire_workers
         # will give up and reinstate a to running status.
-        assert await retire_fut == {}
+        assert not await retire_fut
         while a.status != Status.running:
             await asyncio.sleep(0.01)
 

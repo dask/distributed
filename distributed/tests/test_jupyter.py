@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
@@ -36,7 +37,7 @@ if WINDOWS:
 
 @gen_test()
 async def test_jupyter_server():
-    async with Scheduler(jupyter=True) as s:
+    async with Scheduler(jupyter=True, dashboard_address=":0") as s:
         http_client = AsyncHTTPClient()
         response = await http_client.fetch(
             f"http://localhost:{s.http_server.port}/jupyter/api/status"
@@ -45,10 +46,12 @@ async def test_jupyter_server():
 
 
 @pytest.mark.slow
-def test_jupyter_cli(loop):
+def test_jupyter_cli(loop, requires_default_ports):
     port = open_port()
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             "--jupyter",
@@ -56,7 +59,8 @@ def test_jupyter_cli(loop):
             "--host",
             f"127.0.0.1:{port}",
         ],
-        capture_output=True,
+        terminate_timeout=120,
+        kill_timeout=60,
     ):
         with Client(f"127.0.0.1:{port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/jupyter/api/status")
@@ -66,7 +70,7 @@ def test_jupyter_cli(loop):
 @gen_test()
 async def test_jupyter_idle_timeout():
     "An active Jupyter session should prevent idle timeout"
-    async with Scheduler(jupyter=True, idle_timeout=0.2) as s:
+    async with Scheduler(jupyter=True, idle_timeout=0.2, dashboard_address=":0") as s:
         web_app = s._jupyter_server_application.web_app
 
         # Jupyter offers a place for extensions to provide updates on their last-active
@@ -93,7 +97,7 @@ async def test_jupyter_idle_timeout():
 @gen_test()
 async def test_jupyter_idle_timeout_returned():
     "`check_idle` should return the last Jupyter idle time. Used in dask-kubernetes."
-    async with Scheduler(jupyter=True) as s:
+    async with Scheduler(jupyter=True, dashboard_address=":0") as s:
         web_app = s._jupyter_server_application.web_app
         extension_last_activty = web_app.settings["last_activity_times"]
 
@@ -119,6 +123,8 @@ def test_shutsdown_cleanly(requires_default_ports):
         subprocess_fut = tpe.submit(
             subprocess.run,
             [
+                sys.executable,
+                "-m",
                 "dask",
                 "scheduler",
                 "--jupyter",
@@ -146,8 +152,8 @@ def test_shutsdown_cleanly(requires_default_ports):
         stderr = subprocess_fut.result().stderr
         assert "Traceback" not in stderr
         assert (
-            "distributed.scheduler - INFO - Scheduler closing due to shutdown "
-            "requested via Jupyter...\n" in stderr
+            "distributed.scheduler - INFO - Closing scheduler. Reason: jupyter-requested-shutdown"
+            in stderr
         )
         assert "Shutting down on /api/shutdown request.\n" in stderr
         assert (

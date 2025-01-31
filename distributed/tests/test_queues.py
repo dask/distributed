@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import pickle
+import sys
 from datetime import timedelta
 from time import sleep
 
@@ -282,13 +283,15 @@ def test_queue_in_task(loop):
     # worker in a separate Python process than the client
     with popen(
         [
+            sys.executable,
+            "-m",
             "dask",
             "scheduler",
             "--no-dashboard",
             f"--port={port}",
         ]
     ):
-        with popen(["dask", "worker", f"127.0.0.1:{port}"]):
+        with popen([sys.executable, "-m", "dask", "worker", f"127.0.0.1:{port}"]):
             with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
                 c.wait_for_workers(1)
 
@@ -332,3 +335,14 @@ async def test_unpickle_without_client(s):
         q3 = pickle.loads(pickled)
         await q3.put(1)
         assert await q3.get() == 1
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_set_cancelled_future(c, s):
+    x = c.submit(inc, 1)
+    await x.cancel()
+    q = Queue("x")
+    # FIXME: This is a TimeoutError but pytest doesn't appear to recognize it as
+    # such
+    with pytest.raises(Exception, match="unknown to scheduler"):
+        await q.put(x, timeout="100ms")

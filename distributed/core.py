@@ -35,6 +35,7 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed import profile, protocol
+from distributed._async_taskgroup import AsyncTaskGroup, AsyncTaskGroupClosedError
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -121,7 +122,7 @@ tick_maximum_delay = parse_timedelta(
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
-@functools.lru_cache
+@functools.cache
 def _expects_comm(func: Callable) -> bool:
     sig = inspect.signature(func)
     params = list(sig.parameters)
@@ -136,151 +137,6 @@ def _expects_comm(func: Callable) -> bool:
         )
         return True
     return False
-
-
-class _LoopBoundMixin:
-    """Backport of the private asyncio.mixins._LoopBoundMixin from 3.11"""
-
-    _global_lock = threading.Lock()
-
-    _loop = None
-
-    def _get_loop(self):
-        loop = asyncio.get_running_loop()
-
-        if self._loop is None:
-            with self._global_lock:
-                if self._loop is None:
-                    self._loop = loop
-        if loop is not self._loop:
-            raise RuntimeError(f"{self!r} is bound to a different event loop")
-        return loop
-
-
-class AsyncTaskGroupClosedError(RuntimeError):
-    pass
-
-
-def _delayed(corofunc: Callable[P, Coro[T]], delay: float) -> Callable[P, Coro[T]]:
-    """Decorator to delay the evaluation of a coroutine function by the given delay in seconds."""
-
-    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        await asyncio.sleep(delay)
-        return await corofunc(*args, **kwargs)
-
-    return wrapper
-
-
-class AsyncTaskGroup(_LoopBoundMixin):
-    """Collection tracking all currently running asynchronous tasks within a group"""
-
-    #: If True, the group is closed and does not allow adding new tasks.
-    closed: bool
-
-    def __init__(self) -> None:
-        self.closed = False
-        self._ongoing_tasks: set[asyncio.Task[None]] = set()
-
-    def call_soon(
-        self, afunc: Callable[P, Coro[None]], /, *args: P.args, **kwargs: P.kwargs
-    ) -> None:
-        """Schedule a coroutine function to be executed as an `asyncio.Task`.
-
-        The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
-        as an `asyncio.Task`.
-
-        Parameters
-        ----------
-        afunc
-            Coroutine function to schedule.
-        *args
-            Arguments to be passed to `afunc`.
-        **kwargs
-            Keyword arguments to be passed to `afunc`
-
-        Returns
-        -------
-            None
-
-        Raises
-        ------
-        AsyncTaskGroupClosedError
-            If the task group is closed.
-        """
-        if self.closed:  # Avoid creating a coroutine
-            raise AsyncTaskGroupClosedError(
-                "Cannot schedule a new coroutine function as the group is already closed."
-            )
-        task = self._get_loop().create_task(afunc(*args, **kwargs))
-        task.add_done_callback(self._ongoing_tasks.remove)
-        self._ongoing_tasks.add(task)
-        return None
-
-    def call_later(
-        self,
-        delay: float,
-        afunc: Callable[P, Coro[None]],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> None:
-        """Schedule a coroutine function to be executed after `delay` seconds as an `asyncio.Task`.
-
-        The coroutine function `afunc` is scheduled with `args` arguments and `kwargs` keyword arguments
-        as an `asyncio.Task` that is executed after `delay` seconds.
-
-        Parameters
-        ----------
-        delay
-            Delay in seconds.
-        afunc
-            Coroutine function to schedule.
-        *args
-            Arguments to be passed to `afunc`.
-        **kwargs
-            Keyword arguments to be passed to `afunc`
-
-        Returns
-        -------
-            The None
-
-        Raises
-        ------
-        AsyncTaskGroupClosedError
-            If the task group is closed.
-        """
-        self.call_soon(_delayed(afunc, delay), *args, **kwargs)
-
-    def close(self) -> None:
-        """Closes the task group so that no new tasks can be scheduled.
-
-        Existing tasks continue to run.
-        """
-        self.closed = True
-
-    async def stop(self) -> None:
-        """Close the group and stop all currently running tasks.
-
-        Closes the task group and cancels all tasks. All tasks are cancelled
-        an additional time for each time this task is cancelled.
-        """
-        self.close()
-
-        current_task = asyncio.current_task(self._get_loop())
-        err = None
-        while tasks_to_stop := (self._ongoing_tasks - {current_task}):
-            for task in tasks_to_stop:
-                task.cancel()
-            try:
-                await asyncio.wait(tasks_to_stop)
-            except asyncio.CancelledError as e:
-                err = e
-
-        if err is not None:
-            raise err
-
-    def __len__(self):
-        return len(self._ongoing_tasks)
 
 
 class Server:
@@ -456,7 +312,10 @@ class Server:
         self.io_loop = self.loop = IOLoop.current()
 
         if not hasattr(self.io_loop, "profile"):
-            if dask.config.get("distributed.worker.profile.enabled"):
+            if (
+                dask.config.get("distributed.worker.profile.enabled")
+                and sys.version_info.minor != 11
+            ):
                 ref = weakref.ref(self.io_loop)
 
                 def stop() -> bool:
@@ -568,10 +427,12 @@ class Server:
         return {"status": "OK", "nbytes": len(data)}
 
     def _shift_counters(self):
-        for counter in self.counters.values():
+        # Copy counters before iterating to avoid concurrent modification
+        for counter in list(self.counters.values()):
             counter.shift()
         if self.digests is not None:
-            for digest in self.digests.values():
+            # Copy digests before iterating to avoid concurrent modification
+            for digest in list(self.digests.values()):
                 digest.shift()
 
     @property
@@ -1318,11 +1179,11 @@ class rpc:
             except (RPCClosed, CommClosedError) as e:
                 if comm:
                     raise type(e)(
-                        f"Exception while trying to call remote method {key!r} before comm was established."
+                        f"Exception while trying to call remote method {key!r} using comm {comm!r}."
                     ) from e
                 else:
                     raise type(e)(
-                        f"Exception while trying to call remote method {key!r} using comm {comm!r}."
+                        f"Exception while trying to call remote method {key!r} before comm was established."
                     ) from e
 
             self.comms[comm] = True  # mark as open
@@ -1497,6 +1358,7 @@ class ConnectionPool:
         )
         self._pending_count = 0
         self._connecting_count = 0
+        self._connecting_close_timeout = 5
         self.status = Status.init
 
     def _validate(self) -> None:
@@ -1676,7 +1538,9 @@ class ConnectionPool:
             try:
                 return connect_attempt.result()
             except asyncio.CancelledError:
-                raise CommClosedError(reason)
+                if reason:
+                    raise CommClosedError(reason)
+                raise
 
     def reuse(self, addr: str, comm: Comm) -> None:
         """
@@ -1754,8 +1618,15 @@ class ConnectionPool:
             for _ in comms:
                 self.semaphore.release()
 
+        start = time()
         while self._connecting:
-            await asyncio.sleep(0.005)
+            if time() - start > self._connecting_close_timeout:
+                logger.warning(
+                    "Pending connections refuse to cancel. %d connections pending. Closing anyway.",
+                    len(self._connecting),
+                )
+                break
+            await asyncio.sleep(0.01)
 
 
 def coerce_to_address(o):

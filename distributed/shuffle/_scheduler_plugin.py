@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import itertools
 import logging
@@ -14,6 +15,7 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.protocol.serialize import ToPickle
 from distributed.shuffle._core import (
+    P2PBarrierTask,
     RunSpecMessage,
     SchedulerShuffleState,
     ShuffleId,
@@ -96,10 +98,52 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 stimulus_id=f"p2p-barrier-inconsistent-{time()}",
             )
         msg = {"op": "shuffle_inputs_done", "shuffle_id": id, "run_id": run_id}
-        await self.scheduler.broadcast(
-            msg=msg,
-            workers=list(shuffle.participating_workers),
-        )
+        workers = list(shuffle.participating_workers)
+        no_progress = 0
+        while workers:
+            res = await self.scheduler.broadcast(
+                msg=msg,
+                workers=workers,
+                on_error="return",
+            )
+            before = len(workers)
+            workers = []
+            for w, r in res.items():
+                if r is None:
+                    continue
+                if isinstance(r, OSError):
+                    workers.append(w)
+                else:
+                    raise RuntimeError(
+                        f"Unexpected error encountered during P2P barrier: {r!r}"
+                    )
+            workers = [w for w, r in res.items() if r is not None]
+            if workers:
+                logger.warning(
+                    "Failure during broadcast of %s, retrying.",
+                    shuffle.id,
+                )
+                if any(w not in self.scheduler.workers for w in workers):
+                    if not shuffle.archived:
+                        # If the shuffle is not yet archived, this could mean that the barrier task fails
+                        # before the P2P restarting mechanism can kick in.
+                        raise P2PIllegalStateError(
+                            "Expected shuffle to be archived if participating worker is not known by scheduler"
+                        )
+                    raise RuntimeError(
+                        f"Worker {workers} left during shuffle {shuffle}"
+                    )
+                await asyncio.sleep(0.1)
+                if len(workers) == before:
+                    no_progress += 1
+                    if no_progress >= 3:
+                        raise RuntimeError(
+                            f"""Broadcast not making progress for {shuffle}.
+                            Aborting. This is possibly due to overloaded
+                            workers. Increasing config
+                            `distributed.comm.timeouts.connect` timeout may
+                            help."""
+                        )
 
     def restrict_task(
         self, id: ShuffleId, run_id: int, key: Key, worker: str
@@ -147,23 +191,29 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         state.participating_workers.add(worker)
         return state.run_spec
 
-    def _create(self, spec: ShuffleSpec, key: Key, worker: str) -> ShuffleRunSpec:
+    def _retrieve_spec(self, shuffle_id: ShuffleId) -> ShuffleSpec:
+        barrier_task_spec = self.scheduler.tasks[barrier_key(shuffle_id)].run_spec
+        assert isinstance(barrier_task_spec, P2PBarrierTask)
+        return barrier_task_spec.spec
+
+    def _create(self, shuffle_id: ShuffleId, key: Key, worker: str) -> ShuffleRunSpec:
         # FIXME: The current implementation relies on the barrier task to be
         # known by its name. If the name has been mangled, we cannot guarantee
         # that the shuffle works as intended and should fail instead.
-        self._raise_if_barrier_unknown(spec.id)
+        self._raise_if_barrier_unknown(shuffle_id)
         self._raise_if_task_not_processing(key)
+        spec = self._retrieve_spec(shuffle_id)
         worker_for = self._calculate_worker_for(spec)
         self._ensure_output_tasks_are_non_rootish(spec)
         state = spec.create_new_run(
             worker_for=worker_for, span_id=self.scheduler.tasks[key].group.span_id
         )
-        self.active_shuffles[spec.id] = state
-        self._shuffles[spec.id].add(state)
+        self.active_shuffles[shuffle_id] = state
+        self._shuffles[shuffle_id].add(state)
         state.participating_workers.add(worker)
         logger.warning(
             "Shuffle %s initialized by task %r executed on worker %s",
-            spec.id,
+            shuffle_id,
             key,
             worker,
         )
@@ -171,17 +221,17 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
 
     def get_or_create(
         self,
-        spec: ShuffleSpec,
+        shuffle_id: ShuffleId,
         key: Key,
         worker: str,
     ) -> RunSpecMessage | ErrorMessage:
         try:
-            run_spec = self._get(spec.id, worker)
+            run_spec = self._get(shuffle_id, worker)
         except P2PConsistencyError as e:
             return error_message(e)
         except KeyError:
             try:
-                run_spec = self._create(spec, key, worker)
+                run_spec = self._create(shuffle_id, key, worker)
             except P2PConsistencyError as e:
                 return error_message(e)
         return {"status": "OK", "run_spec": ToPickle(run_spec)}
@@ -300,7 +350,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         """
         barrier = self.scheduler.tasks[barrier_key(spec.id)]
         for dependent in barrier.dependents:
-            dependent._rootish = False
+            dependent._queueable = False
 
     @log_errors()
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
@@ -416,7 +466,11 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         if finish == "erred":
             ts = self.scheduler.tasks[key]
             for active_shuffle in self.active_shuffles.values():
+                # Log once per active shuffle
                 if active_shuffle._failed:
+                    continue
+                # Log IFF a P2P task is the root cause
+                if ts.exception_blame != ts:
                     continue
                 barrier = self.scheduler.tasks[barrier_key(active_shuffle.id)]
                 if (

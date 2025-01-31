@@ -25,7 +25,9 @@ async def test_prometheus(c, s, a, b):
     assert active_metrics == expected_metrics
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True, config={"distributed.scheduler.work-stealing-interval": "100ms"}
+)
 async def test_prometheus_collect_count_total_by_cost_multipliers(c, s, a, b):
     pytest.importorskip("prometheus_client")
 
@@ -58,7 +60,9 @@ async def test_prometheus_collect_count_total_by_cost_multipliers(c, s, a, b):
     assert count == expected_count
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True, config={"distributed.scheduler.work-stealing-interval": "100ms"}
+)
 async def test_prometheus_collect_cost_total_by_cost_multipliers(c, s, a, b):
     pytest.importorskip("prometheus_client")
 

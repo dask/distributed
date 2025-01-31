@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import gc
 import pickle
-import sys
 from collections import defaultdict
 from collections.abc import Iterator
 from time import sleep
@@ -287,9 +286,6 @@ def traverse_subclasses(cls: type) -> Iterator[type]:
     [
         pytest.param(
             TaskState,
-            marks=pytest.mark.skipif(
-                sys.version_info < (3, 10), reason="Requires @dataclass(slots=True)"
-            ),
         ),
         *traverse_subclasses(Instruction),
         *traverse_subclasses(StateMachineEvent),
@@ -427,7 +423,7 @@ def test_computetask_dummy():
         nbytes={},
         priority=(0,),
         duration=1.0,
-        run_spec=ComputeTaskEvent.dummy_runspec(),
+        run_spec=ComputeTaskEvent.dummy_runspec("x"),
         resource_restrictions={},
         actor=False,
         annotations={},

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import operator
+import sys
 from time import sleep
 
 import pytest
@@ -526,6 +527,7 @@ def test_compute_sync(client):
         assert time() < start + 30
 
 
+@pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)],

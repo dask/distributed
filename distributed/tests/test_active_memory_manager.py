@@ -977,7 +977,7 @@ async def test_RetireWorker_all_recipients_are_paused(c, s, a, b):
 
     x = await c.scatter("x", workers=[a.address])
     out = await c.retire_workers([a.address])
-    assert out == {}
+    assert not out
     assert not s.extensions["amm"].policies
     assert set(s.workers) == {a.address, b.address}
 
@@ -1230,7 +1230,7 @@ async def test_RetireWorker_with_actor(c, s, a, b, has_proxy):
 
     with captured_logger("distributed.active_memory_manager", logging.WARNING) as log:
         out = await c.retire_workers([a.address])
-    assert out == {}
+    assert not out
     assert "it holds actor(s)" in log.getvalue()
     assert "x" in a.state.actors
 
@@ -1250,7 +1250,7 @@ async def test_RetireWorker_with_actor_proxy(c, s, a, b):
     assert "y" in b.data
 
     out = await c.retire_workers([b.address])
-    assert out.keys() == {b.address}
+    assert b.address in out
     assert "x" in a.state.actors
     assert "y" in a.data
 
@@ -1266,7 +1266,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
             # Instead of yielding ("drop", ts, None) for each worker, which would result
             # in semi-predictable output about which replica survives, randomly choose a
             # different survivor at each AMM run.
-            candidates = list(ts.who_has)
+            candidates = list(ts.who_has or ())
             random.shuffle(candidates)
             for ws in candidates:
                 yield "drop", ts, {ws}
@@ -1288,10 +1288,17 @@ async def tensordot_stress(c, s):
         warnings.simplefilter("ignore")
         b = (a @ a.T).sum().round(3)
     assert await c.compute(b) == 245.394
-
+    expected_tasks = -1
+    for _, msg in await c.get_events("scheduler"):
+        if msg["action"] == "update-graph":
+            assert msg["status"] == "OK", msg
+            expected_tasks = msg["metrics"]["tasks"]
+            break
+    else:
+        raise RuntimeError("Expected 'update_graph' event not found")
     # Test that we didn't recompute any tasks during the stress test
     await async_poll_for(lambda: not s.tasks, timeout=5)
-    assert sum(t.start == "memory" for t in s.transition_log) == 1639
+    assert sum(t.start == "memory" for t in s.transition_log) == expected_tasks
 
 
 @pytest.mark.slow
