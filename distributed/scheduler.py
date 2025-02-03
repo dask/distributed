@@ -8834,10 +8834,7 @@ class Scheduler(SchedulerState, ServerNode):
         queued = take(100, concat([self.queued, self.unrunnable.keys()]))
         queued_occupancy = 0
         for ts in queued:
-            if ts.prefix.duration_average == -1:
-                queued_occupancy += self.UNKNOWN_TASK_DURATION
-            else:
-                queued_occupancy += ts.prefix.duration_average
+            queued_occupancy += self._get_prefix_duration(ts.prefix)
 
         tasks_ready = len(self.queued) + len(self.unrunnable)
         if tasks_ready > 100:
