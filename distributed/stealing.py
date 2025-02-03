@@ -88,6 +88,9 @@ class WorkStealing(SchedulerPlugin):
     metrics: dict[str, dict[int, float]]
     _in_flight_event: asyncio.Event
     _request_counter: int
+    #: Tasks with unknown duration, grouped by prefix
+    #: {task prefix: {ts, ts, ...}}
+    unknown_durations: dict[str, set[TaskState]]
 
     def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
@@ -111,6 +114,7 @@ class WorkStealing(SchedulerPlugin):
         self.in_flight_occupancy = defaultdict(int)
         self.in_flight_tasks = defaultdict(int)
         self._in_flight_event = asyncio.Event()
+        self.unknown_durations = {}
         self.metrics = {
             "request_count_total": defaultdict(int),
             "request_cost_total": defaultdict(int),
@@ -188,6 +192,13 @@ class WorkStealing(SchedulerPlugin):
             ts = self.scheduler.tasks[key]
             self.remove_key_from_stealable(ts)
             self._remove_from_in_flight(ts)
+
+            if finish == "memory":
+                s = self.unknown_durations.pop(ts.prefix.name, set())
+                for tts in s:
+                    if tts.processing_on:
+                        self.recalculate_cost(tts)
+
         if finish == "processing":
             ts = self.scheduler.tasks[key]
             self.put_key_in_stealable(ts)
@@ -255,7 +266,7 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        compute_time = self.scheduler.get_task_duration(ts)
+        compute_time = self.get_task_duration(ts)
 
         if not compute_time:
             # occupancy/ws.processing[ts] is only allowed to be zero for
@@ -301,12 +312,12 @@ class WorkStealing(SchedulerPlugin):
 
             # TODO: occupancy no longer concats linearly so we can't easily
             # assume that the network cost would go down by that much
-            victim_duration = self.scheduler.get_task_duration(
-                ts
-            ) + self.scheduler.get_comm_cost(ts, victim)
-            thief_duration = self.scheduler.get_task_duration(
-                ts
-            ) + self.scheduler.get_comm_cost(ts, thief)
+            victim_duration = self.get_task_duration(ts) + self.scheduler.get_comm_cost(
+                ts, victim
+            )
+            thief_duration = self.get_task_duration(ts) + self.scheduler.get_comm_cost(
+                ts, thief
+            )
 
             self.scheduler.stream_comms[victim.address].send(
                 {"op": "steal-request", "key": key, "stimulus_id": stimulus_id}
@@ -457,7 +468,7 @@ class WorkStealing(SchedulerPlugin):
                     occ_victim = self._combined_occupancy(victim)
                     comm_cost_thief = self.scheduler.get_comm_cost(ts, thief)
                     comm_cost_victim = self.scheduler.get_comm_cost(ts, victim)
-                    compute = self.scheduler.get_task_duration(ts)
+                    compute = self.get_task_duration(ts)
 
                     if (
                         occ_thief + comm_cost_thief + compute
@@ -483,6 +494,8 @@ class WorkStealing(SchedulerPlugin):
                         occ_thief = self._combined_occupancy(thief)
                         nproc_thief = self._combined_nprocessing(thief)
 
+                        # FIXME: In the worst case, the victim may have 3x the amount of work
+                        # of the thief when this aborts balancing.
                         if not self.scheduler.is_unoccupied(
                             thief, occ_thief, nproc_thief
                         ):
@@ -514,6 +527,7 @@ class WorkStealing(SchedulerPlugin):
                 s.clear()
 
         self.key_stealable.clear()
+        self.unknown_durations.clear()
 
     def story(self, *keys_or_ts: str | TaskState) -> list:
         keys = {key.key if not isinstance(key, str) else key for key in keys_or_ts}
@@ -540,6 +554,30 @@ def _get_thief(
         elif not ts.loose_restrictions:
             return None
     return min(potential_thieves, key=partial(scheduler.worker_objective, ts))
+
+    def get_task_duration(self, ts: TaskState) -> float:
+        """Get the estimated computation cost of the given task (not including
+        any communication cost).
+
+        If no data has been observed, value of
+        `distributed.scheduler.default-task-durations` are used. If none is set
+        for this task, `distributed.scheduler.unknown-task-duration` is used
+        instead.
+        """
+        prefix = ts.prefix
+        duration: float = prefix.duration_average
+        if duration >= 0:
+            return duration
+        if prefix.max_exec_time > 0:
+            duration = 2 * prefix.max_exec_time
+        else:
+            duration = self.scheduler.UNKNOWN_TASK_DURATION
+
+        s = self.unknown_durations.get(prefix.name)
+        if s is None:
+            self.unknown_durations[prefix.name] = s = set()
+        s.add(ts)
+        return duration
 
 
 fast_tasks = {
