@@ -1886,6 +1886,9 @@ async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
     config={"distributed.scheduler.worker-saturation": "inf"},
 )
 async def test_do_not_ping_pong(c, s, a):
+    """Regression test that work-stealing does not contihuously move all tasks between
+    two workers without reaching a stable state, eating up CPU time while doing so.
+    """
     in_event = Event()
     block_event = Event()
 
@@ -1894,13 +1897,18 @@ async def test_do_not_ping_pong(c, s, a):
         block_event.wait()
         return i
 
+    # Stop stealing for deterministic testing
     extension = s.extensions["stealing"]
     await extension.stop()
 
     try:
         futs = c.map(block, range(20), in_event=in_event, block_event=block_event)
         await in_event.wait()
+
+        # This is the pre-condition for the observed problem:
+        # There are tasks that execute fox a long time but do not have an average
         s.task_prefixes["block"].add_exec_time(100)
+        assert s.task_prefixes["block"].duration_average == -1
 
         async with Worker(s.address, nthreads=1) as b:
             try:
