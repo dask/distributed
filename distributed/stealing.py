@@ -542,19 +542,6 @@ class WorkStealing(SchedulerPlugin):
                     out.append(t)
         return out
 
-
-def _get_thief(
-    scheduler: SchedulerState, ts: TaskState, potential_thieves: set[WorkerState]
-) -> WorkerState | None:
-    valid_workers = scheduler.valid_workers(ts)
-    if valid_workers is not None:
-        valid_thieves = potential_thieves & valid_workers
-        if valid_thieves:
-            potential_thieves = valid_thieves
-        elif not ts.loose_restrictions:
-            return None
-    return min(potential_thieves, key=partial(scheduler.worker_objective, ts))
-
     def get_task_duration(self, ts: TaskState) -> float:
         """Get the estimated computation cost of the given task (not including
         any communication cost).
@@ -578,6 +565,19 @@ def _get_thief(
             self.unknown_durations[prefix.name] = s = set()
         s.add(ts)
         return duration
+
+
+def _get_thief(
+    scheduler: SchedulerState, ts: TaskState, potential_thieves: set[WorkerState]
+) -> WorkerState | None:
+    valid_workers = scheduler.valid_workers(ts)
+    if valid_workers is not None:
+        valid_thieves = potential_thieves & valid_workers
+        if valid_thieves:
+            potential_thieves = valid_thieves
+        elif not ts.loose_restrictions:
+            return None
+    return min(potential_thieves, key=partial(scheduler.worker_objective, ts))
 
 
 fast_tasks = {
