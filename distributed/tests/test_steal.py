@@ -278,7 +278,8 @@ async def test_eventually_steal_unknown_functions(c, s, a, b):
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
     await wait(futures)
-    assert not s.unknown_durations
+    extension = s.extensions["stealing"]
+    assert not extension.unknown_durations
     assert len(a.data) >= 3, [len(a.data), len(b.data)]
     assert len(b.data) >= 3, [len(a.data), len(b.data)]
 
