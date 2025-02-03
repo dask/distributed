@@ -1925,6 +1925,29 @@ class SchedulerState:
             self._network_occ_global,
         )
 
+    def _get_prefix_duration(self, prefix: TaskPrefix) -> float:
+        """Get the estimated computation cost of the given task prefix
+        (not including any communication cost).
+
+        If no data has been observed, value of
+        `distributed.scheduler.default-task-durations` are used. If none is set
+        for this task, `distributed.scheduler.unknown-task-duration` is used
+        instead.
+
+        See Also
+        --------
+        WorkStealing.get_task_duration
+        """
+        # TODO: Deal with unknown tasks better
+        assert prefix is not None
+        duration = prefix.duration_average
+        if duration < 0:
+            if prefix.max_exec_time > 0:
+                duration = 2 * prefix.max_exec_time
+            else:
+                duration = self.UNKNOWN_TASK_DURATION
+        return duration
+
     def _calc_occupancy(
         self,
         task_prefix_count: dict[str, int],
@@ -1932,15 +1955,7 @@ class SchedulerState:
     ) -> float:
         res = 0.0
         for prefix_name, count in task_prefix_count.items():
-            # TODO: Deal with unknown tasks better
-            prefix = self.task_prefixes[prefix_name]
-            assert prefix is not None
-            duration = prefix.duration_average
-            if duration < 0:
-                if prefix.max_exec_time > 0:
-                    duration = 2 * prefix.max_exec_time
-                else:
-                    duration = self.UNKNOWN_TASK_DURATION
+            duration = self._get_prefix_duration(self.task_prefixes[prefix_name])
             res += duration * count
         occ = res + network_occ / self.bandwidth
         assert occ >= 0, (occ, res, network_occ, self.bandwidth)

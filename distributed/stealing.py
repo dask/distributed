@@ -234,13 +234,26 @@ class WorkStealing(SchedulerPlugin):
 
     def put_key_in_stealable(self, ts: TaskState) -> None:
         cost_multiplier, level = self.steal_time_ratio(ts)
-        if cost_multiplier is not None:
-            assert level is not None
-            assert ts.processing_on
-            ws = ts.processing_on
-            worker = ws.address
-            self.stealable[worker][level].add(ts)
-            self.key_stealable[ts] = (worker, level)
+
+        prefix = ts.prefix
+        duration = self.scheduler._get_prefix_duration(prefix)
+        if cost_multiplier is None:
+            return
+
+        assert level is not None
+        assert ts.processing_on
+        ws = ts.processing_on
+        worker = ws.address
+        self.stealable[worker][level].add(ts)
+        self.key_stealable[ts] = (worker, level)
+
+        if duration == ts.prefix.duration_average:
+            return
+
+        s = self.unknown_durations.get(prefix.name)
+        if s is None:
+            self.unknown_durations[prefix.name] = s = set()
+        s.add(ts)
 
     def remove_key_from_stealable(self, ts: TaskState) -> None:
         result = self.key_stealable.pop(ts, None)
@@ -266,7 +279,7 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        compute_time = self.get_task_duration(ts)
+        compute_time = self.scheduler._get_prefix_duration(ts.prefix)
 
         if not compute_time:
             # occupancy/ws.processing[ts] is only allowed to be zero for
@@ -312,12 +325,9 @@ class WorkStealing(SchedulerPlugin):
 
             # TODO: occupancy no longer concats linearly so we can't easily
             # assume that the network cost would go down by that much
-            victim_duration = self.get_task_duration(ts) + self.scheduler.get_comm_cost(
-                ts, victim
-            )
-            thief_duration = self.get_task_duration(ts) + self.scheduler.get_comm_cost(
-                ts, thief
-            )
+            compute = self.scheduler._get_prefix_duration(ts.prefix)
+            victim_duration = compute + self.scheduler.get_comm_cost(ts, victim)
+            thief_duration = compute + self.scheduler.get_comm_cost(ts, thief)
 
             self.scheduler.stream_comms[victim.address].send(
                 {"op": "steal-request", "key": key, "stimulus_id": stimulus_id}
@@ -468,8 +478,7 @@ class WorkStealing(SchedulerPlugin):
                     occ_victim = self._combined_occupancy(victim)
                     comm_cost_thief = self.scheduler.get_comm_cost(ts, thief)
                     comm_cost_victim = self.scheduler.get_comm_cost(ts, victim)
-                    compute = self.get_task_duration(ts)
-
+                    compute = self.scheduler._get_prefix_duration(ts.prefix)
                     if (
                         occ_thief + comm_cost_thief + compute
                         <= occ_victim - (comm_cost_victim + compute) / 2
@@ -541,30 +550,6 @@ class WorkStealing(SchedulerPlugin):
                 if any(x in keys for x in t):
                     out.append(t)
         return out
-
-    def get_task_duration(self, ts: TaskState) -> float:
-        """Get the estimated computation cost of the given task (not including
-        any communication cost).
-
-        If no data has been observed, value of
-        `distributed.scheduler.default-task-durations` are used. If none is set
-        for this task, `distributed.scheduler.unknown-task-duration` is used
-        instead.
-        """
-        prefix = ts.prefix
-        duration: float = prefix.duration_average
-        if duration >= 0:
-            return duration
-        if prefix.max_exec_time > 0:
-            duration = 2 * prefix.max_exec_time
-        else:
-            duration = self.scheduler.UNKNOWN_TASK_DURATION
-
-        s = self.unknown_durations.get(prefix.name)
-        if s is None:
-            self.unknown_durations[prefix.name] = s = set()
-        s.add(ts)
-        return duration
 
 
 def _get_thief(
