@@ -1886,8 +1886,7 @@ async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
     config={"distributed.scheduler.worker-saturation": "inf"},
 )
 async def test_stealing_ogjective_accounts_for_in_flight(c, s, a):
-    """Regression test that work-stealing's objective correctly accounts for in-flight data requests
-    """
+    """Regression test that work-stealing's objective correctly accounts for in-flight data requests"""
     in_event = Event()
     block_event = Event()
 
@@ -1912,19 +1911,31 @@ async def test_stealing_ogjective_accounts_for_in_flight(c, s, a):
                 ts = next(iter(wsA.processing))
 
                 # No in-flight requests, so both match
-                assert extension.stealing_objective(ts, wsA) == s.worker_objective(ts, wsA)
-                assert extension.stealing_objective(ts, wsB) == s.worker_objective(ts, wsB)
+                assert extension.stealing_objective(ts, wsA) == s.worker_objective(
+                    ts, wsA
+                )
+                assert extension.stealing_objective(ts, wsB) == s.worker_objective(
+                    ts, wsB
+                )
 
                 extension.balance()
                 assert extension.in_flight
                 # We move tasks from a to b
-                assert extension.stealing_objective(ts, wsA) < s.worker_objective(ts, wsA)
-                assert extension.stealing_objective(ts, wsB) > s.worker_objective(ts, wsB)
+                assert extension.stealing_objective(ts, wsA) < s.worker_objective(
+                    ts, wsA
+                )
+                assert extension.stealing_objective(ts, wsB) > s.worker_objective(
+                    ts, wsB
+                )
 
                 await async_poll_for(lambda: not extension.in_flight, timeout=5)
                 # No in-flight requests, so both match
-                assert extension.stealing_objective(ts, wsA) == s.worker_objective(ts, wsA)
-                assert extension.stealing_objective(ts, wsB) == s.worker_objective(ts, wsB)
+                assert extension.stealing_objective(ts, wsA) == s.worker_objective(
+                    ts, wsA
+                )
+                assert extension.stealing_objective(ts, wsB) == s.worker_objective(
+                    ts, wsB
+                )
             finally:
                 await block_event.set()
     finally:

@@ -528,9 +528,7 @@ class WorkStealing(SchedulerPlugin):
                     out.append(t)
         return out
 
-    def stealing_objective(
-        self, ts: TaskState, ws: WorkerState
-    ) -> tuple[float, ...]:
+    def stealing_objective(self, ts: TaskState, ws: WorkerState) -> tuple[float, ...]:
         """Objective function to determine which worker should get the task
 
         Minimize expected start time.  If a tie then break with data storage.
@@ -565,9 +563,7 @@ class WorkStealing(SchedulerPlugin):
                 potential_thieves = valid_thieves
             elif not ts.loose_restrictions:
                 return None
-        return min(
-            potential_thieves, key=partial(self.stealing_objective, ts)
-        )
+        return min(potential_thieves, key=partial(self.stealing_objective, ts))
 
 
 fast_tasks = {
