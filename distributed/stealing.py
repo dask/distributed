@@ -235,10 +235,11 @@ class WorkStealing(SchedulerPlugin):
     def put_key_in_stealable(self, ts: TaskState) -> None:
         cost_multiplier, level = self.steal_time_ratio(ts)
 
-        prefix = ts.prefix
-        duration = self.scheduler._get_prefix_duration(prefix)
         if cost_multiplier is None:
             return
+
+        prefix = ts.prefix
+        duration = self.scheduler._get_prefix_duration(prefix)
 
         assert level is not None
         assert ts.processing_on
@@ -250,10 +251,10 @@ class WorkStealing(SchedulerPlugin):
         if duration == ts.prefix.duration_average:
             return
 
-        s = self.unknown_durations.get(prefix.name)
-        if s is None:
-            self.unknown_durations[prefix.name] = s = set()
-        s.add(ts)
+        if prefix.name not in self.unknown_durations:
+            self.unknown_durations[prefix.name] = set()
+
+        self.unknown_durations[prefix.name].add(ts)
 
     def remove_key_from_stealable(self, ts: TaskState) -> None:
         result = self.key_stealable.pop(ts, None)
