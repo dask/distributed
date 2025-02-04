@@ -1674,9 +1674,6 @@ class SchedulerState:
     #: Subset of tasks that exist in memory on more than one worker
     replicated_tasks: set[TaskState]
 
-    #: Tasks with unknown duration, grouped by prefix
-    #: {task prefix: {ts, ts, ...}}
-    unknown_durations: dict[str, set[TaskState]]
     task_groups: dict[str, TaskGroup]
     task_prefixes: dict[str, TaskPrefix]
     task_metadata: dict[Key, Any]
@@ -1776,7 +1773,6 @@ class SchedulerState:
         self.task_metadata = {}
         self.total_nthreads = 0
         self.total_nthreads_history = [(time(), 0)]
-        self.unknown_durations = {}
         self.queued = queued
         self.unrunnable = unrunnable
         self.validate = validate
@@ -1855,7 +1851,6 @@ class SchedulerState:
             "unrunnable": self.unrunnable,
             "queued": self.queued,
             "n_tasks": self.n_tasks,
-            "unknown_durations": self.unknown_durations,
             "validate": self.validate,
             "tasks": self.tasks,
             "task_groups": self.task_groups,
@@ -1907,7 +1902,6 @@ class SchedulerState:
             self.task_prefixes,
             self.task_groups,
             self.task_metadata,
-            self.unknown_durations,
             self.replicated_tasks,
         ):
             collection.clear()
@@ -1931,6 +1925,29 @@ class SchedulerState:
             self._network_occ_global,
         )
 
+    def _get_prefix_duration(self, prefix: TaskPrefix) -> float:
+        """Get the estimated computation cost of the given task prefix
+        (not including any communication cost).
+
+        If no data has been observed, value of
+        `distributed.scheduler.default-task-durations` are used. If none is set
+        for this task, `distributed.scheduler.unknown-task-duration` is used
+        instead.
+
+        See Also
+        --------
+        WorkStealing.get_task_duration
+        """
+        # TODO: Deal with unknown tasks better
+        assert prefix is not None
+        duration = prefix.duration_average
+        if duration < 0:
+            if prefix.max_exec_time > 0:
+                duration = 2 * prefix.max_exec_time
+            else:
+                duration = self.UNKNOWN_TASK_DURATION
+        return duration
+
     def _calc_occupancy(
         self,
         task_prefix_count: dict[str, int],
@@ -1938,15 +1955,7 @@ class SchedulerState:
     ) -> float:
         res = 0.0
         for prefix_name, count in task_prefix_count.items():
-            # TODO: Deal with unknown tasks better
-            prefix = self.task_prefixes[prefix_name]
-            assert prefix is not None
-            duration = prefix.duration_average
-            if duration < 0:
-                if prefix.max_exec_time > 0:
-                    duration = 2 * prefix.max_exec_time
-                else:
-                    duration = self.UNKNOWN_TASK_DURATION
+            duration = self._get_prefix_duration(self.task_prefixes[prefix_name])
             res += duration * count
         occ = res + network_occ / self.bandwidth
         assert occ >= 0, (occ, res, network_occ, self.bandwidth)
@@ -2535,13 +2544,6 @@ class SchedulerState:
                     start=startstop["start"],
                     action=startstop["action"],
                 )
-
-        s = self.unknown_durations.pop(ts.prefix.name, set())
-        steal = self.extensions.get("stealing")
-        if steal:
-            for tts in s:
-                if tts.processing_on:
-                    steal.recalculate_cost(tts)
 
         ############################
         # Update State Information #
@@ -3171,26 +3173,6 @@ class SchedulerState:
         nbytes = sum(dts.nbytes for dts in deps)
         return nbytes / self.bandwidth
 
-    def get_task_duration(self, ts: TaskState) -> float:
-        """Get the estimated computation cost of the given task (not including
-        any communication cost).
-
-        If no data has been observed, value of
-        `distributed.scheduler.default-task-durations` are used. If none is set
-        for this task, `distributed.scheduler.unknown-task-duration` is used
-        instead.
-        """
-        prefix = ts.prefix
-        duration: float = prefix.duration_average
-        if duration >= 0:
-            return duration
-
-        s = self.unknown_durations.get(prefix.name)
-        if s is None:
-            self.unknown_durations[prefix.name] = s = set()
-        s.add(ts)
-        return self.UNKNOWN_TASK_DURATION
-
     def valid_workers(self, ts: TaskState) -> set[WorkerState] | None:
         """Return set of currently valid workers for key
 
@@ -3569,12 +3551,8 @@ class SchedulerState:
                     elif ts.state != "erred" and not ts.waiters:
                         recommendations[ts.key] = "released"
 
-    def _task_to_msg(self, ts: TaskState, duration: float = -1) -> dict[str, Any]:
+    def _task_to_msg(self, ts: TaskState) -> dict[str, Any]:
         """Convert a single computational task to a message"""
-        # FIXME: The duration attribute is not used on worker. We could save ourselves the
-        #        time to compute and submit this
-        if duration < 0:
-            duration = self.get_task_duration(ts)
         ts.run_id = next(TaskState._run_id_iterator)
         assert ts.priority, ts
         msg: dict[str, Any] = {
@@ -3582,7 +3560,6 @@ class SchedulerState:
             "key": ts.key,
             "run_id": ts.run_id,
             "priority": ts.priority,
-            "duration": duration,
             "stimulus_id": f"compute-task-{time()}",
             "who_has": {
                 dts.key: tuple(ws.address for ws in (dts.who_has or ()))
@@ -6003,12 +5980,10 @@ class Scheduler(SchedulerState, ServerNode):
                 cleanup_delay, remove_client_from_events
             )
 
-    def send_task_to_worker(
-        self, worker: str, ts: TaskState, duration: float = -1
-    ) -> None:
+    def send_task_to_worker(self, worker: str, ts: TaskState) -> None:
         """Send a single computational task to a worker"""
         try:
-            msg = self._task_to_msg(ts, duration)
+            msg = self._task_to_msg(ts)
             self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
@@ -8859,10 +8834,7 @@ class Scheduler(SchedulerState, ServerNode):
         queued = take(100, concat([self.queued, self.unrunnable.keys()]))
         queued_occupancy = 0
         for ts in queued:
-            if ts.prefix.duration_average == -1:
-                queued_occupancy += self.UNKNOWN_TASK_DURATION
-            else:
-                queued_occupancy += ts.prefix.duration_average
+            queued_occupancy += self._get_prefix_duration(ts.prefix)
 
         tasks_ready = len(self.queued) + len(self.unrunnable)
         if tasks_ready > 100:

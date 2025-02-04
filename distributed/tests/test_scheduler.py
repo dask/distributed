@@ -2788,24 +2788,26 @@ async def test_retire_workers_bad_params(c, s, a, b):
 @gen_cluster(
     client=True, config={"distributed.scheduler.default-task-durations": {"inc": 100}}
 )
-async def test_get_task_duration(c, s, a, b):
+async def test_get_prefix_duration(c, s, a, b):
     future = c.submit(inc, 1)
     await future
     assert 10 < s.task_prefixes["inc"].duration_average < 100
 
     ts_pref1 = s.new_task("inc-abcdefab", None, "released")
-    assert 10 < s.get_task_duration(ts_pref1) < 100
+    assert 10 < s._get_prefix_duration(ts_pref1.prefix) < 100
 
+    extension = s.extensions["stealing"]
     # make sure get_task_duration adds TaskStates to unknown dict
-    assert len(s.unknown_durations) == 0
+    assert len(extension.unknown_durations) == 0
     x = c.submit(slowinc, 1, delay=0.5)
     while len(s.tasks) < 3:
         await asyncio.sleep(0.01)
 
     ts = s.tasks[x.key]
-    assert s.get_task_duration(ts) == 0.5  # default
-    assert len(s.unknown_durations) == 1
-    assert len(s.unknown_durations["slowinc"]) == 1
+    assert s._get_prefix_duration(ts.prefix) == 0.5  # default
+
+    assert len(extension.unknown_durations) == 1
+    assert len(extension.unknown_durations["slowinc"]) == 1
 
 
 @gen_cluster(client=True)
@@ -3338,10 +3340,11 @@ async def test_unknown_task_duration_config(client, s, a, b):
     future = client.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.001)
-    assert sum(s.get_task_duration(ts) for ts in s.tasks.values()) == 3600
-    assert len(s.unknown_durations) == 1
+    assert sum(s._get_prefix_duration(ts.prefix) for ts in s.tasks.values()) == 3600
+    extension = s.extensions["stealing"]
+    assert len(extension.unknown_durations) == 1
     await wait(future)
-    assert len(s.unknown_durations) == 0
+    assert len(extension.unknown_durations) == 0
 
 
 @gen_cluster()

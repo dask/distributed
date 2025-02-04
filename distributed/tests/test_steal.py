@@ -38,6 +38,7 @@ from distributed.utils import wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedGetData,
+    async_poll_for,
     captured_logger,
     freeze_batched_send,
     gen_cluster,
@@ -293,7 +294,8 @@ async def test_eventually_steal_unknown_functions(c, s, a, b):
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
     await wait(futures)
-    assert not s.unknown_durations
+    extension = s.extensions["stealing"]
+    assert not extension.unknown_durations
     assert len(a.data) >= 3, [len(a.data), len(b.data)]
     assert len(b.data) >= 3, [len(a.data), len(b.data)]
 
@@ -1939,3 +1941,61 @@ async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
     await c.gather(futs)
     events = s.get_events("stealing")
     assert len(events) == 0
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    config={"distributed.scheduler.worker-saturation": "inf"},
+)
+async def test_do_not_ping_pong(c, s, a):
+    """Regression test that work-stealing does not contihuously move all tasks between
+    two workers without reaching a stable state, eating up CPU time while doing so.
+    """
+    in_event = Event()
+    block_event = Event()
+
+    def block(i: int, in_event: Event, block_event: Event) -> int:
+        in_event.set()
+        block_event.wait()
+        return i
+
+    # Stop stealing for deterministic testing
+    extension = s.extensions["stealing"]
+    await extension.stop()
+
+    try:
+        futs = c.map(block, range(20), in_event=in_event, block_event=block_event)
+        await in_event.wait()
+
+        # This is the pre-condition for the observed problem:
+        # There are tasks that execute fox a long time but do not have an average
+        s.task_prefixes["block"].add_exec_time(100)
+        assert s.task_prefixes["block"].duration_average == -1
+
+        async with Worker(s.address, nthreads=1) as b:
+            try:
+                await async_poll_for(lambda: s.idle, timeout=5)
+
+                wsB = s.workers[b.address]
+
+                extension.balance()
+                assert 10 >= len(extension.in_flight) >= 5
+                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                # On first try, we may try to balance the task executing on a
+                assert 10 >= len(wsB.processing) >= 5 - 1
+
+                extension.balance()
+                # On second try we may want to rebalance a single task if we failed to
+                # rebalance the task executing on a
+                assert len(extension.in_flight) <= 1
+                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                assert 10 >= len(wsB.processing) >= 5
+
+                # On third try, the balancing should be stable
+                extension.balance()
+                assert not extension.in_flight
+            finally:
+                await block_event.set()
+    finally:
+        await block_event.set()
