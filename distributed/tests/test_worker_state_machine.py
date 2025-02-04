@@ -399,7 +399,6 @@ def test_computetask_to_dict():
         "nbytes": {"y": 123},
         "priority": [0],
         "run_spec": None,
-        "duration": 123.45,
         "resource_restrictions": {},
         "actor": False,
         "annotations": {},
