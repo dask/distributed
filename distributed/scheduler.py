@@ -3283,6 +3283,10 @@ class SchedulerState:
         """Objective function to determine which worker should get the task
 
         Minimize expected start time.  If a tie then break with data storage.
+
+        See Also
+        --------
+        WorkStealing.stealing_objective
         """
         stack_time = ws.occupancy / ws.nthreads
         start_time = stack_time + self.get_comm_cost(ts, ws)

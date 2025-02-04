@@ -529,11 +529,24 @@ class WorkStealing(SchedulerPlugin):
         return out
 
     def stealing_objective(
-        self, scheduler: SchedulerState, ts: TaskState, ws: WorkerState
+        self, ts: TaskState, ws: WorkerState
     ) -> tuple[float, ...]:
+        """Objective function to determine which worker should get the task
+
+        Minimize expected start time.  If a tie then break with data storage.
+
+        Notes
+        -----
+        This method is a modified version of Scheduler.worker_objective that accounts
+        for in-flight requests. It must be kept in sync for work-stealing to work correctly.
+
+        See Also
+        --------
+        Scheduler.worker_objective
+        """
         occupancy = self._combined_occupancy(
             ws
-        ) / ws.nthreads + scheduler.get_comm_cost(ts, ws)
+        ) / ws.nthreads + self.scheduler.get_comm_cost(ts, ws)
         if ts.actor:
             return (len(ws.actors), occupancy, ws.nbytes)
         else:
@@ -553,7 +566,7 @@ class WorkStealing(SchedulerPlugin):
             elif not ts.loose_restrictions:
                 return None
         return min(
-            potential_thieves, key=partial(self.stealing_objective, scheduler, ts)
+            potential_thieves, key=partial(self.stealing_objective, ts)
         )
 
 
