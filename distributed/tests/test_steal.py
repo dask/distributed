@@ -2033,7 +2033,7 @@ async def test_do_not_ping_pong(c, s, a):
         await in_event.wait()
 
         # This is the pre-condition for the observed problem:
-        # There are tasks that execute fox a long time but do not have an average
+        # There are tasks that execute for a long time but do not have an average
         s.task_prefixes["block"].add_exec_time(100)
         assert s.task_prefixes["block"].duration_average == -1
 
