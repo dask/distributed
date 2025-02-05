@@ -6057,7 +6057,12 @@ class Scheduler(SchedulerState, ServerNode):
             self.transitions({key: "released"}, stimulus_id)
 
     def handle_long_running(
-        self, key: Key, worker: str, compute_duration: float | None, stimulus_id: str
+        self,
+        key: Key,
+        worker: str,
+        run_id: int,
+        compute_duration: float | None,
+        stimulus_id: str,
     ) -> None:
         """A task has seceded from the thread pool
 

@@ -1302,12 +1302,20 @@ def test_secede_cancelled_or_resumed_workerstate(
 
 @gen_cluster(client=True, nthreads=[("", 1), ("", 1)], timeout=2)
 async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a, b):
+    """Regression test that ensures that we handle stale long-running messages correctly.
+
+    This tests simulates a race condition where a task secedes on worker a, the task is then cancelled, and resubmitted to
+    run on worker b. The long-running message created on a only arrives on the scheduler after the task started executing on b
+    (but before a secede event arrives from worker b). The scheduler should then ignore the stale secede event from a.
+    """
     wsA = s.workers[a.address]
+    before_secede = Event()
     block_secede = Event()
     block_long_running = Event()
     handled_long_running = Event()
 
-    def f(block_secede, block_long_running):
+    def f(before_secede, block_secede, block_long_running):
+        before_secede.set()
         block_secede.wait()
         distributed.secede()
         block_long_running.wait()
@@ -1327,13 +1335,15 @@ async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a
     # Submit task and wait until it executes on a
     x = c.submit(
         f,
+        before_secede,
         block_secede,
         block_long_running,
         key="x",
         workers=[a.address],
     )
-    await wait_for_state("x", "executing", a)
+    await before_secede.wait()
 
+    # FIXME: Relying on logging is rather brittle. We should fail hard if stimulus handling fails.
     with captured_logger("distributed.scheduler", logging.ERROR) as caplog:
         with freeze_batched_send(a.batched_stream):
             # Let x secede (and later succeed) without informing the scheduler
@@ -1352,18 +1362,20 @@ async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a
             assert not wsA.long_running
 
             # Reset all events
+            await before_secede.clear()
             await block_secede.clear()
             await block_long_running.clear()
 
             # Resubmit task and wait until it executes on b
             x = c.submit(
                 f,
+                before_secede,
                 block_secede,
                 block_long_running,
                 key="x",
                 workers=[b.address],
             )
-            await wait_for_state("x", "executing", b)
+            await before_secede.wait()
             wsB = s.workers[b.address]
             assert wsB.processing
             assert not wsB.long_running
