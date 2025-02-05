@@ -472,7 +472,7 @@ class WorkStealing(SchedulerPlugin):
                         stealable.discard(ts)
                         continue
                     i += 1
-                    if not (thief := _get_thief(s, ts, potential_thieves)):
+                    if not (thief := self._get_thief(s, ts, potential_thieves)):
                         continue
 
                     occ_thief = self._combined_occupancy(thief)
@@ -552,18 +552,42 @@ class WorkStealing(SchedulerPlugin):
                     out.append(t)
         return out
 
+    def stealing_objective(self, ts: TaskState, ws: WorkerState) -> tuple[float, ...]:
+        """Objective function to determine which worker should get the task
 
-def _get_thief(
-    scheduler: SchedulerState, ts: TaskState, potential_thieves: set[WorkerState]
-) -> WorkerState | None:
-    valid_workers = scheduler.valid_workers(ts)
-    if valid_workers is not None:
-        valid_thieves = potential_thieves & valid_workers
-        if valid_thieves:
-            potential_thieves = valid_thieves
-        elif not ts.loose_restrictions:
-            return None
-    return min(potential_thieves, key=partial(scheduler.worker_objective, ts))
+        Minimize expected start time.  If a tie then break with data storage.
+
+        Notes
+        -----
+        This method is a modified version of Scheduler.worker_objective that accounts
+        for in-flight requests. It must be kept in sync for work-stealing to work correctly.
+
+        See Also
+        --------
+        Scheduler.worker_objective
+        """
+        occupancy = self._combined_occupancy(
+            ws
+        ) / ws.nthreads + self.scheduler.get_comm_cost(ts, ws)
+        if ts.actor:
+            return (len(ws.actors), occupancy, ws.nbytes)
+        else:
+            return (occupancy, ws.nbytes)
+
+    def _get_thief(
+        self,
+        scheduler: SchedulerState,
+        ts: TaskState,
+        potential_thieves: set[WorkerState],
+    ) -> WorkerState | None:
+        valid_workers = scheduler.valid_workers(ts)
+        if valid_workers is not None:
+            valid_thieves = potential_thieves & valid_workers
+            if valid_thieves:
+                potential_thieves = valid_thieves
+            elif not ts.loose_restrictions:
+                return None
+        return min(potential_thieves, key=partial(self.stealing_objective, ts))
 
 
 fast_tasks = {

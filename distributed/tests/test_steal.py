@@ -1948,6 +1948,68 @@ async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
     client=True,
     config={"distributed.scheduler.worker-saturation": "inf"},
 )
+async def test_stealing_ogjective_accounts_for_in_flight(c, s, a):
+    """Regression test that work-stealing's objective correctly accounts for in-flight data requests"""
+    in_event = Event()
+    block_event = Event()
+
+    def block(i: int, in_event: Event, block_event: Event) -> int:
+        in_event.set()
+        block_event.wait()
+        return i
+
+    # Stop stealing for deterministic testing
+    extension = s.extensions["stealing"]
+    await extension.stop()
+
+    try:
+        futs = c.map(block, range(20), in_event=in_event, block_event=block_event)
+        await in_event.wait()
+
+        async with Worker(s.address, nthreads=1) as b:
+            try:
+                await async_poll_for(lambda: s.idle, timeout=5)
+                wsA = s.workers[a.address]
+                wsB = s.workers[b.address]
+                ts = next(iter(wsA.processing))
+
+                # No in-flight requests, so both match
+                assert extension.stealing_objective(ts, wsA) == s.worker_objective(
+                    ts, wsA
+                )
+                assert extension.stealing_objective(ts, wsB) == s.worker_objective(
+                    ts, wsB
+                )
+
+                extension.balance()
+                assert extension.in_flight
+                # We move tasks from a to b
+                assert extension.stealing_objective(ts, wsA) < s.worker_objective(
+                    ts, wsA
+                )
+                assert extension.stealing_objective(ts, wsB) > s.worker_objective(
+                    ts, wsB
+                )
+
+                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                # No in-flight requests, so both match
+                assert extension.stealing_objective(ts, wsA) == s.worker_objective(
+                    ts, wsA
+                )
+                assert extension.stealing_objective(ts, wsB) == s.worker_objective(
+                    ts, wsB
+                )
+            finally:
+                await block_event.set()
+    finally:
+        await block_event.set()
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    config={"distributed.scheduler.worker-saturation": "inf"},
+)
 async def test_do_not_ping_pong(c, s, a):
     """Regression test that work-stealing does not contihuously move all tasks between
     two workers without reaching a stable state, eating up CPU time while doing so.
