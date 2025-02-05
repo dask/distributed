@@ -905,13 +905,15 @@ def test_workerstate_executing_to_executing(ws_with_running_task):
 
     instructions = ws.handle_stimulus(
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
-        ComputeTaskEvent.dummy("x", resource_restrictions={"R": 1}, stimulus_id="s2"),
+        ComputeTaskEvent.dummy(
+            "x", run_id=0, resource_restrictions={"R": 1}, stimulus_id="s2"
+        ),
     )
     if prev_state == "executing":
         assert not instructions
     else:
         assert instructions == [
-            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s2")
+            LongRunningMsg(key="x", run_id=0, compute_duration=None, stimulus_id="s2")
         ]
     assert ws.tasks["x"] is ts
     assert ts.state == prev_state
@@ -1089,15 +1091,17 @@ def test_workerstate_resumed_fetch_to_cancelled_to_executing(ws_with_running_tas
 
     instructions = ws.handle_stimulus(
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
-        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        ComputeTaskEvent.dummy("y", run_id=0, who_has={"x": [ws2]}, stimulus_id="s2"),
         FreeKeysEvent(keys=["y", "x"], stimulus_id="s3"),
-        ComputeTaskEvent.dummy("x", resource_restrictions={"R": 1}, stimulus_id="s4"),
+        ComputeTaskEvent.dummy(
+            "x", run_id=1, resource_restrictions={"R": 1}, stimulus_id="s4"
+        ),
     )
     if prev_state == "executing":
         assert not instructions
     else:
         assert instructions == [
-            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s4")
+            LongRunningMsg(key="x", run_id=1, compute_duration=None, stimulus_id="s4")
         ]
     assert ws.tasks["x"].state == prev_state
 
@@ -1113,16 +1117,16 @@ def test_workerstate_resumed_fetch_to_executing(ws_with_running_task):
         # x is released for whatever reason (e.g. client cancellation)
         FreeKeysEvent(keys=["x"], stimulus_id="s1"),
         # x was computed somewhere else
-        ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s2"),
+        ComputeTaskEvent.dummy("y", run_id=0, who_has={"x": [ws2]}, stimulus_id="s2"),
         # x was lost / no known replicas, therefore y is cancelled
         FreeKeysEvent(keys=["y"], stimulus_id="s3"),
-        ComputeTaskEvent.dummy("x", stimulus_id="s4"),
+        ComputeTaskEvent.dummy("x", run_id=1, stimulus_id="s4"),
     )
     if prev_state == "executing":
         assert not instructions
     else:
         assert instructions == [
-            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s4")
+            LongRunningMsg(key="x", run_id=1, compute_duration=None, stimulus_id="s4")
         ]
     assert len(ws.tasks) == 1
     assert ws.tasks["x"].state == prev_state
@@ -1256,12 +1260,14 @@ def test_secede_cancelled_or_resumed_workerstate(
     """
     ws2 = "127.0.0.1:2"
     ws.handle_stimulus(
-        ComputeTaskEvent.dummy("x", stimulus_id="s1"),
+        ComputeTaskEvent.dummy("x", run_id=0, stimulus_id="s1"),
         FreeKeysEvent(keys=["x"], stimulus_id="s2"),
     )
     if resume_to_fetch:
         ws.handle_stimulus(
-            ComputeTaskEvent.dummy("y", who_has={"x": [ws2]}, stimulus_id="s3"),
+            ComputeTaskEvent.dummy(
+                "y", run_id=1, who_has={"x": [ws2]}, stimulus_id="s3"
+            ),
         )
     ts = ws.tasks["x"]
     assert ts.previous == "executing"
@@ -1279,11 +1285,11 @@ def test_secede_cancelled_or_resumed_workerstate(
     if resume_to_executing:
         instructions = ws.handle_stimulus(
             FreeKeysEvent(keys=["y"], stimulus_id="s5"),
-            ComputeTaskEvent.dummy("x", stimulus_id="s6"),
+            ComputeTaskEvent.dummy("x", run_id=2, stimulus_id="s6"),
         )
         # Inform the scheduler of the SecedeEvent that happened in the past
         assert instructions == [
-            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s6")
+            LongRunningMsg(key="x", run_id=2, compute_duration=None, stimulus_id="s6")
         ]
         assert ts.state == "long-running"
         assert ts not in ws.executing
