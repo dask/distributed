@@ -1413,6 +1413,111 @@ async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a
 
 
 @gen_cluster(client=True, nthreads=[("", 1)], timeout=2)
+async def test_secede_racing_resuming_on_same_worker(c, s, a):
+    """Regression test that ensures that we handle stale long-running messages correctly.
+
+    This tests simulates a race condition where a task secedes on worker a, the task is then cancelled, and resumed on
+    worker a. The first long-running message created on a only arrives on the scheduler after the task was resumed.
+    The scheduler should then ignore the stale first secede event from a and only handle the second one.
+    """
+    wsA = s.workers[a.address]
+    before_secede = Event()
+    block_secede = Event()
+    block_long_running = Event()
+    handled_long_running = Event()
+    block_long_running_handler = Event()
+
+    def f(before_secede, block_secede, block_long_running):
+        before_secede.set()
+        block_secede.wait()
+        distributed.secede()
+        block_long_running.wait()
+        return 123
+
+    # Instrument long-running handler
+    original_handler = s.stream_handlers["long-running"]
+    block_second_attempt = None
+
+    async def instrumented_handle_long_running(*args, **kwargs):
+        nonlocal block_second_attempt
+
+        if block_second_attempt is None:
+            block_second_attempt = True
+        elif block_second_attempt is True:
+            await block_long_running_handler.wait()
+            block_second_attempt = False
+        try:
+            return original_handler(*args, **kwargs)
+        finally:
+            await block_long_running_handler.clear()
+            await handled_long_running.set()
+
+    s.stream_handlers["long-running"] = instrumented_handle_long_running
+
+    # Submit task and wait until it executes on a
+    x = c.submit(
+        f,
+        before_secede,
+        block_secede,
+        block_long_running,
+        key="x",
+    )
+    await before_secede.wait()
+
+    # FIXME: Relying on logging is rather brittle. We should fail hard if stimulus handling fails.
+    with captured_logger("distributed.scheduler", logging.ERROR) as caplog:
+        with freeze_batched_send(a.batched_stream):
+            # Let x secede (and later succeed) without informing the scheduler
+            await block_secede.set()
+            await wait_for_state("x", "long-running", a)
+            assert not a.state.executing
+            assert a.state.long_running
+
+            # Cancel x while the scheduler does not know that it seceded
+            x.release()
+            await async_poll_for(lambda: not s.tasks, timeout=5)
+            assert not wsA.processing
+            assert not wsA.long_running
+
+            # Resubmit task and wait until it is resumed on a
+            x = c.submit(
+                f,
+                before_secede,
+                block_secede,
+                block_long_running,
+                key="x",
+            )
+            await wait_for_state("x", "long-running", a)
+            assert not a.state.executing
+            assert a.state.long_running
+
+            assert wsA.processing
+            assert not wsA.long_running
+
+        # Unblock the stream from a to the scheduler and handle the stale long-running message
+        await handled_long_running.wait()
+
+        assert wsA.processing
+        assert wsA.task_prefix_count
+        assert not wsA.long_running
+
+        # Clear the handler and let the scheduler handle the second long-running message
+        await handled_long_running.clear()
+        await block_long_running_handler.set()
+        await handled_long_running.wait()
+
+    # Assert that the handler did not fail and no state was corrupted
+    logs = caplog.getvalue()
+    assert not logs
+    assert not wsA.task_prefix_count
+    assert wsA.processing
+    assert wsA.long_running
+
+    await block_long_running.set()
+    assert await x.result() == 123
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], timeout=2)
 async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
     """Same as test_secede_cancelled_or_resumed_workerstate, but testing the interaction
     with the scheduler

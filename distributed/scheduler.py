@@ -6086,7 +6086,7 @@ class Scheduler(SchedulerState, ServerNode):
             logger.debug("Received long-running signal from duplicate task. Ignoring.")
             return
 
-        if ws.address != worker:
+        if ws.address != worker or ts.run_id != run_id:
             logger.debug(
                 "Received stale long-running signal from worker %s for task %s. Ignoring.",
                 worker,
