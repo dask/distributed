@@ -6032,25 +6032,46 @@ class Scheduler(SchedulerState, ServerNode):
             self.transitions({key: "released"}, stimulus_id)
 
     def handle_long_running(
-        self, key: Key, worker: str, compute_duration: float | None, stimulus_id: str
+        self,
+        key: Key,
+        worker: str,
+        run_id: int,
+        compute_duration: float | None,
+        stimulus_id: str,
     ) -> None:
         """A task has seceded from the thread pool
 
         We stop the task from being stolen in the future, and change task
         duration accounting as if the task has stopped.
         """
+        if worker not in self.workers:
+            logger.debug(
+                "Received long-running signal from unknown worker %s. Ignoring.", worker
+            )
+            return
+
         if key not in self.tasks:
             logger.debug("Skipping long_running since key %s was already released", key)
             return
+
         ts = self.tasks[key]
-        steal = self.extensions.get("stealing")
-        if steal is not None:
-            steal.remove_key_from_stealable(ts)
 
         ws = ts.processing_on
         if ws is None:
             logger.debug("Received long-running signal from duplicate task. Ignoring.")
             return
+
+        if ws.address != worker or ts.run_id != run_id:
+            logger.debug(
+                "Received stale long-running signal from worker %s for task %s. Ignoring.",
+                worker,
+                ts,
+            )
+            return
+
+        steal = self.extensions.get("stealing")
+        if steal is not None:
+            steal.remove_key_from_stealable(ts)
 
         if compute_duration is not None:
             old_duration = ts.prefix.duration_average

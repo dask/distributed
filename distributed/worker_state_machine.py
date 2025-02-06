@@ -507,8 +507,9 @@ class RescheduleMsg(SendMessageToScheduler):
 class LongRunningMsg(SendMessageToScheduler):
     op = "long-running"
 
-    __slots__ = ("key", "compute_duration")
+    __slots__ = ("key", "run_id", "compute_duration")
     key: Key
+    run_id: int
     compute_duration: float | None
 
 
@@ -2166,7 +2167,10 @@ class WorkerState:
             ts.state = "long-running"
             ts.previous = None
             smsg = LongRunningMsg(
-                key=ts.key, compute_duration=None, stimulus_id=stimulus_id
+                key=ts.key,
+                run_id=ts.run_id,
+                compute_duration=None,
+                stimulus_id=stimulus_id,
             )
             return {}, [smsg]
         else:
@@ -2271,7 +2275,10 @@ class WorkerState:
         self.long_running.add(ts)
 
         smsg = LongRunningMsg(
-            key=ts.key, compute_duration=compute_duration, stimulus_id=stimulus_id
+            key=ts.key,
+            run_id=ts.run_id,
+            compute_duration=compute_duration,
+            stimulus_id=stimulus_id,
         )
         return merge_recs_instructions(
             ({}, [smsg]),

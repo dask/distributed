@@ -575,11 +575,13 @@ def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
     assert ws.available_resources == {"R": 0}
 
     instructions = ws.handle_stimulus(
-        ComputeTaskEvent.dummy("x", stimulus_id="s2", resource_restrictions={"R": 0.4})
+        ComputeTaskEvent.dummy(
+            "x", run_id=0, stimulus_id="s2", resource_restrictions={"R": 0.4}
+        )
     )
     if prev_state == "long-running":
         assert instructions == [
-            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s2")
+            LongRunningMsg(key="x", run_id=0, compute_duration=None, stimulus_id="s2")
         ]
     else:
         assert not instructions
