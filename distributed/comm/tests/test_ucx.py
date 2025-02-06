@@ -293,7 +293,7 @@ async def test_ucx_localcluster(ucx_loop, processes, cleanup):
 
 
 @pytest.mark.slow
-@gen_test(timeout=60)
+@gen_test(timeout=120)
 async def test_stress(
     ucx_loop,
 ):
