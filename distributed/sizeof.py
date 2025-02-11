@@ -19,6 +19,5 @@ def safe_sizeof(obj: object, default_size: float = 1e6) -> int:
         logger.warning(
             f"Sizeof calculation for object of type '{typename(obj)}' failed. "
             f"Defaulting to {format_bytes(int(default_size))}",
-            exc_info=True,
         )
         return int(default_size)
