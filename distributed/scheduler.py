@@ -60,7 +60,6 @@ from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
     _deprecated_kwarg,
-    ensure_dict,
     format_bytes,
     format_time,
     key_split,
@@ -143,7 +142,7 @@ if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.11)
     from typing_extensions import Self, TypeAlias
 
-    from dask.highlevelgraph import HighLevelGraph
+    from dask._expr import Expr
 
 # Not to be confused with distributed.worker_state_machine.TaskStateState
 TaskStateState: TypeAlias = Literal[
@@ -3378,7 +3377,7 @@ class SchedulerState:
                 f"dependencies, but worker {ws.address} has memory_limit set to "
                 f"{format_bytes(ws.memory_limit)}."
             )
-            if ts.prefix.name == "finalize":
+            if not ts.dependents:
                 msg += (
                     " It seems like you called client.compute() on a huge collection. "
                     "Consider writing to distributed storage or slicing/reducing first."
@@ -4618,7 +4617,11 @@ class Scheduler(SchedulerState, ServerNode):
                     if d not in self.tasks:
                         lost_keys.add(d)
                         lost_keys.add(k)
-                        logger.info("User asked for computation on lost data, %s", k)
+                        logger.info(
+                            "User asked for computation on lost data. Final key is %s with missing dependency %s",
+                            k,
+                            d,
+                        )
                         dependencies.pop(d, None)
                         keys.discard(k)
                     continue
@@ -4817,8 +4820,8 @@ class Scheduler(SchedulerState, ServerNode):
     async def update_graph(
         self,
         client: str,
-        graph_header: dict,
-        graph_frames: list[bytes],
+        expr_header: dict,
+        expr_frames: list[bytes],
         keys: set[Key],
         span_metadata: SpanMetadata,
         internal_priority: dict[Key, int] | None,
@@ -4836,8 +4839,8 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             logger.debug("Received new graph. Deserializing...")
             try:
-                graph = deserialize(graph_header, graph_frames).data
-                del graph_header, graph_frames
+                expr = deserialize(expr_header, expr_frames).data
+                del expr_header, expr_frames
             except Exception as e:
                 msg = """\
                     Error during deserialization of the task graph. This frequently
@@ -4852,30 +4855,15 @@ class Scheduler(SchedulerState, ServerNode):
                 annotations_by_type,
             ) = await offload(
                 _materialize_graph,
-                graph=graph,
+                expr=expr,
                 global_annotations=annotations or {},
-                keys=keys,
                 validate=self.validate,
             )
 
             materialization_done = time()
             logger.debug("Materialization done. Got %i tasks.", len(dsk))
-            del graph
+            del expr
 
-            lost_keys = self._find_lost_dependencies(dsk, dependencies, keys)
-
-            if lost_keys:
-                self.report(
-                    {
-                        "op": "cancelled-keys",
-                        "keys": lost_keys,
-                        "reason": "lost dependencies",
-                    },
-                    client=client,
-                )
-                self.client_releases_keys(
-                    keys=lost_keys, client=client, stimulus_id=stimulus_id
-                )
             dsk = _cull(dsk, keys)
 
             if not internal_priority:
@@ -4893,7 +4881,30 @@ class Scheduler(SchedulerState, ServerNode):
                     dask.order.order, dsk=dsk, dependencies=stripped_deps
                 )
             ordering_done = time()
+
             logger.debug("Ordering done.")
+
+            # *************************************
+            # BELOW THIS LINE HAS TO BE SYNCHRONOUS
+            #
+            # Everything that compares the submitted graph to the current state
+            # has to happen in the same event loop.
+            # *************************************
+
+            lost_keys = self._find_lost_dependencies(dsk, dependencies, keys)
+
+            if lost_keys:
+                self.report(
+                    {
+                        "op": "cancelled-keys",
+                        "keys": lost_keys,
+                        "reason": "lost dependencies",
+                    },
+                    client=client,
+                )
+                self.client_releases_keys(
+                    keys=lost_keys, client=client, stimulus_id=stimulus_id
+                )
 
             before = len(self.tasks)
 
@@ -9396,12 +9407,11 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 
 def _materialize_graph(
-    graph: HighLevelGraph,
+    expr: Expr,
     global_annotations: dict[str, Any],
     validate: bool,
-    keys: set[Key],
 ) -> tuple[dict[Key, T_runspec], dict[Key, set[Key]], dict[str, dict[Key, Any]]]:
-    dsk: dict = ensure_dict(graph)
+    dsk: dict = expr.__dask_graph__()
     if validate:
         for k in dsk:
             validate_key(k)
@@ -9410,14 +9420,8 @@ def _materialize_graph(
         annotations_by_type[annotations_type].update(
             {k: (value(k) if callable(value) else value) for k in dsk}
         )
-
-    for layer in graph.layers.values():
-        if layer.annotations:
-            annot = layer.annotations
-            for annot_type, value in annot.items():
-                annotations_by_type[annot_type].update(
-                    {k: (value(k) if callable(value) else value) for k in layer}
-                )
+    for annotations_type, value in expr.__dask_annotations__().items():
+        annotations_by_type[annotations_type].update(value)
 
     dsk2 = convert_legacy_graph(dsk)
     # FIXME: There should be no need to fully materialize and copy this but some
