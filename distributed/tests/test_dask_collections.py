@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 np = pytest.importorskip("numpy")
@@ -39,6 +41,47 @@ def assert_equal(a, b):
         assert_index_equal(a, b)
     else:
         assert a == b
+
+
+@gen_cluster(client=True)
+async def test_persist(c, s, a, b):
+    df = pd.DataFrame({"x": range(10), "y": range(10, 20)})
+    ddf = dd.from_pandas(df, npartitions=2)
+    df2 = pd.DataFrame({"x": range(20, 30), "y": range(30, 40)})
+    ddf2 = dd.from_pandas(df2, npartitions=2)
+
+    # Trivial single input
+    ddfp = await c.persist(ddf)
+    assert s.tasks
+    assert sum(ts.state == "memory" for ts in s.tasks.values()) == 2
+    assert_equal(await c.compute(ddfp), await c.compute(ddf))
+    del ddfp
+
+    while not sum(ts.state == "memory" for ts in s.tasks.values()) == 0:
+        await asyncio.sleep(0.01)
+
+    # One collection but in a tuple
+    (ddfp,) = c.persist((ddf,))
+    await wait(ddfp)
+    assert s.tasks
+    assert sum(ts.state == "memory" for ts in s.tasks.values()) == 2
+    assert_equal(await c.compute(ddfp), await c.compute(ddf))
+    del ddfp
+
+    while not sum(ts.state == "memory" for ts in s.tasks.values()) == 0:
+        await asyncio.sleep(0.01)
+
+    # Multiple collections
+    ddfp1, ddfp2 = c.persist((ddf, ddf2))
+    await wait((ddfp1, ddfp2))
+    assert s.tasks
+    assert sum(ts.state == "memory" for ts in s.tasks.values()) == 4
+
+    assert_equal(await c.compute(ddfp1), await c.compute(ddf))
+    assert_equal(await c.compute(ddfp2), await c.compute(ddf2))
+    del ddfp1, ddfp2
+    while not sum(ts.state == "memory" for ts in s.tasks.values()) == 0:
+        await asyncio.sleep(0.01)
 
 
 @ignore_single_machine_warning

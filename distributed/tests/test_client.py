@@ -19,6 +19,7 @@ import sys
 import threading
 import traceback
 import types
+import uuid
 import weakref
 import zipfile
 from collections import deque, namedtuple
@@ -42,7 +43,7 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.bag as db
 from dask import delayed
-from dask.tokenize import tokenize
+from dask.tokenize import TokenizationError, tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
 from distributed import (
@@ -268,6 +269,13 @@ async def test_custom_key_with_batches(c, s, a, b):
     )
     assert len(futs) == 10
     await wait(futs)
+
+
+@gen_cluster(client=True)
+async def test_compute_no_collection_or_future(c, s, *workers):
+    assert c.compute(1) == 1
+
+    assert await c.gather(c.compute((1, delayed(inc)(1)))) == [1, 2]
 
 
 @gen_cluster(client=True)
@@ -4504,50 +4512,6 @@ def test_normalize_collection_with_released_futures(c):
     assert res == sol
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
-@gen_cluster(client=True)
-async def test_auto_normalize_collection(c, s, a, b):
-    da = pytest.importorskip("dask.array")
-
-    x = da.ones(10, chunks=5)
-    assert len(x.dask) == 2
-
-    with dask.config.set(optimizations=[c._optimize_insert_futures]):
-        y = x.map_blocks(inc, dtype=x.dtype)
-        yy = c.persist(y)
-
-        await wait(yy)
-
-        start = time()
-        future = c.compute(y.sum())
-        await future
-        end = time()
-        assert end - start < 1
-
-        start = time()
-        z = c.persist(y + 1)
-        await wait(z)
-        end = time()
-        assert end - start < 1
-
-
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
-def test_auto_normalize_collection_sync(c):
-    da = pytest.importorskip("dask.array")
-    x = da.ones(10, chunks=5)
-
-    y = x.map_blocks(inc, dtype=x.dtype)
-    yy = c.persist(y)
-
-    wait(yy)
-
-    with dask.config.set(optimizations=[c._optimize_insert_futures]):
-        start = time()
-        y.sum().compute()
-        end = time()
-        assert end - start < 1
-
-
 def assert_no_data_loss(scheduler):
     for key, start, finish, recommendations, _, _ in scheduler.transition_log:
         if start == "memory" and finish == "released":
@@ -4678,9 +4642,9 @@ def test_recreate_error_sync(c):
     y0 = c.submit(dec, 1)
     x = c.submit(div, 1, x0)
     y = c.submit(div, 1, y0)
-    tot = c.submit(sum, x, y)
-    f = c.compute(tot)
-
+    f = c.submit(sum, x, y)
+    wait(f)
+    assert f.status == "error"
     with pytest.raises(ZeroDivisionError):
         c.recreate_error_locally(f)
     assert f.status == "error"
@@ -4697,8 +4661,8 @@ def test_recreate_task_sync(c):
     y0 = c.submit(dec, 2)
     x = c.submit(div, 1, x0)
     y = c.submit(div, 1, y0)
-    tot = c.submit(sum, [x, y])
-    f = c.compute(tot)
+    f = c.submit(sum, [x, y])
+    wait(f)
 
     assert c.recreate_task_locally(f) == 2
 
@@ -4849,12 +4813,22 @@ class MyException(Exception):
 
 @gen_cluster(client=True)
 async def test_robust_unserializable(c, s, a, b):
-    class Foo:
+    class NoTokenization:
         def __getstate__(self):
             raise MyException()
 
-    with pytest.raises(TypeError, match="Could not serialize"):
-        future = c.submit(identity, Foo())
+    with pytest.raises((TypeError, TokenizationError), match="serialize"):
+        future = c.submit(identity, NoTokenization())
+
+    class TokenBrokenGet:
+        def __dask_tokenize__(self):
+            return uuid.uuid4().hex
+
+        def __getstate__(self):
+            raise MyException()
+
+    with pytest.raises((TypeError, TokenizationError), match="serialize"):
+        future = c.submit(identity, TokenBrokenGet())
 
     futures = c.map(inc, range(10))
     results = await c.gather(futures)
@@ -4863,16 +4837,24 @@ async def test_robust_unserializable(c, s, a, b):
     assert a.data and b.data
 
 
+class BrokenSetState:
+    def __getstate__(self):
+        return 1
+
+    def __dask_tokenize__(self):
+        return uuid.uuid4().hex
+
+    def __setstate__(self, state):
+        raise MyException("hello")
+
+    def __call__(self):
+        return 1
+
+
 @gen_cluster(client=True)
 async def test_robust_undeserializable(c, s, a, b):
-    class Foo:
-        def __getstate__(self):
-            return 1
 
-        def __setstate__(self, state):
-            raise MyException("hello")
-
-    future = c.submit(identity, Foo())
+    future = c.submit(identity, BrokenSetState())
     await wait(future)
     assert future.status == "error"
     with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
@@ -4886,18 +4868,9 @@ async def test_robust_undeserializable(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_robust_undeserializable_function(c, s, a, b, monkeypatch):
-    class Foo:
-        def __getstate__(self):
-            return 1
+async def test_robust_undeserializable_function(c, s, a, b):
 
-        def __setstate__(self, state):
-            raise MyException("hello")
-
-        def __call__(self, *args):
-            return 1
-
-    future = c.submit(Foo(), 1)
+    future = c.submit(BrokenSetState(), 1)
     await wait(future)
     assert future.status == "error"
     with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
@@ -8201,13 +8174,10 @@ def test_release_persisted_collection_sync(c):
 
 @pytest.mark.slow()
 @pytest.mark.parametrize("do_wait", [True, False])
-def test_worker_clients_do_not_claim_ownership_of_serialize_futures(c, do_wait):
-    # Note: sending collections like this should be considered an anti-pattern
-    # but it is possible. As long as the user ensures the futures stay alive
-    # this is fine but the cluster will not take over this responsibility. The
-    # client will not unpack the collection when using submit and will therefore
-    # not handle the dependencies in any way.
-    # See also https://github.com/dask/distributed/issues/7498
+def test_submit_persisted_collection_as_argument(c, do_wait):
+    # See also test_worker_clients_do_not_claim_ownership_of_serialize_futures
+    # This is just a test to verify that this is indeed possible since otherwise
+    # the other test is not making sense
     da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(10, chunks=(5,)).persist()
     if do_wait:
@@ -8219,19 +8189,67 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(c, do_wait):
 
     future = c.submit(f, x)
     result = future.result()
+
     assert result == sum(range(10))
-    del x, future, result
 
-    # Now we delete the persisted collection before computing the result
-    y = da.arange(10, chunks=(4,)).persist()
-    if do_wait:
-        wait(y)
-    future = c.submit(f, y)
-    del y
-    with pytest.raises(FutureCancelledError):
-        future.result()
-    del future
 
-    future = c.submit(f, da.arange(10, chunks=(4,)).persist())
+@pytest.mark.slow()
+@pytest.mark.parametrize(
+    "do_wait, store_variable",
+    [
+        (True, True),
+        (False, True),
+        (False, False),
+    ],
+)
+def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
+    c, do_wait, store_variable
+):
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
+
+    if not store_variable and not do_wait:
+        pytest.skip("This test is not making sense")
+    # Note: sending collections like this should be considered an anti-pattern
+    # but it is possible. As long as the user ensures the futures stay alive
+    # this is fine but the cluster will not take over this responsibility. The
+    # client will not unpack the collection when using submit and will therefore
+    # not handle the dependencies in any way.
+    # See also https://github.com/dask/distributed/issues/7498
+    # We delete the persisted collection before computing the result
+
+    # We're using the event to control ordering since the task is executed in a
+    # different process such that we cannot rely on msg ordering
+    #
+    # 1. The alive futures have to be serialized as part of the submit payload
+    # 2. The future arive at the worker but the worker client doesn't claim
+    #    ownership
+    # 3. We're deleting them and the cancellation goes through to the scheduler
+    #    such that it can release the futures
+    # 4. Then the worker client submits a workload thinking the futures are
+    #    still alive. This is rejected by the scheduler and it raises a proper
+    #    CancelledError.
+    #
+
+    def f(x, ev):
+        assert isinstance(x, da.Array)
+        ev.wait()
+        return x.sum().compute()
+
+    ev = Event()
+    if store_variable:
+        y = da.arange(10, chunks=(4,)).persist()
+        if do_wait:
+            wait(y)
+        future = c.submit(f, y, ev=ev)
+        del y
+
+    else:
+        ev = Event()
+        future = c.submit(f, da.arange(10, chunks=(4,)).persist(), ev=ev)
+
+    # Wait for persisted collection to vanish
+    while c.run_on_scheduler(lambda dask_scheduler: len(dask_scheduler.tasks)) > 1:
+        sleep(0.1)
+    ev.set()
     with pytest.raises(FutureCancelledError):
         future.result()
