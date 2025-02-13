@@ -3377,8 +3377,8 @@ class Client(SyncMethodMixin):
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
-                    "graph_header": header,
-                    "graph_frames": frames,
+                    "expr_header": header,
+                    "expr_frames": frames,
                     "keys": set(keys),
                     "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
