@@ -501,7 +501,7 @@ class WorkerState:
     # Reference to scheduler task_groups
     scheduler_ref: weakref.ref[SchedulerState] | None
     task_prefix_count: defaultdict[str, int]
-    _network_occ: float
+    _network_occ: int
     _occupancy_cache: float | None
 
     #: Keys that may need to be fetched to this worker, and the number of tasks that need them.
@@ -822,8 +822,11 @@ class WorkerState:
         if self.needs_what[ts] == 0:
             del self.needs_what[ts]
             nbytes = ts.get_nbytes()
-            self._network_occ -= nbytes
-            self.scheduler._network_occ_global -= nbytes
+            # FIXME: ts.get_nbytes may change if non-deterministic tasks get recomputed, causing drift
+            self._network_occ -= min(nbytes, self._network_occ)
+            self.scheduler._network_occ_global -= min(
+                nbytes, self.scheduler._network_occ_global
+            )
 
     def add_replica(self, ts: TaskState) -> None:
         """The worker acquired a replica of task"""
@@ -834,8 +837,11 @@ class WorkerState:
         nbytes = ts.get_nbytes()
         if ts in self.needs_what:
             del self.needs_what[ts]
-            self._network_occ -= nbytes
-            self.scheduler._network_occ_global -= nbytes
+            # FIXME: ts.get_nbytes may change if non-deterministic tasks get recomputed, causing drift
+            self._network_occ -= min(nbytes, self._network_occ)
+            self.scheduler._network_occ_global -= min(
+                nbytes, self.scheduler._network_occ_global
+            )
         ts.who_has.add(self)
         self.nbytes += nbytes
         self._has_what[ts] = None
@@ -1708,7 +1714,7 @@ class SchedulerState:
     transition_counter_max: int | Literal[False]
 
     _task_prefix_count_global: defaultdict[str, int]
-    _network_occ_global: float
+    _network_occ_global: int
     ######################
     # Cached configuration
     ######################
@@ -1777,7 +1783,7 @@ class SchedulerState:
         self.validate = validate
         self.workers = workers
         self._task_prefix_count_global = defaultdict(int)
-        self._network_occ_global = 0.0
+        self._network_occ_global = 0
         self.running = {
             ws for ws in self.workers.values() if ws.status == Status.running
         }
@@ -1957,7 +1963,9 @@ class SchedulerState:
             duration = self._get_prefix_duration(self.task_prefixes[prefix_name])
             res += duration * count
         occ = res + network_occ / self.bandwidth
-        assert occ >= 0, (occ, res, network_occ, self.bandwidth)
+        if self.validate:
+            assert occ >= 0, (occ, res, network_occ, self.bandwidth)
+        occ = max(occ, 0)
         return occ
 
     #####################
