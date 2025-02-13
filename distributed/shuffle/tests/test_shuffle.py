@@ -2445,7 +2445,7 @@ async def test_handle_null_partitions_2(c, s, a, b):
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
 
     with dask.config.set({"dataframe.convert-string": False}):
-        ddf = dd.from_map(make_partition, range(5))
+        ddf = dd.from_map(make_partition, range(5), meta={"a": float, "b": float})
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
     result, expected = c.compute([ddf, out])
@@ -2498,7 +2498,7 @@ async def test_reconcile_partitions(c, s, a, b):
             )
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
 
-    ddf = dd.from_map(make_partition, range(50))
+    ddf = dd.from_map(make_partition, range(50), meta={"a": float, "b": float})
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
 
@@ -2522,7 +2522,7 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
             return pd.DataFrame({"a": np.random.random(10), "b": ["a"] * 10})
         return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
 
-    ddf = dd.from_map(make_partition, range(50))
+    ddf = dd.from_map(make_partition, range(50), meta={"a": float, "b": float})
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True)
 
@@ -2829,7 +2829,9 @@ async def test_shuffle_stable_ordering(c, s, a, b, keep, disk):
         df["b"] = df["a"] % 23
         return df
 
-    df = dd.from_map(make_partition, np.arange(19), args=(250,))
+    df = dd.from_map(
+        make_partition, np.arange(19), args=(250,), meta={"a": int, "b": int}
+    )
 
     with dask.config.set(
         {"dataframe.shuffle.method": "p2p", "distributed.p2p.storage.disk": disk}
