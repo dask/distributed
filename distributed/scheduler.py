@@ -55,7 +55,6 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.utils
 from dask._task_spec import DependenciesMapping, GraphNode, convert_legacy_graph
-from dask.base import TokenizationError, normalize_token, tokenize
 from dask.core import istask, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
@@ -4985,25 +4984,14 @@ class Scheduler(SchedulerState, ServerNode):
             # run_spec in the submitted graph may be None. This happens
             # when an already persisted future is part of the graph
             elif k in dsk:
-                # If both tokens are non-deterministic, skip comparison
-                try:
-                    tok_lhs = tokenize(ts.run_spec, ensure_deterministic=True)
-                except TokenizationError:
-                    tok_lhs = ""
-                try:
-                    tok_rhs = tokenize(dsk[k], ensure_deterministic=True)
-                except TokenizationError:
-                    tok_rhs = ""
-
-                # Additionally check dependency names. This should only be necessary
-                # if run_specs can't be tokenized deterministically.
+                # Check dependency names.
                 deps_lhs = {dts.key for dts in ts.dependencies}
                 deps_rhs = dependencies[k]
 
                 # FIXME It would be a really healthy idea to change this to a hard
                 # failure. However, this is not possible at the moment because of
                 # https://github.com/dask/dask/issues/9888
-                if tok_lhs != tok_rhs or deps_lhs != deps_rhs:
+                if deps_lhs != deps_rhs:
                     # Retain old run_spec and dependencies; rerun them if necessary.
                     # This sweeps the issue of collision under the carpet as long as the
                     # old and new task produce the same output - such as in
@@ -5029,8 +5017,6 @@ class Scheduler(SchedulerState, ServerNode):
                                 old task state: {ts.state}
                                 old run_spec: {ts.run_spec!r}
                                 new run_spec: {dsk[k]!r}
-                                old token: {normalize_token(ts.run_spec)!r}
-                                new token: {normalize_token(dsk[k])!r}
                                 old dependencies: {deps_lhs}
                                 new dependencies: {deps_rhs}
                                 """
