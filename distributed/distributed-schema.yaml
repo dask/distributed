@@ -1061,7 +1061,16 @@ properties:
                 minimum: 0
                 description: |
                   The maximum number of erred tasks to remember.
-
+          debugpy:
+            type: object
+            description: Configuration settings for Dask's remote debugger
+            properties:
+              enabled:
+                type: boolean
+                description: Enable remote debugging.
+              port:
+                type: integer
+                description: Port used by the debug adapter to listen on.
       p2p:
         type: object
         description: Configuration for P2P shuffles

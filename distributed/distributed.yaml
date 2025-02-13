@@ -305,6 +305,9 @@ distributed:
         - get_output_via_markers\.py
     erred-tasks:
       max-history: 100
+    debugpy: 
+      enabled: True
+      port: 5678
 
   p2p:
     comm:
