@@ -81,4 +81,4 @@ def post_mortem() -> None:
 
 if DEBUGPY_ENABLED:
     _check_debugpy_installed()
-    sys.breakpointhook = breakpoint
+    sys.breakpointhook = breakpointhook
