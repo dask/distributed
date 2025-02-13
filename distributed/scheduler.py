@@ -823,8 +823,11 @@ class WorkerState:
         if self.needs_what[ts] == 0:
             del self.needs_what[ts]
             nbytes = ts.get_nbytes()
-            self._network_occ -= nbytes
-            self.scheduler._network_occ_global -= nbytes
+            # FIXME: ts.get_nbytes may change if non-deterministic tasks get recomputed, causing drift
+            self._network_occ -= min(nbytes, self._network_occ)
+            self.scheduler._network_occ_global -= min(
+                nbytes, self.scheduler._network_occ_global
+            )
 
     def add_replica(self, ts: TaskState) -> None:
         """The worker acquired a replica of task"""
@@ -835,8 +838,11 @@ class WorkerState:
         nbytes = ts.get_nbytes()
         if ts in self.needs_what:
             del self.needs_what[ts]
-            self._network_occ -= nbytes
-            self.scheduler._network_occ_global -= nbytes
+            # FIXME: ts.get_nbytes may change if non-deterministic tasks get recomputed, causing drift
+            self._network_occ -= min(nbytes, self._network_occ)
+            self.scheduler._network_occ_global -= min(
+                nbytes, self.scheduler._network_occ_global
+            )
         ts.who_has.add(self)
         self.nbytes += nbytes
         self._has_what[ts] = None
@@ -1958,7 +1964,9 @@ class SchedulerState:
             duration = self._get_prefix_duration(self.task_prefixes[prefix_name])
             res += duration * count
         occ = res + network_occ / self.bandwidth
-        assert occ >= 0, (occ, res, network_occ, self.bandwidth)
+        if self.validate:
+            assert occ >= 0, (occ, res, network_occ, self.bandwidth)
+        occ = max(occ, 0)
         return occ
 
     #####################
