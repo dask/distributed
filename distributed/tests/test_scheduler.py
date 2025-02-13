@@ -1422,8 +1422,8 @@ async def test_update_graph_culls(s, a, b):
 
     header, frames = serialize(ToPickle(dsk), on_error="raise")
     await s.update_graph(
-        graph_header=header,
-        graph_frames=frames,
+        expr_header=header,
+        expr_frames=frames,
         keys=["y"],
         client="client",
         internal_priority={k: 0 for k in "xyz"},
