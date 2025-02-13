@@ -502,7 +502,7 @@ class WorkerState:
     # Reference to scheduler task_groups
     scheduler_ref: weakref.ref[SchedulerState] | None
     task_prefix_count: defaultdict[str, int]
-    _network_occ: float
+    _network_occ: int
     _occupancy_cache: float | None
 
     #: Keys that may need to be fetched to this worker, and the number of tasks that need them.
@@ -1715,7 +1715,7 @@ class SchedulerState:
     transition_counter_max: int | Literal[False]
 
     _task_prefix_count_global: defaultdict[str, int]
-    _network_occ_global: float
+    _network_occ_global: int
     ######################
     # Cached configuration
     ######################
@@ -1784,7 +1784,7 @@ class SchedulerState:
         self.validate = validate
         self.workers = workers
         self._task_prefix_count_global = defaultdict(int)
-        self._network_occ_global = 0.0
+        self._network_occ_global = 0
         self.running = {
             ws for ws in self.workers.values() if ws.status == Status.running
         }
