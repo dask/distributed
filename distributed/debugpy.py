@@ -33,7 +33,7 @@ def _ensure_debugpy_listens() -> tuple[str, int]:
     with LOCK:
         if endpoint := worker.extensions.get("debugpy", None):
             return endpoint
-        endpoint = debugpy.listen(DEBUGPY_PORT)
+        endpoint = debugpy.listen((worker.address, DEBUGPY_PORT))
         worker.extensions["debugpy"] = endpoint
         return endpoint
 
