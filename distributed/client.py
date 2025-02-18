@@ -3667,8 +3667,8 @@ class Client(SyncMethodMixin):
         expr = FinalizeCompute(expr)
 
         expr = expr.optimize()
-
-        names = expr.__dask_keys__()
+        # FIXME: Is this actually required?
+        names = list(flatten(expr.__dask_keys__()))
 
         futures_dict = self._graph_to_futures(
             expr,
