@@ -172,15 +172,22 @@ def connect(application, http_server, scheduler, prefix=""):
     application.add_application(bokeh_app)
     bokeh_app.initialize(IOLoop.current())
 
-    bokeh_app.add_handlers(
-        r".*",
-        [
-            (
-                r"/",
-                web.RedirectHandler,
-                {"url": urljoin((prefix or "").strip("/") + "/", r"status")},
-            )
-        ],
-    )
+    routes = [
+        (
+            r"/",
+            web.RedirectHandler,
+            {"url": urljoin((prefix or "").strip("/") + "/", "status")},
+        )
+    ]
 
+    if prefix:
+        routes.append(
+            (
+                rf"/{prefix.strip("/")}/?",
+                web.RedirectHandler,
+                {"url": urljoin((prefix).strip("/") + "/", "status")},
+            )
+        )
+
+    bokeh_app.add_handlers(r".*", routes)
     bokeh_app.start()
