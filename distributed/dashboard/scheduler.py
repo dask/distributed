@@ -181,11 +181,12 @@ def connect(application, http_server, scheduler, prefix=""):
     ]
 
     if prefix:
+        prefix_clean = prefix.strip("/")
         routes.append(
             (
-                rf"/{prefix.strip("/")}/?",
+                rf"/{prefix_clean}/?",
                 web.RedirectHandler,
-                {"url": urljoin((prefix).strip("/") + "/", "status")},
+                {"url": urljoin(prefix_clean + "/", "status")},
             )
         )
 
