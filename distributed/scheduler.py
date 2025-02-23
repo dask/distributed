@@ -8336,8 +8336,16 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             workers = set(self.workers) & set(workers)
 
+        # NOTE: we assume all workers have the same profile interval as us
+        profile_interval = parse_timedelta(
+            dask.config.get("distributed.worker.profile.interval"), default="ms"
+        )
+
         if scheduler:
-            return profile.get_profile(self.io_loop.profile, start=start, stop=stop)
+            return (
+                profile.get_profile(self.io_loop.profile, start=start, stop=stop),
+                profile_interval,
+            )
 
         results = await asyncio.gather(
             *(
@@ -8353,7 +8361,8 @@ class Scheduler(SchedulerState, ServerNode):
             response = profile.merge(*results)
         else:
             response = dict(zip(workers, results))
-        return response
+
+        return response, profile_interval
 
     async def get_profile_metadata(
         self,
@@ -8420,8 +8429,12 @@ class Scheduler(SchedulerState, ServerNode):
         )
         from distributed import profile
 
+        profile_interval = parse_timedelta(
+            dask.config.get("distributed.worker.profile.interval"), default="ms"
+        )
+
         def profile_to_figure(state):
-            data = profile.plot_data(state)
+            data = profile.plot_data(state, profile_interval=profile_interval)
             figure, source = profile.plot_figure(data, sizing_mode="stretch_both")
             return figure
 
