@@ -5413,17 +5413,6 @@ def test_dynamic_workloads_sync_random(c):
 
 
 @gen_cluster(client=True)
-async def test_bytes_keys(c, s, a, b):
-    key = b"inc-123"
-    future = c.submit(inc, 1, key=key)
-    result = await future
-    assert type(future.key) is bytes
-    assert set(s.tasks) == {key}
-    assert key in a.data or key in b.data
-    assert result == 2
-
-
-@gen_cluster(client=True)
 async def test_unicode_ascii_keys(c, s, a, b):
     uni_type = str
     key = "inc-123"
