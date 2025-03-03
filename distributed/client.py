@@ -43,7 +43,6 @@ from tlz import first, groupby, merge, partition_all, valmap
 import dask
 from dask.base import collections_to_dsk
 from dask.core import flatten, validate_key
-from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
 from dask.typing import Key, NestedKeys, NoDefault, no_default
@@ -3310,7 +3309,7 @@ class Client(SyncMethodMixin):
 
     def _graph_to_futures(
         self,
-        dsk,
+        expr,
         keys,
         span_metadata,
         workers=None,
@@ -3325,9 +3324,6 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-            # Make sure `dsk` is a high level graph
-            if not isinstance(dsk, HighLevelGraph):
-                dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
             annotations = {}
             if user_priority:
@@ -3361,7 +3357,7 @@ class Client(SyncMethodMixin):
             from distributed.protocol import serialize
             from distributed.protocol.serialize import ToPickle
 
-            header, frames = serialize(ToPickle(dsk), on_error="raise")
+            header, frames = serialize(ToPickle(expr), on_error="raise")
 
             pickled_size = sum(map(nbytes, [header] + frames))
             if pickled_size > parse_bytes(
@@ -3381,8 +3377,8 @@ class Client(SyncMethodMixin):
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
-                    "graph_header": header,
-                    "graph_frames": frames,
+                    "expr_header": header,
+                    "expr_frames": frames,
                     "keys": set(keys),
                     "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
@@ -3665,31 +3661,17 @@ class Client(SyncMethodMixin):
             collections=[get_collections_metadata(v) for v in variables]
         )
 
-        dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
-        names = ["finalize-%s" % tokenize(v) for v in variables]
-        dsk2 = {}
-        for i, (name, v) in enumerate(zip(names, variables)):
-            func, extra_args = v.__dask_postcompute__()
-            keys = v.__dask_keys__()
-            if func is single_key and len(keys) == 1 and not extra_args:
-                names[i] = keys[0]
-            else:
-                t = Task(name, func, _convert_dask_keys(keys), *extra_args)
-                dsk2[t.key] = t
+        expr = self.collections_to_dsk(variables, optimize_graph, **kwargs)
+        from dask._expr import FinalizeCompute
 
-        if not isinstance(dsk, HighLevelGraph):
-            dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
+        expr = FinalizeCompute(expr)
 
-        # Let's append the finalize graph to dsk
-        finalize_name = tokenize(names)
-        layers = {finalize_name: dsk2}
-        layers.update(dsk.layers)
-        dependencies = {finalize_name: set(dsk.layers.keys())}
-        dependencies.update(dsk.dependencies)
-        dsk = HighLevelGraph(layers, dependencies)
+        expr = expr.optimize()
+        # FIXME: Is this actually required?
+        names = list(flatten(expr.__dask_keys__()))
 
         futures_dict = self._graph_to_futures(
-            dsk,
+            expr,
             names,
             workers=workers,
             allow_other_workers=allow_other_workers,
