@@ -1329,6 +1329,23 @@ async def test_prefix_bokeh(s, a, b):
     assert bokeh_app.prefix == f"/{prefix}"
 
 
+@gen_cluster(
+    client=True, scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True}
+)
+async def test_prefix_redirect_bokeh(c, s, a, b):
+    prefix = "foo-bar"
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(
+        f"http://localhost:{s.http_server.port}/{prefix}"
+    )
+    assert response.code == 200
+    assert "/status" in response.effective_url
+
+    bokeh_app = s.http_application.applications[0]
+    assert isinstance(bokeh_app, BokehTornado)
+    assert bokeh_app.prefix == f"/{prefix}"
+
+
 @gen_cluster(scheduler_kwargs={"dashboard": True})
 async def test_bokeh_relative(s, a, b):
     http_client = AsyncHTTPClient()
