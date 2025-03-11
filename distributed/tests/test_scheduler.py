@@ -231,7 +231,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
             )
             random_keys = set(flatten(x.__dask_keys__()))
 
-        xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
+        xx, xsum = c.persist([x, x.sum(axis=1, split_every=20)])
         await xsum
 
         # Check that each chunk-row of the array is (mostly) stored on the same worker
@@ -2236,7 +2236,7 @@ async def test_dont_recompute_if_persisted_4(c, s, a, b):
     while s.tasks["x"].state == "memory":
         await asyncio.sleep(0.01)
 
-    yyy, zzz = dask.persist(y, z)
+    yyy, zzz = c.persist([y, z])
     await wait([yyy, zzz])
 
     new = s.story("x")
