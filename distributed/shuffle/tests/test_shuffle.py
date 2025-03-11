@@ -1404,7 +1404,7 @@ async def test_tail(c, s, a, b):
     del full
     while s.tasks:
         await asyncio.sleep(0)
-    partial = await x.tail(compute=False).persist()  # Only ask for one key
+    partial = await c.persist(x.tail(compute=False))  # Only ask for one key
 
     assert len(s.tasks) < ntasks_full
     del partial
