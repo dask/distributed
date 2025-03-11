@@ -2174,12 +2174,12 @@ async def test_dont_recompute_if_persisted(c, s, a, b):
     x = delayed(inc)(1, dask_key_name="x")
     y = delayed(inc)(x, dask_key_name="y")
 
-    yy = y.persist()
+    yy = c.persist(y)
     await wait(yy)
 
     old = list(s.transition_log)
 
-    yyy = y.persist()
+    yyy = c.persist(y)
     await wait(yyy)
 
     await asyncio.sleep(0.100)
@@ -2192,12 +2192,12 @@ async def test_dont_recompute_if_persisted_2(c, s, a, b):
     y = delayed(inc)(x, dask_key_name="y")
     z = delayed(inc)(y, dask_key_name="z")
 
-    yy = y.persist()
+    yy = c.persist(y)
     await wait(yy)
 
     old = s.story("x", "y")
 
-    zz = z.persist()
+    zz = c.persist(z)
     await wait(zz)
 
     await asyncio.sleep(0.100)
@@ -2211,12 +2211,12 @@ async def test_dont_recompute_if_persisted_3(c, s, a, b):
     z = delayed(inc)(y, dask_key_name="z")
     w = delayed(operator.add)(x, z, dask_key_name="w")
 
-    ww = w.persist()
+    ww = c.persist(w)
     await wait(ww)
 
     old = list(s.transition_log)
 
-    www = w.persist()
+    www = c.persist(w)
     await wait(www)
     await asyncio.sleep(0.100)
     assert list(s.transition_log) == old
@@ -2228,7 +2228,7 @@ async def test_dont_recompute_if_persisted_4(c, s, a, b):
     y = delayed(inc)(x, dask_key_name="y")
     z = delayed(inc)(x, dask_key_name="z")
 
-    yy = y.persist()
+    yy = c.persist(y)
     await wait(yy)
 
     old = s.story("x")
@@ -2263,12 +2263,12 @@ async def test_dont_recompute_if_erred(c, s, a, b):
     x = delayed(inc)(1, dask_key_name="x")
     y = delayed(div)(x, 0, dask_key_name="y")
 
-    yy = y.persist()
+    yy = c.persist(y)
     await wait(yy)
 
     old = list(s.transition_log)
 
-    yyy = y.persist()
+    yyy = c.persist(y)
     await wait(yyy)
 
     await asyncio.sleep(0.100)
@@ -2858,7 +2858,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
 
     start = time()
     x = da.arange(100, chunks=(20,))
-    y = (x + 1).persist(optimize_graph=False)
+    y = c.persist(x + 1, optimize_graph=False)
     y = await y
     stop = time()
 
@@ -2918,7 +2918,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert "array" in str(tg.types)
     assert "array" in str(tp.types)
 
-    z = y[:20].persist(optimize_graph=False)
+    z = c.persist(y[:20], optimize_graph=False)
     z = await z
     del y
 
@@ -3098,13 +3098,13 @@ async def test_task_prefix(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
-    y = (x + 1).sum().persist()
+    y = c.persist((x + 1).sum())
     y = await y
 
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 1
 
     a = da.arange(101, chunks=(20,))
-    b = (a + 1).sum().persist()
+    b = c.persist((a + 1).sum())
     b = await b
 
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 2
@@ -3129,7 +3129,7 @@ async def test_task_group_non_tuple_key(c, s, a, b):
     np = pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
-    y = (x + 1).sum().persist()
+    y = c.persist((x + 1).sum())
     y = await y
 
     assert s.task_prefixes["sum"].states["released"] == 4
@@ -4918,7 +4918,7 @@ async def test_refuse_to_schedule_huge_task(c, s, *workers, finalize):
         fut = c.compute(bg)
         match += r".* you called client.compute()"
     else:
-        bg = bg.repartition(npartitions=1).persist()
+        bg = c.persist(bg.repartition(npartitions=1))
         fut = list(c.futures_of(bg))[0]
 
     with pytest.raises(MemoryError, match=match):
@@ -4955,7 +4955,7 @@ async def test_resubmit_nondeterministic_task_different_deps(c, s, add_deps):
     o = object()
     x1 = c.submit(inc, 1, key="x1") if not add_deps else 2
     x2 = c.submit(inc, 2, key="x2")
-    y1 = delayed(lambda i, j: i)(x1, o, dask_key_name="y").persist()
+    y1 = c.persist(delayed(lambda i, j: i)(x1, o, dask_key_name="y"))
     y2 = delayed(lambda i, j: i)(x2, o, dask_key_name="y")
     z = delayed(inc)(y2, dask_key_name="z")
 
@@ -5141,7 +5141,7 @@ async def test_alias_resolving_break_queuing(c, s, a):
     arr = da.random.random((90, 100), chunks=(10, 50))
     result = arr.rechunk(((10, 7, 7, 6) * 3, (50, 50)))
     result = result.sum(split_every=1000)
-    x = result.persist()
+    x = c.persist(result)
     while not s.tasks:
         await asyncio.sleep(0.01)
     assert sum([s.is_rootish(v) for v in s.tasks.values()]) == 18

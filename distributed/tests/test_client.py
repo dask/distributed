@@ -401,7 +401,7 @@ async def test_future_repr(c, s, a, b):
 async def test_future_tuple_repr(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
-    y = da.arange(10, chunks=(5,)).persist()
+    y = c.persist(da.arange(10, chunks=(5,)))
     f = futures_of(y)[0]
     for func in [repr, lambda x: x._repr_html_()]:
         for k in f.key:
@@ -4808,7 +4808,7 @@ async def test_restart_workers(c, s, a, b):
     # Persist futures and perform a computation
     size = 100
     x = da.ones(size, chunks=10)
-    x = x.persist()
+    x = c.persist(x)
     assert await c.compute(x.sum()) == size
 
     # Restart a single worker
@@ -5178,7 +5178,7 @@ async def test_serialize_collections(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
-    x = da.arange(10, chunks=(5,)).persist()
+    x = c.persist(da.arange(10, chunks=(5,)))
 
     def f(x):
         assert isinstance(x, da.Array)
@@ -5360,7 +5360,7 @@ async def test_serialize_collections_of_futures(c, s, a, b):
     from dask.dataframe.utils import assert_eq
 
     df = pd.DataFrame({"x": [1, 2, 3]})
-    ddf = dd.from_pandas(df, npartitions=2).persist()
+    ddf = c.persist(dd.from_pandas(df, npartitions=2))
     future = await c.scatter(ddf)
 
     ddf2 = await future
@@ -5509,7 +5509,7 @@ async def test_call_stack_collections(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
-    x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
+    x = c.persist(da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5))
     while not a.state.executing_count and not b.state.executing_count:
         await asyncio.sleep(0.001)
     result = await c.call_stack(x)
@@ -5521,7 +5521,7 @@ async def test_call_stack_collections_all(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
-    x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
+    x = c.persist(da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5))
     while not a.state.executing_count and not b.state.executing_count:
         await asyncio.sleep(0.001)
     result = await c.call_stack()
@@ -6179,7 +6179,7 @@ async def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
     dd = pytest.importorskip("dask.dataframe")
 
     df = pd.DataFrame({"x": range(1, 11)})
-    ddf = dd.from_pandas(df, npartitions=2).persist()
+    ddf = c.persist(dd.from_pandas(df, npartitions=2))
     ddf = ddf.map_partitions(lambda x: x)
     ddf["x"] = ddf["x"].astype("f8")
     ddf = ddf.map_partitions(lambda x: x)
@@ -6239,10 +6239,10 @@ async def test_file_descriptors_dont_leak(Worker):
         async with (
             Worker(s.address),
             Worker(s.address),
-            Client(s.address, asynchronous=True),
+            Client(s.address, asynchronous=True) as c,
         ):
             assert proc.num_fds() > before
-            await df.sum().persist()
+            await c.persist(df.sum())
 
     start = time()
     while proc.num_fds() > before:
@@ -6340,7 +6340,7 @@ async def test_config_inherited_by_subprocess():
 
 @gen_cluster(client=True)
 async def test_futures_of_sorted(c, s, a, b):
-    b = dask.bag.from_sequence(range(10), npartitions=5).persist()
+    b = c.persist(dask.bag.from_sequence(range(10), npartitions=5))
     futures = futures_of(b)
     assert [fut.key for fut in futures] == [k for k in b.__dask_keys__()]
 
@@ -6767,7 +6767,7 @@ async def test_annotations_task_state(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.annotations["qux"] == "bar"
@@ -6822,7 +6822,7 @@ async def test_annotations_priorities(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.priority[0] == -15
@@ -6838,7 +6838,7 @@ async def test_annotations_workers(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.annotations["workers"] == [a.address]
@@ -6857,7 +6857,7 @@ async def test_annotations_retries(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.retries == 2
@@ -6910,7 +6910,7 @@ async def test_annotations_resources(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.resource_restrictions == {"GPU": 1}
@@ -6949,7 +6949,7 @@ async def test_annotations_loose_restrictions(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert not ts.worker_restrictions
@@ -7229,7 +7229,7 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
     x = da.ones((10, 10), chunks=(3, 3))
-    future = x.sum().persist()
+    future = c.persist(x.sum())
     await future
 
     test_function_code = inspect.getsource(

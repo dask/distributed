@@ -125,7 +125,7 @@ async def test_collections(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.random.random((1000, 1000), chunks=(100, 100))
     x = x + x.T
-    await x.persist()
+    await c.persist(x)
 
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
