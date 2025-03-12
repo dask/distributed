@@ -282,6 +282,7 @@ distributed:
         - dask
         - debugpy
         - distributed
+        - ipykernel
         - coiled
         - cudf
         - cuml
