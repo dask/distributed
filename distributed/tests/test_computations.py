@@ -14,10 +14,10 @@ async def test_computations(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
     x = da.ones(100, chunks=(10,))
-    y = (x + 1).persist()
+    y = c.persist(x + 1)
     await y
 
-    z = (x - 2).persist()
+    z = c.persist(x - 2)
     await z
 
     assert len(s.computations) == 2

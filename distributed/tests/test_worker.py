@@ -1195,7 +1195,7 @@ async def test_statistical_profiling_2(c, s, a, b):
 
     while True:
         x = da.random.random(1000000, chunks=(10000,))
-        y = (x + x * 2) - x.sum().persist()
+        y = c.persist((x + x * 2) - x.sum())
         await wait(y)
 
         profile = await a.get_profile()

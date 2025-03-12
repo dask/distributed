@@ -342,14 +342,14 @@ async def test_mismatched_span(c, s, a, use_default):
     s.add_plugin(MyPlugin(), name="my-plugin")
 
     if use_default:
-        x0 = delayed(inc)(1, dask_key_name=("x", 0)).persist()
+        x0 = c.persist(delayed(inc)(1, dask_key_name=("x", 0)))
     else:
         with span("p1"):
-            x0 = delayed(inc)(1, dask_key_name=("x", 0)).persist()
+            x0 = c.persist(delayed(inc)(1, dask_key_name=("x", 0)))
     await x0
 
     with span("p2"):
-        x1 = delayed(inc)(2, dask_key_name=("x", 1)).persist()
+        x1 = c.persist(delayed(inc)(2, dask_key_name=("x", 1)))
     await x1
     span_name = ("default",) if use_default else ("p1",)
 

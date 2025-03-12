@@ -151,10 +151,10 @@ async def test_compute(c, s, a, pause):
 @gen_blockable_cluster
 async def test_persist(c, s, a, pause):
     async with block_worker(c, s, a, pause):
-        low = dinc(1, dask_key_name="low").persist(priority=-1)
+        low = c.persist(dinc(1, dask_key_name="low"), priority=-1)
         ev = Event()
         clog = c.submit(lambda ev: ev.wait(), ev, key="clog")
-        high = dinc(2, dask_key_name="high").persist(priority=1)
+        high = c.persist(dinc(2, dask_key_name="high"), priority=1)
 
     await wait(high)
     assert all(ws.processing for ws in s.workers.values())
@@ -209,8 +209,8 @@ async def test_repeated_persists_same_priority(c, s, a, pause):
     zs = [delayed(slowinc)(xs[i], delay=0.05, dask_key_name=f"z{i}") for i in range(10)]
 
     async with block_worker(c, s, a, pause, 30, 10):
-        ys = dask.persist(*ys)
-        zs = dask.persist(*zs)
+        ys = c.persist(ys)
+        zs = c.persist(zs)
 
     while (
         sum(t.state == "memory" for t in s.tasks.values()) < 5
