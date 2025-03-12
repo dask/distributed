@@ -219,7 +219,7 @@ async def test_resources_str(c, s, a, b):
 
     x = dd.from_pandas(pd.DataFrame({"A": [1, 2], "B": [3, 4]}), npartitions=1)
     y = x.apply(lambda row: row.sum(), axis=1, meta=(None, "int64"))
-    yy = y.persist(resources={"MyRes": 1})
+    yy = c.persist(y, resources={"MyRes": 1})
     await wait(yy)
 
     ts_first = s.tasks[y.__dask_keys__()[0]]
