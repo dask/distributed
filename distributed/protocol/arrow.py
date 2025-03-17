@@ -47,3 +47,14 @@ def deserialize_table(header, frames):
     blob = frames[0]
     reader = pyarrow.RecordBatchStreamReader(pyarrow.BufferReader(blob))
     return reader.read_all()
+
+
+@dask_serialize.register(pyarrow.fs.FileInfo)
+def serialize_fileinfo(fileinfo):
+    return {}, [(fileinfo.path, fileinfo.size, fileinfo.mtime_ns)]
+
+
+@dask_deserialize.register(pyarrow.fs.FileInfo)
+def serialize_filesystem(header, frames):
+    path, size, mtime_ns = frames[0]
+    return pyarrow.fs.FileInfo(path=path, size=size, mtime_ns=mtime_ns)
