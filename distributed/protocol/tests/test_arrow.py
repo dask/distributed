@@ -46,3 +46,15 @@ def test_dumps_compression():
     msg = {"op": "update", "data": to_serialize(t)}
     result = distributed.protocol.loads(distributed.protocol.dumps(msg))
     assert result["data"].equals(t)
+
+
+def test_dump_fileinfo():
+    from pyarrow.fs import FileInfo
+
+    finfo = FileInfo(path="path", size=1, mtime_ns=2)
+    dtfinfo = deserialize(*serialize(finfo))
+    # Does not implement __equal__
+    assert type(dtfinfo) == FileInfo
+    assert dtfinfo.path == finfo.path
+    assert dtfinfo.size == finfo.size
+    assert dtfinfo.mtime_ns == finfo.mtime_ns
