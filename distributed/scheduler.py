@@ -4865,7 +4865,14 @@ class Scheduler(SchedulerState, ServerNode):
             lost_keys = self._find_lost_dependencies(dsk, dependencies, keys)
 
             if lost_keys:
-                self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
+                self.report(
+                    {
+                        "op": "cancelled-keys",
+                        "keys": lost_keys,
+                        "reason": "lost dependencies",
+                    },
+                    client=client,
+                )
                 self.client_releases_keys(
                     keys=lost_keys, client=client, stimulus_id=stimulus_id
                 )

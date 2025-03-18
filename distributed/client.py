@@ -1839,11 +1839,11 @@ class Client(SyncMethodMixin):
         if state is not None:
             state.lose()
 
-    def _handle_cancelled_keys(self, keys):
+    def _handle_cancelled_keys(self, keys, reason=None, msg=None):
         for key in keys:
             state = self.futures.get(key)
             if state is not None:
-                state.cancel()
+                state.cancel(reason=reason, msg=msg)
 
     def _handle_retried_key(self, key=None):
         state = self.futures.get(key)
@@ -2823,7 +2823,12 @@ class Client(SyncMethodMixin):
             Message that will be attached to the cancelled future
         """
         return self.sync(
-            self._cancel, futures, asynchronous=asynchronous, force=force, msg=msg
+            self._cancel,
+            futures,
+            asynchronous=asynchronous,
+            force=force,
+            msg=msg,
+            reason=reason,
         )
 
     async def _retry(self, futures):
