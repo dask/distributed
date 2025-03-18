@@ -2796,7 +2796,15 @@ class Client(SyncMethodMixin):
     async def _cancel(self, futures, reason=None, msg=None, force=False):
         # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
         keys = list({f.key for f in futures_of(futures)})
-        self._send_to_scheduler({"op": "cancel-keys", "keys": keys, "force": force})
+        self._send_to_scheduler(
+            {
+                "op": "cancel-keys",
+                "keys": keys,
+                "force": force,
+                "reason": reason,
+                "msg": msg,
+            }
+        )
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:

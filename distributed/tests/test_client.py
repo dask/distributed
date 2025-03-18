@@ -2641,28 +2641,23 @@ async def test_futures_of_cancelled_raises(c, s, a, b):
         await asyncio.sleep(0.01)
     await c.cancel([x], reason="testreason")
 
-    # Note: The scheduler currently doesn't remember the reason but rather
-    # forgets the task immediately. The reason is currently. only raised if the
-    # client checks on it. Therefore, we expect an unknown reason and definitely
-    # not a scheduler disconnected which would otherwise indicate a bug, e.g. an
-    # AssertionError during transitioning.
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: testreason"):
         await x
     while x.key in s.tasks:
         await asyncio.sleep(0.01)
 
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         get_obj = c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False)
         gather_obj = c.gather(get_obj)
         await gather_obj
 
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.submit(inc, x)
 
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.submit(add, 1, y=x)
 
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.gather(c.map(add, [1], y=x))
 
 
