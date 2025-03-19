@@ -4865,7 +4865,14 @@ class Scheduler(SchedulerState, ServerNode):
             lost_keys = self._find_lost_dependencies(dsk, dependencies, keys)
 
             if lost_keys:
-                self.report({"op": "cancelled-keys", "keys": lost_keys}, client=client)
+                self.report(
+                    {
+                        "op": "cancelled-keys",
+                        "keys": lost_keys,
+                        "reason": "lost dependencies",
+                    },
+                    client=client,
+                )
                 self.client_releases_keys(
                     keys=lost_keys, client=client, stimulus_id=stimulus_id
                 )
@@ -5572,7 +5579,7 @@ class Scheduler(SchedulerState, ServerNode):
         return "OK"
 
     def stimulus_cancel(
-        self, keys: Collection[Key], client: str, force: bool = False
+        self, keys: Collection[Key], client: str, force: bool, reason: str, msg: str
     ) -> None:
         """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
@@ -5591,7 +5598,11 @@ class Scheduler(SchedulerState, ServerNode):
             if force or ts.who_wants == {cs}:  # no one else wants this key
                 if ts.dependents:
                     self.stimulus_cancel(
-                        [dts.key for dts in ts.dependents], client, force=force
+                        [dts.key for dts in ts.dependents],
+                        client,
+                        force=force,
+                        reason=reason,
+                        msg=msg,
                     )
                 logger.info("Scheduler cancels key %s.  Force=%s", key, force)
                 cancelled_keys.append(key)
@@ -5603,7 +5614,14 @@ class Scheduler(SchedulerState, ServerNode):
                 client=cs.client_key,
                 stimulus_id=f"cancel-key-{time()}",
             )
-        self.report({"op": "cancelled-keys", "keys": cancelled_keys})
+        self.report(
+            {
+                "op": "cancelled-keys",
+                "keys": cancelled_keys,
+                "reason": reason,
+                "msg": msg,
+            }
+        )
 
     def client_desires_keys(self, keys: Collection[Key], client: str) -> None:
         cs = self.clients.get(client)
@@ -8948,7 +8966,7 @@ class Scheduler(SchedulerState, ServerNode):
 
 def _task_to_report_msg(ts: TaskState) -> dict[str, Any] | None:
     if ts.state == "forgotten":
-        return {"op": "cancelled-keys", "keys": [ts.key]}
+        return {"op": "cancelled-keys", "keys": [ts.key], "reason": "already forgotten"}
     elif ts.state == "memory":
         return {"op": "key-in-memory", "key": ts.key}
     elif ts.state == "erred":
