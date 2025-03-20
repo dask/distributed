@@ -6,12 +6,12 @@ Distributed
 A library for distributed computation.  See documentation_ for more details.
 
 .. _documentation: https://distributed.dask.org
-.. |Test Status| image:: https://github.com/dask/distributed/workflows/Tests/badge.svg?branch=main
+.. |Test Status| image:: https://github.com/dask/distributed/actions/workflows/tests.yaml/badge.svg?branch=main
    :target: https://github.com/dask/distributed/actions?query=workflow%3ATests+branch%3Amain
-.. |Longitudinal Report (full)| image:: https://github.com/dask/distributed/workflows/Test%20Report/badge.svg?branch=main
+.. |Longitudinal Report (full)| image:: https://github.com/dask/distributed/actions/workflows/test-report.yaml/badge.svg?branch=main
    :target: https://dask.github.io/distributed/test_report.html
    :alt: Longitudinal test report (full version)
-.. |Longitudinal Report (short)| image:: https://github.com/dask/distributed/workflows/Test%20Report/badge.svg?branch=main
+.. |Longitudinal Report (short)| image:: https://github.com/dask/distributed/actions/workflows/test-report.yaml/badge.svg?branch=main
    :target: https://dask.github.io/distributed/test_short_report.html
    :alt: Longitudinal test report (short version)
 .. |Coverage| image:: https://codecov.io/gh/dask/distributed/branch/main/graph/badge.svg
