@@ -39,12 +39,15 @@ from typing import (
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
+from tornado import gen
+from tornado.ioloop import IOLoop
 
 import dask
-from dask.base import collections_to_dsk
+from dask._expr import Expr, HLGExpr, LLGExpr
+from dask._task_spec import DataNode, GraphNode, List, Task, TaskRef, parse_input
+from dask.base import collections_to_expr
 from dask.core import flatten, validate_key
 from dask.highlevelgraph import HighLevelGraph
-from dask.layers import Layer
 from dask.tokenize import tokenize
 from dask.typing import Key, NestedKeys, NoDefault, no_default
 from dask.utils import (
@@ -58,19 +61,6 @@ from dask.utils import (
 )
 from dask.widgets import get_template
 
-from distributed.core import OKMessage
-from distributed.protocol.serialize import _is_dumpable
-from distributed.utils import Deadline, wait_for
-
-try:
-    from dask.delayed import single_key
-except ImportError:
-    single_key = first
-from tornado import gen
-from tornado.ioloop import IOLoop
-
-from dask._task_spec import DataNode, GraphNode, List, Task, TaskRef, parse_input
-
 import distributed.utils
 from distributed import cluster_dump, preloading
 from distributed import versions as version_module
@@ -80,6 +70,7 @@ from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
+    OKMessage,
     PooledRPCCall,
     Status,
     clean_exception,
@@ -99,6 +90,7 @@ from distributed.metrics import time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
 from distributed.protocol import to_serialize
 from distributed.protocol.pickle import dumps, loads
+from distributed.protocol.serialize import _is_dumpable
 from distributed.publish import Datasets
 from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
@@ -107,6 +99,7 @@ from distributed.spans import SpanMetadata
 from distributed.threadpoolexecutor import rejoin
 from distributed.utils import (
     CancelledError,
+    Deadline,
     LoopRunner,
     NoOpAwaitable,
     SyncMethodMixin,
@@ -118,6 +111,7 @@ from distributed.utils import (
     nbytes,
     sync,
     thread_state,
+    wait_for,
 )
 from distributed.utils_comm import (
     gather_from_workers,
@@ -835,51 +829,38 @@ def _is_nested(iterable):
     return False
 
 
-class _MapLayer(Layer):
+class _MapExpr(Expr):
     func: Callable
-    iterables: Iterable[Any]
-    key: str | Iterable[str] | None
+    iterables: Iterable
+    key: Key
     pure: bool
-    annotations: dict[str, Any] | None
-
-    def __init__(
-        self,
-        func: Callable,
-        iterables: Iterable[Any],
-        key: str | Iterable[str] | None = None,
-        pure: bool = True,
-        annotations: dict[str, Any] | None = None,
-        **kwargs,
-    ):
-        self.func: Callable = func
-        self.iterables = [tuple(map(parse_input, iterable)) for iterable in iterables]
-        self.key: str | Iterable[str] | None = key
-        self.pure: bool = pure
-        self.kwargs = {k: parse_input(v) for k, v in kwargs.items()}
-        super().__init__(annotations=annotations)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__} <func='{funcname(self.func)}'>"
+    annotations: dict
+    kwargs: dict
+    _cached_keys: Iterable[Key] | None
+    _parameters = [
+        "func",
+        "iterables",
+        "key",
+        "pure",
+        "annotations",
+        "kwargs",
+        "_cached_keys",
+    ]
+    _defaults = {"_cached_keys": None}
 
     @property
-    def _dict(self) -> _T_LowLevelGraph:
-        self._cached_dict: _T_LowLevelGraph
-        dsk: _T_LowLevelGraph
-
-        if hasattr(self, "_cached_dict"):
-            return self._cached_dict
-        else:
-            dsk = self._construct_graph()
-            self._cached_dict = dsk
-        return self._cached_dict
+    def deterministic_token(self):
+        if not self.pure:
+            self._determ_token = uuid.uuid4().hex
+        return super().deterministic_token
 
     @property
-    def _keys(self) -> Iterable[Key]:
-        if hasattr(self, "_cached_keys"):
+    def keys(self) -> Iterable[Key]:
+        if self._cached_keys is not None:
             return self._cached_keys
         else:
             if isinstance(self.key, Iterable) and not isinstance(self.key, str):
-                self._cached_keys: Iterable[Key] = self.key
+                self.operands[-1] = self.key
                 return self.key
 
             else:
@@ -899,34 +880,19 @@ class _MapLayer(Layer):
                         if self.iterables
                         else []
                     )
-                self._cached_keys = keys
+                self.operands[-1] = keys
                 return keys
 
-    def get_output_keys(self) -> set[Key]:
-        return set(self._keys)
+    def _meta(self):
+        return []
 
-    def get_ordered_keys(self):
-        return list(self._keys)
-
-    def is_materialized(self) -> bool:
-        return hasattr(self, "_cached_dict")
-
-    def __getitem__(self, key: Key) -> GraphNode:
-        return self._dict[key]
-
-    def __iter__(self) -> Iterator[Key]:
-        return iter(self._dict)
-
-    def __len__(self) -> int:
-        return len(self._dict)
-
-    def _construct_graph(self) -> _T_LowLevelGraph:
+    def _layer(self):
         dsk: _T_LowLevelGraph = {}
 
         if not self.kwargs:
             dsk = {
                 key: Task(key, self.func, *args)
-                for key, args in zip(self._keys, zip(*self.iterables))
+                for key, args in zip(self.keys, zip(*self.iterables))
             }
 
         else:
@@ -938,12 +904,12 @@ class _MapLayer(Layer):
                     kwargs2[k] = vv.ref()
                     dsk[vv.key] = vv
                 else:
-                    kwargs2[k] = v
+                    kwargs2[k] = parse_input(v)
 
                 dsk.update(
                     {
                         key: Task(key, self.func, *args, **kwargs2)
-                        for key, args in zip(self._keys, zip(*self.iterables))
+                        for key, args in zip(self.keys, zip(*self.iterables))
                     }
                 )
         return dsk
@@ -2163,16 +2129,19 @@ class Client(SyncMethodMixin):
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        dsk = {
-            key: Task(
-                key,
-                func,
-                *(parse_input(a) for a in args),
-                **{k: parse_input(v) for k, v in kwargs.items()},
-            )
-        }
+
+        expr = LLGExpr(
+            {
+                key: Task(
+                    key,
+                    func,
+                    *(parse_input(a) for a in args),
+                    **{k: parse_input(v) for k, v in kwargs.items()},
+                )
+            }
+        )
         futures = self._graph_to_futures(
-            dsk,
+            expr,
             [key],
             workers=workers,
             allow_other_workers=allow_other_workers,
@@ -2332,14 +2301,16 @@ class Client(SyncMethodMixin):
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
 
-        dsk = _MapLayer(
+        expr = _MapExpr(
             func,
             iterables,
             key=key,
             pure=pure,
-            **kwargs,
+            # FIXME: this doesn't look right
+            annotations={},
+            kwargs=kwargs,
         )
-        keys = dsk.get_ordered_keys()
+        keys = list(expr.keys)
         if isinstance(workers, (str, Number)):
             workers = [workers]
         if workers is not None and not isinstance(workers, (list, set)):
@@ -2348,7 +2319,7 @@ class Client(SyncMethodMixin):
         internal_priority = dict(zip(keys, range(len(keys))))
 
         futures = self._graph_to_futures(
-            dsk,
+            expr,
             keys,
             workers=workers,
             allow_other_workers=allow_other_workers,
@@ -2362,7 +2333,6 @@ class Client(SyncMethodMixin):
         )
 
         # make sure the graph is not materialized
-        assert not dsk.is_materialized(), "Graph must be non-materialized"
         logger.debug("map(%s, ...)", funcname(func))
         return [futures[k] for k in keys]
 
@@ -3323,7 +3293,7 @@ class Client(SyncMethodMixin):
 
     def _graph_to_futures(
         self,
-        dsk,
+        expr,
         keys,
         span_metadata,
         workers=None,
@@ -3338,9 +3308,6 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-            # Make sure `dsk` is a high level graph
-            if not isinstance(dsk, HighLevelGraph):
-                dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
             annotations = {}
             if user_priority:
@@ -3374,7 +3341,7 @@ class Client(SyncMethodMixin):
             from distributed.protocol import serialize
             from distributed.protocol.serialize import ToPickle
 
-            header, frames = serialize(ToPickle(dsk), on_error="raise")
+            header, frames = serialize(ToPickle(expr), on_error="raise")
 
             pickled_size = sum(map(nbytes, [header] + frames))
             if pickled_size > parse_bytes(
@@ -3394,8 +3361,8 @@ class Client(SyncMethodMixin):
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
-                    "graph_header": header,
-                    "graph_frames": frames,
+                    "expr_header": header,
+                    "expr_frames": frames,
                     "keys": set(keys),
                     "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
@@ -3481,8 +3448,12 @@ class Client(SyncMethodMixin):
         --------
         Client.compute : Compute asynchronous collections
         """
+        if isinstance(dsk, dict):
+            dsk = LLGExpr(dsk)
+        elif isinstance(dsk, HighLevelGraph):
+            dsk = HLGExpr(dsk)
         futures = self._graph_to_futures(
-            dsk,
+            expr=dsk,
             keys=set(flatten([keys])),
             workers=workers,
             allow_other_workers=allow_other_workers,
@@ -3677,42 +3648,28 @@ class Client(SyncMethodMixin):
         metadata = SpanMetadata(
             collections=[get_collections_metadata(v) for v in variables]
         )
+        futures_dict = {}
+        if variables:
+            expr = collections_to_expr(variables, optimize_graph, **kwargs)
+            from dask._expr import FinalizeCompute
 
-        dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
-        names = ["finalize-%s" % tokenize(v) for v in variables]
-        dsk2 = {}
-        for i, (name, v) in enumerate(zip(names, variables)):
-            func, extra_args = v.__dask_postcompute__()
-            keys = v.__dask_keys__()
-            if func is single_key and len(keys) == 1 and not extra_args:
-                names[i] = keys[0]
-            else:
-                t = Task(name, func, _convert_dask_keys(keys), *extra_args)
-                dsk2[t.key] = t
+            expr = FinalizeCompute(expr)
 
-        if not isinstance(dsk, HighLevelGraph):
-            dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
+            expr = expr.optimize()
+            names = list(flatten(expr.__dask_keys__()))
 
-        # Let's append the finalize graph to dsk
-        finalize_name = tokenize(names)
-        layers = {finalize_name: dsk2}
-        layers.update(dsk.layers)
-        dependencies = {finalize_name: set(dsk.layers.keys())}
-        dependencies.update(dsk.dependencies)
-        dsk = HighLevelGraph(layers, dependencies)
-
-        futures_dict = self._graph_to_futures(
-            dsk,
-            names,
-            workers=workers,
-            allow_other_workers=allow_other_workers,
-            resources=resources,
-            retries=retries,
-            user_priority=priority,
-            fifo_timeout=fifo_timeout,
-            actors=actors,
-            span_metadata=metadata,
-        )
+            futures_dict = self._graph_to_futures(
+                expr,
+                names,
+                workers=workers,
+                allow_other_workers=allow_other_workers,
+                resources=resources,
+                retries=retries,
+                user_priority=priority,
+                fifo_timeout=fifo_timeout,
+                actors=actors,
+                span_metadata=metadata,
+            )
 
         i = 0
         futures = []
@@ -3780,8 +3737,6 @@ class Client(SyncMethodMixin):
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
             'y': False}``) basis. See :doc:`actors` for additional details.
-        **kwargs
-            Options to pass to the graph optimize calls
 
         Returns
         -------
@@ -3806,13 +3761,15 @@ class Client(SyncMethodMixin):
         metadata = SpanMetadata(
             collections=[get_collections_metadata(v) for v in collections]
         )
-        dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
+        expr = collections_to_expr(collections, optimize_graph)
 
-        names = {k for c in collections for k in flatten(c.__dask_keys__())}
+        expr2 = expr.optimize()
+
+        keys = expr2.__dask_keys__()
 
         futures = self._graph_to_futures(
-            dsk,
-            names,
+            expr2,
+            list(flatten(keys)),
             workers=workers,
             allow_other_workers=allow_other_workers,
             resources=resources,
@@ -3824,15 +3781,15 @@ class Client(SyncMethodMixin):
         )
 
         postpersists = [c.__dask_postpersist__() for c in collections]
-        result = [
-            func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
-            for (func, args), c in zip(postpersists, collections)
-        ]
 
+        assert len(postpersists) == len(keys)
+        result = [
+            func({k: futures[k] for k in flatten(ks)}, *args)
+            for (func, args), ks in zip(postpersists, keys)
+        ]
         if singleton:
-            return first(result)
-        else:
-            return result
+            return result[0]
+        return result
 
     async def _restart(
         self, timeout: str | int | float | NoDefault, wait_for_workers: bool
@@ -4937,11 +4894,6 @@ class Client(SyncMethodMixin):
                 yield from kk.__dask_keys__()
             else:
                 yield kk
-
-    @staticmethod
-    def collections_to_dsk(collections, *args, **kwargs):
-        """Convert many collections into a single dask graph, after optimization"""
-        return collections_to_dsk(collections, *args, **kwargs)
 
     async def _story(self, *keys_or_stimuli: str, on_error="raise"):
         assert on_error in ("raise", "ignore")
@@ -6135,7 +6087,8 @@ def futures_of(o, client=None):
         elif isinstance(x, TaskRef):
             if x not in seen:
                 seen.add(x)
-                futures.append(x)
+                if isinstance(x, Future):
+                    futures.append(x)
         elif dask.is_dask_collection(x):
             stack.extend(x.__dask_graph__().values())
 
