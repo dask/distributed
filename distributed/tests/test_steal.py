@@ -1084,8 +1084,11 @@ async def test_blocklist_shuffle_split(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "tasks"}):
         graph = df.shuffle(
             "A",
-            # If we don't have enough partitions, we'll fall back to a simple shuffle
+            # If we don't have enough partitions, we'll fall back to a
+            # simple shuffle
             max_branch=npart - 1,
+            # Block optimizer from killing the shuffle
+            force=True,
         ).sum()
     res = c.compute(graph)
 

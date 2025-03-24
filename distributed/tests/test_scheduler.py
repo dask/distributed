@@ -1422,8 +1422,8 @@ async def test_update_graph_culls(s, a, b):
 
     header, frames = serialize(ToPickle(dsk), on_error="raise")
     await s.update_graph(
-        graph_header=header,
-        graph_frames=frames,
+        expr_header=header,
+        expr_frames=frames,
         keys=["y"],
         client="client",
         internal_priority={k: 0 for k in "xyz"},
@@ -2825,8 +2825,11 @@ async def test_default_task_duration_splits(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "tasks"}):
         graph = df.shuffle(
             "A",
-            # If we don't have enough partitions, we'll fall back to a simple shuffle
+            # If we don't have enough partitions, we'll fall back to a
+            # simple shuffle
             max_branch=npart - 1,
+            # Block optimizer from killing the shuffle
+            force=True,
         ).sum()
     fut = c.compute(graph)
     await wait(fut)
@@ -5155,6 +5158,8 @@ async def test_data_producers(c, s, a):
         return 100
 
     class MyArray(DaskMethodsMixin):
+        __dask_optimize__ = None
+
         def __dask_graph__(self):
             return {
                 "a": DataNode("a", 10),
