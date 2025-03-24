@@ -2306,7 +2306,6 @@ class Client(SyncMethodMixin):
             iterables,
             key=key,
             pure=pure,
-            # FIXME: this doesn't look right
             annotations={},
             kwargs=kwargs,
         )
