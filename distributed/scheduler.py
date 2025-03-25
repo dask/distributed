@@ -4867,19 +4867,7 @@ class Scheduler(SchedulerState, ServerNode):
             dsk = _cull(dsk, keys)
 
             if not internal_priority:
-                # Removing all non-local keys before calling order()
-                dsk_keys = set(
-                    dsk
-                )  # intersection() of sets is much faster than dict_keys
-                stripped_deps = {
-                    k: v.intersection(dsk_keys)
-                    for k, v in dependencies.items()
-                    if k in dsk_keys
-                }
-
-                internal_priority = await offload(
-                    dask.order.order, dsk=dsk, dependencies=stripped_deps
-                )
+                internal_priority = await offload(dask.order.order, dsk=dsk)
             ordering_done = time()
 
             logger.debug("Ordering done.")
