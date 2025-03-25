@@ -289,7 +289,9 @@ class WorkStealing(SchedulerPlugin):
             assert ts in ts.processing_on.long_running
             return None, None
 
-        nbytes = ts.get_nbytes_deps()
+        nbytes = sum(
+            self.scheduler.tasks[dts_key].get_nbytes() for dts_key in ts.dependencies
+        )
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         cost_multiplier = transfer_time / compute_time
 
