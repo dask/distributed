@@ -140,9 +140,13 @@ from distributed.variable import VariableExtension
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     # TODO import from typing (requires Python >=3.11)
+    from typing import TypeVar
+
     from typing_extensions import Self, TypeAlias
 
     from dask._expr import Expr
+
+    FuncT = TypeVar("FuncT", bound=Callable[..., Any])
 
 # Not to be confused with distributed.worker_state_machine.TaskStateState
 TaskStateState: TypeAlias = Literal[
@@ -889,7 +893,7 @@ class Computation:
 
     __slots__ = tuple(__annotations__)
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.start = time()
         self.groups = set()
         self.code = SortedSet()
@@ -3674,32 +3678,44 @@ class Scheduler(SchedulerState, ServerNode):
     _workers_removed_total: int
     _active_graph_updates: int
 
+    _starting_nannies: set[str]
+    worker_plugins: dict[str, bytes]
+    nanny_plugins: dict[str, bytes]
+
+    client_comms: dict[str, BatchedSend]
+    stream_comms: dict[str, BatchedSend]
+
+    cumulative_worker_metrics: defaultdict[tuple | str, int]
+    bandwidth_types: defaultdict[str, float]
+    bandwidth_workers: defaultdict[tuple[str, str], float]
+    services: dict
+
     def __init__(
         self,
-        loop=None,
-        services=None,
-        service_kwargs=None,
-        allowed_failures=None,
-        extensions=None,
-        validate=None,
-        scheduler_file=None,
-        security=None,
-        worker_ttl=None,
-        idle_timeout=None,
-        interface=None,
-        host=None,
-        port=0,
-        protocol=None,
-        dashboard_address=None,
-        dashboard=None,
-        http_prefix="/",
-        preload=None,
-        preload_argv=(),
-        plugins=(),
-        contact_address=None,
-        transition_counter_max=False,
-        jupyter=False,
-        **kwargs,
+        loop: IOLoop | None = None,
+        services: dict | None = None,
+        service_kwargs: dict | None = None,
+        allowed_failures: int | None = None,
+        extensions: dict | None = None,
+        validate: bool | None = None,
+        scheduler_file: str | None = None,
+        security: dict | Security | None = None,
+        worker_ttl: float | None = None,
+        idle_timeout: float | None = None,
+        interface: str | None = None,
+        host: str | None = None,
+        port: int = 0,
+        protocol: str | None = None,
+        dashboard_address: str | None = None,
+        dashboard: bool | None = None,
+        http_prefix: str | None = "/",
+        preload: str | Sequence[str] | None = None,
+        preload_argv: str | Sequence[str] | Sequence[Sequence[str]] = (),
+        plugins: Sequence[SchedulerPlugin] = (),
+        contact_address: str | None = None,
+        transition_counter_max: bool | int = False,
+        jupyter: bool = False,
+        **kwargs: Any,
     ):
         if dask.config.get("distributed.scheduler.pickle", default=True) is False:
             raise RuntimeError(
@@ -3754,7 +3770,11 @@ class Scheduler(SchedulerState, ServerNode):
             preload = dask.config.get("distributed.scheduler.preload")
         if not preload_argv:
             preload_argv = dask.config.get("distributed.scheduler.preload-argv")
-        self.preloads = preloading.process_preloads(self, preload, preload_argv)
+        self.preloads = preloading.process_preloads(
+            self,
+            preload,  # type: ignore
+            preload_argv,
+        )
 
         if isinstance(security, dict):
             security = Security(**security)
@@ -3809,7 +3829,7 @@ class Scheduler(SchedulerState, ServerNode):
                 from jupyter_server.auth import authorized
             except ImportError:
 
-                def authorized(c):
+                def authorized(c: FuncT) -> FuncT:
                     return c
 
             from jupyter_server.base.handlers import JupyterHandler
@@ -3820,8 +3840,8 @@ class Scheduler(SchedulerState, ServerNode):
                 auth_resource = "server"
 
                 @tornado.web.authenticated
-                @authorized
-                async def post(self):
+                @authorized  # type: ignore
+                async def post(self) -> None:
                     """Shut down the server."""
                     self.log.info("Shutting down on /api/shutdown request.")
 
@@ -3860,27 +3880,25 @@ class Scheduler(SchedulerState, ServerNode):
         self.stream_comms = {}
 
         # Task state
-        tasks = {}
+        tasks: dict[Key, TaskState] = {}
 
         self.generation = 0
         self._last_client = None
-        self._last_time = 0
-        unrunnable = {}
+        self._last_time = 0.0
+        unrunnable: dict[TaskState, float] = {}
         queued = HeapSet(key=operator.attrgetter("priority"))
-
-        self.datasets = {}
 
         # Prefix-keyed containers
 
         # Client state
-        clients = {}
+        clients: dict[str, ClientState] = {}
 
         # Worker state
         workers = SortedDict()
 
-        host_info = {}
-        resources = {}
-        aliases = {}
+        host_info: dict[str, dict[str, Any]] = {}
+        resources: dict[str, dict[str, float]] = {}
+        aliases: dict[Hashable, str] = {}
 
         self._worker_collections = [
             workers,
@@ -4013,7 +4031,7 @@ class Scheduler(SchedulerState, ServerNode):
             pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl * 1000)
             self.periodic_callbacks["worker-ttl"] = pc
 
-        pc = PeriodicCallback(self.check_idle, 250)
+        pc = PeriodicCallback(self.check_idle, 250)  # type: ignore
         self.periodic_callbacks["idle-timeout"] = pc
 
         pc = PeriodicCallback(self._check_no_workers, 250)
@@ -4251,19 +4269,17 @@ class Scheduler(SchedulerState, ServerNode):
         setproctitle(f"dask scheduler [{self.address}]")
         return self
 
-    async def close(self, fast=None, close_workers=None, reason="unknown"):
+    async def close(
+        self,
+        timeout: float | None = None,
+        reason: str = "unknown",
+    ) -> None:
         """Send cleanup signal to all coroutines then wait until finished
 
         See Also
         --------
         Scheduler.cleanup
         """
-        if fast is not None or close_workers is not None:
-            warnings.warn(
-                "The 'fast' and 'close_workers' parameters in Scheduler.close have no "
-                "effect and will be removed in a future version of distributed.",
-                FutureWarning,
-            )
         if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
@@ -4272,7 +4288,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Closing scheduler. Reason: %s", reason)
         setproctitle("dask scheduler [closing]")
 
-        async def log_errors(func):
+        async def log_errors(func: Callable) -> None:
             try:
                 await func()
             except Exception:
@@ -5295,14 +5311,14 @@ class Scheduler(SchedulerState, ServerNode):
 
     def stimulus_task_erred(
         self,
-        key=None,
-        worker=None,
-        exception=None,
-        stimulus_id=None,
-        traceback=None,
-        run_id=None,
-        **kwargs,
-    ):
+        key: Key,
+        worker: str,
+        exception: Any,
+        stimulus_id: str,
+        traceback: Any,
+        run_id: str,
+        **kwargs: Any,
+    ) -> RecsMsgs:
         """Mark that a task has erred on a particular worker"""
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
@@ -5879,6 +5895,7 @@ class Scheduler(SchedulerState, ServerNode):
             # Notify all clients
             client_keys = list(self.client_comms)
         elif ts is None:
+            assert client is not None
             client_keys = [client]
         else:
             # Notify clients interested in key (including `client`)
@@ -6301,7 +6318,7 @@ class Scheduler(SchedulerState, ServerNode):
                 stimulus_id=f"worker-send-comm-fail-{time()}",
             )
 
-    def client_send(self, client, msg):
+    def client_send(self, client: str, msg: dict) -> None:
         """Send message to client"""
         c = self.client_comms.get(client)
         if c is None:
@@ -6352,13 +6369,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def scatter(
         self,
-        comm=None,
-        data=None,
-        workers=None,
-        client=None,
-        broadcast=False,
-        timeout=2,
-    ):
+        data: dict,
+        workers: Iterable | None,
+        client: str,
+        broadcast: bool = False,
+        timeout: float = 2,
+    ) -> list[Key]:
         """Send data out to workers
 
         See also
@@ -6704,7 +6720,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         ERROR = object()
 
-        async def send_message(addr):
+        async def send_message(addr: str) -> Any:
             try:
                 comm = await self.rpc.connect(addr)
                 comm.name = "Scheduler Broadcast"
@@ -7198,14 +7214,13 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def replicate(
         self,
-        comm=None,
-        keys=None,
-        n=None,
-        workers=None,
-        branching_factor=2,
-        delete=True,
-        stimulus_id=None,
-    ):
+        keys: list[Key],
+        n: int | None = None,
+        workers: Iterable | None = None,
+        branching_factor: int = 2,
+        delete: bool = True,
+        stimulus_id: str | None = None,
+    ) -> dict | None:
         """Replicate data throughout cluster
 
         This performs a tree copy of the data throughout the network
@@ -7253,6 +7268,7 @@ class Scheduler(SchedulerState, ServerNode):
             if delete:
                 del_worker_tasks = defaultdict(set)
                 for ts in tasks:
+                    assert ts.who_has is not None
                     del_candidates = tuple(ts.who_has & workers)
                     if len(del_candidates) > n:
                         for ws in random.sample(
@@ -7271,6 +7287,7 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
             # Copy not-yet-filled data
+            gathers: defaultdict[str, dict[Key, list[str]]]
             while tasks:
                 gathers = defaultdict(dict)
                 for ts in list(tasks):
@@ -7312,6 +7329,7 @@ class Scheduler(SchedulerState, ServerNode):
                     "branching-factor": branching_factor,
                 },
             )
+        return None
 
     @log_errors
     def workers_to_close(
@@ -7414,7 +7432,7 @@ class Scheduler(SchedulerState, ServerNode):
         limit = sum(limit_bytes.values())
         total = sum(group_bytes.values())
 
-        def _key(group):
+        def _key(group: str) -> tuple[bool, int]:
             is_idle = not any([wws.processing for wws in groups[group]])
             bytes = -group_bytes[group]
             return is_idle, bytes
@@ -7772,7 +7790,13 @@ class Scheduler(SchedulerState, ServerNode):
     @overload
     def report_on_key(self, *, ts: TaskState, client: str | None = None) -> None: ...
 
-    def report_on_key(self, key=None, *, ts=None, client=None):
+    def report_on_key(
+        self,
+        key: Key | None = None,
+        *,
+        ts: TaskState | None = None,
+        client: str | None = None,
+    ) -> None:
         if (ts is None) == (key is None):
             raise ValueError(  # pragma: nocover
                 f"ts and key are mutually exclusive; received {key=!r}, {ts=!r}"
@@ -8339,22 +8363,25 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def get_profile(
         self,
-        comm=None,
-        workers=None,
-        scheduler=False,
-        server=False,
-        merge_workers=True,
-        start=None,
-        stop=None,
-        key=None,
-    ):
+        workers: Iterable | None = None,
+        scheduler: bool = False,
+        server: bool = False,
+        merge_workers: bool = True,
+        start: float | None = None,
+        stop: float | None = None,
+        key: Key | None = None,
+    ) -> dict:
         if workers is None:
             workers = self.workers
         else:
             workers = set(self.workers) & set(workers)
 
         if scheduler:
-            return profile.get_profile(self.io_loop.profile, start=start, stop=stop)
+            return profile.get_profile(
+                self.io_loop.profile,  # type: ignore[attr-defined]
+                start=start,
+                stop=stop,
+            )
 
         results = await asyncio.gather(
             *(
@@ -8366,8 +8393,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         results = [r for r in results if not isinstance(r, Exception)]
 
+        response: dict
         if merge_workers:
-            response = profile.merge(*results)
+            response = profile.merge(*results)  # type: ignore
         else:
             response = dict(zip(workers, results))
         return response
@@ -8428,7 +8456,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> str:
         stop = time()
         # Profiles
-        compute, scheduler, workers = await asyncio.gather(
+        compute_d, scheduler_d, workers_d = await asyncio.gather(
             *[
                 self.get_profile(start=start),
                 self.get_profile(scheduler=True, start=start),
@@ -8437,14 +8465,15 @@ class Scheduler(SchedulerState, ServerNode):
         )
         from distributed import profile
 
-        def profile_to_figure(state):
+        def profile_to_figure(state: object) -> object:
             data = profile.plot_data(state)
             figure, source = profile.plot_figure(data, sizing_mode="stretch_both")
             return figure
 
         compute, scheduler, workers = map(
-            profile_to_figure, (compute, scheduler, workers)
+            profile_to_figure, (compute_d, scheduler_d, workers_d)
         )
+        del compute_d, scheduler_d, workers_d
 
         # Task stream
         task_stream = self.get_task_stream(start=start)
@@ -8580,7 +8609,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         return data
 
-    async def get_worker_logs(self, n=None, workers=None, nanny=False):
+    async def get_worker_logs(
+        self, n: int | None = None, workers: list | None = None, nanny: bool = False
+    ) -> dict:
         results = await self.broadcast(
             msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
         )
@@ -8620,7 +8651,9 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> tuple[tuple[float, Any], ...] | dict[str, tuple[tuple[float, Any], ...]]:
         return self._broker.get_events(topic)
 
-    async def get_worker_monitor_info(self, recent=False, starts=None):
+    async def get_worker_monitor_info(
+        self, recent: bool = False, starts: dict | None = None
+    ) -> dict:
         if starts is None:
             starts = {}
         results = await asyncio.gather(
@@ -8842,7 +8875,7 @@ class Scheduler(SchedulerState, ServerNode):
             self._no_workers_since = timestamp or monotonic()
             return
 
-    def adaptive_target(self, target_duration=None):
+    def adaptive_target(self, target_duration: float | None = None) -> int:
         """Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a
@@ -8864,7 +8897,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # CPU
         queued = take(100, concat([self.queued, self.unrunnable.keys()]))
-        queued_occupancy = 0
+        queued_occupancy = 0.0
         for ts in queued:
             queued_occupancy += self._get_prefix_duration(ts.prefix)
 
