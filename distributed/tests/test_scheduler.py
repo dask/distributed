@@ -1465,7 +1465,7 @@ async def test_story(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_scatter_no_workers(c, s, direct):
     with pytest.raises(TimeoutError):
-        await s.scatter(data={"x": 1}, client="alice", timeout=0.1)
+        await s.scatter(data={"x": 1}, client="alice", timeout=0.1, workers=None)
 
     start = time()
     with pytest.raises(TimeoutError):
@@ -4516,12 +4516,6 @@ async def test_worker_state_unique_regardless_of_address(s, w):
     assert ws1 is not ws2
     assert ws1 != ws2
     assert hash(ws1) != ws2
-
-
-@gen_cluster(nthreads=[("", 1)])
-async def test_scheduler_close_fast_deprecated(s, w):
-    with pytest.warns(FutureWarning):
-        await s.close(fast=True)
 
 
 def test_runspec_regression_sync(loop):

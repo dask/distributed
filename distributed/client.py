@@ -886,7 +886,7 @@ class _MapExpr(Expr):
     def _meta(self):
         return []
 
-    def _layer(self):
+    def _layer(self) -> dict[Key, GraphNode]:
         dsk: _T_LowLevelGraph = {}
 
         if not self.kwargs:
