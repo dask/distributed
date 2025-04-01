@@ -88,9 +88,9 @@ from distributed.diagnostics.plugin import (
 )
 from distributed.metrics import time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
-from distributed.protocol import to_serialize
+from distributed.protocol import serialize, to_serialize
 from distributed.protocol.pickle import dumps, loads
-from distributed.protocol.serialize import _is_dumpable
+from distributed.protocol.serialize import Pickled, ToPickle, _is_dumpable
 from distributed.publish import Datasets
 from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
@@ -3336,13 +3336,13 @@ class Client(SyncMethodMixin):
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self) for key in keyset}
-            # Circular import
-            from distributed.protocol import serialize
-            from distributed.protocol.serialize import ToPickle
 
-            header, frames = serialize(ToPickle(expr), on_error="raise")
+            # This is done manually here to get better exception messages on
+            # scheduler side and be able to produce the below warning about
+            # serialized size
+            expr_ser = Pickled(*serialize(ToPickle(expr), on_error="raise"))
 
-            pickled_size = sum(map(nbytes, [header] + frames))
+            pickled_size = sum(map(nbytes, [expr_ser.header] + expr_ser.frames))
             if pickled_size > parse_bytes(
                 dask.config.get("distributed.admin.large-graph-warning-threshold")
             ):
@@ -3360,8 +3360,7 @@ class Client(SyncMethodMixin):
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
-                    "expr_header": header,
-                    "expr_frames": frames,
+                    "expr": expr_ser,
                     "keys": set(keys),
                     "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
