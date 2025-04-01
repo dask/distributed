@@ -108,7 +108,7 @@ from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import deserialize
 from distributed.protocol.pickle import dumps, loads
-from distributed.protocol.serialize import Pickled, Serialized, ToPickle, serialize
+from distributed.protocol.serialize import Serialized, ToPickle, serialize
 from distributed.publish import PublishExtension
 from distributed.pubsub import PubSubSchedulerExtension
 from distributed.queues import QueueExtension
@@ -4836,7 +4836,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def update_graph(
         self,
         client: str,
-        expr_ser: Pickled,
+        expr_ser: Serialized,
         keys: set[Key],
         span_metadata: SpanMetadata,
         internal_priority: dict[Key, int] | None,
@@ -4854,7 +4854,7 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             logger.debug("Received new graph. Deserializing...")
             try:
-                expr = deserialize(expr_ser.header, expr_ser.frames).data
+                expr = deserialize(expr_ser.header, expr_ser.frames)
                 del expr_ser
             except Exception as e:
                 msg = """\

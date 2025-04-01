@@ -90,7 +90,7 @@ from distributed.metrics import time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
 from distributed.protocol import serialize, to_serialize
 from distributed.protocol.pickle import dumps, loads
-from distributed.protocol.serialize import Pickled, ToPickle, _is_dumpable
+from distributed.protocol.serialize import Serialized, ToPickle, _is_dumpable
 from distributed.publish import Datasets
 from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
@@ -3340,7 +3340,7 @@ class Client(SyncMethodMixin):
             # This is done manually here to get better exception messages on
             # scheduler side and be able to produce the below warning about
             # serialized size
-            expr_ser = Pickled(*serialize(ToPickle(expr), on_error="raise"))
+            expr_ser = Serialized(*serialize(to_serialize(expr), on_error="raise"))
 
             pickled_size = sum(map(nbytes, [expr_ser.header] + expr_ser.frames))
             if pickled_size > parse_bytes(
@@ -3360,7 +3360,7 @@ class Client(SyncMethodMixin):
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
-                    "expr": expr_ser,
+                    "expr_ser": expr_ser,
                     "keys": set(keys),
                     "internal_priority": internal_priority,
                     "submitting_task": getattr(thread_state, "key", None),
