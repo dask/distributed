@@ -202,6 +202,7 @@ allow_incomplete_defs = true
 # Recent or recently overhauled modules featuring stricter validation
 module = [
     "distributed.active_memory_manager",
+    "distributed.scheduler",
     "distributed.spans",
     "distributed.system_monitor",
     "distributed.worker_memory",
