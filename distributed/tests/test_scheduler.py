@@ -37,6 +37,7 @@ from distributed import (
     SchedulerPlugin,
     Worker,
     fire_and_forget,
+    get_client,
     wait,
 )
 from distributed.comm.addressing import parse_host_port
@@ -2168,78 +2169,81 @@ async def test_missing_data_errant_worker(c, s, w1, w2, w3):
         await wait(y)
 
 
+def inc_only_once(key):
+    def inc(x):
+        k = f"{x}-{key}"
+        if (c := get_client()).get_metadata(k, default=None):
+            raise RuntimeError("Must only be called once")
+        c.set_metadata(k, True)
+        return x + 1
+
+    return inc
+
+
+def div_only_once(key):
+    def div(x, y):
+        k = f"{x}-{y}-{key}"
+        if (c := get_client()).get_metadata(k, default=None):
+            raise RuntimeError("Must only be called once")
+        c.set_metadata(k, True)
+        return x / y
+
+    return div
+
+
 @gen_cluster(client=True)
 async def test_dont_recompute_if_persisted(c, s, a, b):
-    x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(inc)(x, dask_key_name="y")
+    x = delayed(inc_only_once("x"))(1, dask_key_name="x")
+    y = delayed(inc_only_once("y"))(x, dask_key_name="y")
 
     yy = c.persist(y)
-    await wait(yy)
-
-    old = list(s.transition_log)
+    await c.compute(yy)
 
     yyy = c.persist(y)
-    await wait(yyy)
-
-    await asyncio.sleep(0.100)
-    assert list(s.transition_log) == old
+    await c.compute(yyy)
 
 
 @gen_cluster(client=True)
 async def test_dont_recompute_if_persisted_2(c, s, a, b):
-    x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(inc)(x, dask_key_name="y")
-    z = delayed(inc)(y, dask_key_name="z")
+    x = delayed(inc_only_once("x"))(1, dask_key_name="x")
+    y = delayed(inc_only_once("y"))(x, dask_key_name="y")
+    z = delayed(inc_only_once("z"))(y, dask_key_name="z")
 
     yy = c.persist(y)
-    await wait(yy)
-
-    old = s.story("x", "y")
+    await c.compute(yy)
 
     zz = c.persist(z)
-    await wait(zz)
-
-    await asyncio.sleep(0.100)
-    assert s.story("x", "y") == old
+    await c.compute(zz)
 
 
 @gen_cluster(client=True)
 async def test_dont_recompute_if_persisted_3(c, s, a, b):
-    x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(inc)(2, dask_key_name="y")
-    z = delayed(inc)(y, dask_key_name="z")
+    x = delayed(inc_only_once("x"))(1, dask_key_name="x")
+    y = delayed(inc_only_once("y"))(2, dask_key_name="y")
+    z = delayed(inc_only_once("z"))(y, dask_key_name="z")
     w = delayed(operator.add)(x, z, dask_key_name="w")
 
     ww = c.persist(w)
-    await wait(ww)
-
-    old = list(s.transition_log)
+    await c.compute(ww)
 
     www = c.persist(w)
-    await wait(www)
-    await asyncio.sleep(0.100)
-    assert list(s.transition_log) == old
+    await c.compute(www)
 
 
 @gen_cluster(client=True)
 async def test_dont_recompute_if_persisted_4(c, s, a, b):
     x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(inc)(x, dask_key_name="y")
-    z = delayed(inc)(x, dask_key_name="z")
+    y = delayed(inc_only_once("y"))(x, dask_key_name="y")
+    z = delayed(inc_only_once("z"))(x, dask_key_name="z")
 
     yy = c.persist(y)
-    await wait(yy)
-
-    old = s.story("x")
+    await c.compute(yy)
 
     while s.tasks["x"].state == "memory":
         await asyncio.sleep(0.01)
 
     yyy, zzz = c.persist([y, z])
-    await wait([yyy, zzz])
-
-    new = s.story("x")
-    assert len(new) > len(old)
+    await c.gather(c.compute([yyy, zzz]))
 
 
 @gen_cluster(client=True)
@@ -2259,19 +2263,20 @@ async def test_dont_forget_released_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_dont_recompute_if_erred(c, s, a, b):
-    x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(div)(x, 0, dask_key_name="y")
+
+    x = delayed(inc_only_once("x"))(1, dask_key_name="x")
+    y = delayed(div_only_once("y"))(x, 0, dask_key_name="y")
 
     yy = c.persist(y)
-    await wait(yy)
-
-    old = list(s.transition_log)
+    await c.compute(yy)
 
     yyy = c.persist(y)
-    await wait(yyy)
+    await c.compute(yyy)
 
-    await asyncio.sleep(0.100)
-    assert list(s.transition_log) == old
+    with pytest.raises(RuntimeError, match="Must only be called once"):
+        inc_only_once("x")(1)
+    with pytest.raises(RuntimeError, match="Must only be called once"):
+        div_only_once("y")(1, 1)
 
 
 @gen_cluster()

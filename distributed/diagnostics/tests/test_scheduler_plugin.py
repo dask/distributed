@@ -492,7 +492,6 @@ async def test_update_graph_hook_simple(c, s, a, b):
             tasks,
             annotations,
             priority,
-            dependencies,
             stimulus_id,
             **kwargs,
         ) -> None:
@@ -505,7 +504,6 @@ async def test_update_graph_hook_simple(c, s, a, b):
             assert annotations == {}
             assert len(priority) == 1
             assert isinstance(priority["foo"], tuple)
-            assert dependencies == {"foo": set()}
             assert stimulus_id is not None
             self.success = True
 
@@ -534,7 +532,6 @@ async def test_update_graph_hook_complex(c, s, a, b):
             tasks,
             annotations,
             priority,
-            dependencies,
             stimulus_id,
             **kwargs,
         ) -> None:
@@ -552,10 +549,6 @@ async def test_update_graph_hook_complex(c, s, a, b):
             }
             assert len(priority) == len(tasks), priority
             assert priority["f2"][0] == -13
-            for k in keys:
-                assert k in dependencies
-            assert dependencies["f1"] == set()
-            assert dependencies["sum"] == {"f1", "f3"}
             assert stimulus_id is not None
 
             self.success = True
