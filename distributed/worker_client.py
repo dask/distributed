@@ -68,16 +68,20 @@ def worker_client(timeout=None, separate_thread=True):
                 pass
             else:
                 duration = time() - thread_state.start_time
-                secede()  # have this thread secede from the thread pool
-                stack.callback(rejoin)
-                worker.loop.add_callback(
-                    worker.handle_stimulus,
-                    SecedeEvent(
-                        key=thread_state.key,
-                        compute_duration=duration,
-                        stimulus_id=f"worker-client-secede-{time()}",
-                    ),
-                )
+                try:
+                    secede()  # have this thread secede from the thread pool
+                except KeyError:  # already seceded
+                    pass
+                else:
+                    stack.callback(rejoin)
+                    worker.loop.add_callback(
+                        worker.handle_stimulus,
+                        SecedeEvent(
+                            key=thread_state.key,
+                            compute_duration=duration,
+                            stimulus_id=f"worker-client-secede-{time()}",
+                        ),
+                    )
 
         yield client
 
