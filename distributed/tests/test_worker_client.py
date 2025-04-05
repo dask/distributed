@@ -180,6 +180,27 @@ async def test_async(c, s, a, b):
         assert time() < start + 3
 
 
+@gen_cluster(client=True)
+async def test_nested_worker_clients(c, s, a, b):
+    def mysum():
+        result = 0
+        with worker_client() as lc:
+            futures = lc.map(double, range(100))
+            for f in as_completed(futures):
+                result += f.result()
+        return result
+
+    def inc_mysum():
+        with worker_client() as lc:
+            future = lc.submit(inc, mysum())
+            result = future.result()
+        return result
+
+    future = c.submit(inc_mysum)
+    result = await future
+    assert result == 9901
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 3)])
 async def test_separate_thread_false(c, s, a):
     a.count = 0
