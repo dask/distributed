@@ -4836,8 +4836,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def update_graph(
         self,
         client: str,
-        expr_header: dict,
-        expr_frames: list[bytes],
+        expr_ser: Serialized,
         keys: set[Key],
         span_metadata: SpanMetadata,
         internal_priority: dict[Key, int] | None,
@@ -4855,8 +4854,8 @@ class Scheduler(SchedulerState, ServerNode):
         try:
             logger.debug("Received new graph. Deserializing...")
             try:
-                expr = deserialize(expr_header, expr_frames).data
-                del expr_header, expr_frames
+                expr = deserialize(expr_ser.header, expr_ser.frames)
+                del expr_ser
             except Exception as e:
                 msg = """\
                     Error during deserialization of the task graph. This frequently
