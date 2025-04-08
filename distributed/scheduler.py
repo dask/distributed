@@ -110,7 +110,6 @@ from distributed.protocol import deserialize
 from distributed.protocol.pickle import dumps, loads
 from distributed.protocol.serialize import Serialized, ToPickle, serialize
 from distributed.publish import PublishExtension
-from distributed.pubsub import PubSubSchedulerExtension
 from distributed.queues import QueueExtension
 from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
@@ -185,7 +184,6 @@ DEFAULT_EXTENSIONS = {
     "replay-tasks": ReplayTaskScheduler,
     "queues": QueueExtension,
     "variables": VariableExtension,
-    "pubsub": PubSubSchedulerExtension,
     "semaphores": SemaphoreExtension,
     "events": EventExtension,
     "amm": ActiveMemoryManagerExtension,

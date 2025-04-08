@@ -89,7 +89,6 @@ from distributed.node import ServerNode
 from distributed.proctitle import setproctitle
 from distributed.protocol import pickle, to_serialize
 from distributed.protocol.serialize import _is_dumpable
-from distributed.pubsub import PubSubWorkerExtension
 from distributed.security import Security
 from distributed.sizeof import safe_sizeof as sizeof
 from distributed.spans import CONTEXTS_WITH_SPAN_ID, SpansWorkerExtension
@@ -165,7 +164,6 @@ logger = logging.getLogger(__name__)
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 DEFAULT_EXTENSIONS: dict[str, type] = {
-    "pubsub": PubSubWorkerExtension,
     "spans": SpansWorkerExtension,
 }
 
