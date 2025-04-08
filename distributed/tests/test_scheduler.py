@@ -2262,6 +2262,32 @@ async def test_dont_forget_released_keys(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_dont_recompute_if_erred_transition_log(c, s, a, b):
+    """This is a more low level version of test_dont_recompute_if_erred
+    that verifies that there are indeed no transition logs.
+
+    At the time of https://github.com/dask/distributed/pull/9036 it was not
+    entirely safe to run pre-computed tasks through the state machine since
+    there was something wrong with queued tasks. This was triggered by, e.g.
+    `test_threadsafe_get`. If this issue goes away, this test can be safely
+    removed in favor of `test_dont_recompute_if_erred`.
+    """
+    x = delayed(inc)(1, dask_key_name="x")
+    y = delayed(div)(x, 0, dask_key_name="y")
+
+    yy = c.persist(y)
+    await wait(yy)
+
+    old = list(s.transition_log)
+
+    yyy = c.persist(y)
+    await wait(yyy)
+
+    await asyncio.sleep(0.100)
+    assert list(s.transition_log) == old
+
+
+@gen_cluster(client=True)
 async def test_dont_recompute_if_erred(c, s, a, b):
 
     x = delayed(inc_only_once("x"))(1, dask_key_name="x")
