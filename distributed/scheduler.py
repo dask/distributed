@@ -5011,6 +5011,7 @@ class Scheduler(SchedulerState, ServerNode):
         touched_tasks = []
         tgs_with_bad_run_spec = set()
         colliding_task_count = 0
+        collisions = set()
         while stack:
             k = stack.pop()
             if k in touched_keys:
@@ -5019,6 +5020,8 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is None:
                 ts = self.new_task(k, dsk.get(k), "released", computation=computation)
                 new_tasks.append(ts)
+                if ts.run_spec:
+                    runnable.append(ts)
             # It is possible to create the TaskState object before its runspec is known
             # to the scheduler. For instance, this is possible when using a Variable:
             # `f = c.submit(foo); await Variable().set(f)` since the Variable uses a
@@ -5028,6 +5031,8 @@ class Scheduler(SchedulerState, ServerNode):
             # see for example test_scatter_creates_ts
             elif ts.run_spec is None:
                 ts.run_spec = dsk.get(k)
+                if ts.run_spec:
+                    runnable.append(ts)
             # run_spec in the submitted graph may be None. This happens
             # when an already persisted future is part of the graph
             elif k in dsk:
@@ -5039,12 +5044,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # failure. However, this is not possible at the moment because of
                 # https://github.com/dask/dask/issues/9888
                 if deps_lhs != deps_rhs:
-                    # Retain old run_spec and dependencies; rerun them if necessary.
-                    # This sweeps the issue of collision under the carpet as long as the
-                    # old and new task produce the same output - such as in
-                    # dask/dask#9888.
-                    # We're just updating this below
-
+                    collisions.add(k)
                     colliding_task_count += 1
                     if ts.group not in tgs_with_bad_run_spec:
                         tgs_with_bad_run_spec.add(ts.group)
@@ -5075,8 +5075,6 @@ class Scheduler(SchedulerState, ServerNode):
                             "two consecutive calls to `update_graph`."
                         )
 
-            if ts.run_spec:
-                runnable.append(ts)
             touched_keys.add(k)
             touched_tasks.append(ts)
             if tspec := dsk.get(k, ()):
@@ -5085,7 +5083,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Add dependencies
         for key, tspec in dsk.items():
             ts = self.tasks.get(key)
-            if ts is None or ts.dependencies:
+            if ts is None or key in collisions:
                 continue
             for dep in tspec.dependencies:
                 dts = self.tasks[dep]

@@ -2268,11 +2268,14 @@ async def test_dont_recompute_if_erred(c, s, a, b):
     y = delayed(div_only_once("y"))(x, 0, dask_key_name="y")
 
     yy = c.persist(y)
-    await c.compute(yy)
+    with pytest.raises(ZeroDivisionError):
+        await c.compute(yy)
 
     yyy = c.persist(y)
-    await c.compute(yyy)
+    with pytest.raises(ZeroDivisionError):
+        await c.compute(yyy)
 
+    # If they did run a second time, the error would be different
     with pytest.raises(RuntimeError, match="Must only be called once"):
         inc_only_once("x")(1)
     with pytest.raises(RuntimeError, match="Must only be called once"):
