@@ -54,6 +54,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
+from dask._expr import LLGExpr
 from dask._task_spec import DependenciesMapping, GraphNode, convert_legacy_graph
 from dask.core import istask, validate_key
 from dask.typing import Key, no_default
@@ -110,7 +111,6 @@ from distributed.protocol import deserialize
 from distributed.protocol.pickle import dumps, loads
 from distributed.protocol.serialize import Serialized, ToPickle, serialize
 from distributed.publish import PublishExtension
-from distributed.pubsub import PubSubSchedulerExtension
 from distributed.queues import QueueExtension
 from distributed.recreate_tasks import ReplayTaskScheduler
 from distributed.security import Security
@@ -185,7 +185,6 @@ DEFAULT_EXTENSIONS = {
     "replay-tasks": ReplayTaskScheduler,
     "queues": QueueExtension,
     "variables": VariableExtension,
-    "pubsub": PubSubSchedulerExtension,
     "semaphores": SemaphoreExtension,
     "events": EventExtension,
     "amm": ActiveMemoryManagerExtension,
@@ -4687,7 +4686,6 @@ class Scheduler(SchedulerState, ServerNode):
             # FIXME: This is kind of inconsistent since it only includes global
             # annotations.
             computation.annotations.update(global_annotations)
-        del global_annotations
         (
             runnable,
             touched_tasks,
@@ -4709,6 +4707,7 @@ class Scheduler(SchedulerState, ServerNode):
         keys_with_annotations = self._apply_annotations(
             tasks=new_tasks,
             annotations_by_type=annotations_by_type,
+            global_annotations=global_annotations,
         )
 
         self._set_priorities(
@@ -4871,15 +4870,17 @@ class Scheduler(SchedulerState, ServerNode):
             ) = await offload(
                 _materialize_graph,
                 expr=expr,
-                global_annotations=annotations or {},
                 validate=self.validate,
             )
 
             materialization_done = time()
             logger.debug("Materialization done. Got %i tasks.", len(dsk))
+            # Most/all other expression types are implementing their own
+            # culling. For LLGExpr we just don't know
+            explicit_culling = isinstance(expr, LLGExpr)
             del expr
-
-            dsk = _cull(dsk, keys)
+            if explicit_culling:
+                dsk = _cull(dsk, keys)
 
             if not internal_priority:
                 internal_priority = await offload(dask.order.order, dsk=dsk)
@@ -4926,8 +4927,6 @@ class Scheduler(SchedulerState, ServerNode):
                 code=code,
                 span_metadata=span_metadata,
                 annotations_by_type=annotations_by_type,
-                # FIXME: This is just used to attach to Computation
-                # objects. This should be removed
                 global_annotations=annotations,
                 start=start,
                 stimulus_id=stimulus_id,
@@ -5084,6 +5083,7 @@ class Scheduler(SchedulerState, ServerNode):
         self,
         tasks: Iterable[TaskState],
         annotations_by_type: dict[str, dict[Key, Any]],
+        global_annotations: dict[str, Any] | None = None,
     ) -> set[Key]:
         """Apply the provided annotations to the provided `TaskState` objects.
 
@@ -5103,13 +5103,18 @@ class Scheduler(SchedulerState, ServerNode):
         keys_with_annotations
         """
         keys_with_annotations: set[Key] = set()
-        if not annotations_by_type:
+        if not annotations_by_type and not global_annotations:
             return keys_with_annotations
 
         for ts in tasks:
             key = ts.key
 
             ts_annotations = {}
+            if global_annotations:
+                for annot, value in global_annotations.items():
+                    if callable(value):
+                        value = value(ts.key)
+                    ts_annotations[annot] = value
             for annot, key_value in annotations_by_type.items():
                 if (value := key_value.get(key)) is not None:
                     ts_annotations[annot] = value
@@ -9428,7 +9433,6 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
 
 def _materialize_graph(
     expr: Expr,
-    global_annotations: dict[str, Any],
     validate: bool,
 ) -> tuple[dict[Key, T_runspec], dict[Key, set[Key]], dict[str, dict[Key, Any]]]:
     dsk: dict = expr.__dask_graph__()
@@ -9436,10 +9440,7 @@ def _materialize_graph(
         for k in dsk:
             validate_key(k)
     annotations_by_type: defaultdict[str, dict[Key, Any]] = defaultdict(dict)
-    for annotations_type, value in global_annotations.items():
-        annotations_by_type[annotations_type].update(
-            {k: (value(k) if callable(value) else value) for k in dsk}
-        )
+
     for annotations_type, value in expr.__dask_annotations__().items():
         annotations_by_type[annotations_type].update(value)
 

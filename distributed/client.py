@@ -92,7 +92,6 @@ from distributed.protocol import serialize, to_serialize
 from distributed.protocol.pickle import dumps, loads
 from distributed.protocol.serialize import Serialized, ToPickle, _is_dumpable
 from distributed.publish import Datasets
-from distributed.pubsub import PubSubClientExtension
 from distributed.security import Security
 from distributed.sizeof import sizeof
 from distributed.spans import SpanMetadata
@@ -134,9 +133,7 @@ _global_client_index = [0]
 
 _current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
 
-DEFAULT_EXTENSIONS = {
-    "pubsub": PubSubClientExtension,
-}
+DEFAULT_EXTENSIONS: dict[str, Any] = {}
 
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
