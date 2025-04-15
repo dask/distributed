@@ -54,6 +54,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 import dask.utils
+from dask._expr import LLGExpr
 from dask._task_spec import DependenciesMapping, GraphNode, convert_legacy_graph
 from dask.core import istask, validate_key
 from dask.typing import Key, no_default
@@ -4877,9 +4878,12 @@ class Scheduler(SchedulerState, ServerNode):
 
             materialization_done = time()
             logger.debug("Materialization done. Got %i tasks.", len(dsk))
+            # Most/all other expression types are implementing their own
+            # culling. For LLGExpr we just don't know
+            explicit_culling = isinstance(expr, LLGExpr)
             del expr
-
-            dsk = _cull(dsk, keys)
+            if explicit_culling:
+                dsk = _cull(dsk, keys)
 
             if not internal_priority:
                 internal_priority = await offload(dask.order.order, dsk=dsk)
