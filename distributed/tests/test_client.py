@@ -8260,7 +8260,7 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
 
 
 @gen_cluster(client=True, nthreads=[])
-async def test_adjust_hearbeat(c, s):
+async def test_adjust_heartbeat(c, s):
     assert "heartbeat" in c._periodic_callbacks
     heartbeat_pc = c._periodic_callbacks["heartbeat"]
     scheduler_info_pc = c._periodic_callbacks["scheduler-info"]
