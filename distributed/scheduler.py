@@ -1654,6 +1654,8 @@ class SchedulerState:
     idle_task_count: set[WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
+    #: Current total memory across all workers (sum over memory_limit)
+    total_memory: int
     #: Current number of threads across all workers
     total_nthreads: int
     #: History of number of threads
