@@ -31,7 +31,7 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
-from functools import partial
+from functools import cached_property, partial
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
@@ -584,7 +584,7 @@ class WorkerState:
         """
         return self._has_what.keys()
 
-    @property
+    @cached_property
     def host(self) -> str:
         return get_address_host(self.address)
 
