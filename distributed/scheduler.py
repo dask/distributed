@@ -31,7 +31,7 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
-from functools import cached_property, partial
+from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
 
 import psutil
@@ -513,6 +513,8 @@ class WorkerState:
     #: on the worker.
     needs_what: dict[TaskState, int]
 
+    host: str
+
     __slots__ = tuple(__annotations__)
 
     def __init__(
@@ -564,6 +566,7 @@ class WorkerState:
         self.needs_what = {}
         self._network_occ = 0
         self._occupancy_cache = None
+        self.host = get_address_host(self.address)
 
     def __hash__(self) -> int:
         return self._hash
@@ -583,10 +586,6 @@ class WorkerState:
         values, because rebalance() relies on dicts being insertion-sorted.
         """
         return self._has_what.keys()
-
-    @cached_property
-    def host(self) -> str:
-        return get_address_host(self.address)
 
     @property
     def memory(self) -> MemoryState:
