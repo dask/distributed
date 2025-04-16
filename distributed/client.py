@@ -1298,7 +1298,7 @@ class Client(SyncMethodMixin):
         try:
             return self.cluster.dashboard_link
         except AttributeError:
-            scheduler, info = self._get_scheduler_info()
+            scheduler, info = self._get_scheduler_info(n_workers=0)
             if scheduler is None:
                 return None
             else:
@@ -1312,7 +1312,7 @@ class Client(SyncMethodMixin):
 
             return format_dashboard_link(host, port)
 
-    def _get_scheduler_info(self):
+    def _get_scheduler_info(self, n_workers):
         from distributed.scheduler import Scheduler
 
         if (
@@ -1320,12 +1320,12 @@ class Client(SyncMethodMixin):
             and hasattr(self.cluster, "scheduler")
             and isinstance(self.cluster.scheduler, Scheduler)
         ):
-            info = self.cluster.scheduler.identity()
+            info = self.cluster.scheduler.identity(n_workers=n_workers)
             scheduler = self.cluster.scheduler
         elif (
             self._loop_runner.is_started() and self.scheduler and not self.asynchronous
         ):
-            info = sync(self.loop, self.scheduler.identity)
+            info = sync(self.loop, self.scheduler.identity, n_workers=n_workers)
             scheduler = self.scheduler
         else:
             info = self._scheduler_identity
@@ -1368,7 +1368,7 @@ class Client(SyncMethodMixin):
         except PackageNotFoundError:
             JUPYTERLAB = False
 
-        scheduler, info = self._get_scheduler_info()
+        scheduler, info = self._get_scheduler_info(n_workers=5)
 
         return get_template("client.html.j2").render(
             id=self.id,
@@ -1585,18 +1585,20 @@ class Client(SyncMethodMixin):
 
         logger.debug("Started scheduling coroutines. Synchronized")
 
-    async def _update_scheduler_info(self):
+    async def _update_scheduler_info(self, n_workers=5):
         if self.status not in ("running", "connecting") or self.scheduler is None:
             return
         try:
-            self._scheduler_identity = SchedulerInfo(await self.scheduler.identity())
+            self._scheduler_identity = SchedulerInfo(
+                await self.scheduler.identity(n_workers=n_workers)
+            )
         except OSError:
             logger.debug("Not able to query scheduler for identity")
 
     async def _wait_for_workers(
         self, n_workers: int, timeout: float | None = None
     ) -> None:
-        info = await self.scheduler.identity()
+        info = await self.scheduler.identity(n_workers=-1)
         self._scheduler_identity = SchedulerInfo(info)
         if timeout:
             deadline = time() + parse_timedelta(timeout)
@@ -1619,7 +1621,7 @@ class Client(SyncMethodMixin):
                     % (running_workers(info), n_workers, timeout)
                 )
             await asyncio.sleep(0.1)
-            info = await self.scheduler.identity()
+            info = await self.scheduler.identity(n_workers=-1)
             self._scheduler_identity = SchedulerInfo(info)
 
     def wait_for_workers(self, n_workers: int, timeout: float | None = None) -> None:
@@ -4407,11 +4409,14 @@ class Client(SyncMethodMixin):
         else:
             return state
 
-    def scheduler_info(self, **kwargs):
+    def scheduler_info(self, n_workers: int = 5, **kwargs: Any) -> SchedulerInfo:
         """Basic information about the workers in the cluster
 
         Parameters
         ----------
+        n_workers: int
+            The number of workers for which to fetch information. To fetch all,
+            use -1.
         **kwargs : dict
             Optional keyword arguments for the remote function
 
@@ -4429,7 +4434,7 @@ class Client(SyncMethodMixin):
                                          'time-delay': 0.0061032772064208984}}}
         """
         if not self.asynchronous:
-            self.sync(self._update_scheduler_info)
+            self.sync(self._update_scheduler_info, n_workers=n_workers)
         return self._scheduler_identity
 
     def dump_cluster_state(

@@ -1663,6 +1663,8 @@ class SchedulerState:
     idle_task_count: set[WorkerState]
     #: Workers that are fully utilized. May include non-running workers.
     saturated: set[WorkerState]
+    #: Current total memory across all workers (sum over memory_limit)
+    total_memory: int
     #: Current number of threads across all workers
     total_nthreads: int
     #: History of number of threads
@@ -1787,6 +1789,7 @@ class SchedulerState:
         self.task_groups = {}
         self.task_prefixes = {}
         self.task_metadata = {}
+        self.total_memory = 0
         self.total_nthreads = 0
         self.total_nthreads_history = [(time(), 0)]
         self.queued = queued
@@ -4084,16 +4087,22 @@ class Scheduler(SchedulerState, ServerNode):
             tasks=self.tasks,
         )
 
-    def identity(self) -> dict[str, Any]:
+    def identity(self, n_workers: int = -1) -> dict[str, Any]:
         """Basic information about ourselves and our cluster"""
+        if n_workers == -1:
+            n_workers = len(self.workers)
         d = {
             "type": type(self).__name__,
             "id": str(self.id),
             "address": self.address,
             "services": {key: v.port for (key, v) in self.services.items()},
             "started": self.time_started,
+            "n_workers": len(self.workers),
+            "total_threads": self.total_nthreads,
+            "total_memory": self.total_memory,
             "workers": {
-                worker.address: worker.identity() for worker in self.workers.values()
+                worker.address: worker.identity()
+                for worker in itertools.islice(self.workers.values(), n_workers)
             },
         }
         return d
@@ -4544,6 +4553,7 @@ class Scheduler(SchedulerState, ServerNode):
         dh_addresses.add(address)
         dh["nthreads"] += nthreads
 
+        self.total_memory += ws.memory_limit
         self.total_nthreads += nthreads
         self.total_nthreads_history.append((time(), self.total_nthreads))
         self.aliases[name] = address
@@ -5455,6 +5465,7 @@ class Scheduler(SchedulerState, ServerNode):
         dh_addresses: set = dh["addresses"]
         dh_addresses.remove(address)
         dh["nthreads"] -= ws.nthreads
+        self.total_memory -= ws.memory_limit
         self.total_nthreads -= ws.nthreads
         self.total_nthreads_history.append((time(), self.total_nthreads))
         if not dh_addresses:

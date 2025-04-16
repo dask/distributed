@@ -10,7 +10,7 @@
                         <strong>Comm:</strong> {{ address }}
                     </td>
                     <td style="text-align: left;">
-                        <strong>Workers:</strong> {{ workers | length }}
+                        <strong>Workers:</strong> {{ n_workers }} {% if n_workers > workers | length %} (shown below: {{ workers | length }}) {% endif %}
                     </td>
                 </tr>
                 <tr>
@@ -18,7 +18,7 @@
                         <strong>Dashboard:</strong> <a href="{{ scheduler | format_dashboard_address }}" target="_blank">{{ scheduler | format_dashboard_address }}</a>
                     </td>
                     <td style="text-align: left;">
-                        <strong>Total threads:</strong> {{ workers.values() | map(attribute='nthreads') | sum }}
+                        <strong>Total threads:</strong> {{ total_threads }}
                     </td>
                 </tr>
                 <tr>
@@ -26,7 +26,7 @@
                         <strong>Started:</strong> {{ started | datetime_from_timestamp | format_time_ago }}
                     </td>
                     <td style="text-align: left;">
-                        <strong>Total memory:</strong> {{ workers.values() | map(attribute='memory_limit') | sum | format_bytes }}
+                        <strong>Total memory:</strong> {{ total_memory | format_bytes }}
                     </td>
                 </tr>
             </table>
