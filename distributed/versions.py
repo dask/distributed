@@ -7,6 +7,7 @@ import platform
 import struct
 import sys
 from collections.abc import Iterable
+from functools import cache
 from importlib.metadata import version
 from itertools import chain
 from types import ModuleType
@@ -85,15 +86,25 @@ def version_of_package(pkg: ModuleType) -> str | None:
     return None
 
 
+@cache
+def _version_cached(pkg: str) -> str | None:
+    """Try to get the version of a package from the cache"""
+    try:
+        # using importlib.metadata.version is much faster than importing the
+        # actual package.
+        # However, it is much slower than using pkg.__version__ iff the package
+        # is already imported, e.g. in our test suite! Therefore, cache this.
+        return version(pkg)
+    except Exception:
+        return None
+
+
 def get_package_info(pkgs: Iterable[str]) -> dict[str, str | None]:
     """get package versions for the passed required & optional packages"""
 
     pversions: dict[str, str | None] = {"python": ".".join(map(str, sys.version_info))}
     for pkg in pkgs:
-        try:
-            pversions[pkg] = version(pkg)
-        except Exception:
-            pversions[pkg] = None
+        pversions[pkg] = _version_cached(pkg)
     return pversions
 
 
