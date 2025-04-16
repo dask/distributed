@@ -4086,6 +4086,8 @@ class Scheduler(SchedulerState, ServerNode):
             "services": {key: v.port for (key, v) in self.services.items()},
             "started": self.time_started,
             "n_workers": len(self.workers),
+            "total_threads": self.total_nthreads,
+            "total_memory": sum(ws.memory_limit for ws in self.workers.values()),
             "workers": {
                 worker.address: worker.identity()
                 for worker in itertools.islice(self.workers.values(), n_workers)
