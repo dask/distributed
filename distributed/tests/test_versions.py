@@ -6,6 +6,7 @@ import sys
 import pytest
 import tornado
 
+import distributed
 from distributed import Client, Worker
 from distributed.utils_test import gen_cluster
 from distributed.versions import error_message, get_versions
@@ -156,15 +157,15 @@ def test_version_custom_pkgs():
     out = get_versions(
         [
             # Use custom function
-            ("distributed", lambda mod: "123"),
+            "distributed",
             # Use version_of_package
             "notexist",
-            ("pytest", None),  # has __version__
-            "tornado",  # has version
-            "math",  # has nothing
+            "pytest",
+            "tornado",
+            "math",
         ]
     )["packages"]
-    assert out["distributed"] == "123"
+    assert out["distributed"] == distributed.__version__
     assert out["notexist"] is None
     assert out["pytest"] == pytest.__version__
     assert out["tornado"] == tornado.version

@@ -1,13 +1,13 @@
-""" utilities for package version introspection """
+"""utilities for package version introspection"""
 
 from __future__ import annotations
 
-import importlib
 import os
 import platform
 import struct
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
+from importlib.metadata import version
 from itertools import chain
 from types import ModuleType
 from typing import Any
@@ -17,23 +17,23 @@ from packaging.requirements import Requirement
 BOKEH_REQUIREMENT = Requirement("bokeh>=3.1.0")
 
 required_packages = [
-    ("dask", lambda p: p.__version__),
-    ("distributed", lambda p: p.__version__),
-    ("msgpack", lambda p: ".".join([str(v) for v in p.version])),
-    ("cloudpickle", lambda p: p.__version__),
-    ("tornado", lambda p: p.version),
-    ("toolz", lambda p: p.__version__),
+    "dask",
+    "distributed",
+    "msgpack",
+    "cloudpickle",
+    "tornado",
+    "toolz",
 ]
 
 optional_packages = [
-    ("numpy", lambda p: p.__version__),
-    ("pandas", lambda p: p.__version__),
-    ("lz4", lambda p: p.__version__),
+    "numpy",
+    "pandas",
+    "lz4",
 ]
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {
+scheduler_relevant_packages = set(required_packages) | {
     "lz4",
     "python",
 } - {"msgpack"}
@@ -44,9 +44,7 @@ notes_mismatch_package: dict[str, str] = {}
 
 
 def get_versions(
-    packages: (
-        Iterable[str | tuple[str, Callable[[ModuleType], str | None]]] | None
-    ) = None
+    packages: Iterable[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Return basic information on our software installation, and our installed versions
     of packages
@@ -87,27 +85,15 @@ def version_of_package(pkg: ModuleType) -> str | None:
     return None
 
 
-def get_package_info(
-    pkgs: Iterable[str | tuple[str, Callable[[ModuleType], str | None] | None]]
-) -> dict[str, str | None]:
+def get_package_info(pkgs: Iterable[str]) -> dict[str, str | None]:
     """get package versions for the passed required & optional packages"""
 
     pversions: dict[str, str | None] = {"python": ".".join(map(str, sys.version_info))}
     for pkg in pkgs:
-        if isinstance(pkg, (tuple, list)):
-            modname, ver_f = pkg
-            if ver_f is None:
-                ver_f = version_of_package
-        else:
-            modname = pkg
-            ver_f = version_of_package
-
         try:
-            mod = importlib.import_module(modname)
-            pversions[modname] = ver_f(mod)
+            pversions[pkg] = version(pkg)
         except Exception:
-            pversions[modname] = None
-
+            pversions[pkg] = None
     return pversions
 
 
