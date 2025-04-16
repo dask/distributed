@@ -1585,12 +1585,12 @@ class Client(SyncMethodMixin):
 
         logger.debug("Started scheduling coroutines. Synchronized")
 
-    async def _update_scheduler_info(self):
+    async def _update_scheduler_info(self, n_workers=5):
         if self.status not in ("running", "connecting") or self.scheduler is None:
             return
         try:
             self._scheduler_identity = SchedulerInfo(
-                await self.scheduler.identity(n_workers=5)
+                await self.scheduler.identity(n_workers=n_workers)
             )
         except OSError:
             logger.debug("Not able to query scheduler for identity")
