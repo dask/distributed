@@ -32,7 +32,16 @@ from collections.abc import (
 )
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Final,
+    Literal,
+    NamedTuple,
+    cast,
+    overload,
+)
 
 import psutil
 import tornado.web
@@ -413,7 +422,7 @@ class WorkerState:
 
     #: This worker's unique key. This can be its connected address
     #: (such as ``"tcp://127.0.0.1:8891"``) or an alias (such as ``"alice"``).
-    address: str
+    address: Final[str]
 
     pid: int
     name: Hashable
@@ -513,7 +522,8 @@ class WorkerState:
     #: on the worker.
     needs_what: dict[TaskState, int]
 
-    host: str
+    #: The hostname / IP address identifying the machine this worker is on.
+    host: Final[str]
 
     __slots__ = tuple(__annotations__)
 
