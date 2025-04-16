@@ -4075,8 +4075,10 @@ class Scheduler(SchedulerState, ServerNode):
             tasks=self.tasks,
         )
 
-    def identity(self) -> dict[str, Any]:
+    def identity(self, n_workers: int = -1) -> dict[str, Any]:
         """Basic information about ourselves and our cluster"""
+        if n_workers == -1:
+            n_workers = len(self.workers)
         d = {
             "type": type(self).__name__,
             "id": str(self.id),
@@ -4084,7 +4086,8 @@ class Scheduler(SchedulerState, ServerNode):
             "services": {key: v.port for (key, v) in self.services.items()},
             "started": self.time_started,
             "workers": {
-                worker.address: worker.identity() for worker in self.workers.values()
+                worker.address: worker.identity()
+                for worker in itertools.islice(self.workers.values(), n_workers)
             },
         }
         return d

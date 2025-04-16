@@ -3923,6 +3923,10 @@ def test_scheduler_info(c):
     assert isinstance(info, dict)
     assert len(info["workers"]) == 2
     assert isinstance(info["started"], float)
+    info = c.scheduler_info(n_workers=1)
+    assert len(info["workers"]) == 1
+    info = c.scheduler_info(n_workers=-1)
+    assert len(info["workers"]) == 2
 
 
 def test_write_scheduler_file(c, loop):
