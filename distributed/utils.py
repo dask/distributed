@@ -124,7 +124,7 @@ def get_mp_context():
 
         from distributed.versions import optional_packages, required_packages
 
-        for pkg, _ in required_packages + optional_packages:
+        for pkg in required_packages + optional_packages:
             try:
                 importlib.import_module(pkg)
             except ImportError:
