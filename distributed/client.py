@@ -1164,6 +1164,7 @@ class Client(SyncMethodMixin):
             "restart": self._handle_restart,
             "error": self._handle_error,
             "event": self._handle_event,
+            "adjust-heartbeat-interval": self._adjust_heartbeat_intervals,
         }
 
         self._state_handlers = {
@@ -1644,6 +1645,11 @@ class Client(SyncMethodMixin):
             return self.cluster.wait_for_workers(n_workers, timeout)
 
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
+
+    def _adjust_heartbeat_intervals(self, interval):
+        """Adjust the heartbeat intervals for the client and scheduler"""
+        self._periodic_callbacks["heartbeat"].callback_time = interval * 1000
+        self._periodic_callbacks["scheduler-info"].callback_time = interval * 1000
 
     def _heartbeat(self):
         # Don't send heartbeat if scheduler comm or cluster are already closed

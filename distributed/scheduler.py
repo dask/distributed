@@ -5701,6 +5701,14 @@ class Scheduler(SchedulerState, ServerNode):
         """Handle heartbeats from Client"""
         cs = self.clients[client]
         cs.last_seen = time()
+        self.client_comms[client].send(
+            {
+                "op": "adjust-heartbeat-interval",
+                # heartbeat_interval is used for workers
+                # We don't require the clients to heartbeat this often
+                "interval": heartbeat_interval(len(self.clients)) * 10,
+            }
+        )
 
     ###################
     # Task Validation #
