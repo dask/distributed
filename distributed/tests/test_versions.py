@@ -156,9 +156,7 @@ def test_python_version():
 def test_version_custom_pkgs():
     out = get_versions(
         [
-            # Use custom function
             "distributed",
-            # Use version_of_package
             "notexist",
             "pytest",
             "tornado",

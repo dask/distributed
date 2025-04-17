@@ -10,7 +10,6 @@ from collections.abc import Iterable
 from functools import cache
 from importlib.metadata import version
 from itertools import chain
-from types import ModuleType
 from typing import Any
 
 from packaging.requirements import Requirement
@@ -71,19 +70,6 @@ def get_system_info() -> dict[str, Any]:
         "LC_ALL": os.environ.get("LC_ALL", "None"),
         "LANG": os.environ.get("LANG", "None"),
     }
-
-
-def version_of_package(pkg: ModuleType) -> str | None:
-    """Try a variety of common ways to get the version of a package"""
-    from contextlib import suppress
-
-    with suppress(AttributeError):
-        return pkg.__version__
-    with suppress(AttributeError):
-        return str(pkg.version)
-    with suppress(AttributeError):
-        return ".".join(map(str, pkg.version_info))
-    return None
 
 
 @cache
