@@ -4861,7 +4861,14 @@ async def test_robust_undeserializable(c, s, a, b):
     future = c.submit(identity, BrokenSetState())
     await wait(future)
     assert future.status == "error"
-    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
+    with raises_with_cause(
+        RuntimeError,
+        "deserialization",
+        pickle.UnpicklingError,
+        "deserialize",
+        MyException,
+        "hello",
+    ):
         await future
 
     futures = c.map(inc, range(10))
@@ -4877,7 +4884,14 @@ async def test_robust_undeserializable_function(c, s, a, b):
     future = c.submit(BrokenSetState(), 1)
     await wait(future)
     assert future.status == "error"
-    with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
+    with raises_with_cause(
+        RuntimeError,
+        "deserialization",
+        pickle.UnpicklingError,
+        "deserialize",
+        MyException,
+        "hello",
+    ):
         await future
 
     futures = c.map(inc, range(10))
