@@ -734,6 +734,10 @@ class AllExit(Exception):
     """Custom exception class to exit All(...) early."""
 
 
+class ClosedClientError(Exception):
+    """Raised when an action with a closed client can't be performed"""
+
+
 def _handle_print(event):
     _, msg = event
     if not isinstance(msg, dict):
@@ -1419,9 +1423,8 @@ class Client(SyncMethodMixin):
         if self.status in ("running", "closing", "connecting", "newly-created"):
             self.loop.add_callback(self._send_to_scheduler_safe, msg)
         else:
-            raise Exception(
-                "Tried sending message after closing.  Status: %s\n"
-                "Message: %s" % (self.status, msg)
+            raise ClosedClientError(
+                f"Client is {self.status}. Can't send {msg['op']} message."
             )
 
     async def _start(self, timeout=no_default, **kwargs):
