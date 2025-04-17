@@ -45,7 +45,7 @@ from distributed.core import ConnectionPool, Status, clean_exception, connect, r
 from distributed.metrics import time
 from distributed.protocol import serialize
 from distributed.protocol.pickle import dumps, loads
-from distributed.protocol.serialize import ToPickle
+from distributed.protocol.serialize import Serialize, Serialized
 from distributed.scheduler import (
     KilledWorker,
     MemoryState,
@@ -1420,10 +1420,9 @@ async def test_update_graph_culls(s, a, b):
         dependencies={"foo": set()},
     )
 
-    header, frames = serialize(ToPickle(dsk), on_error="raise")
+    expr = Serialized(*serialize(Serialize(dsk), on_error="raise"))
     await s.update_graph(
-        expr_header=header,
-        expr_frames=frames,
+        expr_ser=expr,
         keys=["y"],
         client="client",
         internal_priority={k: 0 for k in "xyz"},
