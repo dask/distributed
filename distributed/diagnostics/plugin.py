@@ -100,7 +100,6 @@ class SchedulerPlugin:
         tasks: list[Key],
         annotations: dict[str, dict[Key, Any]],
         priority: dict[Key, tuple[int | float, ...]],
-        dependencies: dict[Key, set[Key]],
         stimulus_id: str,
         **kwargs: Any,
     ) -> None:
@@ -128,8 +127,6 @@ class SchedulerPlugin:
                     }
             priority:
                 Task calculated priorities as assigned to the tasks.
-            dependencies:
-                A mapping that maps a key to its dependencies.
             stimulus_id:
                 ID of the stimulus causing the graph update
             **kwargs:
