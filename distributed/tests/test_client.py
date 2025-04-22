@@ -63,6 +63,7 @@ from distributed import (
 )
 from distributed.client import (
     Client,
+    ClosedClientError,
     Future,
     FutureCancelledError,
     FuturesCancelledError,
@@ -5709,6 +5710,19 @@ async def test_warn_when_submitting_large_values_memoryview(c, s):
     a = array.array("d", b"0" * 10_000_000)
     with pytest.warns(UserWarning, match="Sending large graph of size"):
         c.submit(lambda: a)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_closed_client_send_message(c, s):
+    # Ensure a meaningful, but concise error is raised when
+    # a closed client attempts to send a message to the scheduler
+    await c.close()
+    with pytest.raises(ClosedClientError, match="update-graph") as exc_info:
+        c.submit(lambda x: x + 1)
+
+    msg = str(exc_info.value)
+    assert "Can't send update-graph" in msg
+    assert len(msg) < 100
 
 
 @gen_cluster(client=True)
