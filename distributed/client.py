@@ -1,983 +1,613 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import asyncio
 import atexit
-import copy
+import collections
+import concurrent.futures
+import contextlib
+import functools
+import getpass
 import inspect
+import io
 import itertools
-import json
 import logging
+import math
+import numbers
 import os
 import pickle
-import re
+import random
 import sys
+import sysconfig
 import threading
-import traceback
+import time
 import uuid
 import warnings
 import weakref
-from collections import defaultdict
-from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures._base import DoneAndNotDoneFutures
-from contextlib import asynccontextmanager, contextmanager, suppress
-from contextvars import ContextVar
-from functools import partial, singledispatchmethod
-from importlib.metadata import PackageNotFoundError, version
+from collections import ChainMap, defaultdict, deque
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+    Generator,
+    Hashable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    Sequence,
+    Set,
+)
+from concurrent.futures import CancelledError, Future
+from contextlib import suppress
+from datetime import timedelta
+from functools import partial
 from numbers import Number
-from queue import Queue as pyQueue
+from operator import getitem
+from time import sleep
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
+    BinaryIO,
     ClassVar,
+    Generic,
     Literal,
     NamedTuple,
-    TypedDict,
+    NoReturn,
+    TypeVar,
+    Union,
     cast,
 )
 
-from packaging.version import parse as parse_version
-from tlz import first, groupby, merge, partition_all, valmap
-from tornado import gen
-from tornado.ioloop import IOLoop
-
 import dask
-from dask._expr import Expr, HLGExpr, LLGExpr
-from dask._task_spec import DataNode, GraphNode, List, Task, TaskRef, parse_input
-from dask.base import collections_to_expr
-from dask.core import flatten, validate_key
+import dask.config
+from dask.base import DaskMethodsMixin, is_dask_collection, tokenize
+from dask.core import istask
+from dask.delayed import Delayed, delayed
 from dask.highlevelgraph import HighLevelGraph
-from dask.tokenize import tokenize
-from dask.typing import Key, NestedKeys, NoDefault, no_default
+from dask.optimization import SubgraphCallable, fuse
 from dask.utils import (
-    ensure_dict,
+    SerializableLock,
+    apply,
     format_bytes,
+    format_time_ago,
     funcname,
+    get_meta_library,
+    has_keyword,
+    key_split,
     parse_bytes,
     parse_timedelta,
-    shorten_traceback,
-    typename,
+    stringify,
 )
-from dask.widgets import get_template
+from tlz import first, groupby, merge, partition_all, pluck, valmap
+from tornado.ioloop import IOLoop
 
-import distributed.utils
-from distributed import cluster_dump, preloading
-from distributed import versions as version_module
-from distributed.batched import BatchedSend
-from distributed.cfexecutor import ClientExecutor
-from distributed.compatibility import PeriodicCallback
-from distributed.core import (
+from . import config, versions
+from ._async import Condition, Event, Lock, add_callback, asyncio_ensure_future
+from ._concurrent_futures_thread import _shutdown_thread_pool
+from ._stories import story
+from .active_memory_manager import ActiveMemoryManager
+from .batched import BatchedSend
+from .cfexecutor import ClientExecutor
+from .collections import AwaitableQueue
+from .comm import (
+    Comm,
     CommClosedError,
-    ConnectionPool,
-    OKMessage,
-    PooledRPCCall,
-    Status,
-    clean_exception,
     connect,
-    rpc,
+    get_address_host,
+    get_local_address_for,
+    parse_address,
+    parse_addresses,
+    resolve_address,
+    unparse_address,
 )
-from distributed.diagnostics.plugin import (
-    ForwardLoggingPlugin,
-    NannyPlugin,
-    SchedulerPlugin,
-    SchedulerUploadFile,
-    UploadFile,
-    WorkerPlugin,
-    _get_plugin_name,
+from .comm.registry import backends, get_backend
+from .comm.utils import OFFLOAD_THRESHOLD
+from .compatibility import PeriodicCallback
+from .core import CommNanny, Status, dumps, loads, rpc
+from .diagnostics.plugin import WorkerPlugin
+from .diagnostics.progress import AllProgress, MultiProgress, Progress, progress
+from .event import Event as SyncEvent
+from .exceptions import AllExit, CancelledError as DistributedCancelledError, TimeoutError
+from .metrics import context_meter, time_meter
+from .objects import HasWhat, SchedulerInfo, WhoHas
+from .preloading import validate_preload_argv
+from .protocol import HasWhat_Msg, LoseData, ToPickle
+from .protocol.serialize import (
+    Serialize,
+    Serialized,
+    extract_serialize,
+    nested_deserialize,
+    serialize,
+    to_serialize,
 )
-from distributed.metrics import time
-from distributed.objects import HasWhat, SchedulerInfo, WhoHas
-from distributed.protocol import serialize, to_serialize
-from distributed.protocol.pickle import dumps, loads
-from distributed.protocol.serialize import Serialized, ToPickle, _is_dumpable
-from distributed.publish import Datasets
-from distributed.security import Security
-from distributed.sizeof import sizeof
-from distributed.spans import SpanMetadata
-from distributed.threadpoolexecutor import rejoin
-from distributed.utils import (
-    CancelledError,
-    Deadline,
+from .publish import Datasets
+from .queues import Queue
+from .recreate_tasks import ReplayTaskGroup, unpack_remotedata
+from .security import Security
+from .semaphore import Semaphore
+from .sizeof import sizeof
+from .threadpoolexecutor import ThreadPoolExecutor
+from .utils import (
+    CancelledError as _CancelledError,
     LoopRunner,
     NoOpAwaitable,
-    SyncMethodMixin,
-    TimeoutError,
-    format_dashboard_link,
-    has_keyword,
-    import_term,
+    TimeoutError as _TimeoutError,
+    _maybe_complex,
+    get_ip,
+    get_ipv6,
+    has_arg,
+    is_coroutine_function,
+    is_valid_key,
     log_errors,
-    nbytes,
+    maybe_await,
+    no_default,
+    offload,
+    parse_ports,
+    short_exception,
     sync,
     thread_state,
-    wait_for,
+    warn_on_duration,
 )
-from distributed.utils_comm import (
+from .utils_comm import (
     gather_from_workers,
     pack_data,
     retry_operation,
     scatter_to_workers,
-    unpack_remotedata,
 )
-from distributed.worker import get_client, get_worker, secede
+from .variable import Variable
+from .worker import FutureState, get_client, get_worker, secede, wait
 
 if TYPE_CHECKING:
-    from typing_extensions import TypeAlias
+    # TODO import from typing (requires Python >=3.10)
+    from typing_extensions import ParamSpec
+
+    P = ParamSpec("P")
+    T = TypeVar("T")
+    NoneType = type(None)
+
+    # circular dependencies
+    from .deploy.cluster import Cluster
+    from .deploy.spec import SpecCluster
+    from .diagnostics.progressbar import TextProgressBar
+    from .diagnostics.websocket import WebsocketHandler
+    from .nanny import Nanny
+    from .scheduler import Scheduler
+
 
 logger = logging.getLogger(__name__)
 
-_global_clients: weakref.WeakValueDictionary[int, Client] = (
-    weakref.WeakValueDictionary()
-)
-_global_client_index = [0]
-
-_current_client: ContextVar[Client | None] = ContextVar("_current_client", default=None)
-
-DEFAULT_EXTENSIONS: dict[str, Any] = {}
-
-TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
-
-
-class FutureCancelledError(CancelledError):
-    key: str
-    reason: str
-    msg: str | None
-
-    def __init__(self, key: str, reason: str | None, msg: str | None = None):
-        self.key = key
-        self.reason = reason if reason else "unknown"
-        self.msg = msg
-
-    def __str__(self) -> str:
-        result = f"{self.key} cancelled for reason: {self.reason}."
-        if self.msg:
-            result = "\n".join([result, self.msg])
-        return result
-
-    def __reduce__(self):
-        return self.__class__, (self.key, self.reason, self.msg)
-
-
-class FuturesCancelledError(CancelledError):
-    error_groups: list[CancelledFuturesGroup]
-
-    def __init__(self, error_groups: list[CancelledFuturesGroup]):
-        self.error_groups = sorted(
-            error_groups, key=lambda group: len(group.errors), reverse=True
-        )
-
-    def __str__(self):
-        count = sum(map(lambda group: len(group.errors), self.error_groups))
-        result = f"{count} Future{'s' if count > 1 else ''} cancelled:"
-        return "\n".join(
-            [result, "Reasons:"] + [str(group) for group in self.error_groups]
-        )
-
-
-class CancelledFuturesGroup:
-    #: Errors of the cancelled futures
-    errors: list[FutureCancelledError]
-
-    #: Reason for cancelling the futures
-    reason: str
-
-    __slots__ = tuple(__annotations__)
-
-    def __init__(self, errors: list[FutureCancelledError], reason: str):
-        self.errors = errors
-        self.reason = reason
-
-    def __str__(self):
-        keys = [error.key for error in self.errors]
-        example_message = None
-
-        for error in self.errors:
-            if error.msg:
-                example_message = error.msg
-                break
-
-        return (
-            f"{len(keys)} Future{'s' if len(keys) > 1 else ''} cancelled for reason: "
-            f"{self.reason}.\nMessage: {example_message}\n"
-            f"Future{'s' if len(keys) > 1 else ''}: {keys}"
-        )
-
-
-class SourceCode(NamedTuple):
-    code: str
-    lineno_frame: int
-    lineno_relative: int
-    filename: str
+DEFAULT_EXTENSIONS: tuple[str, ...] = ()
 
 
 def _get_global_client() -> Client | None:
-    c = _current_client.get()
-    if c:
-        return c
-    L = sorted(list(_global_clients), reverse=True)
-    for k in L:
-        c = _global_clients[k]
-        if c.status != "closed":
-            return c
-        else:
-            del _global_clients[k]
-    return None
+    return getattr(thread_state, "global_client", None)
 
 
 def _set_global_client(c: Client | None) -> None:
-    if c is not None:
-        c._set_as_default = True
-        _global_clients[_global_client_index[0]] = c
-        _global_client_index[0] += 1
+    thread_state.global_client = c
 
 
-def _del_global_client(c: Client) -> None:
-    for k in list(_global_clients):
-        try:
-            if _global_clients[k] is c:
-                del _global_clients[k]
-        except KeyError:  # pragma: no cover
-            pass
+def _del_global_client() -> None:
+    del thread_state.global_client
 
 
-class Future(TaskRef):
+class SourceCode(NamedTuple):
+    """Source code of a function, broken down by modules"""
+
+    # Function source code proper
+    func_source: str
+    # Source code of the module where the function is defined
+    module_source: str
+    # Source code of any other modules the function may be using through closures
+    closure_modules_sources: dict[str, str]
+
+
+@functools.total_ordering
+class Future(FutureState[T]):
     """A remotely running computation
 
-    A Future is a local proxy to a result running on a remote worker.  A user
-    manages future objects in the local Python process to determine what
-    happens in the larger cluster.
+    A Future is a local proxy to a result computation running on a cluster.
 
-    .. note::
-
-        Users should not instantiate futures manually. This can lead to state
-        corruption and deadlocking clusters.
+    A Future is created either by ``Client.submit``, ``Client.map``,
+    ``Client.get``, or from distributed data structures. It refers to a task
+    that will run on the cluster.
 
     Parameters
     ----------
-    key: str, or tuple
-        Key of remote data to which this future refers
+    key: str, Key
+        The key of the task this future refers to
     client: Client
-        Client that should own this future.  Defaults to _get_global_client()
+        The client that created this future. Usually this is the default client
     inform: bool
-        Do we inform the scheduler that we need an update on this future
+        Whether or not the scheduler should inform the client when this future
+        finishes
     state: FutureState
         The state of the future
 
-    Examples
-    --------
-    Futures typically emerge from Client computations
-
-    >>> my_future = client.submit(add, 1, 2)  # doctest: +SKIP
-
-    We can track the progress and results of a future
-
-    >>> my_future  # doctest: +SKIP
-    <Future: status: finished, key: add-8f6e709446674bad78ea8aeecfee188e>
-
-    We can get the result or the exception and traceback from the future
-
-    >>> my_future.result()  # doctest: +SKIP
-
     See Also
     --------
-    Client:  Creates futures
+    Client
     """
 
-    _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
+    _client: Client | None
+    _state: FutureState[T]
+    _key: Hashable
+    _inform: bool
+    _shared_state: dict[str, Any] | None
+    _instance_name: str | None
 
-    _cb_executor = None
-    _cb_executor_pid = None
-    _counter = itertools.count()
-    # Make sure this stays unique even across multiple processes or hosts
-    _uid = uuid.uuid4().hex
+    # Make Future pickleable according to the conventional protocol
+    __getstate__ = None
+    __setstate__ = None
 
-    def __init__(self, key, client=None, state=None, _id=None):
-        self.key = key
-        self._cleared = False
-        self._client = client
-        self._id = _id or (Future._uid, next(Future._counter))
-        self._input_state = state
-        self._state = None
-        self._bind_late()
+    def __init__(
+        self,
+        key: Hashable,
+        client: Client | None = None,
+        inform: bool = True,
+        state: FutureState[T] | None = None,
+    ):
+        self._key = key
+        self._client = client or _get_global_client()
+        self._inform = inform
+        self._shared_state = None
+        # instance_name is used by repr and str to give some helpful context
+        # about what the future is for. e.g. the name of the variable it's
+        # assigned to. This isn't serialized.
+        self._instance_name = None
+        if self._client is None:
+            raise ValueError(
+                "No global client found and no client specified. "
+                "Use Client() as a context manager or "
+                "set a global client using Client.as_current()."
+            )
+        if state is None:
+            # Avoid initializing FutureState if we already have one.
+            # This is useful for methods like 'gather' that already have this information
+            try:
+                self._state = self._client.futures[key]
+            except KeyError:
+                self._state = FutureState(status="pending")
+                self._client.futures[key] = self._state
+                if inform:
+                    self._client._send_to_scheduler(
+                        {"op": "client-desires-keys", "keys": [key], "client": self._client.id}
+                    )
+        else:
+            self._state = state
+            self._client.futures[key] = self._state
+
+        if self._state.client is None:
+            self._state.client = self._client
 
     @property
-    def client(self):
-        self._bind_late()
+    def client(self) -> Client:
+        if self._client is None:
+            raise ValueError("Future has no associated client")
         return self._client
 
-    def bind_client(self, client):
-        self._client = client
-        self._bind_late()
-
-    def _bind_late(self):
-        if self._client and not self._state:
-            self._client._inc_ref(self.key)
-            self._generation = self._client.generation
-
-            if self.key in self._client.futures:
-                self._state = self._client.futures[self.key]
-            else:
-                self._state = self._client.futures[self.key] = FutureState(self.key)
-
-            if self._input_state is not None:
-                try:
-                    handler = self._client._state_handlers[self._input_state]
-                except KeyError:
-                    pass
-                else:
-                    handler(key=self.key)
-
-    def _verify_initialized(self):
-        if not self.client or not self._state:
-            raise RuntimeError(
-                f"{type(self)} object not properly initialized. This can happen"
-                " if the object is being deserialized outside of the context of"
-                " a Client or Worker."
-            )
+    @property
+    def key(self) -> Hashable:
+        return self._key
 
     @property
-    def executor(self):
-        """Returns the executor, which is the client.
+    def status(self) -> str:
+        """The status of the Future
 
         Returns
         -------
-        Client
-            The executor
-        """
-        return self.client
-
-    @property
-    def status(self):
-        """Returns the status
-
-        Returns
-        -------
-        str
-            The status
+        status: {'pending', 'processing', 'finished', 'error', 'cancelled'}
         """
         return self._state.status
 
-    def done(self):
-        """Returns whether or not the computation completed.
-
-        Returns
-        -------
-        bool
-            True if the computation is complete, otherwise False
-        """
+    @property
+    def done(self) -> bool:
+        """Return True if the computation is finished or cancelled."""
         return self._state.done()
 
-    def result(self, timeout=None):
-        """Wait until computation completes, gather result to local process.
+    @property
+    def cancelled(self) -> bool:
+        """Return True if the computation was cancelled."""
+        return self._state.cancelled()
+
+    def cancel(self, **kwargs: Any) -> None:
+        """Cancel the running task
+
+        This attempts to cancel the remotely running task. If the task is
+        already finished then this does nothing. If the task is currently
+        running then the worker will attempt to stop the task. If the task has
+        not yet been started then it will be stopped prior to starting on a
+        worker.
 
         Parameters
         ----------
-        timeout : number, optional
-            Time in seconds after which to raise a
-            ``dask.distributed.TimeoutError``
-
-        Raises
-        ------
-        dask.distributed.TimeoutError
-            If *timeout* seconds are elapsed before returning, a
-            ``dask.distributed.TimeoutError`` is raised.
-
-        Returns
-        -------
-        result
-            The result of the computation. Or a coroutine if the client is asynchronous.
-        """
-        self._verify_initialized()
-        with shorten_traceback():
-            return self.client.sync(self._result, callback_timeout=timeout)
-
-    async def _result(self, raiseit=True):
-        await self._state.wait()
-        if self.status == "error":
-            exc = clean_exception(self._state.exception, self._state.traceback)
-            if raiseit:
-                typ, exc, tb = exc
-                raise exc.with_traceback(tb)
-            else:
-                return exc
-        elif self.cancelled():
-            assert self._state
-            exception = self._state.exception
-            assert isinstance(exception, CancelledError)
-            if raiseit:
-                raise exception
-            else:
-                return exception
-        else:
-            result = await self.client._gather([self])
-            return result[0]
-
-    async def _exception(self):
-        await self._state.wait()
-        if self.status == "error":
-            return self._state.exception
-        else:
-            return None
-
-    def exception(self, timeout=None, **kwargs):
-        """Return the exception of a failed task
-
-        Parameters
-        ----------
-        timeout : number, optional
-            Time in seconds after which to raise a
-            ``dask.distributed.TimeoutError``
         **kwargs : dict
-            Optional keyword arguments for the function
+            Optional keyword arguments for the remote function
 
         Returns
         -------
-        Exception
-            The exception that was raised
-            If *timeout* seconds are elapsed before returning, a
-            ``dask.distributed.TimeoutError`` is raised.
-
-        See Also
-        --------
-        Future.traceback
-        """
-        self._verify_initialized()
-        return self.client.sync(self._exception, callback_timeout=timeout, **kwargs)
-
-    def add_done_callback(self, fn):
-        """Call callback on future when future has finished
-
-        The callback ``fn`` should take the future as its only argument.  This
-        will be called regardless of if the future completes successfully,
-        errs, or is cancelled
-
-        The callback is executed in a separate thread.
-
-        Parameters
-        ----------
-        fn : callable
-            The method or function to be called
-        """
-        self._verify_initialized()
-        cls = Future
-        if cls._cb_executor is None or cls._cb_executor_pid != os.getpid():
-            try:
-                cls._cb_executor = ThreadPoolExecutor(
-                    1, thread_name_prefix="Dask-Callback-Thread"
-                )
-            except TypeError:
-                cls._cb_executor = ThreadPoolExecutor(1)
-            cls._cb_executor_pid = os.getpid()
-
-        def execute_callback(fut):
-            try:
-                fn(fut)
-            except BaseException:
-                logger.exception("Error in callback %s of %s:", fn, fut)
-                raise
-
-        self.client.loop.add_callback(
-            done_callback, self, partial(cls._cb_executor.submit, execute_callback)
-        )
-
-    def cancel(self, reason=None, msg=None, **kwargs):
-        """Cancel the request to run this future
+        None
 
         See Also
         --------
         Client.cancel
         """
-        self._verify_initialized()
-        return self.client.cancel([self], reason=reason, msg=msg, **kwargs)
+        self._client.cancel([self], **kwargs)
 
-    def retry(self, **kwargs):
-        """Retry this future if it has failed
+    @property
+    def exception(self) -> Exception | None:
+        """Return the exception of a failed task
+
+        If the task failed, this returns the exception object. Otherwise it
+        returns None.
 
         See Also
         --------
-        Client.retry
+        Future.traceback
+        Client.recreate_error_locally
         """
-        self._verify_initialized()
-        return self.client.retry([self], **kwargs)
-
-    def cancelled(self):
-        """Returns True if the future has been cancelled
-
-        Returns
-        -------
-        bool
-            True if the future was 'cancelled', otherwise False
-        """
-        return self._state.status == "cancelled"
-
-    async def _traceback(self):
-        await self._state.wait()
-        if self.status == "error":
-            return self._state.traceback
+        if self._state.status == "error":
+            return self._state.exception
         else:
             return None
 
-    def traceback(self, timeout=None, **kwargs):
+    @property
+    def traceback(self) -> BaseException | None:
         """Return the traceback of a failed task
 
-        This returns a traceback object.  You can inspect this object using the
-        ``traceback`` module.  Alternatively if you call ``future.result()``
-        this traceback will accompany the raised exception.
-
-        Parameters
-        ----------
-        timeout : number, optional
-            Time in seconds after which to raise a
-            ``dask.distributed.TimeoutError``
-            If *timeout* seconds are elapsed before returning, a
-            ``dask.distributed.TimeoutError`` is raised.
-
-        Examples
-        --------
-        >>> import traceback  # doctest: +SKIP
-        >>> tb = future.traceback()  # doctest: +SKIP
-        >>> traceback.format_tb(tb)  # doctest: +SKIP
-        [...]
-
-        Returns
-        -------
-        traceback
-            The traceback object. Or a coroutine if the client is asynchronous.
+        If the task failed, this returns the traceback object. Otherwise it
+        returns None.
 
         See Also
         --------
         Future.exception
+        Client.recreate_error_locally
         """
-        self._verify_initialized()
-        return self.client.sync(self._traceback, callback_timeout=timeout, **kwargs)
-
-    @property
-    def type(self):
-        """Returns the type"""
-        return self._state.type
-
-    def release(self):
-        """
-        Notes
-        -----
-        This method can be called from different threads
-        (see e.g. Client.get() or Future.__del__())
-        """
-        self._verify_initialized()
-        if not self._cleared and self.client.generation == self._generation:
-            self._cleared = True
-            try:
-                self.client.loop.add_callback(self.client._dec_ref, self.key)
-            except TypeError:  # pragma: no cover
-                pass  # Shutting down, add_callback may be None
-
-    def __reduce__(self) -> str | tuple[Any, ...]:
-        return Future, (self.key,)
-
-    def __dask_tokenize__(self):
-        return (type(self).__name__, self.key, self._id)
-
-    def __del__(self):
-        try:
-            self.release()
-        except AttributeError:
-            # Occasionally we see this error when shutting down the client
-            # https://github.com/dask/distributed/issues/4305
-            if not self._is_finalizing():
-                raise
-        except RuntimeError:  # closed event loop
-            pass
-
-    def __str__(self):
-        return repr(self)
-
-    def __repr__(self):
-        if self.type:
-            return (
-                f"<Future: {self.status}, type: {typename(self.type)}, key: {self.key}>"
-            )
+        if self._state.status == "error":
+            return self._state.traceback
         else:
-            return f"<Future: {self.status}, key: {self.key}>"
+            return None
 
-    def _repr_html_(self):
-        return get_template("future.html.j2").render(
-            key=str(self.key),
-            type=typename(self.type),
-            status=self.status,
-        )
+    def add_done_callback(self, fn: Callable[[Future], None]) -> None:
+        """Call callback function when future is finished
 
-    def __await__(self):
-        return self.result().__await__()
+        The callback ``fn`` should take the future as its argument. This will
+        be called regardless of whether the future completes successfully,
+        errs, or is cancelled.
 
-    def __hash__(self):
-        return hash(self._id)
+        This is particularly useful for asynchronous computations.
 
-    def __eq__(self, other):
-        return self is other
-
-
-class FutureState:
-    """A Future's internal state.
-
-    This is shared between all Futures with the same key and client.
-    """
-
-    __slots__ = ("_event", "key", "status", "type", "exception", "traceback")
-
-    def __init__(self, key: str):
-        self._event = None
-        self.key = key
-        self.exception = None
-        self.status = "pending"
-        self.traceback = None
-        self.type = None
-
-    def _get_event(self):
-        # Can't create Event eagerly in constructor as it can fetch
-        # its IOLoop from the wrong thread
-        # (https://github.com/tornadoweb/tornado/issues/2189)
-        event = self._event
-        if event is None:
-            event = self._event = asyncio.Event()
-        return event
-
-    def cancel(self, reason=None, msg=None):
-        """Cancels the operation"""
-        self.status = "cancelled"
-        self.exception = FutureCancelledError(key=self.key, reason=reason, msg=msg)
-        self._get_event().set()
-
-    def finish(self, type=None):
-        """Sets the status to 'finished' and sets the event
-
-        Parameters
-        ----------
-        type : any
-            The type
+        Warning: The callback is executed by the same thread that completes
+        the Future. Therefore, it should not perform any blocking operations,
+        to avoid stalling the client's event loop.
         """
-        self.status = "finished"
-        self._get_event().set()
-        if type is not None:
-            self.type = type
+        self._state.add_done_callback(fn)
 
-    def lose(self):
-        """Sets the status to 'lost' and clears the event"""
-        self.status = "lost"
-        self._get_event().clear()
-
-    def retry(self):
-        """Sets the status to 'pending' and clears the event"""
-        self.status = "pending"
-        self._get_event().clear()
-
-    def set_error(self, exception, traceback):
-        """Sets the error data
-
-        Sets the status to 'error'. Sets the exception, the traceback,
-        and the event
-
-        Parameters
-        ----------
-        exception: Exception
-            The exception
-        traceback: Exception
-            The traceback
-        """
-        _, exception, traceback = clean_exception(exception, traceback)
-
-        self.status = "error"
-        self.exception = exception
-        self.traceback = traceback
-        self._get_event().set()
-
-    def done(self):
-        """Returns 'True' if the event is not None and the event is set"""
-        return self._event is not None and self._event.is_set()
-
-    def reset(self):
-        """Sets the status to 'pending' and clears the event"""
-        self.status = "pending"
-        if self._event is not None:
-            self._event.clear()
-
-    async def wait(self, timeout=None):
-        """Wait for the awaitable to complete with a timeout.
+    def result(self, timeout: float | str | None = None) -> T:
+        """Wait for the computation to complete and return the result.
 
         Parameters
         ----------
         timeout : number, optional
             Time in seconds after which to raise a
-            ``dask.distributed.TimeoutError``
+            ``distributed.TimeoutError`` if the future has not completed.
+            Can also be a string like "10s".
+
+        Returns
+        -------
+        result : object
+
+        Raises
+        ------
+        distributed.TimeoutError
+            If *timeout* is reached before the future completes.
+        CancelledError
+            If the task was cancelled. This definition is consistent with the
+            standard library ``concurrent.futures``.
+        Exception
+            If the remote task raised an exception.
         """
-        await wait_for(self._get_event().wait(), timeout)
-
-    def __repr__(self):
-        return f"<{self.__class__.__name__}: {self.status}>"
-
-
-async def done_callback(future, callback):
-    """Coroutine that waits on the future, then calls the callback
-
-    Parameters
-    ----------
-    future : asyncio.Future
-        The future
-    callback : callable
-        The callback
-    """
-    while future.status == "pending":
-        await future._state.wait()
-    callback(future)
-
-
-class AllExit(Exception):
-    """Custom exception class to exit All(...) early."""
-
-
-class ClosedClientError(Exception):
-    """Raised when an action with a closed client can't be performed"""
-
-
-def _handle_print(event):
-    _, msg = event
-    if not isinstance(msg, dict):
-        # someone must have manually logged a print event with a hand-crafted
-        # payload, rather than by calling worker.print(). In that case simply
-        # print the payload and hope it works.
-        print(msg)
-        return
-
-    args = msg.get("args")
-    if not isinstance(args, tuple):
-        # worker.print() will always send us a tuple of args, even if it's an
-        # empty tuple.
-        raise TypeError(
-            f"_handle_print: client received non-tuple print args: {args!r}"
-        )
-
-    file = msg.get("file")
-    if file == 1:
-        file = sys.stdout
-    elif file == 2:
-        file = sys.stderr
-    elif file is not None:
-        raise TypeError(
-            f"_handle_print: client received unsupported file kwarg: {file!r}"
-        )
-
-    print(
-        *args, sep=msg.get("sep"), end=msg.get("end"), file=file, flush=msg.get("flush")
-    )
-
-
-def _handle_warn(event):
-    _, msg = event
-    if not isinstance(msg, dict):
-        # someone must have manually logged a warn event with a hand-crafted
-        # payload, rather than by calling worker.warn(). In that case simply
-        # warn the payload and hope it works.
-        warnings.warn(msg)
-    else:
-        if "message" not in msg:
-            # TypeError makes sense here because it's analogous to calling a
-            # function without a required positional argument
-            raise TypeError(
-                "_handle_warn: client received a warn event missing the required "
-                '"message" argument.'
+        if self._client.asynchronous:
+            raise RuntimeError(
+                "Future.result() cannot be used from within asynchronous function"
             )
-        if "category" in msg:
-            category = pickle.loads(msg["category"])
+
+        event = Event()
+        self.add_done_callback(lambda f: event.set())
+
+        if not self.done():
+            sync(self._client.loop, self._wait, timeout=timeout)
+            # Ensure that the event is set by the time _wait returns
+            assert event.is_set()
+
+        if self._state.status == "finished":
+            return self._state.result
+        elif self._state.status == "cancelled":
+            raise self._state.exception
+        elif self._state.status == "error":
+            typ, exc, tb = self._state.exception_info
+            raise exc.with_traceback(tb)
         else:
-            category = None
-        warnings.warn(
-            pickle.loads(msg["message"]),
-            category=category,
-        )
+            raise RuntimeError(f"Future in unknown state: {self._state.status}")
 
+    async def _wait(self, timeout=None):
+        if timeout is not None:
+            timeout = parse_timedelta(timeout)
+        if not self.done():
+            future = self._state.event.wait(timeout)
+            if self._client._timeout_factor:
+                # Give the remote scheduler some time to heartbeat back
+                future = asyncio.wait_for(future, timeout * self._client._timeout_factor)
+            try:
+                await future
+            except asyncio.TimeoutError:
+                raise TimeoutError from None
 
-def _maybe_call_security_loader(address):
-    security_loader_term = dask.config.get("distributed.client.security-loader")
-    if security_loader_term:
+    def __await__(self):
+        return self._wait().__await__()
+
+    def __repr__(self) -> str:
+        st = self._state.status
+        if self._instance_name is not None:
+            st = f"{st}, name: {self._instance_name}"
+        if self.type is not None:
+            st = f"{st}, type: {self.type.__name__}"
+        return f"<Future: {st}, key: {self.key!s}>"
+
+    def __str__(self) -> str:
+        return repr(self)
+
+    def __del__(self):
+        # If the client has already been destroyed (during interpreter
+        # shutdown, for example), we cannot remove the future any more.
+        if self._client is not None and not self._client._closed:
+            if self._inform:
+                try:
+                    self._client._dec_ref(self.key)
+                except (RuntimeError, KeyError):  # closed client or missing key
+                    pass
+            # Remove the Future state from the Client's dict.
+            # This is mostly to avoid leaking memory.
+            # We use a weakref to self._state in case this Future
+            # was cancelled and another one created with the same key.
+            st_ref = weakref.ref(self._state)
+            self._client._maybe_remove_future_later(self.key, st_ref)
+
+    def __lt__(self, other):
+        if not isinstance(other, Future):
+            return NotImplemented
+        return self.key < other.key
+
+    def __getstate__(self):
+        return {"key": self.key, "client": self.client.id, "inform": self._inform}
+
+    def __setstate__(self, state):
         try:
-            security_loader = import_term(security_loader_term)
-        except Exception as exc:
-            raise ImportError(
-                f"Failed to import `{security_loader_term}` configured at "
-                f"`distributed.client.security-loader` - is this module "
-                f"installed?"
-            ) from exc
-        return security_loader({"address": address})
-    return None
-
-
-class VersionsDict(TypedDict):
-    scheduler: dict[str, dict[str, Any]]
-    workers: dict[str, dict[str, dict[str, Any]]]
-    client: dict[str, dict[str, Any]]
-
-
-_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
-
-
-def _is_nested(iterable):
-    for item in iterable:
-        if (
-            isinstance(item, Iterable)
-            and not isinstance(item, str)
-            and not isinstance(item, bytes)
-        ):
-            return True
-    return False
-
-
-class _MapExpr(Expr):
-    func: Callable
-    iterables: Iterable
-    key: Key
-    pure: bool
-    annotations: dict
-    kwargs: dict
-    _cached_keys: Iterable[Key] | None
-    _parameters = [
-        "func",
-        "iterables",
-        "key",
-        "pure",
-        "annotations",
-        "kwargs",
-        "_cached_keys",
-    ]
-    _defaults = {"_cached_keys": None}
-
-    @property
-    def deterministic_token(self):
-        if not self.pure:
-            self._determ_token = uuid.uuid4().hex
-        return super().deterministic_token
-
-    @property
-    def keys(self) -> Iterable[Key]:
-        if self._cached_keys is not None:
-            return self._cached_keys
-        else:
-            if isinstance(self.key, Iterable) and not isinstance(self.key, str):
-                self.operands[-1] = self.key
-                return self.key
-
-            else:
-                if self.pure:
-                    tok = tokenize(self.func, self.kwargs)
-                    keys = [
-                        self.key + "-" + tokenize(tok, args)  # type: ignore
-                        for args in zip(*self.iterables)
-                    ]
-                else:
-                    uid = str(uuid.uuid4())
-                    keys = (
-                        [
-                            f"{self.key}-{uid}-{i}"
-                            for i in range(min(map(len, self.iterables)))
-                        ]
-                        if self.iterables
-                        else []
-                    )
-                self.operands[-1] = keys
-                return keys
-
-    def _meta(self):
-        return []
-
-    def _layer(self) -> dict[Key, GraphNode]:
-        dsk: _T_LowLevelGraph = {}
-
-        if not self.kwargs:
-            dsk = {
-                key: Task(key, self.func, *args)
-                for key, args in zip(self.keys, zip(*self.iterables))
-            }
-
-        else:
-            kwargs2 = {}
-            dsk = {}
-            for k, v in self.kwargs.items():
-                if sizeof(v) > 1e5:
-                    vv = DataNode(k, v)
-                    kwargs2[k] = vv.ref()
-                    dsk[vv.key] = vv
-                else:
-                    kwargs2[k] = parse_input(v)
-
-                dsk.update(
-                    {
-                        key: Task(key, self.func, *args, **kwargs2)
-                        for key, args in zip(self.keys, zip(*self.iterables))
-                    }
+            client = Client._instances[state["client"]]
+        except KeyError:
+            client = _get_global_client()
+            if client is None:
+                raise RuntimeError(
+                    "Can not deserialize Future: could not find Client %r" % state["client"]
                 )
-        return dsk
+        try:
+            future = client.futures[state["key"]]
+        except KeyError:
+            future = FutureState(status="lost")
+            client.futures[state["key"]] = future
+        self.__init__(state["key"], client, inform=state["inform"], state=future)
+
+    @property
+    def type(self):
+        return self._state.type
+
+    def release(self):
+        """Release the responsibility of this future to the scheduler
+
+        This notifies the scheduler that the client no longer desires the result
+        of this future. Often this allows the scheduler to release the result
+        from memory.
+
+        This is often useful if you have many futures but only need the results
+        of a few. Releasing the others can significantly reduce memory use.
+
+        Examples
+        --------
+        >>> from distributed import Client, Future
+        >>> client = Client()  # connect to cluster
+        >>> x = client.submit(lambda: [1, 2, 3])  # compute large list
+        >>> x.result()  # wait until result arrives
+        [1, 2, 3]
+        >>> x.release()  # tell scheduler that I no longer care about this result
+
+        If the future is needed by other futures it will remain in memory.
+        If the future has already been released then this method does nothing.
+
+        See Also
+        --------
+        Client.release
+        """
+        if not self._state.released:
+            self._client.release([self])
+            self._state.released = True
 
 
-class Client(SyncMethodMixin):
+class Client:
     """Connect to and submit computation to a Dask cluster
 
-    The Client connects users to a Dask cluster.  It provides an asynchronous
-    user interface around functions and futures.  This class resembles
-    executors in ``concurrent.futures`` but also allows ``Future`` objects
-    within ``submit/map`` calls.  When a Client is instantiated it takes over
-    all ``dask.compute`` and ``dask.persist`` calls by default.
-
-    It is also common to create a Client without specifying the scheduler
-    address , like ``Client()``.  In this case the Client creates a
-    :class:`LocalCluster` in the background and connects to that.  Any extra
-    keywords are passed from Client to LocalCluster in this case.  See the
-    LocalCluster documentation for more information.
+    The Client connects users to a Dask cluster. It provides an asynchronous
+    user interface around functions and futures. This class resembles pools
+    in ``concurrent.futures`` but also allows ``Future`` objects within
+    ``submit/map`` calls.
 
     Parameters
     ----------
-    address: string, or Cluster
-        This can be the address of a ``Scheduler`` server like a string
-        ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
-    loop
-        The event loop
-    timeout: int (defaults to configuration ``distributed.comm.timeouts.connect``)
-        Timeout duration for initial connection to the scheduler
+    address: string, list of strings, or ``Cluster`` object, optional
+        This can be the address of a single Scheduler server, a list of
+        addresses (if you have a multi-headed cluster), or a ``Cluster``
+        object like ``LocalCluster``, ``SSHCluster``, or ``KubeCluster``.
+        If set to None (default), it will try to connect to a local cluster
+        if one exists, otherwise it will create a ``LocalCluster``.
+    loop: tornado.ioloop.IOLoop
+        The tornado IOLoop event loop object to use.
+        Use None for the default loop.
+    timeout: number, string
+        Timeout duration for initial connection to the scheduler. Can also be a
+        string like "10s".
     set_as_default: bool (True)
-        Use this Client as the global dask scheduler
-    scheduler_file: string (optional)
-        Path to a file with scheduler information if available
+        Whether to set this client as the default client.
     security: Security or bool, optional
-        Optional security information. If creating a local cluster can also
-        pass in ``True``, in which case temporary self-signed credentials will
-        be created automatically.
+        Configures communication security. Can be a security object, or True.
+        If True, temporary self-signed credentials will be created automatically.
     asynchronous: bool (False by default)
         Set to True if using this client within async/await functions or within
-        Tornado gen.coroutines.  Otherwise this should remain False for normal
-        use.
+        Tornado gen.coroutines. Otherwise this will be False by default.
     name: string (optional)
         Gives the client a name that will be included in logs generated on
         the scheduler for matters relating to this client
-    heartbeat_interval: int (optional)
-        Time in milliseconds between heartbeats to scheduler
+    heartbeat_interval: number or string (optional)
+        Time between heartbeats to scheduler in seconds. Can also be a
+        string like "10s". Advice: set this significantly shorter than the scheduler's
+        configured worker timeout.
     serializers
-        Iterable of approaches to use when serializing the object.
-        See :ref:`serialization` for more.
+        A list of custom serializers for data transmission. See the Dask
+        documentation on serialization for more information.
+        Default is ['dask', 'pickle'].
     deserializers
-        Iterable of approaches to use when deserializing the object.
-        See :ref:`serialization` for more.
-    extensions : list
-        The extensions
+        A list of custom deserializers for data reception. See the Dask
+        documentation on serialization for more information.
+        Default is ['dask', 'error', 'pickle'].
+    extensions : list of functions
+        A list of functions to be run on the client and scheduler at setup.
+        This is useful for extending Dask's behavior for customization.
+        The functions should take a client or scheduler instance as an argument.
     direct_to_workers: bool (optional)
         Whether or not to connect directly to the workers, or to ask
-        the scheduler to serve as intermediary.
-    connection_limit : int
-        The number of open comms to maintain at once in the connection pool
-
-    **kwargs:
-        If you do not pass a scheduler address, Client will create a
-        ``LocalCluster`` object, passing any extra keyword arguments.
+        the scheduler to serve as intermediary. Set this to True if you
+        have direct connectivity to the workers. It is common to disable
+        this in secured clusters. Default is False if you pass an address,
+        or True if you pass a ``LocalCluster`` or other ``Cluster`` object.
+    processes: bool
+        Whether to use processes (True) or threads (False) for workers
+        in a :class:`~distributed.LocalCluster`. Defaults to True. Ignored if
+        *address* is not None or a :class:`~distributed.LocalCluster`.
+    silence_logs: logging level
+        The logging level threshold below which messages should be silenced.
+        Default is ``logging.WARN``. Set this to ``logging.DEBUG`` for more
+        verbose reporting or ``logging.ERROR`` for only errors.
+    dashboard_link: str
+        Location of the scheduler dashboard. If None, determined automatically.
+    proxy_address: str
+        Address of a proxy server between the client and the scheduler, if applicable
+    shutdown_on_close: bool
+        Whether to shutdown the scheduler and workers when this client is closed.
+        This is useful for temporary ``LocalCluster`` objects.
 
     Examples
     --------
-    Provide cluster's scheduler node address on initialization:
+    Provide cluster's scheduler address on initialization:
 
     >>> client = Client('127.0.0.1:8786')  # doctest: +SKIP
 
@@ -986,2631 +616,1674 @@ class Client(SyncMethodMixin):
     >>> a = client.submit(add, 1, 2)  # doctest: +SKIP
     >>> b = client.submit(add, 10, 20)  # doctest: +SKIP
 
-    Continue using submit or map on results to build up larger computations
+    Continue using submit or map on results to build up larger computations.
 
     >>> c = client.submit(add, a, b)  # doctest: +SKIP
 
     Gather results with the ``gather`` method.
 
-    >>> client.gather(c)  # doctest: +SKIP
-    33
-
-    You can also call Client with no arguments in order to create your own
-    local cluster.
-
-    >>> client = Client()  # makes your own local "cluster" # doctest: +SKIP
-
-    Extra keywords will be passed directly to LocalCluster
-
-    >>> client = Client(n_workers=2, threads_per_worker=4)  # doctest: +SKIP
+    >>> client.gather([c])  # doctest: +SKIP
+    [33]
 
     See Also
     --------
-    distributed.scheduler.Scheduler: Internal scheduler
-    distributed.LocalCluster:
+    distributed.scheduler.Scheduler
+    distributed.LocalCluster
     """
 
-    _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
+    _instances: ClassVar[weakref.WeakValueDictionary[str, Client]] = (
+        weakref.WeakValueDictionary()
+    )
+    _initialized_clients: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
+    _loop_runner: ClassVar[LoopRunner] = LoopRunner()
+    _global_clients_lock = threading.Lock()
+    _default_event_loop: ClassVar[IOLoop | None] = None
 
-    _instances: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
-
-    _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
-
-    preloads: preloading.PreloadManager
-    __loop: IOLoop | None = None
+    asynchronous: bool
+    futures: MutableMapping[Hashable, FutureState]
+    id: str
+    loop: IOLoop
+    security: Security
+    serializers: dict[str, tuple[Callable, Callable, bool]]
+    _scheduler_identity: SchedulerInfo
+    _serializers: dict[str, tuple[Callable, Callable, bool]] | None
+    _stream_handlers: dict[str, Callable]
+    _extensions: dict[str, Any]
+    _startup_kwargs: dict[str, Any]
+    cluster: Cluster | None
+    _cluster_kwargs: dict[str, Any]
+    _scheduler: rpc | None
+    _scheduler_conn: Comm | None
+    _periodic_callbacks: dict[str, PeriodicCallback]
+    _refcount: dict[Hashable, int]
+    _who_has: dict[Hashable, set[str]]
+    _pending_futures_per_worker: dict[str, set[Hashable]]
+    _pending_msg_buffer: list[dict]
+    _pending_uploads: set[str]
+    _handle_report_task: asyncio.Task | None
+    _handle_stream_task: asyncio.Task | None
+    _heartbeat_task: asyncio.Task | None
+    _gather_semaphore: asyncio.Semaphore
+    _exceptions: dict[int, Exception]
+    _exceptions_lock: threading.Lock
+    _exception_i: int
+    _datasets: Datasets
+    _serializers_orig: list[str] | None
+    _deserializers_orig: list[str] | None
+    _timeout_factor: float
+    _direct_to_workers: bool
+    _dashboard_link: str | None
+    _scheduler_address: str | None
+    _proxy_address: str | None
+    _scheduler_addresses: list[str]
+    _name: str | None
+    _status: Status
+    _startTime: float
+    _wait_for_workers_task: asyncio.Task | None
+    _connecting_to_scheduler: bool
+    _periodic_callback_cache: dict[str, Any]
+    _executor: ThreadPoolExecutor | None
+    _executor_wait_callback: Callable | None
+    _executor_err_callback: Callable | None
+    _file_upload_lock: Lock
+    _who_has_cv: Condition
+    _shutdown_on_close: bool
+    _silence_logs: int
+    _connection_event: Event
+    _start_arg: str | Cluster | None
+    _start_kwargs: dict[str, Any]
+    _close_future: asyncio.Future | None
+    _closed: bool
 
     def __init__(
         self,
-        address=None,
-        loop=None,
-        timeout=no_default,
-        set_as_default=True,
-        scheduler_file=None,
-        security=None,
-        asynchronous=False,
-        name=None,
-        heartbeat_interval=None,
-        serializers=None,
-        deserializers=None,
-        extensions=DEFAULT_EXTENSIONS,
-        direct_to_workers=None,
-        connection_limit=512,
-        **kwargs,
+        address: str | Cluster | None = None,
+        loop: IOLoop | None = None,
+        timeout: float | str = config.timeouts["connect"],
+        set_as_default: bool = True,
+        security: Security | bool | None = None,
+        asynchronous: bool = False,
+        name: str | None = None,
+        heartbeat_interval: float | str | None = None,
+        serializers: list[str] | None = None,
+        deserializers: list[str] | None = None,
+        extensions: Collection[Callable] = DEFAULT_EXTENSIONS,
+        direct_to_workers: bool | None = None,
+        **kwargs: Any,
     ):
-        if timeout is no_default:
-            timeout = dask.config.get("distributed.comm.timeouts.connect")
-        timeout = parse_timedelta(timeout, "s")
-        if timeout is None:
-            raise ValueError("None is an invalid value for global client timeout")
-        self._timeout = timeout
+        if isinstance(address, (list, tuple)):
+            address = list(address)
 
-        self.futures = dict()
-        self.refcount = defaultdict(int)
-        self._handle_report_task = None
-        if name is None:
-            name = dask.config.get("client-name", None)
-        self.id = (
-            type(self).__name__
-            + ("-" + name + "-" if name else "-")
-            + str(uuid.uuid1(clock_seq=os.getpid()))
-        )
-        self.generation = 0
-        self.status = "newly-created"
-        self._pending_msg_buffer = []
-        self.extensions = {}
-        self.scheduler_file = scheduler_file
-        self._startup_kwargs = kwargs
-        self.cluster = None
-        self.scheduler = None
-        self._scheduler_identity = {}
-        # A reentrant-lock on the refcounts for futures associated with this
-        # client. Should be held by individual operations modifying refcounts,
-        # or any bulk operation that needs to ensure the set of futures doesn't
-        # change during operation.
-        self._refcount_lock = threading.RLock()
+        if kwargs.get("processes"):
+            raise TypeError("``processes=`` is no longer a valid keyword argument.")
+
+        self.futures = weakref.WeakValueDictionary()
+        self.id = type(self).__name__ + "-" + str(uuid.uuid4())
+        self._instances[self.id] = self
         self.datasets = Datasets(self)
-        self._serializers = serializers
-        if deserializers is None:
-            deserializers = serializers
-        self._deserializers = deserializers
-        self.direct_to_workers = direct_to_workers
-        self._previous_as_current = None
-
-        # Communication
-        self.scheduler_comm = None
-
-        if address is None:
-            address = dask.config.get("scheduler-address", None)
-            if address:
-                logger.info("Config value `scheduler-address` found: %s", address)
-
-        if address is not None and kwargs:
-            raise ValueError(f"Unexpected keyword arguments: {sorted(kwargs)}")
-
-        if isinstance(address, (rpc, PooledRPCCall)):
-            self.scheduler = address
-        elif isinstance(getattr(address, "scheduler_address", None), str):
-            # It's a LocalCluster or LocalCluster-compatible object
-            self.cluster = address
-            status = self.cluster.status
-            if status in (Status.closed, Status.closing):
-                raise RuntimeError(
-                    f"Trying to connect to an already closed or closing Cluster {self.cluster}."
-                )
-            with suppress(AttributeError):
-                loop = address.loop
-            if security is None:
-                security = getattr(self.cluster, "security", None)
-        elif address is not None and not isinstance(address, str):
-            raise TypeError(
-                "Scheduler address must be a string or a Cluster instance, got {}".format(
-                    type(address)
-                )
-            )
-
-        # If connecting to an address and no explicit security is configured, attempt
-        # to load security credentials with a security loader (if configured).
-        if security is None and isinstance(address, str):
-            security = _maybe_call_security_loader(address)
-
-        if security is None or security is False:
-            security = Security()
-        elif isinstance(security, dict):
-            security = Security(**security)
-        elif security is True:
-            security = Security.temporary()
-            self._startup_kwargs["security"] = security
-        elif not isinstance(security, Security):  # pragma: no cover
-            raise TypeError("security must be a Security object")
-
-        self.security = security
-
-        if name == "worker":
-            self.connection_args = self.security.get_connection_args("worker")
-        else:
-            self.connection_args = self.security.get_connection_args("client")
-
-        self._asynchronous = asynchronous
-        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self._connecting_to_scheduler = False
-
-        self._gather_keys = None
-        self._gather_future = None
-
-        if heartbeat_interval is None:
-            heartbeat_interval = dask.config.get("distributed.client.heartbeat")
-        heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
-
-        scheduler_info_interval = parse_timedelta(
-            dask.config.get("distributed.client.scheduler-info-interval", default="ms")
+        self._serializers_orig = serializers
+        self._deserializers_orig = deserializers
+        self._serializers = None
+        self._scheduler_identity = SchedulerInfo(
+            type="Scheduler",
+            id=None,
+            address=None,
+            services={},
+            workers={},
+            n_workers=-1,
+            total_threads=-1,
+            total_memory=-1,
+            started=-1,
         )
-
-        self._periodic_callbacks = dict()
-        self._periodic_callbacks["scheduler-info"] = PeriodicCallback(
-            self._update_scheduler_info, scheduler_info_interval * 1000
-        )
-        self._periodic_callbacks["heartbeat"] = PeriodicCallback(
-            self._heartbeat, heartbeat_interval * 1000
-        )
-
-        self._start_arg = address
-        self._set_as_default = set_as_default
-        if set_as_default:
-            self._set_config = dask.config.set(scheduler="dask.distributed")
-        self._event_handlers = {}
-
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
             "lost-data": self._handle_lost_data,
-            "cancelled-keys": self._handle_cancelled_keys,
+            "cancelled-key": self._handle_cancelled_key,
             "task-retried": self._handle_retried_key,
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
             "error": self._handle_error,
-            "event": self._handle_event,
-            "adjust-heartbeat-interval": self._adjust_heartbeat_intervals,
+            "cluster-dump-error": self._handle_cluster_dump_error,
+        }
+        self._extensions = {}
+        self._startup_kwargs = kwargs
+        # Communication streams relevant to this client
+        self._scheduler = None
+        self._scheduler_conn = None  # type: Comm | None
+        self.cluster = None
+        self._cluster_kwargs = {}
+        self._periodic_callbacks = {}
+        self._refcount = defaultdict(int)
+        self._who_has = defaultdict(set)
+        self._pending_futures_per_worker = defaultdict(set)
+        self._pending_msg_buffer = []
+        self._pending_uploads = set()
+        self._handle_report_task = None
+        self._handle_stream_task = None
+        self._heartbeat_task = None
+        self._gather_semaphore = asyncio.Semaphore(
+            dask.config.get("distributed.comm.gather-semaphore")
+        )
+        self._exceptions = {}
+        self._exceptions_lock = threading.Lock()
+        self._exception_i = 0
+        self._timeout_factor = 1.5
+
+        # Connection state
+        self._loop_runner.start()
+        # TODO: remove self.loop attribute after removing Tornado support
+        self.loop = self._loop_runner.loop
+        if timeout:
+            timeout = parse_timedelta(timeout, "s")
+        self._timeout = timeout
+        self._direct_to_workers = direct_to_workers
+        self._dashboard_link = kwargs.pop("dashboard_link", None)
+        self._scheduler_address = None
+        self._proxy_address = kwargs.pop("proxy_address", None)
+        self._scheduler_addresses = []
+        self._name = name
+        self._status = Status.created
+        self._startTime = time.time()
+        self._wait_for_workers_task = None
+        self._connecting_to_scheduler = False
+        self._set_as_default = set_as_default
+        self._periodic_callback_cache = {}
+
+        self.asynchronous = asynchronous
+        if asynchronous:
+            self._executor = None
+            self._executor_wait_callback = None
+            self._executor_err_callback = None
+        else:
+            self._executor = ThreadPoolExecutor(1, thread_name_prefix="Client-Executor")
+            # Ensure the executor is shutdown gracefully to avoid hanging threads
+            # and associated warnings.
+            atexit.register(_shutdown_thread_pool, self._executor)
+            self._executor_wait_callback = self.loop.add_callback
+            self._executor_err_callback = functools.partial(
+                self.loop.add_callback, self._handle_executor_error
+            )
+
+        self._file_upload_lock = Lock()
+        self._who_has_cv = Condition()
+
+        if heartbeat_interval is None:
+            heartbeat_interval = dask.config.get("distributed.client.heartbeat")
+        self._heartbeat_interval = parse_timedelta(heartbeat_interval, "s")
+
+        self._shutdown_on_close = kwargs.pop("shutdown_on_close", None)
+        self._silence_logs = kwargs.pop("silence_logs", logging.WARN)
+
+        if kwargs:
+            raise TypeError(f"Unexpected keyword arguments: {list(kwargs)}")
+
+        # Initialization methods
+        self._connection_event = Event()
+        self._start_arg = address
+        self._start_kwargs = {
+            "timeout": timeout,
+            "security": security,
+            "serializers": serializers,
+            "deserializers": deserializers,
+            "extensions": extensions,
+            "direct_to_workers": direct_to_workers,
         }
 
-        self._state_handlers = {
-            "memory": self._handle_key_in_memory,
-            "lost": self._handle_lost_data,
-            "erred": self._handle_task_erred,
-        }
-
-        self.rpc = ConnectionPool(
-            limit=connection_limit,
-            serializers=serializers,
-            deserializers=deserializers,
-            deserialize=True,
-            connection_args=self.connection_args,
-            timeout=timeout,
-            server=self,
-        )
-
-        self.extensions = {
-            name: extension(self) for name, extension in extensions.items()
-        }
-
-        preload = dask.config.get("distributed.client.preload")
-        preload_argv = dask.config.get("distributed.client.preload-argv")
-        self.preloads = preloading.process_preloads(self, preload, preload_argv)
-
-        self.start(timeout=timeout)
-        Client._instances.add(self)
-
-        from distributed.recreate_tasks import ReplayTaskClient
-
-        ReplayTaskClient(self)
-
-    @property
-    def io_loop(self) -> IOLoop | None:
-        warnings.warn(
-            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        return self.loop
-
-    @io_loop.setter
-    def io_loop(self, value: IOLoop) -> None:
-        warnings.warn(
-            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        self.loop = value
-
-    @property
-    def loop(self) -> IOLoop | None:
-        loop = self.__loop
-        if loop is None:
-            # If the loop is not running when this is called, the LoopRunner.loop
-            # property will raise a DeprecationWarning
-            # However subsequent calls might occur - eg atexit, where a stopped
-            # loop is still acceptable - so we cache access to the loop.
-            self.__loop = loop = self._loop_runner.loop
-        return loop
-
-    @loop.setter
-    def loop(self, value: IOLoop) -> None:
-        warnings.warn(
-            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        self.__loop = value
-
-    @contextmanager
-    def as_current(self):
-        """Thread-local, Task-local context manager that causes the Client.current
-        class method to return self. Any Future objects deserialized inside this
-        context manager will be automatically attached to this Client.
-        """
-        tok = _current_client.set(self)
-        with dask.config.set(scheduler="dask.distributed"):
+        self._start()
+        if not self.asynchronous:
             try:
-                yield
-            finally:
-                _current_client.reset(tok)
+                self.sync(self._start, **self._start_kwargs)
+            except BaseException:
+                # Avoid GeneratorExit errors during interpreter shutdown
+                with suppress(AttributeError, RuntimeError):
+                    self.close()
+                raise
+        self._initialized_clients.add(self)
+
+    def _handle_executor_error(self, typ, exc, tb):
+        logger.exception("Error in Client executor thread", exc_info=(typ, exc, tb))
+        self.close()
+
+    def __repr__(self):
+        if self.scheduler:
+            addr = self.scheduler.address
+            if self._proxy_address:
+                addr += f" [proxy: {self._proxy_address}]"
+            workers = len(self.scheduler_info()["workers"])
+            threads = sum(w["nthreads"] for w in self.scheduler_info()["workers"].values())
+            memory = sum(w["memory_limit"] for w in self.scheduler_info()["workers"].values())
+            text = (
+                f"<Client: {self.status} scheduler={addr!r} processes={workers} "
+                f"threads={threads} memory={format_bytes(memory)}>"
+            )
+        elif self._start_arg:
+            text = f"<Client: {self.status} scheduler={self._start_arg!r}>"
+        else:
+            text = f"<Client: {self.status}>"
+
+        if self._instance_name is not None:
+            text = f"{text[:-1]}, name: {self._instance_name}>"
+
+        return text
+
+    def __await__(self):
+        """For usage in await statements"""
+        yield from self._started.__await__()
+        return self
+
+    @property
+    def status(self):
+        return self._status.name
+
+    @property
+    def scheduler(self):
+        """The RPC object for the scheduler
+
+        This is deprecated, and will be removed in a future version.
+        """
+        # TODO: deprecate this?
+        return self._scheduler
+
+    @property
+    def scheduler_address(self):
+        """The address of the scheduler"""
+        return self._scheduler_address
+
+    @property
+    def security(self):
+        return self._security
+
+    @property
+    def dashboard_link(self):
+        """Link to the scheduler's dashboard"""
+        if self._dashboard_link is not None:
+            return self._dashboard_link
+        if self.cluster is not None and self.cluster.dashboard_link is not None:
+            return self.cluster.dashboard_link
+        try:
+            port = self.scheduler_info()["services"]["dashboard"]
+            host = get_address_host(self.scheduler.address)
+            # If the dashboard is served on the same host as the scheduler,
+            # replace the scheduler port with the dashboard port
+            if host in self.scheduler.address:
+                addr = self.scheduler.address.replace(
+                    str(self.scheduler.port), str(port)
+                )
+            # Otherwise assume the dashboard is served on the same host the client is on
+            else:
+                addr = f"{host}:{port}"
+            # Use "http" because "tls" is not a valid scheme for web browsers
+            if self.security.require_encryption:
+                # Assume the dashboard is served over HTTPS
+                scheme = "https"
+            else:
+                scheme = "http"
+            return f"{scheme}://{addr}"
+        except (KeyError, IndexError, TypeError):
+            return ""
+
+    def _repr_html_(self):
+        from .widgets import get_template
+
+        return get_template("client.html.j2").render(client=self)
+
+    def _ipython_key_completions_(self):
+        """Completion for IPython attribute access"""
+        return ["datasets", "futures", "cluster"]
+
+    def _start(self, **kwargs):
+        """Start the client"""
+        if self._status != Status.created:
+            return
+
+        self._status = Status.starting
+        if self.asynchronous:
+            self._started = asyncio_ensure_future(
+                self._start_async(**merge(self._start_kwargs, kwargs))
+            )
+        else:
+            # Ensure that the IO loop is running if starting in sync mode
+            self.loop.add_callback(
+                self._start_async, **merge(self._start_kwargs, kwargs)
+            )
+
+    async def _start_async(
+        self,
+        timeout: float | None = config.timeouts["connect"],
+        security: Security | bool | None = None,
+        serializers: list[str] | None = None,
+        deserializers: list[str] | None = None,
+        extensions: Collection[Callable] = DEFAULT_EXTENSIONS,
+        direct_to_workers: bool | None = None,
+        **kwargs: Any,
+    ):
+        # Wait for the loop to start if it hasn't already
+        await self._loop_runner.running.wait()
+
+        self._start_kwargs = {
+            "timeout": timeout,
+            "security": security,
+            "serializers": serializers,
+            "deserializers": deserializers,
+            "extensions": extensions,
+            "direct_to_workers": direct_to_workers,
+        }
+
+        if security is None:
+            security = dask.config.get("distributed.comm.security")
+        if security is False or security == "off":
+            self._security = Security()
+        elif security is True:
+            self._security = Security.temporary()
+        elif isinstance(security, Security):
+            self._security = security
+        elif isinstance(security, dict):
+            self._security = Security(**security)
+        else:
+            raise TypeError("security must be Security object or boolean")
+
+        if serializers is None:
+            serializers = dask.config.get("distributed.comm.serializers", [])
+        if deserializers is None:
+            deserializers = dask.config.get("distributed.comm.serializers", [])
+
+        serializers = list(serializers)
+        deserializers = list(deserializers)
+
+        if "pickle" not in serializers:
+            serializers.append("pickle")
+        if "pickle" not in deserializers:
+            deserializers.append("pickle")
+        if "dask" not in serializers:
+            serializers = ["dask"] + serializers
+        if "dask" not in deserializers:
+            deserializers = ["dask"] + deserializers
+        if "error" not in deserializers:
+            deserializers = ["error"] + deserializers
+
+        self._serializers = merge(
+            *(dask.config.get("distributed.comm.serialization").get(name, {}) for name in serializers)
+        )
+        self._deserializers = merge(
+            *(dask.config.get("distributed.comm.serialization").get(name, {}) for name in deserializers)
+        )
+
+        if self._start_arg is None and dask.config.get("scheduler-address", None):
+            self._start_arg = dask.config.get("scheduler-address")
+            logger.info(
+                "Config value `scheduler-address` detected. Connecting to %s",
+                self._start_arg,
+            )
+
+        if self._start_arg is None and not os.environ.get(
+            "DASK_INTERNAL_INHERIT_CONFIG"
+        ):
+            # If no address given, try connecting to local cluster (`Client()`)
+            try:
+                addr = Client._running_clients_on_this_process[-1].scheduler.address
+                await self._connect(addr, timeout=1)
+            except (IndexError, OSError, TimeoutError):
+                pass
+            # If no address given and no local cluster, start LocalCluster
+            if not self.scheduler:
+                try:
+                    from .deploy import LocalCluster
+
+                    self.cluster = LocalCluster(
+                        loop=self.loop,
+                        security=self._security,
+                        asynchronous=self.asynchronous,
+                        silence_logs=self._silence_logs,
+                        serializers=serializers,
+                        deserializers=deserializers,
+                        extensions=extensions,
+                        direct_to_workers=direct_to_workers,
+                        **self._startup_kwargs,
+                    )
+
+                    if self._shutdown_on_close is None:
+                        self._shutdown_on_close = True
+
+                    if self.asynchronous:
+                        await self.cluster
+                    self._cluster_kwargs = self.cluster.kwargs
+                    self._start_arg = self.cluster
+                except Exception:
+                    logger.error("Failed to start local Dask cluster", exc_info=True)
+                    await self._close(fast=True)
+                    raise
+
+        if isinstance(self._start_arg, str):
+            await self._connect(self._start_arg, timeout=timeout)
+        elif isinstance(self._start_arg, (list, tuple)):
+            await self._connect(self._start_arg, timeout=timeout)
+        elif hasattr(self._start_arg, "scheduler_address"):  # Cluster object
+            cluster = self._start_arg
+            if cluster.status == Status.created:
+                if self.asynchronous:
+                    await cluster
+                else:
+                    cluster.sync(cluster._start)
+            elif cluster.status == Status.failed:
+                raise ValueError(
+                    f"Cluster {cluster} has already failed: {cluster.reason}"
+                )
+            elif cluster.status == Status.closed:
+                raise ValueError(f"Cluster {cluster} has already been closed")
+
+            if self.cluster is None:
+                self.cluster = cluster
+                if self._shutdown_on_close is None:
+                    self._shutdown_on_close = False
+
+            await self._connect(self.cluster.scheduler_address, timeout=timeout)
+        elif self._start_arg is not None:
+            raise TypeError(
+                "First argument must be scheduler address string or Cluster instance"
+            )
+        else:
+            assert self.scheduler
+
+        if direct_to_workers is None:
+            # We connect directly to workers for LocalCluster by default
+            if self.cluster and type(self.cluster).__name__ == "LocalCluster":
+                self._direct_to_workers = True
+            else:
+                self._direct_to_workers = False
+        else:
+            self._direct_to_workers = direct_to_workers
+
+        if self._set_as_default:
+            cls = type(self)
+            with cls._global_clients_lock:
+                cls._running_clients_on_this_process.append(self)
+            _set_global_client(self)
+
+        # Start background tasks
+        self._handle_report_task = asyncio_ensure_future(self._handle_report())
+        self._handle_stream_task = asyncio_ensure_future(self._handle_stream())
+        self._heartbeat_task = asyncio_ensure_future(self._heartbeat())
+
+        # Run extensions
+        for ext in extensions:
+            await self._run_extension(ext)
+
+        return self
+
+    async def _connect(self, address: str | list[str], timeout: float | None = None):
+        if self._connecting_to_scheduler:
+            return
+        self._connecting_to_scheduler = True
+
+        if self._proxy_address:
+            address = self._proxy_address
+            self._scheduler_addresses = [address]
+            logger.info("Connecting to scheduler at proxy address %s", address)
+        elif isinstance(address, str):
+            self._scheduler_addresses = [address]
+            logger.info("Connecting to scheduler at %s", address)
+        elif isinstance(address, (list, tuple)):
+            address = list(address)
+            random.shuffle(address)
+            self._scheduler_addresses = address
+            logger.info("Connecting to scheduler at %s", address[0])
+        else:
+            raise TypeError(address)
+
+        comm = None
+        start = time.time()
+        deadline = start + timeout if timeout is not None else None
+        last_error = None
+
+        if self._proxy_address:
+            # If we have a proxy address, we only try that one address
+            addresses = [self._proxy_address]
+        else:
+            addresses = list(self._scheduler_addresses)
+
+        while True:
+            if not addresses:
+                msg = "Could not connect to %s after trying for %s" % (
+                    self._scheduler_addresses,
+                    format_time_ago(start),
+                )
+                if last_error:
+                    raise last_error from TimeoutError(msg)
+                else:
+                    raise TimeoutError(msg)
+
+            addr = addresses.pop(0)
+            if self._proxy_address:
+                # If we have a proxy address, we must connect via the proxy
+                # even if the scheduler address is different
+                connect_addr = self._proxy_address
+                # We still need to know the real scheduler address for the handshake
+                handshake_addr = addr
+            else:
+                connect_addr = addr
+                handshake_addr = addr
+
+            try:
+                comm = await connect(
+                    connect_addr,
+                    timeout=timeout,
+                    security=self.security,
+                    local_addr=self._start_kwargs.get("local_addr"),
+                    serializers=self._serializers_orig,
+                    deserializers=self._deserializers_orig,
+                    connection_args=self.security.get_connection_args("client"),
+                )
+                comm.name = "Client->Scheduler"
+                if self._proxy_address:
+                    comm.remote_address = handshake_addr
+                logger.info(
+                    "Receive scheduler info: %r",
+                    await comm.read(),
+                )
+                await comm.write(
+                    {
+                        "op": "register-client",
+                        "client": self.id,
+                        "reply": False,
+                        "pid": os.getpid(),
+                        "versions": versions.get_versions(),
+                        "name": self._name,
+                    }
+                )
+                break
+            except (OSError, TimeoutError) as e:
+                last_error = e
+                comm = None
+                if deadline is not None and time.time() > deadline:
+                    msg = "Could not connect to %s after trying for %s" % (
+                        self._scheduler_addresses,
+                        format_time_ago(start),
+                    )
+                    raise last_error from TimeoutError(msg)
+
+        assert comm
+        self._scheduler_conn = comm
+        # Use a proxy rpc object when talking to the scheduler.
+        # This allows the comm to be safely replaced on the fly
+        # (e.g. on heartbeat reconnects).
+        self._scheduler = rpc(comm, serializers=self._serializers_orig)
+        self._scheduler_address = comm.peer_address
+
+        await self._update_scheduler_info()
+        self._connection_event.set()
+        self._status = Status.running
+        self._connecting_to_scheduler = False
+
+    async def _reconnect(self):
+        self._connection_event.clear()
+        if self._scheduler_conn:
+            self._scheduler_conn.abort()
+            self._scheduler_conn = None
+            self._scheduler = None
+
+        addresses = list(self._scheduler_addresses)
+        random.shuffle(addresses)
+        await self._connect(addresses, timeout=self._timeout)
+
+    async def _send_to_scheduler(self, msg: dict) -> Any:
+        """Send message to scheduler
+
+        If the scheduler connection is down, wait for it to come back up, but fail after a timeout.
+        """
+        if self._closed:
+            raise ClientClosedError()
+
+        await self._connection_event.wait()
+        assert self._scheduler
+        try:
+            return await self._scheduler.send_comm_safe(msg)
+        except CommClosedError:
+            # Rely on heartbeat task to notice and reconnect
+            await self._connection_event.wait()
+            assert self._scheduler
+            return await self._scheduler.send_comm_safe(msg)
+
+    def _send_to_scheduler_safe(self, msg: dict) -> None:
+        """Send message to scheduler without expecting a response"""
+        if self._closed:
+            raise ClientClosedError()
+
+        if not self._connection_event.is_set():
+            # Connection not ready, buffer message
+            self._pending_msg_buffer.append(msg)
+            return
+
+        assert self._scheduler_conn
+        try:
+            self._scheduler_conn.send(msg)
+        except CommClosedError:
+            # Connection broken, buffer message and rely on heartbeat task
+            # to notice and reconnect
+            self._pending_msg_buffer.append(msg)
+            self._connection_event.clear()
+
+    @log_errors
+    async def _handle_stream(self):
+        """Listen to messages from scheduler"""
+        while self._status != Status.closed:
+            if not self._connection_event.is_set():
+                # Connection is down, wait until it's back up
+                await self._connection_event.wait()
+                continue
+
+            assert self._scheduler_conn
+            try:
+                msgs = await self._scheduler_conn.read()
+            except CommClosedError:
+                if self._closed:
+                    break
+                if self._status != Status.running:  # Shutting down, leave
+                    break
+                logger.warning(
+                    "Client stream closed to scheduler (%s). "
+                    "Trying to reconnect",
+                    self._scheduler_address,
+                    exc_info=True,
+                )
+                self._connection_event.clear()
+                continue
+            except Exception:
+                if self._status != Status.running:  # Shutting down, leave
+                    break
+                logger.error("Client stream errored", exc_info=True)
+                # Hopefully the scheduler is still alive. Try to reconnect.
+                self._connection_event.clear()
+                continue
+
+            if not isinstance(msgs, list):
+                msgs = [msgs]
+
+            for msg in msgs:
+                op = msg.pop("op", None)
+
+                if op == "stream-start":
+                    continue
+
+                if not op:
+                    logger.error("Received unexpected message from scheduler: %s", msg)
+                    continue
+
+                handler = self._stream_handlers.get(op)
+                if handler is None:
+                    logger.warning("Received unknown operation '%s'", op)
+                else:
+                    try:
+                        await handler(**msg)
+                    except Exception:
+                        logger.exception("Failed to handle message %r", op)
+
+    @log_errors
+    async def _heartbeat(self) -> None:
+        """Periodically send heartbeat to scheduler"""
+        wait_for = self._heartbeat_interval
+        while self._status != Status.closed:
+            await asyncio.sleep(wait_for)
+            if not self._connection_event.is_set():
+                # Connection down, try to reconnect
+                if not self._connecting_to_scheduler:
+                    logger.info("Attempting to reconnect to scheduler %s", self._scheduler_address)
+                    try:
+                        await self._reconnect()
+                        logger.info("Reconnected to scheduler")
+                        # Heartbeat again after an interval
+                        wait_for = self._heartbeat_interval
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to reconnect to scheduler: %s", e, exc_info=True
+                        )
+                        # Wait longer before retrying
+                        wait_for = min(max(wait_for * 2, self._heartbeat_interval), 30)
+                continue
+
+            assert self._scheduler_conn
+            if self._scheduler_conn.closed():
+                self._connection_event.clear()
+                continue
+
+            # Flush pending message buffer
+            if self._pending_msg_buffer:
+                try:
+                    self._scheduler_conn.send(self._pending_msg_buffer)
+                    self._pending_msg_buffer.clear()
+                except CommClosedError:
+                    self._connection_event.clear()
+                    continue
+
+            # Send heartbeat
+            logger.debug("Client heartbeat to scheduler: %s", self._scheduler_address)
+            resp = await self._scheduler.heartbeat_client(
+                client=self.id, metrics=context_meter.digest(), started=self._startTime
+            )
+            if resp["status"] == "missing":
+                logger.warning(
+                    "Scheduler is unaware of this client %s. Reregistering.", self.id
+                )
+                await self._reconnect()
+
+    async def _handle_report(self):
+        """Handle reports from the scheduler, assigning them to futures"""
+        await self._connection_event.wait()
+        while self._status != Status.closed:
+            await self._who_has_cv.wait()
+            if self._status == Status.closed:
+                break
+            self._send_to_scheduler_safe(
+                {"op": "who-has", "keys": list(self._who_has), "client": self.id}
+            )
+            # This is a performance optimization. Without this sleep, the client can flood
+            # the scheduler with identical who_has requests. See
+            # https://github.com/dask/distributed/issues/6659
+            await asyncio.sleep(0.01)
+
+    async def _handle_key_in_memory(self, key: Hashable, workers: list[str]) -> None:
+        """Handle confirmation that a key is now in memory"""
+        state = self.futures.get(key)
+        if state is None:
+            return
+
+        async with self._who_has_cv:
+            if key in self._who_has:
+                self._who_has.pop(key)
+                self._who_has_cv.notify_all()
+
+        if state.status == "pending":
+            state.set_result(None)
+        elif state.status == "processing":
+            state.set_processing(workers)
+        elif state.status == "error":
+            return
+        if state.status == "finished":
+            # Do not overwrite result if we have it already
+            return
+
+        if self._inform:
+            state.set_result(None)
+
+    async def _handle_lost_data(self, key: Hashable) -> None:
+        """Handle notification that a key has been lost"""
+        state = self.futures.get(key)
+        if state is not None:
+            state.set_lost()
+
+        async with self._who_has_cv:
+            if key in self._who_has:
+                self._who_has.pop(key)
+                self._who_has_cv.notify_all()
+
+    async def _handle_cancelled_key(self, key: Hashable) -> None:
+        """Handle notification that a key has been cancelled"""
+        state = self.futures.get(key)
+        if state is None:
+            return
+        state.set_cancelled()
+
+    async def _handle_retried_key(self, key: Hashable) -> None:
+        state = self.futures.get(key)
+        if state is None:
+            return
+        state.retry()
+
+    async def _handle_task_erred(
+        self,
+        key: Hashable,
+        exception: Serialized,
+        traceback: Serialized | None = None,
+    ) -> None:
+        """Handle notification that a task has erred"""
+        state = self.futures.get(key)
+        if state is None:
+            return
+
+        try:
+            exception = await offload(exception.deserialize)
+        except Exception as e:
+            exception = e
+            logger.info("Could not deserialize exception: %s", str(e)[:1000])
+
+        if traceback:
+            try:
+                traceback = await offload(traceback.deserialize)
+            except Exception as e:
+                traceback = None
+                logger.info("Could not deserialize traceback: %s", str(e)[:1000])
+
+        state.set_exception(exception, traceback)
+
+    async def _handle_restart(self) -> None:
+        logger.info("Receive restart signal from scheduler")
+        for state in self.futures.values():
+            state.set_lost()
+        if self.cluster:
+            self.cluster.scheduler_info = self.scheduler_info()
+            self.cluster.workers = {}
+        await self._update_scheduler_info()
+        if self.cluster:
+            # Update this ক্লাস্টার's known workers by asking the scheduler
+            # for the full worker list. This is important so that the ক্লাস্টার
+            # object's representation is accurate.
+            await self.cluster._correct_state()
+
+    async def _handle_error(self, message: str) -> None:
+        """Handle unknown errors reported by the scheduler"""
+        logger.error("Received error from scheduler: %s", message)
+
+    async def _handle_cluster_dump_error(self, exc: Serialized) -> None:
+        """Handle errors during cluster state dump"""
+        logger.error("Error during cluster state dump", exc_info=exc.deserialize())
+
+    async def _update_scheduler_info(self, n_workers: int = -1):
+        """Get info from scheduler, update local state"""
+        if self._closed:
+            raise ClientClosedError()
+        info = await self._send_to_scheduler({"op": "identity", "n_workers": n_workers})
+        self._scheduler_identity.update(info)
+
+        # Notify cluster object about new workers
+        if self.cluster is not None:
+            self.cluster.scheduler_info = self.scheduler_info()
+            for addr, w in self.cluster.scheduler_info["workers"].items():
+                if addr not in self.cluster.workers:
+                    from .worker import Worker
+
+                    worker = Worker(
+                        scheduler_ip=self.scheduler.address,
+                        address=addr,
+                        loop=self.loop,
+                        name=w.get("name"),
+                        nthreads=w["nthreads"],
+                        memory_limit=w["memory_limit"],
+                        security=self.security,
+                        silence_logs=self._silence_logs,
+                        serializers=self._serializers_orig,
+                        deserializers=self._deserializers_orig,
+                        **self.cluster.new_worker_spec(w),
+                    )
+                    self.cluster.workers[addr] = worker
+
+        # Remove pending futures for workers that no longer exist
+        workers = set(self.scheduler_info()["workers"])
+        for w in list(self._pending_futures_per_worker):
+            if w not in workers:
+                del self._pending_futures_per_worker[w]
+
+    async def _run_extension(self, ext: Callable) -> None:
+        """Run extension locally and on scheduler"""
+        if ext is None:
+            return
+        logger.info("Setting up client extension %s", ext)
+        if is_coroutine_function(ext):
+            await ext(self)
+        else:
+            ext(self)
+
+        if hasattr(ext, "setup"):
+            ext_setup = ext.setup
+            if is_coroutine_function(ext_setup):
+                ext_setup = await ext_setup(self)
+            else:
+                ext_setup = ext_setup(self)
+        else:
+            ext_setup = Serialize(ext)
+
+        name = funcname(ext)
+        self._extensions[name] = ext
+        logger.info("Setting up scheduler extension %s", name)
+        await self._send_to_scheduler({"op": "add-client-extension", "name": name, "extension": ext_setup})
+
+    def start(self, **kwargs):
+        """Start the client if it is has not yet started"""
+        if self.asynchronous:
+            raise TypeError(
+                "client.start() is not safe to use in asynchronous mode. "
+                "Please use `await client` or `await client._start()` instead."
+            )
+        if self._status == Status.created:
+            sync(self.loop, self._start, **kwargs)
 
     @classmethod
-    def current(cls, allow_global=True):
-        """When running within the context of `as_client`, return the context-local
-        current client. Otherwise, return the latest initialised Client.
-        If no Client instances exist, raise ValueError.
-        If allow_global is set to False, raise ValueError if running outside of
-        the `as_client` context manager.
+    def current(cls, allow_global: bool = True) -> Client:
+        """Return the currently active client
+
+        If no clients are active, raise ValueError
 
         Parameters
         ----------
         allow_global : bool
-            If True returns the default client
+            If True (the default), then we search for a default client if we
+            can't find a context specific client.
+
+        """
+        client = _get_global_client()
+        if client is not None:
+            return client
+
+        if allow_global:
+            with cls._global_clients_lock:
+                if cls._running_clients_on_this_process:
+                    return cls._running_clients_on_this_process[-1]
+
+        raise ValueError("No clients found")
+
+    @classmethod
+    def get(
+        cls,
+        address: str | Cluster | None = None,
+        *,
+        loop: IOLoop | None = None,
+        timeout: float | str = config.timeouts["connect"],
+        security: Security | bool | None = None,
+        asynchronous: bool = False,
+        **kwargs: Any,
+    ) -> Client:
+        """Get a client with the given arguments. Create one if necessary.
+
+        This allows us to avoid creating clients repeatedly with the same arguments.
+
+        Parameters
+        ----------
+        address : str, Cluster, or None
+            Address or cluster to connect to.
+        loop : IOLoop
+        timeout : int or str
+        security : Security or bool
+        asynchronous : bool
+        **kwargs :
+            Other keyword arguments for the Client constructor.
 
         Returns
         -------
         Client
-            The current client
-
-        Raises
-        ------
-        ValueError
-            If there is no client set, a ValueError is raised
-
-        See also
-        --------
-        default_client
-        """
-        out = _current_client.get()
-        if out:
-            return out
-        if allow_global:
-            return default_client()
-        raise ValueError("Not running inside the `as_current` context manager")
-
-    @property
-    def dashboard_link(self):
-        """Link to the scheduler's dashboard.
-
-        Returns
-        -------
-        str
-            Dashboard URL.
 
         Examples
         --------
-        Opening the dashboard in your default web browser:
-
-        >>> import webbrowser
-        >>> from distributed import Client
-        >>> client = Client()
-        >>> webbrowser.open(client.dashboard_link)
-
+        >>> client = Client.get(asynchronous=True)  # Create a new client
+        >>> client2 = Client.get(asynchronous=True)  # Get the same client
+        >>> assert client is client2
+        >>> client.close()  # doctest: +SKIP
+        >>> client3 = Client.get(asynchronous=True)  # Create a new client
+        >>> assert client is not client3
+        >>> client3.close()  # doctest: +SKIP
         """
-        try:
-            return self.cluster.dashboard_link
-        except AttributeError:
-            scheduler, info = self._get_scheduler_info(n_workers=0)
-            if scheduler is None:
-                return None
-            else:
-                protocol, rest = scheduler.address.split("://")
-
-            port = info["services"]["dashboard"]
-            if protocol == "inproc":
-                host = "localhost"
-            else:
-                host = rest.split(":")[0]
-
-            return format_dashboard_link(host, port)
-
-    def _get_scheduler_info(self, n_workers):
-        from distributed.scheduler import Scheduler
-
-        if (
-            self.cluster
-            and hasattr(self.cluster, "scheduler")
-            and isinstance(self.cluster.scheduler, Scheduler)
-        ):
-            info = self.cluster.scheduler.identity(n_workers=n_workers)
-            scheduler = self.cluster.scheduler
-        elif (
-            self._loop_runner.is_started() and self.scheduler and not self.asynchronous
-        ):
-            info = sync(self.loop, self.scheduler.identity, n_workers=n_workers)
-            scheduler = self.scheduler
-        else:
-            info = self._scheduler_identity
-            scheduler = self.scheduler
-
-        return scheduler, SchedulerInfo(info)
-
-    def __repr__(self):
-        # Note: avoid doing I/O here...
-        info = self._scheduler_identity
-        addr = info.get("address")
-        if addr:
-            workers = info.get("workers", {})
-            nworkers = len(workers)
-            nthreads = sum(w["nthreads"] for w in workers.values())
-            text = "<%s: %r processes=%d threads=%d" % (
-                self.__class__.__name__,
-                addr,
-                nworkers,
-                nthreads,
+        if asynchronous:
+            raise TypeError(
+                "Client.get is not safe to use in asynchronous mode. "
+                "Please instantiate Client class directly."
             )
-            memory = [w["memory_limit"] for w in workers.values()]
-            if all(memory):
-                text += ", memory=" + format_bytes(sum(memory))
-            text += ">"
-            return text
 
-        elif self.scheduler is not None:
-            return "<{}: scheduler={!r}>".format(
-                self.__class__.__name__,
-                self.scheduler.address,
-            )
-        else:
-            return f"<{self.__class__.__name__}: No scheduler connected>"
-
-    def _repr_html_(self):
-        try:
-            dle_version = parse_version(version("dask-labextension"))
-            JUPYTERLAB = False if dle_version < parse_version("6.0.0") else True
-        except PackageNotFoundError:
-            JUPYTERLAB = False
-
-        scheduler, info = self._get_scheduler_info(n_workers=5)
-
-        return get_template("client.html.j2").render(
-            id=self.id,
-            scheduler=scheduler,
-            info=info,
-            cluster=self.cluster,
-            scheduler_file=self.scheduler_file,
-            dashboard_link=self.dashboard_link,
-            jupyterlab=JUPYTERLAB,
+        kwargs.update(
+            {
+                "address": address,
+                "loop": loop,
+                "timeout": timeout,
+                "security": security,
+                "asynchronous": asynchronous,
+            }
         )
+        kwargs["set_as_default"] = False
 
-    def start(self, **kwargs):
-        """Start scheduler running in separate thread"""
-        if self.status != "newly-created":
-            return
+        key = tokenize(kwargs)
 
-        self._loop_runner.start()
-        if self._set_as_default:
-            _set_global_client(self)
-
-        if self.asynchronous:
-            self._started = asyncio.ensure_future(self._start(**kwargs))
-        else:
-            sync(self.loop, self._start, **kwargs)
-
-    def __await__(self):
-        if hasattr(self, "_started"):
-            return self._started.__await__()
-        else:
-
-            async def _():
-                return self
-
-            return _().__await__()
-
-    def _send_to_scheduler_safe(self, msg):
-        if self.status in ("running", "closing"):
-            try:
-                self.scheduler_comm.send(msg)
-            except (CommClosedError, AttributeError):
-                if self.status == "running":
-                    raise
-        elif self.status in ("connecting", "newly-created"):
-            self._pending_msg_buffer.append(msg)
-
-    def _send_to_scheduler(self, msg):
-        if self.status in ("running", "closing", "connecting", "newly-created"):
-            self.loop.add_callback(self._send_to_scheduler_safe, msg)
-        else:
-            raise ClosedClientError(
-                f"Client is {self.status}. Can't send {msg['op']} message."
-            )
-
-    async def _start(self, timeout=no_default, **kwargs):
-        self.status = "connecting"
-
-        await self.rpc.start()
-
-        if timeout is no_default:
-            timeout = self._timeout
-        timeout = parse_timedelta(timeout, "s")
-
-        address = self._start_arg
-        if self.cluster is not None:
-            # Ensure the cluster is started (no-op if already running)
-            try:
-                await self.cluster
-            except Exception:
-                logger.info(
-                    "Tried to start cluster and received an error. Proceeding.",
-                    exc_info=True,
-                )
-            address = self.cluster.scheduler_address
-        elif self.scheduler_file is not None:
-            while not os.path.exists(self.scheduler_file):
-                await asyncio.sleep(0.01)
-            for _ in range(10):
-                try:
-                    with open(self.scheduler_file) as f:
-                        cfg = json.load(f)
-                    address = cfg["address"]
-                    break
-                except (ValueError, KeyError):  # JSON file not yet flushed
-                    await asyncio.sleep(0.01)
-        elif self._start_arg is None:
-            from distributed.deploy import LocalCluster
-
-            self.cluster = await LocalCluster(
-                loop=self.loop,
-                asynchronous=self._asynchronous,
-                **self._startup_kwargs,
-            )
-            address = self.cluster.scheduler_address
-
-        self._gather_semaphore = asyncio.Semaphore(5)
-
-        if self.scheduler is None:
-            self.scheduler = self.rpc(address)
-        self.scheduler_comm = None
-
-        try:
-            await self._ensure_connected(timeout=timeout)
-        except (OSError, ImportError):
-            await self._close()
-            raise
-
-        for pc in self._periodic_callbacks.values():
-            pc.start()
-
-        for topic, handler in Client._default_event_handlers.items():
-            self.subscribe_topic(topic, handler)
-
-        await self.preloads.start()
-
-        self._handle_report_task = asyncio.create_task(self._handle_report())
-
-        return self
-
-    @log_errors
-    async def _reconnect(self):
-        assert self.scheduler_comm.comm.closed()
-
-        self.status = "connecting"
-        self.scheduler_comm = None
-
-        for st in self.futures.values():
-            st.cancel(
-                reason="scheduler-connection-lost",
-                msg=(
-                    "Client lost the connection to the scheduler. "
-                    "Please check your connection and re-run your work."
-                ),
-            )
-        self.futures.clear()
-
-        timeout = self._timeout
-        deadline = time() + timeout
-        while timeout > 0 and self.status == "connecting":
-            try:
-                await self._ensure_connected(timeout=timeout)
-                break
-            except OSError:
-                # Wait a bit before retrying
-                await asyncio.sleep(0.1)
-                timeout = deadline - time()
-            except ImportError:
-                await self._close()
-                break
-
-        else:
-            logger.error(
-                "Failed to reconnect to scheduler after %.2f "
-                "seconds, closing client",
-                self._timeout,
-            )
-            await self._close()
-
-    async def _ensure_connected(self, timeout=None):
-        if (
-            self.scheduler_comm
-            and not self.scheduler_comm.closed()
-            or self._connecting_to_scheduler
-            or self.scheduler is None
-        ):
-            return
-
-        self._connecting_to_scheduler = True
-
-        try:
-            comm = await connect(
-                self.scheduler.address, timeout=timeout, **self.connection_args
-            )
-            comm.name = "Client->Scheduler"
-            if timeout is not None:
-                await wait_for(self._update_scheduler_info(), timeout)
+        with cls._global_clients_lock:
+            if key in cls._active_clients:
+                client = cls._active_clients[key]
             else:
-                await self._update_scheduler_info()
-            await comm.write(
-                {
-                    "op": "register-client",
-                    "client": self.id,
-                    "reply": False,
-                    "versions": version_module.get_versions(),
-                }
-            )
-        except Exception:
-            if self.status == "closed":
-                return
-            else:
-                raise
-        finally:
-            self._connecting_to_scheduler = False
-        if timeout is not None:
-            msg = await wait_for(comm.read(), timeout)
-        else:
-            msg = await comm.read()
-        assert len(msg) == 1
-        assert msg[0]["op"] == "stream-start"
-
-        if msg[0].get("error"):
-            raise ImportError(msg[0]["error"])
-        if msg[0].get("warning"):
-            warnings.warn(version_module.VersionMismatchWarning(msg[0]["warning"]))
-
-        bcomm = BatchedSend(interval="10ms", loop=self.loop)
-        bcomm.start(comm)
-        self.scheduler_comm = bcomm
-        self.status = "running"
-
-        for msg in self._pending_msg_buffer:
-            self._send_to_scheduler(msg)
-        del self._pending_msg_buffer[:]
-
-        logger.debug("Started scheduling coroutines. Synchronized")
-
-    async def _update_scheduler_info(self, n_workers=5):
-        if self.status not in ("running", "connecting") or self.scheduler is None:
-            return
-        try:
-            self._scheduler_identity = SchedulerInfo(
-                await self.scheduler.identity(n_workers=n_workers)
-            )
-        except OSError:
-            logger.debug("Not able to query scheduler for identity")
-
-    async def _wait_for_workers(
-        self, n_workers: int, timeout: float | None = None
-    ) -> None:
-        info = await self.scheduler.identity(n_workers=-1)
-        self._scheduler_identity = SchedulerInfo(info)
-        if timeout:
-            deadline = time() + parse_timedelta(timeout)
-        else:
-            deadline = None
-
-        def running_workers(info):
-            return len(
-                [
-                    ws
-                    for ws in info["workers"].values()
-                    if ws["status"] == Status.running.name
-                ]
-            )
-
-        while running_workers(info) < n_workers:
-            if deadline and time() > deadline:
-                raise TimeoutError(
-                    "Only %d/%d workers arrived after %s"
-                    % (running_workers(info), n_workers, timeout)
-                )
-            await asyncio.sleep(0.1)
-            info = await self.scheduler.identity(n_workers=-1)
-            self._scheduler_identity = SchedulerInfo(info)
-
-    def wait_for_workers(self, n_workers: int, timeout: float | None = None) -> None:
-        """Blocking call to wait for n workers before continuing
-
-        Parameters
-        ----------
-        n_workers : int
-            The number of workers
-        timeout : number, optional
-            Time in seconds after which to raise a
-            ``dask.distributed.TimeoutError``
-        """
-        if not isinstance(n_workers, int) or n_workers < 1:
-            raise ValueError(
-                f"`n_workers` must be a positive integer. Instead got {n_workers}."
-            )
-
-        if self.cluster and hasattr(self.cluster, "wait_for_workers"):
-            return self.cluster.wait_for_workers(n_workers, timeout)
-
-        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
-
-    def _adjust_heartbeat_intervals(self, interval):
-        """Adjust the heartbeat intervals for the client and scheduler"""
-        self._periodic_callbacks["heartbeat"].callback_time = interval * 1000
-        self._periodic_callbacks["scheduler-info"].callback_time = interval * 1000
-
-    def _heartbeat(self):
-        # Don't send heartbeat if scheduler comm or cluster are already closed
-        if self.scheduler_comm is not None and not (
-            self.scheduler_comm.comm.closed()
-            or (self.cluster and self.cluster.status in (Status.closed, Status.closing))
-        ):
-            self.scheduler_comm.send({"op": "heartbeat-client"})
-
-    def __enter__(self):
-        if not self._loop_runner.is_started():
-            self.start()
-        if self._set_as_default:
-            self._previous_as_current = _current_client.set(self)
-        return self
-
-    async def __aenter__(self):
-        await self
-        if self._set_as_default:
-            self._previous_as_current = _current_client.set(self)
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        if self._previous_as_current:
-            try:
-                _current_client.reset(self._previous_as_current)
-            except ValueError as e:
-                if not e.args[0].endswith(" was created in a different Context"):
-                    raise  # pragma: nocover
-                warnings.warn(
-                    "It is deprecated to enter and exit the Client context "
-                    "manager from different tasks",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-        await self._close(
-            # if we're handling an exception, we assume that it's more
-            # important to deliver that exception than shutdown gracefully.
-            fast=(exc_type is not None)
-        )
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        if self._previous_as_current:
-            try:
-                _current_client.reset(self._previous_as_current)
-            except ValueError as e:
-                if not e.args[0].endswith(" was created in a different Context"):
-                    raise  # pragma: nocover
-                warnings.warn(
-                    "It is deprecated to enter and exit the Client context "
-                    "manager from different threads",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-        self.close()
-
-    def __del__(self):
-        # If the loop never got assigned, we failed early in the constructor,
-        # nothing to do
-        if self.__loop is not None:
-            self.close()
-
-    def _inc_ref(self, key):
-        with self._refcount_lock:
-            self.refcount[key] += 1
-
-    def _dec_ref(self, key):
-        with self._refcount_lock:
-            self.refcount[key] -= 1
-            if self.refcount[key] == 0:
-                del self.refcount[key]
-                self._release_key(key)
-
-    def _release_key(self, key):
-        """Release key from distributed memory"""
-        logger.debug("Release key %s", key)
-        st = self.futures.pop(key, None)
-        if st is not None:
-            st.cancel()
-        if self.status != "closed":
-            self._send_to_scheduler(
-                {"op": "client-releases-keys", "keys": [key], "client": self.id}
-            )
-
-    @log_errors
-    async def _handle_report(self):
-        """Listen to scheduler"""
-        try:
-            while True:
-                if self.scheduler_comm is None:
-                    break
                 try:
-                    msgs = await self.scheduler_comm.comm.read()
-                except CommClosedError:
-                    if self._is_finalizing():
-                        return
-                    if self.status == "running":
-                        if self.cluster and self.cluster.status in (
-                            Status.closed,
-                            Status.closing,
-                        ):
-                            # Don't attempt to reconnect if cluster are already closed.
-                            # Instead close down the client.
-                            await self._close()
-                            return
-                        logger.info("Client report stream closed to scheduler")
-                        logger.info("Reconnecting...")
-                        self.status = "connecting"
-                        await self._reconnect()
-                        continue
-                    else:
-                        break
-                if not isinstance(msgs, (list, tuple)):
-                    msgs = (msgs,)
-
-                breakout = False
-                for msg in msgs:
-                    logger.debug("Client %s receives message %s", self.id, msg)
-
-                    if "status" in msg and "error" in msg["status"]:
-                        typ, exc, tb = clean_exception(**msg)
-                        raise exc.with_traceback(tb)
-
-                    op = msg.pop("op")
-
-                    if op == "close" or op == "stream-closed":
-                        breakout = True
-                        break
-
-                    try:
-                        handler = self._stream_handlers[op]
-                        result = handler(**msg)
-                        if inspect.isawaitable(result):
-                            await result
-                    except Exception as e:
-                        logger.exception(e)
-                if breakout:
-                    break
-        except (CancelledError, asyncio.CancelledError):
-            pass
-
-    def _handle_key_in_memory(self, key=None, type=None, workers=None):
-        state = self.futures.get(key)
-        if state is not None:
-            if type and not state.type:  # Type exists and not yet set
-                try:
-                    type = loads(type)
+                    client = cls(**kwargs)
                 except Exception:
-                    type = None
-                # Here, `type` may be a str if actual type failed
-                # serializing in Worker
-            else:
-                type = None
-            state.finish(type)
+                    logger.error(
+                        "Failed to start client with arguments %s",
+                        kwargs,
+                        exc_info=True,
+                    )
+                    raise
+                cls._active_clients[key] = client
 
-    def _handle_lost_data(self, key=None):
-        state = self.futures.get(key)
-        if state is not None:
-            state.lose()
+            return client
 
-    def _handle_cancelled_keys(self, keys, reason=None, msg=None):
-        for key in keys:
-            state = self.futures.get(key)
-            if state is not None:
-                state.cancel(reason=reason, msg=msg)
+    @classmethod
+    async def get_current(cls) -> Client:
+        """Get the current client for this Tornado loop.
 
-    def _handle_retried_key(self, key=None):
-        state = self.futures.get(key)
-        if state is not None:
-            state.retry()
-
-    def _handle_task_erred(self, key=None, exception=None, traceback=None):
-        state = self.futures.get(key)
-        if state is not None:
-            state.set_error(exception, traceback)
-
-    def _handle_restart(self):
-        logger.info("Receive restart signal from scheduler")
-        for state in self.futures.values():
-            state.cancel(
-                reason="scheduler-restart",
-                msg="Scheduler has restarted. Please re-run your work.",
-            )
-        self.futures.clear()
-        self.generation += 1
-        with self._refcount_lock:
-            self.refcount.clear()
-
-    def _handle_error(self, exception=None):
-        logger.warning("Scheduler exception:")
-        logger.exception(exception)
-
-    @asynccontextmanager
-    async def _wait_for_handle_report_task(self, fast=False):
-        current_task = asyncio.current_task()
-        handle_report_task = self._handle_report_task
-        # Give the scheduler 'stream-closed' message 100ms to come through
-        # This makes the shutdown slightly smoother and quieter
-        should_wait = (
-            handle_report_task is not None and handle_report_task is not current_task
+        Returns the most recently created client.
+        Raises ValueError if no clients are found.
+        """
+        # Deprecated: this method was intended for Tornado users.
+        # Since Tornado support is deprecated, this method is deprecated too.
+        warnings.warn(
+            "`Client.get_current` is deprecated and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
         )
-        if should_wait:
-            with suppress(asyncio.CancelledError, TimeoutError):
-                await wait_for(asyncio.shield(handle_report_task), 0.1)
+        return cls.current()
 
-        yield
+    ##################
+    # Client methods #
+    ##################
 
-        if should_wait:
-            with suppress(TimeoutError, asyncio.CancelledError):
-                await wait_for(handle_report_task, 0 if fast else 2)
+    @overload
+    def submit(
+        self,
+        func: Callable[P, T],
+        *args: P.args,
+        key: Hashable | None = None,
+        workers: str | Iterable[str] | None = None,
+        resources: dict[str, float] | None = None,
+        retries: int = 0,
+        priority: int = 0,
+        fifo_timeout: str | timedelta = 0,
+        allow_other_workers: bool = False,
+        actor: bool = False,
+        actors: bool | str | Iterable[str] = False,
+        pure: bool = True,
+        on_error: Literal["retry", "raise", "ignore"] | None = None,
+        **kwargs: P.kwargs,
+    ) -> Future[T]: ...
 
-    @log_errors
-    async def _close(self, fast: bool = False) -> None:
-        """Send close signal and wait until scheduler completes
-
-        If fast is True, the client will close forcefully, by cancelling tasks
-        the background _handle_report_task.
-        """
-        # TODO: close more forcefully by aborting the RPC and cancelling all
-        # background tasks.
-        # See https://trio.readthedocs.io/en/stable/reference-io.html#trio.aclose_forcefully
-        if self.status == "closed":
-            return
-
-        self.status = "closing"
-
-        await self.preloads.teardown()
-
-        with suppress(AttributeError):
-            for pc in self._periodic_callbacks.values():
-                pc.stop()
-
-        _del_global_client(self)
-        self._scheduler_identity = {}
-        if self._set_as_default and not _get_global_client():
-            with suppress(AttributeError):
-                # clear the dask.config set keys
-                with self._set_config:
-                    pass
-        if self.get == dask.config.get("get", None):
-            del dask.config.config["get"]
-
-        if (
-            self.scheduler_comm
-            and self.scheduler_comm.comm
-            and not self.scheduler_comm.comm.closed()
-        ):
-            self._send_to_scheduler({"op": "close-client"})
-            self._send_to_scheduler({"op": "close-stream"})
-        async with self._wait_for_handle_report_task(fast=fast):
-            if (
-                self.scheduler_comm
-                and self.scheduler_comm.comm
-                and not self.scheduler_comm.comm.closed()
-            ):
-                await self.scheduler_comm.close()
-
-            for key in list(self.futures):
-                self._release_key(key=key)
-
-            if self._start_arg is None:
-                with suppress(AttributeError):
-                    await self.cluster.close()
-
-            await self.rpc.close()
-
-            self.status = "closed"
-
-            if _get_global_client() is self:
-                _set_global_client(None)
-
-        with suppress(AttributeError):
-            await self.scheduler.close_rpc()
-
-        self.scheduler = None
-        self.status = "closed"
-
-    def close(self, timeout=no_default):
-        """Close this client
-
-        Clients will also close automatically when your Python session ends
-
-        If you started a client without arguments like ``Client()`` then this
-        will also close the local cluster that was started at the same time.
-
-
-        Parameters
-        ----------
-        timeout : number
-            Time in seconds after which to raise a
-            ``dask.distributed.TimeoutError``
-
-        See Also
-        --------
-        Client.restart
-        """
-        if timeout is no_default:
-            timeout = self._timeout * 2
-        # XXX handling of self.status here is not thread-safe
-        if self.status in ["closed", "newly-created"]:
-            if self.asynchronous:
-                return NoOpAwaitable()
-            return
-        self.status = "closing"
-
-        with suppress(AttributeError):
-            for pc in self._periodic_callbacks.values():
-                pc.stop()
-
-        if self.asynchronous:
-            coro = self._close()
-            if timeout:
-                coro = wait_for(coro, timeout)
-            return coro
-
-        sync(self.loop, self._close, fast=True, callback_timeout=timeout)
-        assert self.status == "closed"
-
-        if not self._is_finalizing():
-            self._loop_runner.stop()
-
-    async def _shutdown(self):
-        logger.info("Shutting down scheduler from Client")
-
-        self.status = "closing"
-        for pc in self._periodic_callbacks.values():
-            pc.stop()
-
-        async with self._wait_for_handle_report_task():
-            if self.cluster:
-                await self.cluster.close()
-            else:
-                with suppress(CommClosedError):
-                    await self.scheduler.terminate()
-
-        await self._close()
-
-    def shutdown(self):
-        """Shut down the connected scheduler and workers
-
-        Note, this may disrupt other clients that may be using the same
-        scheduler and workers.
-
-        See Also
-        --------
-        Client.close : close only this client
-        """
-        return self.sync(self._shutdown)
-
-    def get_executor(self, **kwargs):
-        """
-        Return a concurrent.futures Executor for submitting tasks on this
-        Client
-
-        Parameters
-        ----------
-        **kwargs
-            Any submit()- or map()- compatible arguments, such as
-            `workers` or `resources`.
-
-        Returns
-        -------
-        ClientExecutor
-            An Executor object that's fully compatible with the
-            concurrent.futures API.
-        """
-        return ClientExecutor(self, **kwargs)
+    @overload
+    def submit(
+        self,
+        func: Callable[..., T],
+        *args: Any,
+        key: Hashable | None = None,
+        workers: str | Iterable[str] | None = None,
+        resources: dict[str, float] | None = None,
+        retries: int = 0,
+        priority: int = 0,
+        fifo_timeout: str | timedelta = 0,
+        allow_other_workers: bool = False,
+        actor: bool = False,
+        actors: bool | str | Iterable[str] = False,
+        pure: bool = True,
+        on_error: Literal["retry", "raise", "ignore"] | None = None,
+        **kwargs: Any,
+    ) -> Future[T]: ...
 
     def submit(
         self,
-        func,
-        *args,
-        key=None,
-        workers=None,
-        resources=None,
-        retries=None,
-        priority=0,
-        fifo_timeout="100 ms",
-        allow_other_workers=False,
-        actor=False,
-        actors=False,
-        pure=True,
-        **kwargs,
-    ):
+        func: Callable[..., T],
+        *args: Any,
+        key: Hashable | None = None,
+        workers: str | Iterable[str] | None = None,
+        resources: dict[str, float] | None = None,
+        retries: int = 0,
+        priority: int = 0,
+        fifo_timeout: str | timedelta = 0,
+        allow_other_workers: bool = False,
+        actor: bool = False,
+        actors: bool | str | Iterable[str] = False,
+        pure: bool = True,
+        on_error: Literal["retry", "raise", "ignore"] | None = None,
+        **kwargs: Any,
+    ) -> Future[T]:
         """Submit a function application to the scheduler
 
         Parameters
         ----------
-        func : callable
-            Callable to be scheduled as ``func(*args **kwargs)``. If ``func`` returns a
-            coroutine, it will be run on the main event loop of a worker. Otherwise
-            ``func`` will be run in a worker's task executor pool (see
-            ``Worker.executors`` for more information.)
-        *args : tuple
-            Optional positional arguments
-        key : str
-            Unique identifier for the task.  Defaults to function-name and hash
-        workers : string or iterable of strings
-            A set of worker addresses or hostnames on which computations may be
-            performed. Leave empty to default to all workers (common case)
-        resources : dict (defaults to {})
-            Defines the ``resources`` each instance of this mapped task
-            requires on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
-        retries : int (default to 0)
-            Number of allowed automatic retries if the task fails
-        priority : Number
-            Optional prioritization of task.  Zero is default.
-            Higher priorities take precedence
-        fifo_timeout : str timedelta (default '100ms')
-            Allowed amount of time between calls to consider the same priority
-        allow_other_workers : bool (defaults to False)
-            Used with ``workers``. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
-        actor : bool (default False)
-            Whether this task should exist on the worker as a stateful actor.
-            See :doc:`actors` for additional details.
-        actors : bool (default False)
-            Alias for `actor`
-        pure : bool (defaults to True)
-            Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``. Note that if both
-            ``actor`` and ``pure`` kwargs are set to True, then the value
-            of ``pure`` will be reverted to False, since an actor is stateful.
-            See :ref:`pure functions` for more details.
-        **kwargs
+        func : function
+        *args :
+        key : hashable, optional
+            Unique identifier for the task. Defaults to hashing the function
+            and arguments.
+        workers : string or iterable of strings, optional
+            A list of worker addresses to restrict this task to.
+            Ex: ``['127.0.0.1:8787', '127.0.0.1:8788']``
+        resources : dict, optional
+            A dictionary of resource constraints for this task.
+            Ex: ``{'GPU': 2, 'memory': 7e9}``
+        retries : int, optional
+            Number of times to retry the task if it fails.
+        priority : int, optional
+            Priority of task. Higher numbers mean higher priority. Defaults to 0.
+        fifo_timeout : timedelta or string, optional like '1s' or '100ms'
+            Maximum time for the task to be runnable. If it doesn't run by this
+            deadline then it is cancelled.
+        allow_other_workers : bool, optional
+            If True, allow this task to run on workers that were not specified
+            in the ``workers=`` keyword. Default is False.
+        actor : bool, optional
+            Whether this task creates an Actor. Default is False.
+        actors : bool, string, list, optional
+            Addresses of actors that this task can run on.
+        pure : bool, optional
+            Whether the function is pure. Default is True. If True, the task
+            will be executed at most once. If False, the task may be executed
+            multiple times if it is needed by multiple results.
+        on_error: 'retry', 'raise', 'ignore', optional
+            What to do if the task raises an error. Defaults to 'raise'.
+            If 'retry', the task will be retried up to ``retries`` times.
+            If 'raise', the exception will be raised when the future is awaited.
+            If 'ignore', the future will be marked as cancelled.
+        **kwargs :
+
+        Returns
+        -------
+        Future
 
         Examples
         --------
         >>> c = client.submit(add, a, b)  # doctest: +SKIP
 
-        Notes
-        -----
-        The current implementation of a task graph resolution searches for occurrences of ``key``
-        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
-        substitution of strings passed as arguments to a task if these strings match some ``key``
-        that already exists on a cluster. To avoid these situations it is required to use unique
-        values if a ``key`` is set manually.
-        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
-
-        Returns
-        -------
-        Future
-            If running in asynchronous mode, returns the future. Otherwise
-            returns the concrete value
-
-        Raises
-        ------
-        TypeError
-            If 'func' is not callable, a TypeError is raised
-        ValueError
-            If 'allow_other_workers'is True and 'workers' is None, a
-            ValueError is raised
-
         See Also
         --------
-        Client.map : Submit on many arguments at once
+        Client.map
+        Future
         """
         if not callable(func):
             raise TypeError("First input to submit must be a callable function")
 
-        actor = actor or actors
+        key = key or tokenize(func, *args, **kwargs)
+        if not isinstance(key, Hashable):
+            raise TypeError("key= must be Hashable")
+
+        if key in self.futures:
+            return Future(key, self)
+
         if actor:
-            pure = not actor
-
-        if allow_other_workers not in (True, False, None):
-            raise TypeError("allow_other_workers= must be True or False")
-
-        if key is None:
-            if pure:
-                key = funcname(func) + "-" + tokenize(func, kwargs, *args)
-            else:
-                key = funcname(func) + "-" + str(uuid.uuid4())
-
-        with self._refcount_lock:
-            if key in self.futures:
-                return Future(key, self)
-
-        if allow_other_workers and workers is None:
-            raise ValueError("Only use allow_other_workers= if using workers=")
-
-        if isinstance(workers, (str, Number)):
-            workers = [workers]
-
-        expr = LLGExpr(
-            {
-                key: Task(
-                    key,
-                    func,
-                    *(parse_input(a) for a in args),
-                    **{k: parse_input(v) for k, v in kwargs.items()},
+            if workers or resources or retries or priority or fifo_timeout:
+                raise ValueError(
+                    "Cannot specify workers, resources, retries, priority, "
+                    "or fifo_timeout for actors"
                 )
-            }
-        )
-        futures = self._graph_to_futures(
-            expr,
-            [key],
-            workers=workers,
-            allow_other_workers=allow_other_workers,
-            internal_priority={key: 0},
-            user_priority=priority,
-            resources=resources,
-            retries=retries,
-            fifo_timeout=fifo_timeout,
-            actors=actor,
-            span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
+            if actor is True:
+                if key is None:
+                    key = "actor-" + str(uuid.uuid4())
+                else:
+                    key = "actor-" + str(key)
+            else:
+                raise TypeError("actor= must be boolean or string")
+        if actors:
+            if workers or resources:
+                raise ValueError("Cannot specify workers or resources for actors")
+            if actors is True:
+                raise TypeError("actors= must be an address or list of addresses")
+
+        if kwargs:
+            task = (apply, func, list(args), kwargs)
+        else:
+            task = (func,) + tuple(args)
+
+        futures = {key: self._get_computation(task, key=key, pure=pure)}
+
+        info = {
+            "actors": actors,
+            "workers": workers,
+            "allow_other_workers": allow_other_workers,
+            "resources": resources,
+            "retries": retries,
+            "priority": priority,
+            "fifo_timeout": fifo_timeout,
+            "on_error": on_error,
+        }
+        futures, annotations, dependencies = self._gather_keys(futures=futures, annotations=info)
+
+        logger.debug("Submit %s(...), key: %s", funcname(func), key)
+        self._send_update_graph(
+            tasks=futures,
+            keys=[key],
+            dependencies=dependencies,
+            annotations=annotations,
         )
 
-        logger.debug("Submit %s(...), %s", funcname(func), key)
-
-        return futures[key]
+        return Future(key, self)
 
     def map(
         self,
-        func: Callable,
-        *iterables: Collection,
-        key: str | list | None = None,
+        func: Callable[..., T],
+        *iterables: Iterable,
+        key: Hashable | None = None,
         workers: str | Iterable[str] | None = None,
-        retries: int | None = None,
-        resources: dict[str, Any] | None = None,
+        resources: dict[str, float] | None = None,
+        retries: int = 0,
         priority: int = 0,
+        fifo_timeout: str | timedelta = 0,
         allow_other_workers: bool = False,
-        fifo_timeout: str = "100 ms",
         actor: bool = False,
-        actors: bool = False,
+        actors: bool | str | Iterable[str] = False,
         pure: bool = True,
-        batch_size=None,
-        **kwargs,
-    ):
-        """Map a function on a sequence of arguments
+        batch_size: int | None = None,
+        on_error: Literal["retry", "raise", "ignore"] | None = None,
+        **kwargs: Any,
+    ) -> list[Future[T]]:
+        """Map a function on a sequence of arguments.
 
-        Arguments can be normal objects or Futures
+        Arguments can be Futures or normal data.
 
         Parameters
         ----------
-        func : callable
-            Callable to be scheduled for execution. If ``func`` returns a coroutine, it
-            will be run on the main event loop of a worker. Otherwise ``func`` will be
-            run in a worker's task executor pool (see ``Worker.executors`` for more
-            information.)
+        func : function
         iterables : Iterables
-            List-like objects to map over.  They should have the same length.
-        key : str, list
-            Prefix for task names if string.  Explicit names if list.
-        workers : string or iterable of strings
-            A set of worker hostnames on which computations may be performed.
-            Leave empty to default to all workers (common case)
-        retries : int (default to 0)
-            Number of allowed automatic retries if a task fails
-        resources : dict (defaults to {})
-            Defines the `resources` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
-        priority : Number
-            Optional prioritization of task.  Zero is default.
-            Higher priorities take precedence
-        allow_other_workers : bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
-        fifo_timeout : str timedelta (default '100ms')
-            Allowed amount of time between calls to consider the same priority
-        actor : bool (default False)
-            Whether these tasks should exist on the worker as stateful actors.
-            See :doc:`actors` for additional details.
-        actors : bool (default False)
-            Alias for `actor`
-        pure : bool (defaults to True)
-            Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``. Note that if both
-            ``actor`` and ``pure`` kwargs are set to True, then the value
-            of ``pure`` will be reverted to False, since an actor is stateful.
-            See :ref:`pure functions` for more details.
-        batch_size : int, optional (default: just one batch whose size is the entire iterable)
-            Submit tasks to the scheduler in batches of (at most)
-            ``batch_size``.
-            The tradeoff in batch size is that large batches avoid more per-batch overhead,
-            but batches that are too big can take a long time to submit and unreasonably delay
-            the cluster from starting its processing.
-        **kwargs : dict
-            Extra keyword arguments to send to the function.
-            Large values will be included explicitly in the task graph.
-
-        Examples
-        --------
-        >>> L = client.map(func, sequence)  # doctest: +SKIP
-
-        Notes
-        -----
-        The current implementation of a task graph resolution searches for occurrences of ``key``
-        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
-        substitution of strings passed as arguments to a task if these strings match some ``key``
-        that already exists on a cluster. To avoid these situations it is required to use unique
-        values if a ``key`` is set manually.
-        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
+        key : hashable, optional
+            Prefix for task names. Defaults to the function name.
+        workers : string or list, optional
+            A list of worker addresses to restrict this task to.
+            Ex: ``['127.0.0.1:8787', '127.0.0.1:8788']``
+        resources : dict, optional
+            A dictionary of resource constraints for this task.
+            Ex: ``{'GPU': 2, 'memory': 7e9}``
+        retries : int, optional
+            Number of times to retry the task if it fails.
+        priority : int, optional
+            Priority of task. Higher numbers mean higher priority. Defaults to 0.
+        fifo_timeout : timedelta or string, optional like '1s' or '100ms'
+            Maximum time for the task to be runnable. If it doesn't run by this
+            deadline then it is cancelled.
+        allow_other_workers : bool, optional
+            If True, allow this task to run on workers that were not specified
+            in the ``workers=`` keyword. Default is False.
+        actor : bool, optional
+            Whether these tasks create Actors. Default is False.
+        actors : bool, string, list, optional
+            Addresses of actors that these tasks can run on.
+        pure : bool, optional
+            Whether the function is pure. Default is True. If True, the task
+            will be executed at most once. If False, the task may be executed
+            multiple times if it is needed by multiple results.
+        batch_size: int, optional
+            If > 1, maybe group tasks into batches of this size. By default,
+            do not batch.
+            Not recommended unless the function has very low overhead and the
+            arguments are either not futures or are futures that are guaranteed
+            to be computed on the same worker.
+        on_error: 'retry', 'raise', 'ignore', optional
+            What to do if the task raises an error. Defaults to 'raise'.
+            If 'retry', the task will be retried up to ``retries`` times.
+            If 'raise', the exception will be raised when the future is awaited.
+            If 'ignore', the future will be marked as cancelled.
+        **kwargs :
 
         Returns
         -------
-        List, iterator, or Queue of futures, depending on the type of the
-        inputs.
+        List of Futures
+
+        Examples
+        --------
+        >>> L = client.map(add, range(10), range(10))  # doctest: +SKIP
 
         See Also
         --------
-        Client.submit : Submit a single function
+        Client.submit
+        Future
         """
         if not callable(func):
             raise TypeError("First input to map must be a callable function")
 
-        if all(isinstance(it, pyQueue) for it in iterables) or all(
-            isinstance(i, Iterator) for i in iterables
-        ):
+        iterables = [list(it) for it in iterables]
+        if not iterables:
+            return []
+
+        if key is None:
+            key = funcname(func)
+        if not isinstance(key, (str, bytes)):
             raise TypeError(
-                "Dask no longer supports mapping over Iterators or Queues."
-                "Consider using a normal for loop and Client.submit"
-            )
-        total_length = sum(len(x) for x in iterables)
-        if batch_size and batch_size > 1 and total_length > batch_size:
-            batches = list(
-                zip(*(partition_all(batch_size, iterable) for iterable in iterables))
-            )
-            keys: list[list[Any]] | list[Any]
-            if isinstance(key, list):
-                keys = [list(element) for element in partition_all(batch_size, key)]
-            else:
-                keys = [key for _ in range(len(batches))]
-            return sum(
-                (
-                    self.map(
-                        func,
-                        *batch,
-                        key=key,
-                        workers=workers,
-                        retries=retries,
-                        priority=priority,
-                        allow_other_workers=allow_other_workers,
-                        fifo_timeout=fifo_timeout,
-                        resources=resources,
-                        actor=actor,
-                        actors=actors,
-                        pure=pure,
-                        **kwargs,
-                    )
-                    for key, batch in zip(keys, batches)
-                ),
-                [],
+                "key= keyword argument must be string or bytes, got %s" % type(key)
             )
 
-        key = key or funcname(func)
-        actor = actor or actors
+        info = {
+            "actors": actors,
+            "workers": workers,
+            "allow_other_workers": allow_other_workers,
+            "resources": resources,
+            "retries": retries,
+            "priority": priority,
+            "fifo_timeout": fifo_timeout,
+            "on_error": on_error,
+        }
+
         if actor:
-            pure = not actor
+            raise ValueError("Cannot use map to create actors")
+        if actors:
+            if workers or resources:
+                raise ValueError("Cannot specify workers or resources for actors")
+            if actors is True:
+                raise TypeError("actors= must be an address or list of addresses")
 
-        if allow_other_workers and workers is None:
-            raise ValueError("Only use allow_other_workers= if using workers=")
+        if batch_size is not None and batch_size > 1:
+            keys = [
+                f"{key}-{uuid.uuid4()}"
+                for i in range(math.ceil(len(iterables[0]) / batch_size))
+            ]
+        else:
+            keys = [f"{key}-{uuid.uuid4()}" for i in range(len(iterables[0]))]
 
-        expr = _MapExpr(
-            func,
-            iterables,
-            key=key,
-            pure=pure,
-            annotations={},
-            kwargs=kwargs,
-        )
-        keys = list(expr.keys)
-        if isinstance(workers, (str, Number)):
-            workers = [workers]
-        if workers is not None and not isinstance(workers, (list, set)):
-            raise TypeError("Workers must be a list or set of workers or None")
-
-        internal_priority = dict(zip(keys, range(len(keys))))
-
-        futures = self._graph_to_futures(
-            expr,
-            keys,
-            workers=workers,
-            allow_other_workers=allow_other_workers,
-            internal_priority=internal_priority,
-            resources=resources,
-            retries=retries,
-            user_priority=priority,
-            fifo_timeout=fifo_timeout,
-            actors=actor,
-            span_metadata=SpanMetadata(collections=[{"type": "Future"}]),
-        )
-
-        # make sure the graph is not materialized
-        logger.debug("map(%s, ...)", funcname(func))
-        return [futures[k] for k in keys]
-
-    async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
-        unpacked, future_set = unpack_remotedata(futures, byte_keys=True)
-        mismatched_futures = [f for f in future_set if f.client is not self]
-        if mismatched_futures:
+        if len(set(keys)) != len(keys):
             raise ValueError(
-                "Cannot gather Futures created by another client. "
-                f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
-                f"mismatched Futures and their client IDs (this client is {self.id}): "
-                f"{ {f: f.client.id for f in mismatched_futures} }"  # noqa: E201, E202
-            )
-        keys = [future.key for future in future_set]
-        bad_data = dict()
-        data = {}
-
-        if direct is None:
-            direct = self.direct_to_workers
-        if direct is None:
-            try:
-                w = get_worker()
-            except Exception:
-                direct = False
-            else:
-                if w.scheduler.address == self.scheduler.address:
-                    direct = True
-
-        async def wait(k):
-            """Want to stop the All(...) early if we find an error"""
-            try:
-                st = self.futures[k]
-            except KeyError:
-                raise AllExit()
-            else:
-                await st.wait()
-            if st.status != "finished" and errors == "raise":
-                raise AllExit()
-
-        while True:
-            logger.debug("Waiting on futures to clear before gather")
-
-            with suppress(AllExit):
-                await distributed.utils.All(
-                    [wait(key) for key in keys if key in self.futures],
-                    quiet_exceptions=AllExit,
-                )
-
-            failed = ("error", "cancelled")
-
-            exceptions = set()
-            bad_keys = set()
-            for future in future_set:
-                key = future.key
-                if key not in self.futures or future.status in failed:
-                    exceptions.add(key)
-                    if errors == "raise":
-                        st = future._state
-                        exception = st.exception
-                        traceback = st.traceback
-                        raise exception.with_traceback(traceback)
-                    if errors == "skip":
-                        bad_keys.add(key)
-                        bad_data[key] = None
-                    else:  # pragma: no cover
-                        raise ValueError("Bad value, `errors=%s`" % errors)
-
-            keys = [k for k in keys if k not in bad_keys and k not in data]
-
-            if local_worker:  # look inside local worker
-                data.update(
-                    {k: local_worker.data[k] for k in keys if k in local_worker.data}
-                )
-                keys = [k for k in keys if k not in data]
-
-            # We now do an actual remote communication with workers or scheduler
-            if self._gather_future:  # attach onto another pending gather request
-                self._gather_keys |= set(keys)
-                response = await self._gather_future
-            else:  # no one waiting, go ahead
-                self._gather_keys = set(keys)
-                future = asyncio.ensure_future(
-                    self._gather_remote(direct, local_worker)
-                )
-                if self._gather_keys is None:
-                    self._gather_future = None
-                else:
-                    self._gather_future = future
-                response = await future
-
-            if response["status"] == "error":
-                log = logger.warning if errors == "raise" else logger.debug
-                log(
-                    "Couldn't gather %s keys, rescheduling %s",
-                    len(response["keys"]),
-                    response["keys"],
-                )
-                for key in response["keys"]:
-                    self._send_to_scheduler({"op": "report-key", "key": key})
-                for key in response["keys"]:
-                    try:
-                        self.futures[key].reset()
-                    except KeyError:  # TODO: verify that this is safe
-                        pass
-            else:  # pragma: no cover
-                break
-
-        if bad_data and errors == "skip" and isinstance(unpacked, list):
-            unpacked = [f for f in unpacked if f not in bad_data]
-
-        data.update(response["data"])
-        result = pack_data(unpacked, merge(data, bad_data))
-        return result
-
-    async def _gather_remote(self, direct: bool, local_worker: bool) -> dict[str, Any]:
-        """Perform gather with workers or scheduler
-
-        This method exists to limit and batch many concurrent gathers into a
-        few.  In controls access using a Tornado semaphore, and picks up keys
-        from other requests made recently.
-        """
-        async with self._gather_semaphore:
-            keys = list(self._gather_keys)
-            self._gather_keys = None  # clear state, these keys are being sent off
-            self._gather_future = None
-
-            if direct or local_worker:  # gather directly from workers
-                who_has = await retry_operation(self.scheduler.who_has, keys=keys)
-                data, missing_keys, failed_keys, _ = await gather_from_workers(
-                    who_has, rpc=self.rpc
-                )
-                response: dict[str, Any] = {"status": "OK", "data": data}
-                if missing_keys or failed_keys:
-                    response = await retry_operation(
-                        self.scheduler.gather, keys=missing_keys + failed_keys
-                    )
-                    if response["status"] == "OK":
-                        response["data"].update(data)
-
-            else:  # ask scheduler to gather data for us
-                response = await retry_operation(self.scheduler.gather, keys=keys)
-
-        return response
-
-    def gather(self, futures, errors="raise", direct=None, asynchronous=None):
-        """Gather futures from distributed memory
-
-        Accepts a future, nested container of futures, iterator, or queue.
-        The return type will match the input type.
-
-        Parameters
-        ----------
-        futures : Collection of futures
-            This can be a possibly nested collection of Future objects.
-            Collections can be lists, sets, or dictionaries
-        errors : string
-            Either 'raise' or 'skip' if we should raise if a future has erred
-            or skip its inclusion in the output collection
-        direct : boolean
-            Whether or not to connect directly to the workers, or to ask
-            the scheduler to serve as intermediary.  This can also be set when
-            creating the Client.
-        asynchronous: bool
-            If True the client is in asynchronous mode
-
-        Returns
-        -------
-        results: a collection of the same type as the input, but now with
-        gathered results rather than futures
-
-        Examples
-        --------
-        >>> from operator import add  # doctest: +SKIP
-        >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
-        >>> x = c.submit(add, 1, 2)  # doctest: +SKIP
-        >>> c.gather(x)  # doctest: +SKIP
-        3
-        >>> c.gather([x, [x], x])  # support lists and dicts # doctest: +SKIP
-        [3, [3], 3]
-
-        See Also
-        --------
-        Client.scatter : Send data out to cluster
-        """
-        if isinstance(futures, pyQueue):
-            raise TypeError(
-                "Dask no longer supports gathering over Iterators and Queues. "
-                "Consider using a normal for loop and Client.submit/gather"
+                "Hash collision on keys. Perhaps the function name is too short"
             )
 
-        if isinstance(futures, Iterator):
-            return (self.gather(f, errors=errors, direct=direct) for f in futures)
-
-        try:
-            local_worker = get_worker()
-        except ValueError:
-            local_worker = None
-
-        with shorten_traceback():
-            return self.sync(
-                self._gather,
-                futures,
-                errors=errors,
-                direct=direct,
-                local_worker=local_worker,
-                asynchronous=asynchronous,
-            )
-
-    async def _scatter(
-        self,
-        data,
-        workers=None,
-        broadcast=False,
-        direct=None,
-        local_worker=None,
-        timeout=no_default,
-        hash=True,
-    ):
-        if timeout is no_default:
-            timeout = self._timeout
-        if isinstance(workers, (str, Number)):
-            workers = [workers]
-
-        if isinstance(data, type(range(0))):
-            data = list(data)
-        input_type = type(data)
-        names = False
-        unpack = False
-        if isinstance(data, Iterator):
-            data = list(data)
-        if isinstance(data, (set, frozenset)):
-            data = list(data)
-        if not isinstance(data, (dict, list, tuple, set, frozenset)):
-            unpack = True
-            data = [data]
-        if isinstance(data, (list, tuple)):
-            if hash:
-                names = [type(x).__name__ + "-" + tokenize(x) for x in data]
-            else:
-                names = [type(x).__name__ + "-" + uuid.uuid4().hex for x in data]
-            data = dict(zip(names, data))
-
-        assert isinstance(data, dict)
-
-        types = valmap(type, data)
-
-        if direct is None:
-            direct = self.direct_to_workers
-        if direct is None:
-            try:
-                w = get_worker()
-            except Exception:
-                direct = False
-            else:
-                if w.scheduler.address == self.scheduler.address:
-                    direct = True
-
-        if local_worker:  # running within task
-            local_worker.update_data(data=data)
-
-            await self.scheduler.update_data(
-                who_has={key: [local_worker.address] for key in data},
-                nbytes=valmap(sizeof, data),
-                client=self.id,
-            )
-
-        else:
-            data2 = valmap(to_serialize, data)
-            if direct:
-                nthreads = None
-                start = time()
-                while not nthreads:
-                    if nthreads is not None:
-                        await asyncio.sleep(0.1)
-                    if time() > start + timeout:
-                        raise TimeoutError("No valid workers found")
-                    # Exclude paused and closing_gracefully workers
-                    nthreads = await self.scheduler.ncores_running(workers=workers)
-                if not nthreads:  # pragma: no cover
-                    raise ValueError("No valid workers found")
-                workers = list(nthreads.keys())
-
-                _, who_has, nbytes = await scatter_to_workers(workers, data2, self.rpc)
-
-                await self.scheduler.update_data(
-                    who_has=who_has, nbytes=nbytes, client=self.id
-                )
-            else:
-                await self.scheduler.scatter(
-                    data=data2,
-                    workers=workers,
-                    client=self.id,
-                    broadcast=broadcast,
-                    timeout=timeout,
-                )
-
-        out = {k: Future(k, self) for k in data}
-        for key, typ in types.items():
-            self.futures[key].finish(type=typ)
-
-        if direct and broadcast:
-            n = None if broadcast is True else broadcast
-            await self._replicate(list(out.values()), workers=workers, n=n)
-
-        if issubclass(input_type, (list, tuple, set, frozenset)):
-            out = input_type(out[k] for k in names)
-
-        if unpack:
-            assert len(out) == 1
-            out = list(out.values())[0]
-        return out
-
-    def scatter(
-        self,
-        data,
-        workers=None,
-        broadcast=False,
-        direct=None,
-        hash=True,
-        timeout=no_default,
-        asynchronous=None,
-    ):
-        """Scatter data into distributed memory
-
-        This moves data from the local client process into the workers of the
-        distributed scheduler.  Note that it is often better to submit jobs to
-        your workers to have them load the data rather than loading data
-        locally and then scattering it out to them.
-
-        Parameters
-        ----------
-        data : list, dict, or object
-            Data to scatter out to workers.  Output type matches input type.
-        workers : list of tuples (optional)
-            Optionally constrain locations of data.
-            Specify workers as hostname/port pairs, e.g.
-            ``('127.0.0.1', 8787)``.
-        broadcast : bool (defaults to False)
-            Whether to send each data element to all workers.
-            By default we round-robin based on number of cores.
-
-            .. note::
-               Setting this flag to True is incompatible with the Active Memory
-               Manager's :ref:`ReduceReplicas` policy. If you wish to use it, you must
-               first disable the policy or disable the AMM entirely.
-        direct : bool (defaults to automatically check)
-            Whether or not to connect directly to the workers, or to ask
-            the scheduler to serve as intermediary.  This can also be set when
-            creating the Client.
-        hash : bool (optional)
-            Whether or not to hash data to determine key.
-            If False then this uses a random key
-        timeout : number, optional
-            Time in seconds after which to raise a
-            ``dask.distributed.TimeoutError``
-        asynchronous: bool
-            If True the client is in asynchronous mode
-
-        Returns
-        -------
-        List, dict, iterator, or queue of futures matching the type of input.
-
-        Examples
-        --------
-        >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
-        >>> c.scatter(1) # doctest: +SKIP
-        <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>
-
-        >>> c.scatter([1, 2, 3])  # doctest: +SKIP
-        [<Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
-         <Future: status: finished, key: 58e78e1b34eb49a68c65b54815d1b158>,
-         <Future: status: finished, key: d3395e15f605bc35ab1bac6341a285e2>]
-
-        >>> c.scatter({'x': 1, 'y': 2, 'z': 3})  # doctest: +SKIP
-        {'x': <Future: status: finished, key: x>,
-         'y': <Future: status: finished, key: y>,
-         'z': <Future: status: finished, key: z>}
-
-        Constrain location of data to subset of workers
-
-        >>> c.scatter([1, 2, 3], workers=[('hostname', 8788)])   # doctest: +SKIP
-
-        Broadcast data to all workers
-
-        >>> [future] = c.scatter([element], broadcast=True)  # doctest: +SKIP
-
-        Send scattered data to parallelized function using client futures
-        interface
-
-        >>> data = c.scatter(data, broadcast=True)  # doctest: +SKIP
-        >>> res = [c.submit(func, data, i) for i in range(100)]
-
-        Notes
-        -----
-        Scattering a dictionary uses ``dict`` keys to create ``Future`` keys.
-        The current implementation of a task graph resolution searches for occurrences of ``key``
-        and replaces it with a corresponding ``Future`` result. That can lead to unwanted
-        substitution of strings passed as arguments to a task if these strings match some ``key``
-        that already exists on a cluster. To avoid these situations it is required to use unique
-        values if a ``key`` is set manually.
-        See https://github.com/dask/dask/issues/9969 to track progress on resolving this issue.
-
-        See Also
-        --------
-        Client.gather : Gather data back to local process
-        """
-        if timeout is no_default:
-            timeout = self._timeout
-        if isinstance(data, pyQueue) or isinstance(data, Iterator):
-            raise TypeError(
-                "Dask no longer supports mapping over Iterators or Queues."
-                "Consider using a normal for loop and Client.submit"
-            )
-
-        try:
-            local_worker = get_worker()
-        except ValueError:
-            local_worker = None
-        return self.sync(
-            self._scatter,
-            data,
-            workers=workers,
-            broadcast=broadcast,
-            direct=direct,
-            local_worker=local_worker,
-            timeout=timeout,
-            asynchronous=asynchronous,
-            hash=hash,
-        )
-
-    async def _cancel(self, futures, reason=None, msg=None, force=False):
-        # FIXME: This method is asynchronous since interacting with the FutureState below requires an event loop.
-        keys = list({f.key for f in futures_of(futures)})
-        self._send_to_scheduler(
-            {
-                "op": "cancel-keys",
-                "keys": keys,
-                "force": force,
-                "reason": reason,
-                "msg": msg,
-            }
-        )
-        for k in keys:
-            st = self.futures.pop(k, None)
-            if st is not None:
-                st.cancel(reason=reason, msg=msg)
-
-    def cancel(self, futures, asynchronous=None, force=False, reason=None, msg=None):
-        """
-        Cancel running futures
-        This stops future tasks from being scheduled if they have not yet run
-        and deletes them if they have already run.  After calling, this result
-        and all dependent results will no longer be accessible
-
-        Parameters
-        ----------
-        futures : List[Future]
-            The list of Futures
-        asynchronous: bool
-            If True the client is in asynchronous mode
-        force : boolean (False)
-            Cancel this future even if other clients desire it
-        reason: str
-            Reason for cancelling the futures
-        msg : str
-            Message that will be attached to the cancelled future
-        """
-        return self.sync(
-            self._cancel,
-            futures,
-            asynchronous=asynchronous,
-            force=force,
-            msg=msg,
-            reason=reason,
-        )
-
-    async def _retry(self, futures):
-        keys = list({f.key for f in futures_of(futures)})
-        response = await self.scheduler.retry(keys=keys, client=self.id)
-        for key in response:
-            st = self.futures[key]
-            st.retry()
-
-    def retry(self, futures, asynchronous=None):
-        """
-        Retry failed futures
-
-        Parameters
-        ----------
-        futures : list of Futures
-            The list of Futures
-        asynchronous: bool
-            If True the client is in asynchronous mode
-        """
-        return self.sync(self._retry, futures, asynchronous=asynchronous)
-
-    @log_errors
-    async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
-        coroutines = []
-        uid = uuid.uuid4().hex
-        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
-
-        def add_coro(name, data):
-            keys = [f.key for f in futures_of(data)]
-
-            async def _():
-                await self.scheduler.publish_wait_flush(uid=uid)
-                await self.scheduler.publish_put(
-                    keys=keys,
-                    name=name,
-                    data=to_serialize(data),
-                    override=override,
-                    client=self.id,
-                )
-
-            coroutines.append(_())
-
-        if name:
-            if len(args) == 0:
-                raise ValueError(
-                    "If name is provided, expecting call signature like"
-                    " publish_dataset(df, name='ds')"
-                )
-            # in case this is a singleton, collapse it
-            elif len(args) == 1:
-                args = args[0]
-            add_coro(name, args)
-
-        for name, data in kwargs.items():
-            add_coro(name, data)
-
-        await asyncio.gather(*coroutines)
-
-    def publish_dataset(self, *args, **kwargs):
-        """
-        Publish named datasets to scheduler
-
-        This stores a named reference to a dask collection or list of futures
-        on the scheduler.  These references are available to other Clients
-        which can download the collection or futures with ``get_dataset``.
-
-        Datasets are not immediately computed.  You may wish to call
-        ``Client.persist`` prior to publishing a dataset.
-
-        Parameters
-        ----------
-        args : list of objects to publish as name
-        kwargs : dict
-            named collections to publish on the scheduler
-
-        Examples
-        --------
-        Publishing client:
-
-        >>> df = dd.read_csv('s3://...')  # doctest: +SKIP
-        >>> df = c.persist(df) # doctest: +SKIP
-        >>> c.publish_dataset(my_dataset=df)  # doctest: +SKIP
-
-        Alternative invocation
-        >>> c.publish_dataset(df, name='my_dataset')
-
-        Receiving client:
-
-        >>> c.list_datasets()  # doctest: +SKIP
-        ['my_dataset']
-        >>> df2 = c.get_dataset('my_dataset')  # doctest: +SKIP
-
-        Returns
-        -------
-        None
-
-        See Also
-        --------
-        Client.list_datasets
-        Client.get_dataset
-        Client.unpublish_dataset
-        Client.persist
-        """
-        return self.sync(self._publish_dataset, *args, **kwargs)
-
-    def unpublish_dataset(self, name, **kwargs):
-        """
-        Remove named datasets from scheduler
-
-        Parameters
-        ----------
-        name : str
-            The name of the dataset to unpublish
-
-        Examples
-        --------
-        >>> c.list_datasets()  # doctest: +SKIP
-        ['my_dataset']
-        >>> c.unpublish_dataset('my_dataset')  # doctest: +SKIP
-        >>> c.list_datasets()  # doctest: +SKIP
-        []
-
-        See Also
-        --------
-        Client.publish_dataset
-        """
-        return self.sync(self.scheduler.publish_delete, name=name, **kwargs)
-
-    def list_datasets(self, **kwargs):
-        """
-        List named datasets available on the scheduler
-
-        See Also
-        --------
-        Client.publish_dataset
-        Client.get_dataset
-        """
-        return self.sync(self.scheduler.publish_list, **kwargs)
-
-    async def _get_dataset(self, name, default=no_default):
-        with self.as_current():
-            out = await self.scheduler.publish_get(name=name, client=self.id)
-        if out is None:
-            if default is no_default:
-                raise KeyError(f"Dataset '{name}' not found")
-            else:
-                return default
-        for fut in futures_of(out["data"]):
-            fut.bind_client(self)
-        self._inform_scheduler_of_futures()
-        return out["data"]
-
-    def get_dataset(self, name, default=no_default, **kwargs):
-        """
-        Get named dataset from the scheduler if present.
-        Return the default or raise a KeyError if not present.
-
-        Parameters
-        ----------
-        name : str
-            name of the dataset to retrieve
-        default : str
-            optional, not set by default
-            If set, do not raise a KeyError if the name is not present but
-            return this default
-        kwargs : dict
-            additional keyword arguments to _get_dataset
-
-        Returns
-        -------
-        The dataset from the scheduler, if present
-
-        See Also
-        --------
-        Client.publish_dataset
-        Client.list_datasets
-        """
-        return self.sync(self._get_dataset, name, default=default, **kwargs)
-
-    async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
-        response = await self.scheduler.run_function(
-            function=dumps(function),
-            args=dumps(args),
-            kwargs=dumps(kwargs),
-            wait=wait,
-        )
-        if response["status"] == "error":
-            typ, exc, tb = clean_exception(**response)
-            raise exc.with_traceback(tb)
-        else:
-            return response["result"]
-
-    def run_on_scheduler(self, function, *args, **kwargs):
-        """Run a function on the scheduler process
-
-        This is typically used for live debugging.  The function should take a
-        keyword argument ``dask_scheduler=``, which will be given the scheduler
-        object itself.
-
-        Parameters
-        ----------
-        function : callable
-            The function to run on the scheduler process
-        *args : tuple
-            Optional arguments for the function
-        **kwargs : dict
-            Optional keyword arguments for the function
-
-        Examples
-        --------
-        >>> def get_number_of_tasks(dask_scheduler=None):
-        ...     return len(dask_scheduler.tasks)
-
-        >>> client.run_on_scheduler(get_number_of_tasks)  # doctest: +SKIP
-        100
-
-        Run asynchronous functions in the background:
-
-        >>> async def print_state(dask_scheduler):  # doctest: +SKIP
-        ...    while True:
-        ...        print(dask_scheduler.status)
-        ...        await asyncio.sleep(1)
-
-        >>> c.run(print_state, wait=False)  # doctest: +SKIP
-
-        See Also
-        --------
-        Client.run : Run a function on all workers
-        """
-        return self.sync(self._run_on_scheduler, function, *args, **kwargs)
-
-    async def _run(
-        self,
-        function,
-        *args,
-        nanny: bool = False,
-        workers: list[str] | None = None,
-        wait: bool = True,
-        on_error: Literal["raise", "return", "ignore"] = "raise",
-        **kwargs,
-    ):
-        responses = await self.scheduler.broadcast(
-            msg=dict(
-                op="run",
-                function=dumps(function),
-                args=dumps(args),
-                wait=wait,
-                kwargs=dumps(kwargs),
-            ),
-            workers=workers,
-            nanny=nanny,
-            on_error="return_pickle",
-        )
-        results = {}
-        for key, resp in responses.items():
-            if isinstance(resp, bytes):
-                # Pickled RPC exception
-                exc = loads(resp)
-                assert isinstance(exc, Exception)
-            elif resp["status"] == "error":
-                # Exception raised by the remote function
-                _, exc, tb = clean_exception(**resp)
-                exc = exc.with_traceback(tb)
-            else:
-                assert resp["status"] == "OK"
-                results[key] = resp["result"]
-                continue
-
-            if on_error == "raise":
-                raise exc
-            elif on_error == "return":
-                results[key] = exc
-            elif on_error != "ignore":
-                raise ValueError(
-                    "on_error must be 'raise', 'return', or 'ignore'; "
-                    f"got {on_error!r}"
-                )
-
-        if wait:
-            return results
-
-    def run(
-        self,
-        function,
-        *args,
-        workers: list[str] | None = None,
-        wait: bool = True,
-        nanny: bool = False,
-        on_error: Literal["raise", "return", "ignore"] = "raise",
-        **kwargs,
-    ):
-        """
-        Run a function on all workers outside of task scheduling system
-
-        This calls a function on all currently known workers immediately,
-        blocks until those results come back, and returns the results
-        asynchronously as a dictionary keyed by worker address.  This method
-        is generally used for side effects such as collecting diagnostic
-        information or installing libraries.
-
-        If your function takes an input argument named ``dask_worker`` then
-        that variable will be populated with the worker itself.
-
-        Parameters
-        ----------
-        function : callable
-            The function to run
-        *args : tuple
-            Optional arguments for the remote function
-        **kwargs : dict
-            Optional keyword arguments for the remote function
-        workers : list
-            Workers on which to run the function. Defaults to all known
-            workers.
-        wait : boolean (optional)
-            If the function is asynchronous whether or not to wait until that
-            function finishes.
-        nanny : bool, default False
-            Whether to run ``function`` on the nanny. By default, the function
-            is run on the worker process.  If specified, the addresses in
-            ``workers`` should still be the worker addresses, not the nanny addresses.
-        on_error: "raise" | "return" | "ignore"
-            If the function raises an error on a worker:
-
-            raise
-                (default) Re-raise the exception on the client.
-                The output from other workers will be lost.
-            return
-                Return the Exception object instead of the function output for
-                the worker
-            ignore
-                Ignore the exception and remove the worker from the result dict
-
-        Examples
-        --------
-        >>> c.run(os.getpid)  # doctest: +SKIP
-        {'192.168.0.100:9000': 1234,
-         '192.168.0.101:9000': 4321,
-         '192.168.0.102:9000': 5555}
-
-        Restrict computation to particular workers with the ``workers=``
-        keyword argument.
-
-        >>> c.run(os.getpid, workers=['192.168.0.100:9000',
-        ...                           '192.168.0.101:9000'])  # doctest: +SKIP
-        {'192.168.0.100:9000': 1234,
-         '192.168.0.101:9000': 4321}
-
-        >>> def get_status(dask_worker):
-        ...     return dask_worker.status
-
-        >>> c.run(get_status)  # doctest: +SKIP
-        {'192.168.0.100:9000': 'running',
-         '192.168.0.101:9000': 'running}
-
-        Run asynchronous functions in the background:
-
-        >>> async def print_state(dask_worker):  # doctest: +SKIP
-        ...    while True:
-        ...        print(dask_worker.status)
-        ...        await asyncio.sleep(1)
-
-        >>> c.run(print_state, wait=False)  # doctest: +SKIP
-        """
-        return self.sync(
-            self._run,
-            function,
-            *args,
-            workers=workers,
-            wait=wait,
-            nanny=nanny,
-            on_error=on_error,
-            **kwargs,
-        )
-
-    @staticmethod
-    def _get_computation_code(
-        stacklevel: int | None = None, nframes: int = 1
-    ) -> tuple[SourceCode, ...]:
-        """Walk up the stack to the user code and extract the code surrounding
-        the compute/submit/persist call. All modules encountered which are
-        ignored through the option
-        `distributed.diagnostics.computations.ignore-modules` will be ignored.
-        This can be used to exclude commonly used libraries which wrap
-        dask/distributed compute calls.
-
-        ``stacklevel`` may be used to explicitly indicate from which frame on
-        the stack to get the source code.
-        """
-        if nframes <= 0:
-            return ()
-
-        ignore_modules = dask.config.get(
-            "distributed.diagnostics.computations.ignore-modules"
-        )
-        if not isinstance(ignore_modules, list):
-            raise TypeError(
-                "Ignored modules must be a list. Instead got "
-                f"({type(ignore_modules)}, {ignore_modules})"
-            )
-        ignore_files = dask.config.get(
-            "distributed.diagnostics.computations.ignore-files"
-        )
-        if not isinstance(ignore_files, list):
-            raise TypeError(
-                "Ignored files must be a list. Instead got "
-                f"({type(ignore_files)}, {ignore_files})"
-            )
-
-        mod_pattern: re.Pattern | None = None
-        fname_pattern: re.Pattern | None = None
-        if stacklevel is None:
-            if ignore_modules:
-                mod_pattern = re.compile(
-                    "|".join([f"(?:{mod})" for mod in ignore_modules])
-                )
-            if ignore_files:
-                fname_pattern = re.compile(
-                    r".*[\\/](" + "|".join(mod for mod in ignore_files) + r")([\\/]|$)"
-                )
-        else:
-            # stacklevel 0 or less - shows dask internals which likely isn't helpful
-            stacklevel = stacklevel if stacklevel > 0 else 1
-
-        code: list[SourceCode] = []
-        for i, (fr, lineno_frame) in enumerate(
-            traceback.walk_stack(sys._getframe().f_back), 1
-        ):
-            if len(code) >= nframes:
-                break
-            if stacklevel is not None and i != stacklevel:
-                continue
-            if fr.f_code.co_name in ("<listcomp>", "<dictcomp>"):
-                continue
-            if mod_pattern and mod_pattern.match(fr.f_globals.get("__name__", "")):
-                continue
-            if fname_pattern and fname_pattern.match(fr.f_code.co_filename):
-                continue
-
-            kwargs = dict(
-                lineno_frame=lineno_frame,
-                lineno_relative=lineno_frame - fr.f_code.co_firstlineno,
-                filename=fr.f_code.co_filename,
-            )
-
-            try:
-                code.append(SourceCode(code=inspect.getsource(fr), **kwargs))  # type: ignore
-            except OSError:
-                try:
-                    from IPython import get_ipython
-
-                    ip = get_ipython()
-                    if ip is not None:
-                        # The current cell
-                        code.append(SourceCode(code=ip.history_manager._i00, **kwargs))  # type: ignore
-                except ImportError:
-                    pass  # No IPython
-
-                break
-
-            if hasattr(fr.f_back, "f_globals"):
-                module_name = fr.f_back.f_globals["__name__"]  # type: ignore
-                if module_name == "__channelexec__":
-                    break  # execnet; pytest-xdist  # pragma: nocover
-                try:
-                    module_name = sys.modules[module_name].__name__
-                except KeyError:
-                    # Ignore pathological cases where the module name isn't in `sys.modules`
-                    break
-                # Ignore IPython related wrapping functions to user code
-                if module_name.endswith("interactiveshell"):
-                    break
-
-        return tuple(reversed(code))
-
-    def _inform_scheduler_of_futures(self):
-        self._send_to_scheduler(
-            {
-                "op": "client-desires-keys",
-                "keys": list(self.refcount),
-            }
-        )
-
-    def _graph_to_futures(
-        self,
-        expr,
-        keys,
-        span_metadata,
-        workers=None,
-        allow_other_workers=None,
-        internal_priority=None,
-        user_priority=0,
-        resources=None,
-        retries=None,
-        fifo_timeout=0,
-        actors=None,
-    ):
-        with self._refcount_lock:
-            if actors is not None and actors is not True and actors is not False:
-                actors = list(self._expand_key(actors))
-
-            annotations = {}
-            if user_priority:
-                annotations["priority"] = user_priority
-            if workers:
-                if not isinstance(workers, (list, tuple, set)):
-                    workers = [workers]
-                annotations["workers"] = workers
-            if retries:
-                annotations["retries"] = retries
-            if allow_other_workers not in (True, False, None):
-                raise TypeError("allow_other_workers= must be True, False, or None")
-            if allow_other_workers:
-                annotations["allow_other_workers"] = allow_other_workers
-            if resources:
-                annotations["resources"] = resources
-
-            # Merge global and local annotations
-            annotations = merge(dask.get_annotations(), annotations)
-
-            # Pack the high level graph before sending it to the scheduler
-            keyset = set(keys)
-
-            # Validate keys
-            for key in keyset:
-                validate_key(key)
-
-            # Create futures before sending graph (helps avoid contention)
-            futures = {key: Future(key, self) for key in keyset}
-
-            # This is done manually here to get better exception messages on
-            # scheduler side and be able to produce the below warning about
-            # serialized size
-            expr_ser = Serialized(*serialize(to_serialize(expr), on_error="raise"))
-
-            pickled_size = sum(map(nbytes, [expr_ser.header] + expr_ser.frames))
-            if pickled_size > parse_bytes(
-                dask.config.get("distributed.admin.large-graph-warning-threshold")
-            ):
-                warnings.warn(
-                    f"Sending large graph of size {format_bytes(pickled_size)}.\n"
-                    "This may cause some slowdown.\n"
-                    "Consider loading the data with Dask directly\n or using futures or "
-                    "delayed objects to embed the data into the graph without repetition.\n"
-                    "See also https://docs.dask.org/en/stable/best-practices.html#load-data-with-dask for more information."
-                )
-
-            computations = self._get_computation_code(
-                nframes=dask.config.get("distributed.diagnostics.computations.nframes")
-            )
-            self._send_to_scheduler(
-                {
-                    "op": "update-graph",
-                    "expr_ser": expr_ser,
-                    "keys": set(keys),
-                    "internal_priority": internal_priority,
-                    "submitting_task": getattr(thread_state, "key", None),
-                    "fifo_timeout": fifo_timeout,
-                    "actors": actors,
-                    "code": ToPickle(computations),
-                    "annotations": ToPickle(annotations),
-                    "span_metadata": ToPickle(span_metadata),
+        if kwargs:
+            func = partial(func, **kwargs)
+
+        arglist = list(zip(*iterables))
+
+        if batch_size is not None and batch_size > 1:
+            tasks = {}
+            for i, batch in enumerate(partition_all(batch_size, arglist)):
+                dsk = {
+                    (keys[i], j): (apply, func, list(map(lambda x: x[j], batch)))
+                    for j in range(len(batch[0]))
                 }
-            )
-            return futures
+                tasks[(keys[i], 0)] = (list, [(keys[i], j) for j in range(len(batch))])
+        else:
+            tasks = {keys[i]: (func,) + arglist[i] for i in range(len(keys))}
+
+        futures, annotations, dependencies = self._gather_keys(
+            futures=tasks, annotations=info, keys=keys, pure=pure
+        )
+
+        results = [Future(k, self) for k in keys]
+
+        logger.debug("map(%s, ...)", funcname(func))
+
+        self._send_update_graph(
+            tasks=futures,
+            keys=keys,
+            dependencies=dependencies,
+            annotations=annotations,
+        )
+
+        if batch_size is not None and batch_size > 1:
+            from .actor import BatchActorFuture
+
+            results = [BatchActorFuture(k, i, self) for k in keys for i in range(batch_size)]
+
+        return results
 
     def get(
         self,
-        dsk,
-        keys,
-        workers=None,
-        allow_other_workers=None,
-        resources=None,
-        sync=True,
-        asynchronous=None,
-        direct=None,
-        retries=None,
-        priority=0,
-        fifo_timeout="60s",
-        actors=None,
-        **kwargs,
-    ):
-        """Compute dask graph
+        dsk: Mapping,
+        keys: Hashable | Collection[Hashable],
+        workers: str | Iterable[str] | None = None,
+        resources: dict[str, float] | None = None,
+        sync: bool = True,
+        retries: int = 0,
+        priority: int = 0,
+        fifo_timeout: str | timedelta = 0,
+        allow_other_workers: bool = False,
+        actor: bool = False,
+        actors: bool | str | Iterable[str] = False,
+        pure: bool = True,
+        on_error: Literal["retry", "raise", "ignore"] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Compute dask graph.
 
         Parameters
         ----------
         dsk : dict
-        keys : object, or nested lists of objects
-        workers : string or iterable of strings
-            A set of worker addresses or hostnames on which computations may be
-            performed. Leave empty to default to all workers (common case)
-        allow_other_workers : bool (defaults to False)
-            Used with ``workers``. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
-        resources : dict (defaults to {})
-            Defines the ``resources`` each instance of this mapped task
-            requires on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
+        keys : object or list
         sync : bool (optional)
             Returns Futures if False or concrete values if True (default).
-        asynchronous: bool
-            If True the client is in asynchronous mode
-        direct : bool
-            Whether or not to connect directly to the workers, or to ask
-            the scheduler to serve as intermediary.  This can also be set when
-            creating the Client.
-        retries : int (default to 0)
-            Number of allowed automatic retries if computing a result fails
-        priority : Number
-            Optional prioritization of task.  Zero is default.
-            Higher priorities take precedence
-        fifo_timeout : timedelta str (defaults to '60s')
-            Allowed amount of time between calls to consider the same priority
-        actors : bool or dict (default None)
-            Whether these tasks should exist on the worker as stateful actors.
-            Specified on a global (True/False) or per-task (``{'x': True,
-            'y': False}``) basis. See :doc:`actors` for additional details.
-
+        workers : string or list, optional
+            A list of worker addresses to restrict this task to.
+            Ex: ``['127.0.0.1:8787', '127.0.0.1:8788']``
+        resources : dict, optional
+            A dictionary of resource constraints for this task.
+            Ex: ``{'GPU': 2, 'memory': 7e9}``
+        retries : int, optional
+            Number of times to retry the task if it fails.
+        priority : int, optional
+            Priority of task. Higher numbers mean higher priority. Defaults to 0.
+        fifo_timeout : timedelta or string, optional like '1s' or '100ms'
+            Maximum time for the task to be runnable. If it doesn't run by this
+            deadline then it is cancelled.
+        allow_other_workers : bool, optional
+            If True, allow this task to run on workers that were not specified
+            in the ``workers=`` keyword. Default is False.
+        actor : bool, optional
+            Whether these tasks create Actors. Default is False.
+        actors : bool, string, list, optional
+            Addresses of actors that these tasks can run on.
+        pure : bool, optional
+            Whether the function is pure. Default is True. If True, the task
+            will be executed at most once. If False, the task may be executed
+            multiple times if it is needed by multiple results.
+        on_error: 'retry', 'raise', 'ignore', optional
+            What to do if the task raises an error. Defaults to 'raise'.
+            If 'retry', the task will be retried up to ``retries`` times.
+            If 'raise', the exception will be raised when the future is awaited.
+            If 'ignore', the future will be marked as cancelled.
+        **kwargs
+            Extra keyword arguments to forward to the scheduler.
 
         Returns
         -------
-        results
-            If 'sync' is True, returns the results. Otherwise, returns the
-            known data packed
-            If 'sync' is False, returns the known data. Otherwise, returns
-            the results
+        results : list or object
+            results has the same structure as keys
 
         Examples
         --------
         >>> from operator import add  # doctest: +SKIP
-        >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
-        >>> c.get({'x': (add, 1, 2)}, 'x')  # doctest: +SKIP
+        >>> dsk = {'x': 1, 'y': 2, 'z': (add, 'x', 'y')}  # doctest: +SKIP
+        >>> future = client.get(dsk, 'z')  # doctest: +SKIP
+        >>> future.result()  # doctest: +SKIP
         3
 
         See Also
         --------
-        Client.compute : Compute asynchronous collections
+        Client.compute
+        Client.persist
         """
-        if isinstance(dsk, dict):
-            dsk = LLGExpr(dsk)
-        elif isinstance(dsk, HighLevelGraph):
-            dsk = HLGExpr(dsk)
-        futures = self._graph_to_futures(
-            expr=dsk,
-            keys=set(flatten([keys])),
-            workers=workers,
-            allow_other_workers=allow_other_workers,
-            resources=resources,
-            fifo_timeout=fifo_timeout,
-            retries=retries,
-            user_priority=priority,
-            actors=actors,
-            span_metadata=SpanMetadata(collections=[{"type": "low-level-graph"}]),
+        singleton = False
+        if not isinstance(keys, (list, set)):
+            singleton = True
+            keys = [keys]
+
+        if actor:
+            raise ValueError("Cannot use get to create actors")
+        if actors:
+            if workers or resources:
+                raise ValueError("Cannot specify workers or resources for actors")
+            if actors is True:
+                raise TypeError("actors= must be an address or list of addresses")
+
+        info = {
+            "actors": actors,
+            "workers": workers,
+            "allow_other_workers": allow_other_workers,
+            "resources": resources,
+            "retries": retries,
+            "priority": priority,
+            "fifo_timeout": fifo_timeout,
+            "on_error": on_error,
+        }
+
+        futures, annotations, dependencies = self._gather_keys(
+            futures=dsk, annotations=info, keys=keys, pure=pure
         )
-        packed = pack_data(keys, futures)
+
+        logger.debug("Get %d keys from graph", len(keys))
+
+        self._send_update_graph(
+            tasks=futures,
+            keys=keys,
+            dependencies=dependencies,
+            annotations=annotations,
+            **kwargs,
+        )
+
+        results = [Future(key, self) for key in keys]
+
+        if singleton:
+            results = results[0]
+
         if sync:
-            if getattr(thread_state, "key", False):
-                try:
-                    secede()
-                    should_rejoin = True
-                except Exception:
-                    should_rejoin = False
-            try:
-                results = self.gather(packed, asynchronous=asynchronous, direct=direct)
-            finally:
-                for f in futures.values():
-                    f.release()
-                if getattr(thread_state, "key", False) and should_rejoin:
-                    rejoin()
+            if self.asynchronous:
+                raise ValueError(
+                    "sync=True is not allowed in asynchronous mode. "
+                    "Use sync=False and await the result instead."
+                )
+            else:
+                return self.gather(results)
+        else:
             return results
-        return packed
 
-    def _optimize_insert_futures(self, dsk, keys):
-        """Replace known keys in dask graph with Futures
+    def _gather_keys(
+        self,
+        futures: Mapping,
+        keys: Hashable | Collection[Hashable] | None = None,
+        annotations: dict[str, Any] | None = None,
+        pure: bool = True,
+    ) -> tuple[dict[Hashable, Any], dict[str, Any], set[Hashable]]:
+        """Take a graph and traverse through it gathering keys and annotations
 
-        When given a Dask graph that might have overlapping keys with our known
-        results we replace the values of that graph with futures.  This can be
-        used as an optimization to avoid recomputation.
-
-        This returns the same graph if unchanged but a new graph if any changes
-        were necessary.
-        """
-        with self._refcount_lock:
-            changed = False
-            for key in list(dsk):
-                if key in self.futures:
-                    if not changed:
-                        changed = True
-                        dsk = ensure_dict(dsk)
-                    dsk[key] = Future(key, self)
-
-        if changed:
-            dsk, _ = dask.optimization.cull(dsk, keys)
-
-        return dsk
-
-    def normalize_collection(self, collection):
-        """
-        Replace collection's tasks by already existing futures if they exist
-
-        This normalizes the tasks within a collections task graph against the
-        known futures within the scheduler.  It returns a copy of the
-        collection with a task graph that includes the overlapping futures.
+        This takes a Dask graph and the desired keys and walks up the graph
+        gathering all keys and keys of futures. It also collects annotations
+        and applies the given annotation to all keys in the graph that connect
+        to the output keys.
 
         Parameters
         ----------
-        collection : dask object
-            Collection like dask.array or dataframe or dask.value objects
+        futures : dict
+            A dask graph
+        keys : list
+            A list of keys desired by the user
+        annotations : dict
+            Annotations to apply to the keys that connect to the desired keys
 
         Returns
-        -------
-        collection : dask object
-            Collection with its tasks replaced with any existing futures.
-
-        Examples
         --------
-        >>> len(x.__dask_graph__())  # x is a dask collection with 100 tasks  # doctest: +SKIP
-        100
-        >>> set(client.futures).intersection(x.__dask_graph__())  # some overlap exists  # doctest: +SKIP
-        10
-
-        >>> x = client.normalize_collection(x)  # doctest: +SKIP
-        >>> len(x.__dask_graph__())  # smaller computational graph  # doctest: +SKIP
-        20
-
-        See Also
-        --------
-        Client.persist : trigger computation of collection's tasks
+        tasks : dict
+            A dictionary mapping keys to tasks
+        annotations : dict
+            A dictionary mapping annotations like 'priority' or 'resources'
+            to dictionaries that map keys to values like ``{'x': 1}``
+        dependencies : set
+            A set of keys for Futures results upon which these tasks depend
         """
-        dsk_orig = collection.__dask_graph__()
-        dsk = self._optimize_insert_futures(dsk_orig, collection.__dask_keys__())
+        tasks = {}
+        dependencies = set()
+        queue = deque(keys or futures)
+        keyset = set(keys or futures)
+        seen = set()
 
-        if dsk is dsk_orig:
-            return collection
+        if annotations:
+            # Copy as we mutate annotations below
+            annotations = annotations.copy()
+            if fifo_timeout := annotations.get("fifo_timeout"):
+                annotations["fifo_timeout"] = parse_timedelta(fifo_timeout)
+            if workers := annotations.get("workers"):
+                if isinstance(workers, str):
+                    workers = {workers}
+                else:
+                    workers = set(workers)
+                annotations["workers"] = workers
         else:
-            return redict_collection(collection, dsk)
+            annotations = {}
+
+        annotations_out: dict[str, dict] = {k: {} for k in annotations}
+        annotations_out["__workers_loose"] = {}
+        annotations_out["workers"] = {}
+
+        while queue:
+            key = queue.popleft()
+            if key in seen or key not in futures:
+                continue
+            seen.add(key)
+
+            if isinstance(key, Future):
+                dependencies.add(key.key)
+                if key.client is not self:
+                    raise ValueError("Inputs contain futures from another client.")
+                continue
+
+            if key not in tasks:
+                tasks[key] = futures[key]
+
+            # Put key in annotations
+            for k, v in annotations.items():
+                if v is not None:
+                    if k == "workers":
+                        annotations_out["__workers_loose"][key] = v
+                    elif k == "allow_other_workers":
+                        if v is True:
+                            annotations_out["__workers_loose"].pop(key, None)
+                        else:
+                            annotations_out["workers"][key] = annotations_out[
+                                "__workers_loose"
+                            ].pop(key, None)
+                    else:
+                        annotations_out[k][key] = v
+
+            # If the task is a tuple, recursively search its contents
+            task = futures[key]
+            if istask(task):
+                queue.extend(task[1:])
+            elif isinstance(task, list):
+                queue.extend(task)
+
+        if pure:
+            annotations_out["pure"] = {key: True for key in tasks}
+
+        del annotations_out["__workers_loose"]
+        if not annotations_out["workers"]:
+            del annotations_out["workers"]
+        for k in list(annotations_out):
+            if not annotations_out[k]:
+                del annotations_out[k]
+
+        return tasks, annotations_out, dependencies
 
     def compute(
         self,
-        collections,
-        sync=False,
-        optimize_graph=True,
-        workers=None,
-        allow_other_workers=False,
-        resources=None,
-        retries=0,
-        priority=0,
-        fifo_timeout="60s",
-        actors=None,
-        traverse=True,
-        **kwargs,
+        collections: Any,
+        sync: bool = False,
+        optimize_graph: bool = True,
+        workers: str | Iterable[str] | None = None,
+        allow_other_workers: bool = False,
+        resources: dict[str, float] | None = None,
+        retries: int = 0,
+        priority: int = 0,
+        fifo_timeout: str | timedelta = 0,
+        actor: bool = False,
+        actors: bool | str | Iterable[str] = False,
+        traverse: bool = True,
+        **kwargs: Any,
     ):
         """Compute dask collections on cluster
 
         Parameters
         ----------
-        collections : iterable of dask objects or single dask object
-            Collections like dask.array or dataframe or dask.value objects
+        collections : iterable of dask collections or single dask collection
+            Collections like dask.array, dask.dataframe, dask.delayed or dask.bag
+            or list of dask collections to compute.
         sync : bool (optional)
-            Returns Futures if False (default) or concrete values if True
-        optimize_graph : bool
-            Whether or not to optimize the underlying graphs
-        workers : string or iterable of strings
-            A set of worker hostnames on which computations may be performed.
-            Leave empty to default to all workers (common case)
-        allow_other_workers : bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
-        retries : int (default to 0)
-            Number of allowed automatic retries if computing a result fails
-        priority : Number
-            Optional prioritization of task.  Zero is default.
-            Higher priorities take precedence
-        fifo_timeout : timedelta str (defaults to '60s')
-            Allowed amount of time between calls to consider the same priority
-        traverse : bool (defaults to True)
-            By default dask traverses builtin python collections looking for
-            dask objects passed to ``compute``. For large collections this can
-            be expensive. If none of the arguments contain any dask objects,
-            set ``traverse=False`` to avoid doing this traversal.
-        resources : dict (defaults to {})
-            Defines the `resources` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
-        actors : bool or dict (default None)
-            Whether these tasks should exist on the worker as stateful actors.
-            Specified on a global (True/False) or per-task (``{'x': True,
-            'y': False}``) basis. See :doc:`actors` for additional details.
-        **kwargs
-            Options to pass to the graph optimize calls
+            Returns Futures if False (default) or concrete values if True.
+        optimize_graph : bool (optional)
+            Whether to optimize the underlying graphs. Defaults to True.
+        workers : string or list, optional
+            A list of worker addresses to restrict this task to.
+            Ex: ``['127.0.0.1:8787', '127.0.0.1:8788']``
+        allow_other_workers : bool, optional
+            If True, allow this task to run on workers that were not specified
+            in the ``workers=`` keyword. Default is False.
+        resources : dict, optional
+            A dictionary of resource constraints for this task.
+            Ex: ``{'GPU': 2, 'memory': 7e9}``
+        retries : int, optional
+            Number of times to retry the task if it fails.
+        priority : int, optional
+            Priority of task. Higher numbers mean higher priority. Defaults to 0.
+        fifo_timeout : timedelta or string, optional like '1s' or '100ms'
+            Maximum time for the task to be runnable. If it doesn't run by this
+            deadline then it is cancelled.
+        actor : bool, optional
+            Whether these tasks create Actors. Default is False.
+        actors : bool, string, list, optional
+            Addresses of actors that these tasks can run on.
+        traverse : bool, optional
+            By default dask traverses builtin python collections looking for dask
+            objects stopping when it reaches a user defined object. If traverse is
+            False dask will stop traversing when it reaches any object that is not
+            a list, dict, set, or tuple. Defaults to True.
 
         Returns
         -------
-        List of Futures if input is a sequence, or a single future otherwise
+            Future, list of Futures, or collection wrapped in compute
 
         Examples
         --------
@@ -3618,828 +2291,1871 @@ class Client(SyncMethodMixin):
         >>> from operator import add
         >>> x = delayed(add)(1, 2)
         >>> y = delayed(add)(x, x)
-        >>> xx, yy = client.compute([x, y])  # doctest: +SKIP
-        >>> xx  # doctest: +SKIP
-        <Future: status: finished, key: add-8f6e709446674bad78ea8aeecfee188e>
-        >>> xx.result()  # doctest: +SKIP
-        3
-        >>> yy.result()  # doctest: +SKIP
-        6
+        >>> futures = client.compute([x, y])  # Starts computation
+        >>> results = client.gather(futures)  # Waits for results
+        [3, 6]
 
         Also support single arguments
 
-        >>> xx = client.compute(x)  # doctest: +SKIP
+        >>> future = client.compute(y) # doctest: +SKIP
+        >>> future.result()  # doctest: +SKIP
+        6
 
         See Also
         --------
-        Client.get : Normal synchronous dask.get function
+        Client.get : underlying function
+        Client.persist : similar function that keeps data on the cluster
         """
-        if isinstance(collections, (list, tuple, set, frozenset)):
+        if isinstance(collections, (list, tuple, set)):
             singleton = False
         else:
-            collections = [collections]
             singleton = True
+            collections = [collections]
 
-        if traverse:
-            collections = tuple(
-                (
-                    dask.delayed(a)
-                    if isinstance(a, (list, set, tuple, dict, Iterator))
-                    else a
-                )
-                for a in collections
-            )
+        info = {
+            "actors": actors,
+            "workers": workers,
+            "allow_other_workers": allow_other_workers,
+            "resources": resources,
+            "retries": retries,
+            "priority": priority,
+            "fifo_timeout": fifo_timeout,
+        }
 
-        variables = [a for a in collections if dask.is_dask_collection(a)]
-        metadata = SpanMetadata(
-            collections=[get_collections_metadata(v) for v in variables]
+        variables = [a for a in collections if isinstance(a, Variable)]
+        collections = [a for a in collections if not isinstance(a, Variable)]
+
+        futures_dict = self._graph_to_futures(
+            collections,
+            info,
+            optimize_graph=optimize_graph,
+            traverse=traverse,
+            **kwargs,
         )
-        futures_dict = {}
+        futures = [futures_dict[v] for v in collections]
+
         if variables:
-            expr = collections_to_expr(variables, optimize_graph, **kwargs)
-            from dask._expr import FinalizeCompute
-
-            expr = FinalizeCompute(expr)
-
-            expr = expr.optimize()
-            names = list(flatten(expr.__dask_keys__()))
-
-            futures_dict = self._graph_to_futures(
-                expr,
-                names,
-                workers=workers,
-                allow_other_workers=allow_other_workers,
-                resources=resources,
-                retries=retries,
-                user_priority=priority,
-                fifo_timeout=fifo_timeout,
-                actors=actors,
-                span_metadata=metadata,
-            )
-
-        i = 0
-        futures = []
-        for arg in collections:
-            if dask.is_dask_collection(arg):
-                futures.append(futures_dict[names[i]])
-                i += 1
-            else:
-                futures.append(arg)
-
-        if sync:
-            result = self.gather(futures)
-        else:
-            result = futures
+            futures.extend([v.current_future() for v in variables])
 
         if singleton:
-            return first(result)
+            out = futures[0]
         else:
-            return result
+            out = futures
+
+        if sync:
+            if self.asynchronous:
+                raise ValueError(
+                    "sync=True is not allowed in asynchronous mode. "
+                    "Use sync=False and await gather(futures) instead."
+                )
+            else:
+                return self.gather(out)
+        else:
+            return out
 
     def persist(
         self,
-        collections,
-        optimize_graph=True,
-        workers=None,
-        allow_other_workers=None,
-        resources=None,
-        retries=None,
-        priority=0,
-        fifo_timeout="60s",
-        actors=None,
-        **kwargs,
+        collections: Any,
+        optimize_graph: bool = True,
+        workers: str | Iterable[str] | None = None,
+        allow_other_workers: bool = False,
+        resources: dict[str, float] | None = None,
+        retries: int = 0,
+        priority: int = 0,
+        fifo_timeout: str | timedelta = 0,
+        actor: bool = False,
+        actors: bool | str | Iterable[str] = False,
+        traverse: bool = True,
+        **kwargs: Any,
     ):
         """Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
-        Provides a new dask collection that is semantically identical to the
-        previous one, but now based off of futures currently in execution.
+        Provides a new collection that is semantically identical to the old collection,
+        but now points to data that is remote.
 
         Parameters
         ----------
-        collections : sequence or single dask object
-            Collections like dask.array or dataframe or dask.value objects
-        optimize_graph : bool
-            Whether or not to optimize the underlying graphs
-        workers : string or iterable of strings
-            A set of worker hostnames on which computations may be performed.
-            Leave empty to default to all workers (common case)
-        allow_other_workers : bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
-        retries : int (default to 0)
-            Number of allowed automatic retries if computing a result fails
-        priority : Number
-            Optional prioritization of task.  Zero is default.
-            Higher priorities take precedence
-        fifo_timeout : timedelta str (defaults to '60s')
-            Allowed amount of time between calls to consider the same priority
-        resources : dict (defaults to {})
-            Defines the `resources` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
-        actors : bool or dict (default None)
-            Whether these tasks should exist on the worker as stateful actors.
-            Specified on a global (True/False) or per-task (``{'x': True,
-            'y': False}``) basis. See :doc:`actors` for additional details.
+        collections : iterable of dask collections or single dask collection
+            Collections like dask.array, dask.dataframe, dask.delayed or dask.bag
+            or list of dask collections to compute.
+        optimize_graph : bool (optional)
+            Whether to optimize the underlying graphs. Defaults to True.
+        workers : string or list, optional
+            A list of worker addresses to restrict this task to.
+            Ex: ``['127.0.0.1:8787', '127.0.0.1:8788']``
+        allow_other_workers : bool, optional
+            If True, allow this task to run on workers that were not specified
+            in the ``workers=`` keyword. Default is False.
+        resources : dict, optional
+            A dictionary of resource constraints for this task.
+            Ex: ``{'GPU': 2, 'memory': 7e9}``
+        retries : int, optional
+            Number of times to retry the task if it fails.
+        priority : int, optional
+            Priority of task. Higher numbers mean higher priority. Defaults to 0.
+        fifo_timeout : timedelta or string, optional like '1s' or '100ms'
+            Maximum time for the task to be runnable. If it doesn't run by this
+            deadline then it is cancelled.
+        actor : bool, optional
+            Whether these tasks create Actors. Default is False.
+        actors : bool, string, list, optional
+            Addresses of actors that these tasks can run on.
+        traverse : bool, optional
+            By default dask traverses builtin python collections looking for dask
+            objects stopping when it reaches a user defined object. If traverse is
+            False dask will stop traversing when it reaches any object that is not
+            a list, dict, set, or tuple. Defaults to True.
 
         Returns
         -------
-        List of collections, or single collection, depending on type of input.
+            New dask collections backed by futures
 
         Examples
         --------
-        >>> xx = client.persist(x)  # doctest: +SKIP
-        >>> xx, yy = client.persist([x, y])  # doctest: +SKIP
+        >>> from dask import delayed
+        >>> from operator import add
+        >>> x = delayed(add)(1, 2)
+        >>> y = delayed(add)(x, x)
+        >>> x2, y2 = client.persist([x, y])  # Starts computation
+        >>> # x2 and y2 are equivalent to x and y, but point to remote data
+
+        >>> y2.compute()  # Computation is already done, this is fast
+        6
 
         See Also
         --------
         Client.compute
         """
-        if isinstance(collections, (tuple, list, set, frozenset)):
+        info = {
+            "actors": actors,
+            "workers": workers,
+            "allow_other_workers": allow_other_workers,
+            "resources": resources,
+            "retries": retries,
+            "priority": priority,
+            "fifo_timeout": fifo_timeout,
+        }
+
+        if isinstance(collections, (list, tuple, set)):
             singleton = False
         else:
             singleton = True
             collections = [collections]
 
-        assert all(map(dask.is_dask_collection, collections))
-        metadata = SpanMetadata(
-            collections=[get_collections_metadata(v) for v in collections]
+        variables = [a for a in collections if isinstance(a, Variable)]
+        collections = [a for a in collections if not isinstance(a, Variable)]
+
+        futures_dict = self._graph_to_futures(
+            collections,
+            info,
+            optimize_graph=optimize_graph,
+            traverse=traverse,
+            **kwargs,
         )
-        expr = collections_to_expr(collections, optimize_graph)
-
-        expr2 = expr.optimize()
-
-        keys = expr2.__dask_keys__()
-
-        futures = self._graph_to_futures(
-            expr2,
-            list(flatten(keys)),
-            workers=workers,
-            allow_other_workers=allow_other_workers,
-            resources=resources,
-            retries=retries,
-            user_priority=priority,
-            fifo_timeout=fifo_timeout,
-            actors=actors,
-            span_metadata=metadata,
+        rebuilt, state = dask.base.replace_data_in_collection(
+            collections, futures_dict, connection_client=self
         )
 
-        postpersists = [c.__dask_postpersist__() for c in collections]
+        if variables:
+            rebuilt.extend(variables)
 
-        assert len(postpersists) == len(keys)
-        result = [
-            func({k: futures[k] for k in flatten(ks)}, *args)
-            for (func, args), ks in zip(postpersists, keys)
-        ]
         if singleton:
-            return result[0]
-        return result
+            return rebuilt[0]
+        else:
+            return rebuilt
 
-    async def _restart(
-        self, timeout: str | int | float | NoDefault, wait_for_workers: bool
-    ) -> None:
-        if timeout is no_default:
-            timeout = self._timeout * 4
-        timeout = parse_timedelta(cast("str|int|float", timeout), "s")
+    def _graph_to_futures(
+        self,
+        collections: Collection,
+        extra_annotations: dict[str, Any],
+        optimize_graph: bool = True,
+        traverse: bool = True,
+        **kwargs: Any,
+    ) -> dict:
+        """Turn Dask collections into dictionary of Futures"""
+        dsk = dask.base.collections_to_dsk(collections, optimize_graph, traverse=traverse)
+        dsk = HighLevelGraph.from_collections(str(uuid.uuid4()), dsk, dependencies=())
+        user_keys = {c.key for c in collections}
+        dsk, _ = dask.optimization.cull(dsk, user_keys)
+        dsk, _ = dask.optimization.fuse(dsk, user_keys)
 
-        await self.scheduler.restart(
-            timeout=timeout,
-            wait_for_workers=wait_for_workers,
-            stimulus_id=f"client-restart-{time()}",
+        # Prepare graph annotations
+        annotations: dict[str, Any] = {
+            k: {} for k in extra_annotations if extra_annotations[k] is not None
+        }
+        annotations["__workers_loose"] = {}
+        annotations["workers"] = {}
+        annotations.update(kwargs.get("annotations", {}))
+
+        for key, ann in dsk.annotations.items():
+            ann = ann.copy()
+            workers = ann.pop("workers", None)
+            allow_other_workers = ann.pop("allow_other_workers", False)
+
+            if workers:
+                if isinstance(workers, str):
+                    workers = {workers}
+                else:
+                    workers = set(workers)
+                if allow_other_workers:
+                    annotations["__workers_loose"][key] = workers
+                else:
+                    annotations["workers"][key] = workers
+
+            for k, v in extra_annotations.items():
+                # Explicit keywords override graph annotations
+                if v is not None:
+                    ann[k] = v
+
+            for k, v in ann.items():
+                # Set annotation if key doesn't exist or value is None
+                annotations.setdefault(k, {})[key] = v
+
+        if fifo_timeout := annotations.get("fifo_timeout"):
+            for k, v in fifo_timeout.items():
+                fifo_timeout[k] = parse_timedelta(v)
+
+        del annotations["__workers_loose"]
+        if not annotations["workers"]:
+            del annotations["workers"]
+        for k in list(annotations):
+            if not annotations[k]:
+                del annotations[k]
+
+        keys = list(dsk.keys())
+        self._send_update_graph(
+            tasks=dict(dsk.layers),
+            keys=keys,
+            dependencies=dsk.dependencies,
+            annotations=annotations,
+            **kwargs,
         )
 
-    def restart(
+        futures = {key: Future(key, self) for key in dsk}
+
+        # Delete any intermediate futures we no longer need
+        intermediate_keys = set(futures) - user_keys
+        if intermediate_keys:
+            self.release(intermediate_keys)
+
+        return futures
+
+    def _send_update_graph(
         self,
-        timeout: str | int | float | NoDefault = no_default,
-        wait_for_workers: bool = True,
+        tasks: Mapping,
+        keys: list[Hashable],
+        dependencies: Iterable[Hashable] = (),
+        client: str | None = None,
+        annotations: dict[str, Any] | None = None,
+        fifo_timeout: str | timedelta | None = None,
+        retries: int | None = None,
+        priority: dict[str, int] | None = None,
+        resources: dict[str, dict[str, float]] | None = None,
+        workers: dict[str, list[str]] | None = None,
+        actors: dict[str, list[str]] | None = None,
+        submitting_task: Hashable | None = None,
+        user_priority: int = 0,
+        allow_other_workers: bool = False,
+        on_error: Literal["retry", "raise", "ignore"] | None = None,
+        **kwargs: Any,
     ):
-        """
-        Restart all workers. Reset local state. Optionally wait for workers to return.
+        """Send graph to scheduler"""
+        if annotations is None:
+            annotations = {}
+        if client is None:
+            client = self.id
 
-        Workers without nannies are shut down, hoping an external deployment system
-        will restart them. Therefore, if not using nannies and your deployment system
-        does not automatically restart workers, ``restart`` will just shut down all
-        workers, then time out!
+        tasks2 = {}
+        dependencies2 = set()
 
-        After ``restart``, all connected workers are new, regardless of whether ``TimeoutError``
-        was raised. Any workers that failed to shut down in time are removed, and
-        may or may not shut down on their own in the future.
+        # Make sure that all tasks are serializable
+        for key, task in tasks.items():
+            try:
+                if istask(task):
+                    tasks2[key] = dumps(task)
+                else:
+                    tasks2[key] = Serialize(task)
+            except Exception as e:
+                logger.exception("Failed to serialize task %s", key)
+                raise e
 
-        Parameters
-        ----------
-        timeout:
-            How long to wait for workers to shut down and come back, if ``wait_for_workers``
-            is True, otherwise just how long to wait for workers to shut down.
-            Raises ``asyncio.TimeoutError`` if this is exceeded.
-        wait_for_workers:
-            Whether to wait for all workers to reconnect, or just for them to shut down
-            (default True). Use ``restart(wait_for_workers=False)`` combined with
-            :meth:`Client.wait_for_workers` for granular control over how many workers to
-            wait for.
+        # Collect dependencies from annotations
+        annotations_deps = set()
+        for v in annotations.values():
+            if isinstance(v, dict):
+                annotations_deps.update(v)
+        dependencies2.update(annotations_deps)
 
-        See also
-        --------
-        Scheduler.restart
-        Client.restart_workers
-        """
-        return self.sync(
-            self._restart, timeout=timeout, wait_for_workers=wait_for_workers
-        )
+        # Collect dependencies from Futures in task arguments
+        for task in tasks.values():
+            if istask(task):
+                dependencies2.update({f.key for f in task[1:] if isinstance(f, Future)})
+            elif isinstance(task, (list, set)):
+                dependencies2.update({f.key for f in task if isinstance(f, Future)})
 
-    async def _restart_workers(
-        self,
-        workers: list[str],
-        timeout: str | int | float | NoDefault,
-        raise_for_error: bool,
-    ) -> dict[str, Literal["OK", "removed", "timed out"]]:
-        if timeout is no_default:
-            timeout = self._timeout * 4
-        timeout = parse_timedelta(cast("str|int|float", timeout), "s")
+        # Collect dependencies from explicit keywords
+        dependencies2.update({dep for dep in dependencies if isinstance(dep, Future)})
+        dependencies2.update({dep.key for dep in dependencies if isinstance(dep, Future)})
 
-        info = self.scheduler_info()
-        name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
-        worker_addrs = [name_to_addr.get(w, w) for w in workers]
+        # Collect dependencies from keys to compute
+        dependencies2.update({k.key for k in keys if isinstance(k, Future)})
 
-        out: dict[str, Literal["OK", "removed", "timed out"]] = (
-            await self.scheduler.restart_workers(
-                workers=worker_addrs,
-                timeout=timeout,
-                on_error="raise" if raise_for_error else "return",
-                stimulus_id=f"client-restart-workers-{time()}",
+        # Create Future states for all keys
+        for key in tasks:
+            if key not in self.futures:
+                self.futures[key] = FutureState()
+
+        # Build message payload
+        msg = {
+            "op": "update-graph",
+            "tasks": tasks2,
+            "dependencies": [Serialize(dep) for dep in dependencies2],
+            "keys": [to_serialize(key) for key in keys],
+            "priority": user_priority,
+            "submitting_task": submitting_task,
+            "client": client,
+            "annotations": {
+                k: Serialize(v)
+                for k, v in annotations.items()
+                if k not in ("fifo_timeout", "retries")
+            },
+        }
+        if fifo_timeout := annotations.get("fifo_timeout"):
+            msg["fifo_timeout"] = Serialize(fifo_timeout)
+        if retries := annotations.get("retries"):
+            msg["retries"] = Serialize(retries)
+
+        # Send message to scheduler
+        self._send_to_scheduler_safe(msg)
+
+    def _inc_ref(self, key: Hashable) -> None:
+        """Increment the reference count for a key"""
+        if self._refcount[key] == 0:
+            self._send_to_scheduler_safe(
+                {"op": "client-desires-keys", "keys": [to_serialize(key)], "client": self.id}
             )
-        )
-        # Map keys back to original `workers` input names/addresses
-        out = {w: out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
-        if raise_for_error:
-            assert all(v == "OK" for v in out.values()), out
-        return out
+        self._refcount[key] += 1
 
-    def restart_workers(
+    def _dec_ref(self, key: Hashable) -> None:
+        """Decrement the reference count for a key"""
+        if key not in self._refcount:
+            return  # Should not happen in principle
+        self._refcount[key] -= 1
+        if self._refcount[key] == 0:
+            self._send_to_scheduler_safe(
+                {"op": "client-releases-keys", "keys": [to_serialize(key)], "client": self.id}
+            )
+            del self._refcount[key]
+
+    def _get_computation(self, task: tuple, key: Hashable, pure: bool = True) -> tuple:
+        """Get a computation from a task tuple"""
+        if pure:
+            return task
+        else:
+            # Add a random nonce to ensure the task is unique
+            return task + (uuid.uuid4().hex,)
+
+    def _get_futures(self, value: Any) -> list[Future]:
+        """Extract futures from a value"""
+        if isinstance(value, Future):
+            return [value]
+        elif isinstance(value, (list, tuple)):
+            return list(itertools.chain.from_iterable(self._get_futures(v) for v in value))
+        elif isinstance(value, dict):
+            return list(
+                itertools.chain.from_iterable(
+                    self._get_futures(v) for v in value.values()
+                )
+            )
+        else:
+            return []
+
+    def gather(
         self,
-        workers: list[str],
-        timeout: str | int | float | NoDefault = no_default,
-        raise_for_error: bool = True,
-    ):
-        """Restart a specified set of workers
+        futures: Any,
+        errors: Literal["raise", "omit", "skip"] = "raise",
+        direct: bool | None = None,
+        local_worker: bool | None = None,
+        asynchronous: bool | None = None,
+    ) -> Any:
+        """Gather futures from cluster
 
-        .. note::
-
-            Only workers being monitored by a :class:`distributed.Nanny` can be restarted.
-            See ``Nanny.restart`` for more details.
+        Accepts a future, nested container of futures, or dict/list/tuple
+        of futures. Returns the results in the same structure.
 
         Parameters
         ----------
-        workers : list[str]
-            Workers to restart. This can be a list of worker addresses, names, or a both.
-        timeout : int | float | None
-            Number of seconds to wait
-        raise_for_error: bool (default True)
-            Whether to raise a :py:class:`TimeoutError` if restarting worker(s) doesn't
-            finish within ``timeout``, or another exception caused from restarting
-            worker(s).
+        futures : Collection of Futures or Future
+            The futures to gather. Can be a single future, list, tuple, dict
+            of futures. Nested structures are supported.
+        errors : string
+            How to handle errors. Options are 'raise', 'omit', 'skip'.
+            If 'raise', raise the exception on the client. Default.
+            If 'omit', remove the future from the collection.
+            If 'skip', keep the future object itself in the collection.
+        direct : bool
+            Whether or not to connect directly to the workers; defaults to True
+            if the client can connect to the workers, False otherwise.
+        local_worker : bool
+            Whether or not to prefer using a local worker, if available.
+            Defaults to True.
+        asynchronous: bool or None
+            If True run in asynchronous mode. If False run in synchronous mode.
+            If None, defaults to client behavior.
 
         Returns
         -------
-        dict[str, "OK" | "removed" | "timed out"]
-            Mapping of worker and restart status, the keys will match the original
-            values passed in via ``workers``.
+        results : gathered results in the same structure as futures.
 
-        Notes
-        -----
-        This method differs from :meth:`Client.restart` in that this method
-        simply restarts the specified set of workers, while ``Client.restart``
-        will restart all workers and also reset local state on the cluster
-        (e.g. all keys are released).
-
-        Additionally, this method does not gracefully handle tasks that are
-        being executed when a worker is restarted. These tasks may fail or have
-        their suspicious count incremented.
+        Raises
+        ------
+        If any remote task raises an exception, that exception will be
+        raised here, unless ``errors='omit'`` or ``errors='skip'``.
 
         Examples
         --------
-        You can get information about active workers using the following:
+        >>> from operator import add  # doctest: +SKIP
+        >>> x = client.submit(add, 1, 2)  # doctest: +SKIP
+        >>> y = client.submit(add, 10, 20)  # doctest: +SKIP
+        >>> client.gather([x, y])  # doctest: +SKIP
+        [3, 30]
 
-        >>> workers = client.scheduler_info()['workers']
+        >>> client.gather({'x': x, 'y': y})  # doctest: +SKIP
+        {'x': 3, 'y': 30}
 
-        From that list you may want to select some workers to restart
+        Optionally ignore futures that erred
 
-        >>> client.restart_workers(workers=['tcp://address:port', ...])
+        >>> z = client.submit(lambda: 1 / 0)  # doctest: +SKIP
+        >>> client.gather([x, y, z], errors='omit')  # doctest: +SKIP
+        [3, 30]
+        >>> client.gather([x, y, z], errors='skip')  # doctest: +SKIP
+        [3, 30, <Future: error, key: lambda-....>]
 
         See Also
         --------
-        Client.restart
+        Client.get : Normal synchronous dask function
+        Client.compute : Normal synchronous dask function
+        Future.result : Wait on a single future
         """
-        info = self.scheduler_info()
+        if asynchronous is None:
+            asynchronous = self.asynchronous
+        if asynchronous:
+            return self._gather(
+                futures, errors=errors, direct=direct, local_worker=local_worker
+            )
+        else:
+            return self.sync(
+                self._gather,
+                futures,
+                errors=errors,
+                direct=direct,
+                local_worker=local_worker,
+                asynchronous=True,
+            )
 
-        for worker, meta in info["workers"].items():
-            if (worker in workers or meta["name"] in workers) and meta["nanny"] is None:
-                raise ValueError(
-                    f"Restarting workers requires a nanny to be used. Worker "
-                    f"{worker} has type {info['workers'][worker]['type']}."
-                )
-        return self.sync(
-            self._restart_workers,
-            workers=workers,
-            timeout=timeout,
-            raise_for_error=raise_for_error,
+    async def _gather(
+        self,
+        futures: Any,
+        errors: Literal["raise", "omit", "skip"] = "raise",
+        direct: bool | None = None,
+        local_worker: bool | None = None,
+    ) -> Any:
+        """Asynchronous version of gather"""
+        if errors not in ("raise", "omit", "skip"):
+            raise ValueError("errors= must be 'raise', 'omit', or 'skip'")
+
+        # Short circuit on trivial cases
+        if not futures:
+            return futures
+        if isinstance(futures, Future):
+            futures_list = [futures]
+            return_structure = lambda L: L[0]
+        else:
+            futures_list, return_structure = pack_data(futures, merge_lists=False)
+
+        # Filter out non-futures
+        futures_set: set[Future] = set()
+        futures_indices: dict[Future, list[int]] = defaultdict(list)
+        data = {}
+        for i, f in enumerate(futures_list):
+            if isinstance(f, Future):
+                if f.client is not self:
+                    raise ValueError("Inputs contain futures from another client.")
+                futures_set.add(f)
+                futures_indices[f].append(i)
+            else:
+                data[i] = f
+
+        # Wait for all futures to complete
+        await wait(futures_set)
+
+        # Collect results or errors
+        results: dict[int, Any] = {}
+        exceptions: dict[int, Exception] = {}
+        tracebacks: dict[int, Any] = {}
+        bad_futures: set[Future] = set()
+
+        for f in futures_set:
+            if f.status == "error":
+                if errors == "raise":
+                    exc = f.exception
+                    tb = f.traceback
+                    # Avoid keeping references to large objects through the traceback
+                    exc = exc.with_traceback(tb)
+                    raise exc
+                elif errors == "omit":
+                    bad_futures.add(f)
+                elif errors == "skip":
+                    for i in futures_indices[f]:
+                        results[i] = f
+                else:
+                    assert False, "Not reachable"
+            elif f.status == "cancelled":
+                if errors == "raise":
+                    raise f.exception
+                elif errors == "omit":
+                    bad_futures.add(f)
+                elif errors == "skip":
+                    for i in futures_indices[f]:
+                        results[i] = f
+                else:
+                    assert False, "Not reachable"
+            else:
+                assert f.status == "finished"
+
+        # Collect data from workers
+        keys_to_gather = {f.key for f in futures_set if f not in bad_futures}
+        if keys_to_gather:
+            gathered_results = await self._gather_remote(
+                keys_to_gather, direct=direct, local_worker=local_worker
+            )
+            for f in futures_set:
+                if f in bad_futures:
+                    continue
+                try:
+                    result = gathered_results[f.key]
+                except KeyError:
+                    # Future not in gathered results, assume it was lost
+                    f._state.set_lost()
+                    if errors == "raise":
+                        raise LostKeyError(f.key)
+                    elif errors == "omit":
+                        bad_futures.add(f)
+                    elif errors == "skip":
+                        for i in futures_indices[f]:
+                            results[i] = f
+                    else:
+                        assert False, "Not reachable"
+                else:
+                    for i in futures_indices[f]:
+                        results[i] = result
+
+        # Reconstruct original data structure
+        if bad_futures:
+            unpack_indices = [
+                i for i, f in enumerate(futures_list) if f not in bad_futures
+            ]
+            packed_results = [results[i] for i in unpack_indices]
+            return return_structure(packed_results)
+        else:
+            final_results = [results.get(i, data.get(i)) for i in range(len(futures_list))]
+            return return_structure(final_results)
+
+    async def _gather_remote(
+        self,
+        keys_to_gather: set[Hashable],
+        direct: bool | None = None,
+        local_worker: bool | None = None,
+    ) -> dict[Hashable, Any]:
+        """Gather data from workers"""
+        who_has = await self._who_has(keys_to_gather)
+        data, missing_keys, failed_keys, bad_workers = await gather_from_workers(
+            who_has,
+            rpc=self.rpc,
+            close=False,
+            serializers=self._serializers_orig,
+            direct=direct,
+            local_worker=local_worker,
+            gather_semaphore=self._gather_semaphore,
         )
 
-    async def _upload_large_file(self, local_filename, remote_filename=None):
-        if remote_filename is None:
-            remote_filename = os.path.split(local_filename)[1]
+        if missing_keys:
+            logger.warning("Couldn't gather keys %s", missing_keys)
+            # TODO: Do something about missing keys?
 
-        with open(local_filename, "rb") as f:
-            data = f.read()
+        if failed_keys:
+            logger.warning("Failed to gather keys %s", failed_keys)
+            # TODO: Do something about failed keys?
 
-        [future] = await self._scatter([data])
-        key = future.key
-        await self._replicate(future)
+        return data
 
-        def dump_to_file(dask_worker=None):
-            if not os.path.isabs(remote_filename):
-                fn = os.path.join(dask_worker.local_directory, remote_filename)
+    def scatter(
+        self,
+        data: Any,
+        workers: str | Iterable[str] | None = None,
+        broadcast: bool = False,
+        direct: bool | None = None,
+        local_worker: bool | None = None,
+        timeout: float | str = config.timeouts["connect"],
+        hash: bool = True,
+        asynchronous: bool | None = None,
+    ):
+        """Scatter data to workers
+
+        Parameters
+        ----------
+        data : list, dict, or object
+            Data to scatter to workers. Output type matches input type.
+        workers : list of strings, optional
+            List of worker addresses to scatter data to.
+            Leave None to scatter to all workers.
+        broadcast : bool, optional
+            Whether to scatter data to all workers. Default is False.
+            If True, ignores the ``workers`` keyword argument.
+        direct : bool, optional
+            Whether or not to connect directly to the workers; defaults to True
+            if the client can connect to the workers, False otherwise.
+        local_worker : bool, optional
+            Whether or not to prefer using a local worker, if available.
+            Defaults to True.
+        timeout : number, optional
+            Time in seconds after which to raise a ``distributed.TimeoutError``
+            if the scatter operation has not completed.
+        hash : bool, optional
+            Whether to hash data to determine which worker to send it to.
+            Default is True. If False, data is sent to workers in a round-robin fashion.
+        asynchronous: bool or None
+            If True run in asynchronous mode. If False run in synchronous mode.
+            If None, defaults to client behavior.
+
+        Returns
+        -------
+        List, dict, or Futures matching the type of input.
+
+        Examples
+        --------
+        >>> data = [1, 2, 3]  # doctest: +SKIP
+        >>> futures = client.scatter(data)  # doctest: +SKIP
+
+        >>> data = {'x': 1, 'y': 2, 'z': 3}  # doctest: +SKIP
+        >>> futures = client.scatter(data)  # doctest: +SKIP
+
+        >>> data = MyObject()  # doctest: +SKIP
+        >>> future = client.scatter(data)  # doctest: +SKIP
+
+        See Also
+        --------
+        Client.gather : gather data back to client
+        Client.replicate : replicate data across workers
+        """
+        if asynchronous is None:
+            asynchronous = self.asynchronous
+        if asynchronous:
+            return self._scatter(
+                data,
+                workers=workers,
+                broadcast=broadcast,
+                direct=direct,
+                local_worker=local_worker,
+                timeout=timeout,
+                hash=hash,
+            )
+        else:
+            return self.sync(
+                self._scatter,
+                data,
+                workers=workers,
+                broadcast=broadcast,
+                direct=direct,
+                local_worker=local_worker,
+                timeout=timeout,
+                hash=hash,
+                asynchronous=True,
+            )
+
+    async def _scatter(
+        self,
+        data: Any,
+        workers: str | Iterable[str] | None = None,
+        broadcast: bool = False,
+        direct: bool | None = None,
+        local_worker: bool | None = None,
+        timeout: float | str = config.timeouts["connect"],
+        hash: bool = True,
+    ) -> Any:
+        """Asynchronous version of scatter"""
+        # Input validation
+        if broadcast:
+            workers = None
+        elif workers is not None:
+            if isinstance(workers, str):
+                workers = [workers]
+            workers = list(set(workers))
+            # Check if workers are known
+            known_workers = set(self.scheduler_info()["workers"])
+            if not set(workers).issubset(known_workers):
+                raise ValueError(
+                    f"Workers {set(workers) - known_workers} not found. "
+                    f"Valid workers are: {known_workers}"
+                )
+
+        # Prepare data and keys
+        if isinstance(data, Mapping):
+            keys = list(data)
+            data_list = [data[k] for k in keys]
+            return_structure = lambda L: dict(zip(keys, L))
+        elif isinstance(data, (list, tuple, set)):
+            data_list = list(data)
+            return_structure = type(data)
+        else:
+            data_list = [data]
+            return_structure = lambda L: L[0]
+
+        keys = [f"scatter-{uuid.uuid4()}" for _ in data_list]
+        data_dict = dict(zip(keys, data_list))
+
+        # Scatter data to workers
+        futures_dict = await scatter_to_workers(
+            data_dict,
+            workers=workers,
+            broadcast=broadcast,
+            rpc=self.rpc,
+            serializers=self._serializers_orig,
+            report=False,
+            direct=direct,
+            local_worker=local_worker,
+            timeout=timeout,
+            hash=hash,
+        )
+
+        # Create Futures and update client state
+        futures = []
+        for key in keys:
+            if key in futures_dict:
+                # Data successfully scattered
+                worker_addr = futures_dict[key]
+                future = Future(key, self, inform=False)
+                self.futures[key] = FutureState(status="finished")
+                self._who_has[key] = {worker_addr}
+                futures.append(future)
             else:
-                fn = remote_filename
-            with open(fn, "wb") as f:
-                f.write(dask_worker.data[key])
+                # Scatter failed for this key
+                logger.warning("Failed to scatter data for key %s", key)
+                # TODO: Handle scatter failure more gracefully?
+                futures.append(None)  # Placeholder for failed scatter
 
-            return len(dask_worker.data[key])
+        return return_structure(futures)
 
-        response = await self._run(dump_to_file)
+    def cancel(
+        self,
+        futures: Future | Collection[Future],
+        force: bool = False,
+        asynchronous: bool | None = None,
+    ) -> None:
+        """Cancel running futures
 
-        assert all(len(data) == v for v in response.values())
+        Parameters
+        ----------
+        futures : list of Futures
+        force : bool, default False
+            If True, cancel the future even if other clients or tasks depend on it.
+            If False, the future will only be cancelled if the current client is
+            the only one holding a reference to it.
+        asynchronous: bool or None
+            If True run in asynchronous mode. If False run in synchronous mode.
+            If None, defaults to client behavior.
 
-    def upload_file(self, filename, load: bool = True):
-        """Upload local package to scheduler and workers
+        Examples
+        --------
+        >>> x = client.submit(inc, 1)  # doctest: +SKIP
+        >>> client.cancel([x])  # doctest: +SKIP
 
-        This sends a local file up to the scheduler and all worker nodes.
-        This file is placed into the working directory of each node, see config option
-        ``temporary-directory`` (defaults to :py:func:`tempfile.gettempdir`).
+        See Also
+        --------
+        Future.cancel
+        Client.retry
+        """
+        if isinstance(futures, Future):
+            futures = [futures]
+        if not futures:
+            return
 
-        This directory will be added to the Python's system path so any ``.py``,
-        ``.egg`` or ``.zip``  files will be importable.
+        keys = [f.key for f in futures]
+        logger.debug("Cancel futures %s", keys)
+
+        if asynchronous is None:
+            asynchronous = self.asynchronous
+        if asynchronous:
+            return self._cancel(keys, force=force)
+        else:
+            return self.sync(self._cancel, keys, force=force, asynchronous=True)
+
+    async def _cancel(self, keys: list[Hashable], force: bool = False) -> None:
+        """Asynchronous version of cancel"""
+        await self._send_to_scheduler(
+            {"op": "cancel", "keys": keys, "client": self.id, "force": force}
+        )
+
+    def retry(
+        self, futures: Future | Collection[Future], asynchronous: bool | None = None
+    ) -> None:
+        """Retry failed futures
+
+        Parameters
+        ----------
+        futures : list of Futures
+        asynchronous: bool or None
+            If True run in asynchronous mode. If False run in synchronous mode.
+            If None, defaults to client behavior.
+
+        Examples
+        --------
+        >>> x = client.submit(fail)  # doctest: +SKIP
+        >>> x.result()  # raises Exception  # doctest: +SKIP
+        >>> client.retry([x])  # doctest: +SKIP
+
+        See Also
+        --------
+        Client.cancel
+        """
+        if isinstance(futures, Future):
+            futures = [futures]
+        if not futures:
+            return
+
+        keys = [f.key for f in futures]
+        logger.debug("Retry futures %s", keys)
+
+        if asynchronous is None:
+            asynchronous = self.asynchronous
+        if asynchronous:
+            return self._retry(keys)
+        else:
+            return self.sync(self._retry, keys, asynchronous=True)
+
+    async def _retry(self, keys: list[Hashable]) -> None:
+        """Asynchronous version of retry"""
+        await self._send_to_scheduler({"op": "retry", "keys": keys, "client": self.id})
+
+    def publish_dataset(
+        self,
+        *args: Any,
+        name: str | None = None,
+        override: bool = False,
+        client: Client | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Publish data to the cluster under a given name
+
+        This stores data on the cluster under a given name. This data is
+        available to all clients. If the data exists on the scheduler then this
+        is cheap. If the data exists on the workers then it will be replicated
+        on all workers (perhaps inefficiently.) If the data is local then this
+        will call ``Client.scatter`` first.
+
+        Warning: If the data is larger than the available memory on the
+        scheduler then the scheduler may crash. This is especially likely if
+        calling `publish_dataset` on data that has not yet been scattered.
+        Consider scattering large datasets manually first.
+
+        Parameters
+        ----------
+        *args : dask objects or Futures
+            Datasets to publish. These must have names attribute
+        name : str, optional
+            Name under which to publish the dataset. Defaults to the name
+            of the dataset.
+        override : bool, optional
+            Whether to override existing dataset with the same name.
+            Default is False.
+        client : Client, optional
+            Client to use for publishing. Defaults to the current client.
+        **kwargs : dict
+            Keyword arguments to pass to ``Client.scatter`` if scattering is
+            necessary.
+
+        Examples
+        --------
+        Publish a local Pandas DataFrame
+
+        >>> df = pd.DataFrame({'x': [1, 2, 3]})  # doctest: +SKIP
+        >>> client.publish_dataset(my_dataset=df)  # doctest: +SKIP
+
+        Publish a Dask DataFrame
+
+        >>> import dask.dataframe as dd  # doctest: +SKIP
+        >>> df = dd.read_csv('s3://...')  # doctest: +SKIP
+        >>> df = client.persist(df)  # doctest: +SKIP
+        >>> client.publish_dataset(my_dataset=df)  # doctest: +SKIP
+
+        Publishing multiple datasets at once
+
+        >>> client.publish_dataset(dataset1=df1, dataset2=df2)  # doctest: +SKIP
+
+        Retrieving data
+
+        >>> client.list_datasets()  # doctest: +SKIP
+        ['my_dataset']
+        >>> df_future = client.get_dataset('my_dataset')  # doctest: +SKIP
+        >>> df = client.gather(df_future)  # doctest: +SKIP
+
+        See Also
+        --------
+        Client.list_datasets
+        Client.get_dataset
+        Client.unpublish_dataset
+        Client.scatter
+        """
+        if not args and not kwargs:
+            raise ValueError("Must provide at least one dataset to publish")
+        if args:
+            if name is not None:
+                raise ValueError("Cannot provide name= and unnamed arguments")
+            if len(args) > 1:
+                raise ValueError("Cannot provide multiple unnamed arguments")
+            if not hasattr(args[0], "name"):
+                raise ValueError("Unnamed arguments must have a .name attribute")
+            name = args[0].name
+            data = args[0]
+            kwargs[name] = data
+        if name is not None:
+            if len(kwargs) > 1:
+                raise ValueError("Cannot provide name= and multiple datasets")
+            if name not in kwargs:
+                raise ValueError("Name provided but no matching dataset found")
+            data = kwargs[name]
+
+        if client is None:
+            client = self
+
+        for name, data in kwargs.items():
+            if not isinstance(data, Future) and not is_dask_collection(data):
+                # Scatter local data
+                logger.info("Scattering data for dataset '%s'...", name)
+                if sizeof(data) > 1e6:
+                    logger.warning(
+                        "Large dataset detected. Consider scattering manually "
+                        "using client.scatter for more control."
+                    )
+                scatter_kwargs = kwargs.copy()
+                scatter_kwargs.pop(name)  # Avoid passing dataset as kwarg
+                futures = client.scatter(data, **scatter_kwargs)
+                data = futures
+
+            # Publish scattered or persisted data
+            logger.info("Publishing dataset '%s'...", name)
+            if client.asynchronous:
+                client.loop.add_callback(
+                    client.datasets.publish, data, name=name, override=override
+                )
+            else:
+                client.sync(
+                    client.datasets.publish, data, name=name, override=override
+                )
+
+    def unpublish_dataset(self, name: str, **kwargs: Any) -> None:
+        """Remove a published dataset from the cluster
+
+        Parameters
+        ----------
+        name : str
+            Name of the dataset to unpublish.
+        **kwargs : dict
+            Options to pass to the remote function.
+
+        Examples
+        --------
+        >>> client.list_datasets()  # doctest: +SKIP
+        ['my_dataset']
+        >>> client.unpublish_dataset('my_dataset')  # doctest: +SKIP
+        >>> client.list_datasets()  # doctest: +SKIP
+        []
+
+        See Also
+        --------
+        Client.publish_dataset
+        Client.list_datasets
+        Client.get_dataset
+        """
+        if self.asynchronous:
+            self.loop.add_callback(self.datasets.unpublish, name, **kwargs)
+        else:
+            self.sync(self.datasets.unpublish, name, **kwargs)
+
+    def list_datasets(self, **kwargs: Any) -> list[str]:
+        """List named datasets available on the scheduler
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Options to pass to the remote function.
+
+        Returns
+        -------
+        List of dataset names
+
+        Examples
+        --------
+        >>> client.publish_dataset(my_dataset=df)  # doctest: +SKIP
+        >>> client.list_datasets()  # doctest: +SKIP
+        ['my_dataset']
+
+        See Also
+        --------
+        Client.publish_dataset
+        Client.get_dataset
+        Client.unpublish_dataset
+        """
+        if self.asynchronous:
+            # Cannot await here, return a coroutine instead
+            raise RuntimeError(
+                "list_datasets is awaitable, use `await client.list_datasets()`"
+            )
+        else:
+            return self.sync(self.datasets.list, **kwargs)
+
+    async def _list_datasets(self, **kwargs: Any) -> list[str]:
+        """Internal awaitable version of list_datasets"""
+        return await self.datasets.list(**kwargs)
+
+    def get_dataset(
+        self, name: str, default: Any = no_default, **kwargs: Any
+    ) -> Future | Any:
+        """Get a named dataset from the scheduler
+
+        This returns a Future. The data represented by this future will be
+        replicated on all workers.
+
+        Parameters
+        ----------
+        name : str
+            Name of the dataset to retrieve.
+        default : object, optional
+            Value to return if the dataset does not exist. If not provided,
+            raises KeyError if the dataset is not found.
+        **kwargs : dict
+            Options to pass to the remote function.
+
+        Returns
+        -------
+        Future containing the dataset.
+
+        Examples
+        --------
+        >>> client.publish_dataset(my_dataset=df)  # doctest: +SKIP
+        >>> future = client.get_dataset('my_dataset')  # doctest: +SKIP
+        >>> result = client.gather(future)  # doctest: +SKIP
+
+        See Also
+        --------
+        Client.publish_dataset
+        Client.list_datasets
+        Client.unpublish_dataset
+        """
+        if self.asynchronous:
+            # Cannot await here, return a coroutine instead
+            raise RuntimeError(
+                "get_dataset is awaitable, use `await client.get_dataset()`"
+            )
+        else:
+            return self.sync(self.datasets.get, name, default=default, **kwargs)
+
+    async def _get_dataset(
+        self, name: str, default: Any = no_default, **kwargs: Any
+    ) -> Future | Any:
+        """Internal awaitable version of get_dataset"""
+        return await self.datasets.get(name, default=default, **kwargs)
+
+    def upload_file(
+        self,
+        filename: str,
+        data: bytes | None = None,
+        raise_on_error: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        """Upload a local file to all workers
 
         Parameters
         ----------
         filename : string
-            Filename of ``.py``, ``.egg``, or ``.zip`` file to send to workers
-        load : bool, optional
-            Whether or not to import the module as part of the upload process.
-            Defaults to ``True``.
+            Filename of the file to upload. The file will be placed in the
+            worker's local directory with the same name.
+        data : bytes, optional
+            If provided, the value of `data` is uploaded instead of the
+            contents of `filename`. The file will still be named `filename`
+            on the worker.
+        raise_on_error : bool, optional
+            If True (default), raise an exception if the upload fails on any worker.
+            If False, log a warning but do not raise an exception.
+        **kwargs : dict
+            Optional keyword arguments for the remote function.
 
         Examples
         --------
-        >>> client.upload_file('mylibrary.egg')  # doctest: +SKIP
-        >>> from mylibrary import myfunc  # doctest: +SKIP
-        >>> L = client.map(myfunc, seq)  # doctest: +SKIP
-        >>>
-        >>> # Where did that file go? Use `dask_worker.local_directory`.
-        >>> def where_is_mylibrary(dask_worker):
-        >>>     path = pathlib.Path(dask_worker.local_directory) / 'mylibrary.egg'
-        >>>     assert path.exists()
-        >>>     return str(path)
-        >>>
-        >>> client.run(where_is_mylibrary)  # doctest: +SKIP
-        """
-        name = filename + str(uuid.uuid4())
+        >>> client.upload_file('myfile.py')  # doctest: +SKIP
 
-        async def _():
-            results = await asyncio.gather(
-                self.register_plugin(
-                    SchedulerUploadFile(filename, load=load), name=name
-                ),
-                # FIXME: Make scheduler plugin responsible for (de)registering worker plugin
-                self.register_plugin(UploadFile(filename, load=load), name=name),
+        See Also
+        --------
+        Client.upload_environment
+        Client.register_worker_plugin
+        """
+        if self.asynchronous:
+            self.loop.add_callback(
+                self._upload_file, filename, data=data, raise_on_error=raise_on_error
             )
-            return results[1]  # Results from workers upload
-
-        return self.sync(_)
-
-    async def _rebalance(self, futures=None, workers=None):
-        if futures is not None:
-            await _wait(futures)
-            keys = list({f.key for f in self.futures_of(futures)})
         else:
-            keys = None
-        result = await self.scheduler.rebalance(keys=keys, workers=workers)
-        if result["status"] == "partial-fail":
-            raise KeyError(f"Could not rebalance keys: {result['keys']}")
-        assert result["status"] == "OK", result
+            self.sync(
+                self._upload_file,
+                filename,
+                data=data,
+                raise_on_error=raise_on_error,
+            )
 
-    def rebalance(self, futures=None, workers=None, **kwargs):
-        """Rebalance data within network
+    async def _upload_file(
+        self, filename: str, data: bytes | None = None, raise_on_error: bool = True
+    ) -> None:
+        """Asynchronous version of upload_file"""
+        key = os.path.basename(filename)
+        async with self._file_upload_lock:
+            if key in self._pending_uploads:
+                # Already uploading this file
+                return
+            self._pending_uploads.add(key)
 
-        Move data between workers to roughly balance memory burden.  This
-        either affects a subset of the keys/workers or the entire network,
-        depending on keyword arguments.
+        try:
+            if data is None:
+                with open(filename, "rb") as f:
+                    data = f.read()
 
-        For details on the algorithm and configuration options, refer to the matching
-        scheduler-side method :meth:`~distributed.scheduler.Scheduler.rebalance`.
+            logger.info("Uploading file %s (%d bytes)", filename, len(data))
+            response = await self._send_to_scheduler(
+                {
+                    "op": "upload_file",
+                    "filename": filename,
+                    "data": data,
+                    "reply": True,
+                    "raise_on_error": raise_on_error,
+                }
+            )
 
-        .. warning::
-           This operation is generally not well tested against normal operation of the
-           scheduler. It is not recommended to use it while waiting on computations.
+            if raise_on_error and response["status"] == "error":
+                raise response["error"]
+            elif response["status"] == "error":
+                logger.warning(
+                    "Failed to upload file %s to some workers: %s",
+                    filename,
+                    response["error"],
+                )
+        finally:
+            async with self._file_upload_lock:
+                self._pending_uploads.remove(key)
+
+    def upload_environment(self, zipfile: str, **kwargs: Any) -> None:
+        """Upload a zipped conda environment to all workers
 
         Parameters
         ----------
-        futures : list, optional
-            A list of futures to balance, defaults all data
-        workers : list, optional
-            A list of workers on which to balance, defaults to all workers
+        zipfile : string
+            Path to the zipped conda environment file.
         **kwargs : dict
-            Optional keyword arguments for the function
-        """
-        return self.sync(self._rebalance, futures, workers, **kwargs)
+            Optional keyword arguments for the remote function.
 
-    async def _replicate(self, futures, n=None, workers=None, branching_factor=2):
-        futures = self.futures_of(futures)
-        await _wait(futures)
-        keys = {f.key for f in futures}
-        await self.scheduler.replicate(
-            keys=list(keys), n=n, workers=workers, branching_factor=branching_factor
+        See Also
+        --------
+        Client.upload_file
+        """
+        # TODO: Implement environment upload functionality
+        raise NotImplementedError("Environment upload not yet implemented")
+
+    def register_worker_plugin(
+        self,
+        plugin: WorkerPlugin | tuple | dict,
+        name: str | None = None,
+        nanny: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        """Register a worker plugin on all workers
+
+        A worker plugin is a class or function that is run on the worker
+        at startup and periodically throughout its lifetime. Plugins can
+        be used to extend worker functionality, monitor performance, or
+        integrate with external systems.
+
+        Parameters
+        ----------
+        plugin : WorkerPlugin, tuple, or dict
+            The plugin object, or arguments to construct a plugin.
+            If a tuple, it is interpreted as ``(PluginClass, *args, **kwargs)``.
+            If a dict, it is interpreted as ``{"plugin": PluginClass, "args": [], "kwargs": {}}``.
+        name : str, optional
+            A name for the plugin. If not provided, the class name is used.
+        nanny : bool, optional
+            If True, register the plugin with the Nanny process instead of the Worker.
+            Default is False.
+        **kwargs : dict
+            Optional keyword arguments for the remote function.
+
+        Examples
+        --------
+        >>> class MyPlugin(WorkerPlugin):
+        ...     def setup(self, worker):
+        ...         print("Plugin setup on worker", worker.address)
+        ...
+        >>> client.register_worker_plugin(MyPlugin())  # doctest: +SKIP
+
+        Register a plugin with arguments
+
+        >>> class MyPluginWithArgs(WorkerPlugin):
+        ...     def __init__(self, value):
+        ...         self.value = value
+        ...     def setup(self, worker):
+        ...         print("Plugin setup with value", self.value)
+        ...
+        >>> client.register_worker_plugin(MyPluginWithArgs(10))  # doctest: +SKIP
+
+        Register using a tuple
+
+        >>> client.register_worker_plugin((MyPluginWithArgs, 20))  # doctest: +SKIP
+
+        Register using a dict
+
+        >>> client.register_worker_plugin({"plugin": MyPluginWithArgs, "kwargs": {"value": 30}})  # doctest: +SKIP
+
+        Register with the Nanny process
+
+        >>> client.register_worker_plugin(MyPlugin(), nanny=True)  # doctest: +SKIP
+
+        See Also
+        --------
+        Client.unregister_worker_plugin
+        distributed.diagnostics.plugin.WorkerPlugin
+        """
+        if self.asynchronous:
+            self.loop.add_callback(
+                self._register_worker_plugin, plugin, name=name, nanny=nanny, **kwargs
+            )
+        else:
+            self.sync(
+                self._register_worker_plugin,
+                plugin,
+                name=name,
+                nanny=nanny,
+                **kwargs,
+            )
+
+    async def _register_worker_plugin(
+        self,
+        plugin: WorkerPlugin | tuple | dict,
+        name: str | None = None,
+        nanny: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        """Asynchronous version of register_worker_plugin"""
+        if isinstance(plugin, dict):
+            plugin_dict = plugin
+        elif isinstance(plugin, tuple):
+            plugin_dict = {"plugin": plugin[0]}
+            if len(plugin) > 1:
+                plugin_dict["args"] = plugin[1:]
+            if len(plugin) > 2:
+                plugin_dict["kwargs"] = plugin[2]
+        else:
+            plugin_dict = {"plugin": plugin}
+
+        if name is None:
+            if isinstance(plugin_dict["plugin"], type):
+                name = plugin_dict["plugin"].__name__
+            else:
+                name = type(plugin_dict["plugin"]).__name__
+
+        logger.info("Registering worker plugin %s", name)
+        await self._send_to_scheduler(
+            {
+                "op": "register_worker_plugin",
+                "plugin": Serialize(plugin_dict),
+                "name": name,
+                "nanny": nanny,
+                **kwargs,
+            }
         )
 
-    def replicate(self, futures, n=None, workers=None, branching_factor=2, **kwargs):
-        """Set replication of futures within network
-
-        Copy data onto many workers.  This helps to broadcast frequently
-        accessed data and can improve resilience.
-
-        This performs a tree copy of the data throughout the network
-        individually on each piece of data.  This operation blocks until
-        complete.  It does not guarantee replication of data to future workers.
-
-        .. note::
-           This method is incompatible with the Active Memory Manager's
-           :ref:`ReduceReplicas` policy. If you wish to use it, you must first disable
-           the policy or disable the AMM entirely.
+    def unregister_worker_plugin(
+        self, name: str, nanny: bool = False, **kwargs: Any
+    ) -> None:
+        """Unregister a worker plugin on all workers
 
         Parameters
         ----------
-        futures : list of futures
-            Futures we wish to replicate
+        name : str
+            Name of the plugin to unregister.
+        nanny : bool, optional
+            If True, unregister the plugin from the Nanny process instead of the Worker.
+            Default is False.
+        **kwargs : dict
+            Optional keyword arguments for the remote function.
+
+        See Also
+        --------
+        Client.register_worker_plugin
+        """
+        if self.asynchronous:
+            self.loop.add_callback(
+                self._unregister_worker_plugin, name, nanny=nanny, **kwargs
+            )
+        else:
+            self.sync(self._unregister_worker_plugin, name, nanny=nanny, **kwargs)
+
+    async def _unregister_worker_plugin(
+        self, name: str, nanny: bool = False, **kwargs: Any
+    ) -> None:
+        """Asynchronous version of unregister_worker_plugin"""
+        logger.info("Unregistering worker plugin %s", name)
+        await self._send_to_scheduler(
+            {"op": "unregister_worker_plugin", "name": name, "nanny": nanny, **kwargs}
+        )
+
+    def run(
+        self,
+        function: Callable,
+        *args: Any,
+        workers: list[str] | None = None,
+        nanny: bool = False,
+        wait: bool = True,
+        on_error: Literal["raise", "return"] = "raise",
+        **kwargs: Any,
+    ) -> dict:
+        """Run a function on all workers
+
+        Parameters
+        ----------
+        function : callable
+            Function to run on each worker.
+        *args :
+            Positional arguments to pass to the function.
+        workers : list of strings, optional
+            List of worker addresses to run the function on.
+            Defaults to all workers.
+        nanny : bool, optional
+            Whether to run the function on the Nanny process instead of the Worker.
+            Default is False.
+        wait : bool, optional
+            If True (default), wait for the function to complete on all workers.
+            If False, return immediately.
+        on_error : 'raise' or 'return'
+            If 'raise' (default), raise the first exception encountered on any worker.
+            If 'return', return the exception object instead of raising.
+        **kwargs :
+            Keyword arguments to pass to the function.
+
+        Returns
+        -------
+        Dictionary mapping worker addresses to the results or exceptions.
+
+        Examples
+        --------
+        >>> client.run(os.getpid)  # doctest: +SKIP
+        {'tcp://127.0.0.1:37985': 14185,
+         'tcp://127.0.0.1:40167': 14186,
+         'tcp://127.0.0.1:44193': 14187,
+         'tcp://127.0.0.1:46169': 14188}
+
+        Restrict to particular workers
+
+        >>> client.run(os.getpid, workers=['tcp://127.0.0.1:37985'])  # doctest: +SKIP
+        {'tcp://127.0.0.1:37985': 14185}
+
+        Run on the Nanny process instead
+
+        >>> client.run(os.getpid, nanny=True)  # doctest: +SKIP
+
+        See Also
+        --------
+        Client.run_on_scheduler
+        """
+        if self.asynchronous:
+            return self._run(
+                function,
+                *args,
+                workers=workers,
+                nanny=nanny,
+                wait=wait,
+                on_error=on_error,
+                **kwargs,
+            )
+        else:
+            return self.sync(
+                self._run,
+                function,
+                *args,
+                workers=workers,
+                nanny=nanny,
+                wait=wait,
+                on_error=on_error,
+                **kwargs,
+            )
+
+    async def _run(
+        self,
+        function: Callable,
+        *args: Any,
+        workers: list[str] | None = None,
+        nanny: bool = False,
+        wait: bool = True,
+        on_error: Literal["raise", "return"] = "raise",
+        **kwargs: Any,
+    ) -> dict:
+        """Asynchronous version of run"""
+        if on_error not in ("raise", "return"):
+            raise ValueError("on_error= must be 'raise' or 'return'")
+
+        # Serialize function and arguments
+        try:
+            serialized_function = dumps(function)
+            serialized_args = dumps(args)
+            serialized_kwargs = dumps(kwargs)
+        except Exception as e:
+            logger.exception("Failed to serialize function or arguments")
+            raise e
+
+        # Send request to scheduler
+        response = await self._send_to_scheduler(
+            {
+                "op": "run",
+                "function": serialized_function,
+                "args": serialized_args,
+                "kwargs": serialized_kwargs,
+                "workers": workers,
+                "nanny": nanny,
+                "wait": wait,
+            }
+        )
+
+        # Process results
+        results = {}
+        for worker, res in response.items():
+            if res["status"] == "error":
+                exc = loads(res["exception"])
+                if on_error == "raise":
+                    raise exc
+                else:
+                    results[worker] = exc
+            elif res["status"] == "OK":
+                results[worker] = loads(res["result"])
+            else:
+                logger.error("Unknown status from worker %s: %s", worker, res["status"])
+
+        return results
+
+    def run_on_scheduler(
+        self, function: Callable, *args: Any, wait: bool = True, **kwargs: Any
+    ) -> Any:
+        """Run a function on the scheduler process
+
+        Parameters
+        ----------
+        function : callable
+            Function to run on the scheduler.
+        *args :
+            Positional arguments to pass to the function.
+        wait : bool, optional
+            If True (default), wait for the function to complete.
+            If False, return immediately (result will be None).
+        **kwargs :
+            Keyword arguments to pass to the function.
+
+        Returns
+        -------
+        Result of the function if wait=True, else None.
+
+        Examples
+        --------
+        >>> def get_log_level():
+        ...     return logging.getLogger('distributed.scheduler').level
+        ...
+        >>> client.run_on_scheduler(get_log_level)  # doctest: +SKIP
+        20  # logging.INFO
+
+        See Also
+        --------
+        Client.run : Run a function on workers
+        """
+        if self.asynchronous:
+            return self._run_on_scheduler(function, *args, wait=wait, **kwargs)
+        else:
+            return self.sync(
+                self._run_on_scheduler, function, *args, wait=wait, **kwargs
+            )
+
+    async def _run_on_scheduler(
+        self, function: Callable, *args: Any, wait: bool = True, **kwargs: Any
+    ) -> Any:
+        """Asynchronous version of run_on_scheduler"""
+        # Serialize function and arguments
+        try:
+            serialized_function = dumps(function)
+            serialized_args = dumps(args)
+            serialized_kwargs = dumps(kwargs)
+        except Exception as e:
+            logger.exception("Failed to serialize function or arguments")
+            raise e
+
+        # Send request to scheduler
+        response = await self._send_to_scheduler(
+            {
+                "op": "run_scheduler",
+                "function": serialized_function,
+                "args": serialized_args,
+                "kwargs": serialized_kwargs,
+                "wait": wait,
+            }
+        )
+
+        # Process result
+        if response["status"] == "error":
+            raise loads(response["exception"])
+        elif response["status"] == "OK":
+            return loads(response["result"])
+        else:
+            logger.error("Unknown status from scheduler: %s", response["status"])
+            return None
+
+    def get_metadata(
+        self,
+        keys: Hashable | Collection[Hashable],
+        default: Any = no_default,
+        asynchronous: bool | None = None,
+    ) -> Any:
+        """Get metadata associated with keys
+
+        Parameters
+        ----------
+        keys : list of keys or single key
+            Keys to retrieve metadata for.
+        default : object, optional
+            Value to return if a key is not found. If not provided,
+            raises KeyError if any key is not found.
+        asynchronous: bool or None
+            If True run in asynchronous mode. If False run in synchronous mode.
+            If None, defaults to client behavior.
+
+        Returns
+        -------
+        Dictionary mapping keys to metadata, or single metadata value if
+        a single key was provided.
+
+        Examples
+        --------
+        >>> arr = da.ones(1000, chunks=100)  # doctest: +SKIP
+        >>> fut = client.persist(arr)  # doctest: +SKIP
+        >>> client.get_metadata(fut.key)  # doctest: +SKIP
+        {'dtype': dtype('float64'), 'shape': (1000,), 'chunks': ((100,) * 10,)}
+
+        See Also
+        --------
+        Client.set_metadata
+        Client.has_what
+        """
+        if asynchronous is None:
+            asynchronous = self.asynchronous
+        if asynchronous:
+            return self._get_metadata(keys, default=default)
+        else:
+            return self.sync(self._get_metadata, keys, default=default)
+
+    async def _get_metadata(
+        self, keys: Hashable | Collection[Hashable], default: Any = no_default
+    ) -> Any:
+        """Asynchronous version of get_metadata"""
+        if not isinstance(keys, (list, tuple, set)):
+            singleton = True
+            keys_list = [keys]
+        else:
+            singleton = False
+            keys_list = list(keys)
+
+        # Request metadata from scheduler
+        response = await self._send_to_scheduler(
+            {"op": "get_metadata", "keys": keys_list}
+        )
+
+        # Process results
+        results = {}
+        missing_keys = set(keys_list)
+        for key, metadata in response.items():
+            results[key] = metadata
+            missing_keys.remove(key)
+
+        if missing_keys:
+            if default is no_default:
+                raise KeyError(f"Metadata not found for keys: {missing_keys}")
+            else:
+                for key in missing_keys:
+                    results[key] = default
+
+        if singleton:
+            return results[keys_list[0]]
+        else:
+            return results
+
+    def set_metadata(
+        self, keys: Hashable | Collection[Hashable], value: Any = None, **kwargs: Any
+    ) -> None:
+        """Set metadata associated with keys
+
+        Parameters
+        ----------
+        keys : list of keys or single key
+            Keys to set metadata for.
+        value : object, optional
+            Metadata value to set. If not provided, metadata is set based
+            on keyword arguments.
+        **kwargs :
+            Keyword arguments mapping metadata fields to values.
+
+        Examples
+        --------
+        Set metadata for a single key
+
+        >>> client.set_metadata('mykey', type='int', description='An integer')  # doctest: +SKIP
+
+        Set metadata for multiple keys
+
+        >>> client.set_metadata(['key1', 'key2'], is_valid=True)  # doctest: +SKIP
+
+        Set a single metadata value for a key
+
+        >>> client.set_metadata('key3', value={'custom': 'info'})  # doctest: +SKIP
+
+        See Also
+        --------
+        Client.get_metadata
+        """
+        if self.asynchronous:
+            self.loop.add_callback(self._set_metadata, keys, value=value, **kwargs)
+        else:
+            self.sync(self._set_metadata, keys, value=value, **kwargs)
+
+    async def _set_metadata(
+        self, keys: Hashable | Collection[Hashable], value: Any = None, **kwargs: Any
+    ) -> None:
+        """Asynchronous version of set_metadata"""
+        if not isinstance(keys, (list, tuple, set)):
+            keys_list = [keys]
+        else:
+            keys_list = list(keys)
+
+        if value is not None:
+            if kwargs:
+                raise ValueError("Cannot provide both value= and keyword arguments")
+            metadata = value
+        else:
+            metadata = kwargs
+
+        await self._send_to_scheduler(
+            {"op": "set_metadata", "keys": keys_list, "metadata": metadata}
+        )
+
+    def get_versions(
+        self,
+        workers: list[str] | None = None,
+        packages: list[str] | None = None,
+        check: bool = False,
+        asynchronous: bool | None = None,
+    ) -> dict:
+        """Get package versions from scheduler and workers
+
+        Parameters
+        ----------
+        workers : list of strings, optional
+            List of worker addresses to query. Defaults to all workers.
+        packages : list of strings, optional
+            List of package names to query versions for. Defaults to packages
+            listed in `distributed.versions.required_packages`.
+        check : bool, optional
+            If True, check for version mismatches and raise an error if found.
+            Default is False.
+        asynchronous: bool or None
+            If True run in asynchronous mode. If False run in synchronous mode.
+            If None, defaults to client behavior.
+
+        Returns
+        -------
+        Dictionary mapping component addresses ('scheduler', 'client', worker addresses)
+        to dictionaries mapping package names to version strings.
+
+        Examples
+        --------
+        >>> client.get_versions()  # doctest: +SKIP
+        {'client': {'python': '3.9.7', 'dask': '2022.1.0', ...},
+         'scheduler': {'python': '3.9.7', 'dask': '2022.1.0', ...},
+         'tcp://127.0.0.1:37985': {'python': '3.9.7', 'dask': '2022.1.0', ...},
+         ...}
+
+        Check for version mismatches
+
+        >>> client.get_versions(check=True)  # doctest: +SKIP
+        # Raises ImportError if mismatches are found
+
+        See Also
+        --------
+        versions.get_versions
+        """
+        if asynchronous is None:
+            asynchronous = self.asynchronous
+        if asynchronous:
+            return self._get_versions(workers=workers, packages=packages, check=check)
+        else:
+            return self.sync(
+                self._get_versions, workers=workers, packages=packages, check=check
+            )
+
+    async def _get_versions(
+        self,
+        workers: list[str] | None = None,
+        packages: list[str] | None = None,
+        check: bool = False,
+    ) -> dict:
+        """Asynchronous version of get_versions"""
+        # Get versions from scheduler and workers
+        response = await self._send_to_scheduler(
+            {"op": "versions", "workers": workers, "packages": packages}
+        )
+
+        # Add client versions
+        client_versions = versions.get_versions(packages=packages)
+        response["client"] = client_versions
+
+        # Check for mismatches if requested
+        if check:
+            versions.error_message(response, versions.required_packages)
+
+        return response
+
+    def get_scheduler_logs(self, n: int | None = None) -> list[tuple]:
+        """Get logs from the scheduler
+
+        Parameters
+        ----------
         n : int, optional
-            Number of processes on the cluster on which to replicate the data.
-            Defaults to all.
-        workers : list of worker addresses
-            Workers on which we want to restrict the replication.
-            Defaults to all.
-        branching_factor : int, optional
-            The number of workers that can copy data in each generation
-        **kwargs : dict
-            Optional keyword arguments for the remote function
+            Number of log entries to retrieve. Defaults to all logs.
+
+        Returns
+        -------
+        List of log entries (tuples containing level, message, timestamp).
 
         Examples
         --------
-        >>> x = c.submit(func, *args)  # doctest: +SKIP
-        >>> c.replicate([x])  # send to all workers  # doctest: +SKIP
-        >>> c.replicate([x], n=3)  # send to three workers  # doctest: +SKIP
-        >>> c.replicate([x], workers=['alice', 'bob'])  # send to specific  # doctest: +SKIP
-        >>> c.replicate([x], n=1, workers=['alice', 'bob'])  # send to one of specific workers  # doctest: +SKIP
-        >>> c.replicate([x], n=1)  # reduce replications # doctest: +SKIP
+        >>> client.get_scheduler_logs(n=10)  # doctest: +SKIP
 
         See Also
         --------
-        Client.rebalance
+        Client.get_worker_logs
         """
-        return self.sync(
-            self._replicate,
-            futures,
-            n=n,
-            workers=workers,
-            branching_factor=branching_factor,
-            **kwargs,
-        )
-
-    def nthreads(self, workers=None, **kwargs):
-        """The number of threads/cores available on each worker node
-
-        Parameters
-        ----------
-        workers : list (optional)
-            A list of workers that we care about specifically.
-            Leave empty to receive information about all workers.
-        **kwargs : dict
-            Optional keyword arguments for the remote function
-
-        Examples
-        --------
-        >>> c.nthreads()  # doctest: +SKIP
-        {'192.168.1.141:46784': 8,
-         '192.167.1.142:47548': 8,
-         '192.167.1.143:47329': 8,
-         '192.167.1.144:37297': 8}
-
-        See Also
-        --------
-        Client.who_has
-        Client.has_what
-        """
-        if isinstance(workers, tuple) and all(
-            isinstance(i, (str, tuple)) for i in workers
-        ):
-            workers = list(workers)
-        if workers is not None and not isinstance(workers, (tuple, list, set)):
-            workers = [workers]
-        return self.sync(self.scheduler.ncores, workers=workers, **kwargs)
-
-    ncores = nthreads
-
-    def who_has(self, futures=None, **kwargs):
-        """The workers storing each future's data
-
-        Parameters
-        ----------
-        futures : list (optional)
-            A list of futures, defaults to all data
-        **kwargs : dict
-            Optional keyword arguments for the remote function
-
-        Examples
-        --------
-        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
-        >>> wait([x, y, z])  # doctest: +SKIP
-        >>> c.who_has()  # doctest: +SKIP
-        {'inc-1c8dd6be1c21646c71f76c16d09304ea': ['192.168.1.141:46784'],
-         'inc-1e297fc27658d7b67b3a758f16bcf47a': ['192.168.1.141:46784'],
-         'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b': ['192.168.1.141:46784']}
-
-        >>> c.who_has([x, y])  # doctest: +SKIP
-        {'inc-1c8dd6be1c21646c71f76c16d09304ea': ['192.168.1.141:46784'],
-         'inc-1e297fc27658d7b67b3a758f16bcf47a': ['192.168.1.141:46784']}
-
-        See Also
-        --------
-        Client.has_what
-        Client.nthreads
-        """
-        if futures is not None:
-            futures = self.futures_of(futures)
-            keys = list({f.key for f in futures})
+        if self.asynchronous:
+            return self._get_scheduler_logs(n=n)
         else:
-            keys = None
+            return self.sync(self._get_scheduler_logs, n=n)
 
-        async def _():
-            return WhoHas(await self.scheduler.who_has(keys=keys, **kwargs))
+    async def _get_scheduler_logs(self, n: int | None = None) -> list[tuple]:
+        """Asynchronous version of get_scheduler_logs"""
+        response = await self._send_to_scheduler({"op": "logs", "n": n})
+        return response
 
-        return self.sync(_)
-
-    def has_what(self, workers=None, **kwargs):
-        """Which keys are held by which workers
-
-        This returns the keys of the data that are held in each worker's
-        memory.
+    def get_worker_logs(
+        self, n: int | None = None, workers: list[str] | None = None, nanny: bool = False
+    ) -> dict[str, list[tuple]]:
+        """Get logs from workers
 
         Parameters
         ----------
-        workers : list (optional)
-            A list of worker addresses, defaults to all
-        **kwargs : dict
-            Optional keyword arguments for the remote function
+        n : int, optional
+            Number of log entries to retrieve per worker. Defaults to all logs.
+        workers : list of strings, optional
+            List of worker addresses to retrieve logs from. Defaults to all workers.
+        nanny : bool, optional
+            Whether to retrieve logs from the Nanny process instead of the Worker.
+            Default is False.
+
+        Returns
+        -------
+        Dictionary mapping worker addresses to lists of log entries.
 
         Examples
         --------
-        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
-        >>> wait([x, y, z])  # doctest: +SKIP
-        >>> c.has_what()  # doctest: +SKIP
-        {'192.168.1.141:46784': ['inc-1c8dd6be1c21646c71f76c16d09304ea',
-                                 'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b',
-                                 'inc-1e297fc27658d7b67b3a758f16bcf47a']}
+        >>> client.get_worker_logs(n=10)  # doctest: +SKIP
 
         See Also
         --------
-        Client.who_has
-        Client.nthreads
-        Client.processing
+        Client.get_scheduler_logs
         """
-        if isinstance(workers, tuple) and all(
-            isinstance(i, (str, tuple)) for i in workers
-        ):
-            workers = list(workers)
-        if workers is not None and not isinstance(workers, (tuple, list, set)):
-            workers = [workers]
-
-        async def _():
-            return HasWhat(await self.scheduler.has_what(workers=workers, **kwargs))
-
-        return self.sync(_)
-
-    def processing(self, workers=None):
-        """The tasks currently running on each worker
-
-        Parameters
-        ----------
-        workers : list (optional)
-            A list of worker addresses, defaults to all
-
-        Examples
-        --------
-        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
-        >>> c.processing()  # doctest: +SKIP
-        {'192.168.1.141:46784': ['inc-1c8dd6be1c21646c71f76c16d09304ea',
-                                 'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b',
-                                 'inc-1e297fc27658d7b67b3a758f16bcf47a']}
-
-        See Also
-        --------
-        Client.who_has
-        Client.has_what
-        Client.nthreads
-        """
-        if isinstance(workers, tuple) and all(
-            isinstance(i, (str, tuple)) for i in workers
-        ):
-            workers = list(workers)
-        if workers is not None and not isinstance(workers, (tuple, list, set)):
-            workers = [workers]
-        return self.sync(self.scheduler.processing, workers=workers)
-
-    def nbytes(self, keys=None, summary=True, **kwargs):
-        """The bytes taken up by each key on the cluster
-
-        This is as measured by ``sys.getsizeof`` which may not accurately
-        reflect the true cost.
-
-        Parameters
-        ----------
-        keys : list (optional)
-            A list of keys, defaults to all keys
-        summary : boolean, (optional)
-            Summarize keys into key types
-        **kwargs : dict
-            Optional keyword arguments for the remote function
-
-        Examples
-        --------
-        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
-        >>> c.nbytes(summary=False)  # doctest: +SKIP
-        {'inc-1c8dd6be1c21646c71f76c16d09304ea': 28,
-         'inc-1e297fc27658d7b67b3a758f16bcf47a': 28,
-         'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b': 28}
-
-        >>> c.nbytes(summary=True)  # doctest: +SKIP
-        {'inc': 84}
-
-        See Also
-        --------
-        Client.who_has
-        """
-        return self.sync(self.scheduler.nbytes, keys=keys, summary=summary, **kwargs)
-
-    def call_stack(self, futures=None, keys=None):
-        """The actively running call stack of all relevant keys
-
-        You can specify data of interest either by providing futures or
-        collections in the ``futures=`` keyword or a list of explicit keys in
-        the ``keys=`` keyword.  If neither are provided then all call stacks
-        will be returned.
-
-        Parameters
-        ----------
-        futures : list (optional)
-            List of futures, defaults to all data
-        keys : list (optional)
-            List of key names, defaults to all data
-
-        Examples
-        --------
-        >>> df = dd.read_parquet(...).persist()  # doctest: +SKIP
-        >>> client.call_stack(df)  # call on collections
-
-        >>> client.call_stack()  # Or call with no arguments for all activity  # doctest: +SKIP
-        """
-        keys = keys or []
-        if futures is not None:
-            futures = self.futures_of(futures)
-            keys += list({f.key for f in futures})
-        return self.sync(self.scheduler.call_stack, keys=keys or None)
-
-    def profile(
-        self,
-        key=None,
-        start=None,
-        stop=None,
-        workers=None,
-        merge_workers=True,
-        plot=False,
-        filename=None,
-        server=False,
-        scheduler=False,
-    ):
-        """Collect statistical profiling information about recent work
-
-        Parameters
-        ----------
-        key : str
-            Key prefix to select, this is typically a function name like 'inc'
-            Leave as None to collect all data
-        start : time
-        stop : time
-        workers : list
-            List of workers to restrict profile information
-        server : bool
-            If true, return the profile of the worker's administrative thread
-            rather than the worker threads.
-            This is useful when profiling Dask itself, rather than user code.
-        scheduler : bool
-            If true, return the profile information from the scheduler's
-            administrative thread rather than the workers.
-            This is useful when profiling Dask's scheduling itself.
-        plot : boolean or string
-            Whether or not to return a plot object
-        filename : str
-            Filename to save the plot
-
-        Examples
-        --------
-        >>> client.profile()  # call on collections
-        >>> client.profile(filename='dask-profile.html')  # save to html file
-        """
-        return self.sync(
-            self._profile,
-            key=key,
-            workers=workers,
-            merge_workers=merge_workers,
-            start=start,
-            stop=stop,
-            plot=plot,
-            filename=filename,
-            server=server,
-            scheduler=scheduler,
-        )
-
-    async def _profile(
-        self,
-        key=None,
-        start=None,
-        stop=None,
-        workers=None,
-        merge_workers=True,
-        plot=False,
-        filename=None,
-        server=False,
-        scheduler=False,
-    ):
-        if isinstance(workers, (str, Number)):
-            workers = [workers]
-
-        state = await self.scheduler.profile(
-            key=key,
-            workers=workers,
-            merge_workers=merge_workers,
-            start=start,
-            stop=stop,
-            server=server,
-            scheduler=scheduler,
-        )
-
-        if filename:
-            plot = True
-
-        if plot:
-            from distributed import profile
-
-            data = profile.plot_data(state)
-            figure, source = profile.plot_figure(data, sizing_mode="stretch_both")
-
-            if plot == "save" and not filename:
-                filename = "dask-profile.html"
-
-            if filename:
-                from bokeh.plotting import output_file, save
-
-                output_file(filename=filename, title="Dask Profile")
-                save(figure, filename=filename)
-            return (state, figure)
-
+        if self.asynchronous:
+            return self._get_worker_logs(n=n, workers=workers, nanny=nanny)
         else:
-            return state
+            return self.sync(self._get_worker_logs, n=n, workers=workers, nanny=nanny)
+
+    async def _get_worker_logs(
+        self, n: int | None = None, workers: list[str] | None = None, nanny: bool = False
+    ) -> dict[str, list[tuple]]:
+        """Asynchronous version of get_worker_logs"""
+        response = await self._send_to_scheduler(
+            {"op": "worker_logs", "n": n, "workers": workers, "nanny": nanny}
+        )
+        return response
+
+    @property
+    def nthreads(self) -> dict[str, int]:
+        """Number of threads per worker"""
+        return valmap(lambda w: w["nthreads"], self.scheduler_info()["workers"])
 
     def scheduler_info(self, n_workers: int = 5, **kwargs: Any) -> SchedulerInfo:
         """Basic information about the workers in the cluster
 
         Parameters
         ----------
-        n_workers: int
+        n_workers : int
             The number of workers for which to fetch information. To fetch all,
             use -1.
         **kwargs : dict
             Optional keyword arguments for the remote function
 
-        Examples
-        --------
-        >>> c.scheduler_info()  # doctest: +SKIP
-        {'id': '2de2b6da-69ee-11e6-ab6a-e82aea155996',
-         'services': {},
-         'type': 'Scheduler',
-         'workers': {'127.0.0.1:40575': {'active': 0,
-                                         'last-seen': 1472038237.4845693,
-                                         'name': '127.0.0.1:40575',
-                                         'services': {},
-                                         'stored': 0,
-                                         'time-delay': 0.0061032772064208984}}}
+        Returns
+        -------
+        SchedulerInfo : dict
+            A dictionary containing information about the scheduler and workers.
+
+            Top-level keys include:
+                * type: (str) Always "Scheduler".
+                * id: (str) Scheduler's unique ID.
+                * address: (str) Scheduler's network address (e.g., "tcp://127.0.0.1:8786").
+                * services: (dict) Service names mapped to ports (e.g., {'dashboard': 8787}).
+                * started: (float) Timestamp when the scheduler started.
+                * n_workers: (int) Number of workers included in the 'workers' dict.
+                * total_threads: (int) Total threads across the included workers.
+                * total_memory: (int) Total memory limit across the included workers (bytes).
+                * workers: (dict) A dictionary mapping worker addresses to detailed worker information.
+
+            Keys within the nested `workers` dictionary include:
+                * type: (str) Always "Worker".
+                * id: (str) Worker's unique ID.
+                * host: (str) Hostname or IP address of the worker.
+                * resources: (dict) Custom resources assigned to the worker (e.g., {}).
+                * local_directory: (str) Path to the worker's local scratch directory.
+                * name: (str or Hashable) Worker's name.
+                * nthreads: (int) Number of threads on the worker.
+                * memory_limit: (int) Memory limit for the worker (bytes).
+                * last_seen: (float) Timestamp of the last heartbeat from the worker.
+                * services: (dict) Services running on the worker mapped to ports.
+                * metrics: (dict) Worker metrics (e.g., memory usage, CPU usage). The specific
+                  metrics included can vary based on worker configuration and plugins.
+                * status: (str) Current status (e.g., "running", "closing").
+                * nanny: (str or None) Address of the worker's Nanny process, if applicable.
+
+        Note
+        ----
+        Some internal scheduler state regarding workers, such as the total
+        size of task data stored on a worker (tracked internally as `nbytes`),
+        is not included in this dictionary.
         """
         if not self.asynchronous:
             self.sync(self._update_scheduler_info, n_workers=n_workers)
@@ -4458,1938 +4174,364 @@ class Client(SyncMethodMixin):
 
         Warning: Memory usage on the scheduler (and client, if writing the dump locally)
         can be large. On a large or long-running cluster, this can take several minutes.
-        The scheduler may be unresponsive while the dump is processed.
-
-        Results will be stored in a dict::
-
-            {
-                "scheduler": {...},  # scheduler state
-                "workers": {
-                    worker_addr: {...},  # worker state
-                    ...
-                }
-                "versions": {
-                    "scheduler": {...},
-                    "workers": {
-                        worker_addr: {...},
-                        ...
-                    }
-                }
-            }
 
         Parameters
         ----------
-        filename:
-            The path or URL to write to. The appropriate file suffix (``.msgpack.gz`` or
-            ``.yaml``) will be appended automatically.
-
-            Must be a path supported by :func:`fsspec.open` (like ``s3://my-bucket/cluster-dump``,
-            or ``cluster-dumps/dump``). See ``write_from_scheduler`` to control whether
-            the dump is written directly to ``filename`` from the scheduler, or sent
-            back to the client over the network, then written locally.
-        write_from_scheduler:
-            If None (default), infer based on whether ``filename`` looks like a URL
-            or a local path: True if the filename contains ``://`` (like
-            ``s3://my-bucket/cluster-dump``), False otherwise (like ``local_dir/cluster-dump``).
-
-            If True, write cluster state directly to ``filename`` from the scheduler.
-            If ``filename`` is a local path, the dump will be written to that
-            path on the *scheduler's* filesystem, so be careful if the scheduler is running
-            on ephemeral hardware. Useful when the scheduler is attached to a network
-            filesystem or persistent disk, or for writing to buckets.
-
-            If False, transfer cluster state from the scheduler back to the client
-            over the network, then write it to ``filename``. This is much less
-            efficient for large dumps, but useful when the scheduler doesn't have
-            access to any persistent storage.
-        exclude:
-            A collection of attribute names which are supposed to be excluded
-            from the dump, e.g. to exclude code, tracebacks, logs, etc.
-
-            Defaults to exclude ``run_spec``, which is the serialized user code.
-            This is typically not required for debugging. To allow serialization
-            of this, pass an empty tuple.
-        format:
-            Either ``"msgpack"`` or ``"yaml"``. If msgpack is used (default),
-            the output will be stored in a gzipped file as msgpack.
-
-            To read::
-
-                import gzip, msgpack
-                with gzip.open("filename") as fd:
-                    state = msgpack.unpack(fd)
-
-            or::
-
-                import yaml
-                try:
-                    from yaml import CLoader as Loader
-                except ImportError:
-                    from yaml import Loader
-                with open("filename") as fd:
-                    state = yaml.load(fd, Loader=Loader)
+        filename: str, default "dask-cluster-dump"
+            Path or URL to write the dump to. If no extension is provided, the format
+            (e.g., ".msgpack") will be appended.
+        write_from_scheduler: bool, optional
+            If True, write the dump file from the scheduler process. If False (default),
+            write from the client process. Writing from the scheduler may be necessary
+            if the client does not have write access to the target location or if the
+            dump is too large to fit in the client's memory.
+        exclude: Collection[str], optional
+            A collection of top-level keys to exclude from the dump (e.g., {"tasks"}).
+        format: "msgpack" or "yaml", default "msgpack"
+            The format to use for the dump file.
         **storage_options:
-            Any additional arguments to :func:`fsspec.open` when writing to a URL.
+            Additional keyword arguments passed to the backend file system implementation
+            (e.g., `host`, `port` for HDFS).
+
+        Returns
+        -------
+        Future | None
+            If `write_from_scheduler` is True, returns a Future that completes when the
+            dump is finished. Otherwise, returns None.
+
+        See Also
+        --------
+        distributed.diagnostics.cluster_dump.ClusterDump
         """
-        return self.sync(
-            self._dump_cluster_state,
-            filename=filename,
-            write_from_scheduler=write_from_scheduler,
-            exclude=exclude,
-            format=format,
-            **storage_options,
-        )
+        from .diagnostics.cluster_dump import dump_cluster_state
 
-    async def _dump_cluster_state(
-        self,
-        filename: str = "dask-cluster-dump",
-        write_from_scheduler: bool | None = None,
-        exclude: Collection[str] = cluster_dump.DEFAULT_CLUSTER_DUMP_EXCLUDE,
-        format: Literal["msgpack", "yaml"] = cluster_dump.DEFAULT_CLUSTER_DUMP_FORMAT,
-        **storage_options,
-    ):
-        filename = str(filename)
-        if write_from_scheduler is None:
-            write_from_scheduler = "://" in filename
-
-        if write_from_scheduler:
-            await self.scheduler.dump_cluster_state_to_url(
-                url=filename,
+        if self.asynchronous:
+            return dump_cluster_state(
+                client=self,
+                filename=filename,
+                write_from_scheduler=write_from_scheduler,
                 exclude=exclude,
                 format=format,
                 **storage_options,
             )
         else:
-            await cluster_dump.write_state(
-                partial(self.scheduler.get_cluster_state, exclude=exclude),
-                filename,
-                format,
+            return self.sync(
+                dump_cluster_state,
+                client=self,
+                filename=filename,
+                write_from_scheduler=write_from_scheduler,
+                exclude=exclude,
+                format=format,
                 **storage_options,
             )
 
-    def write_scheduler_file(self, scheduler_file):
-        """Write the scheduler information to a json file.
+    ###################
+    # Close Methods #
+    ###################
 
-        This facilitates easy sharing of scheduler information using a file
-        system. The scheduler file can be used to instantiate a second Client
-        using the same scheduler.
-
-        Parameters
-        ----------
-        scheduler_file : str
-            Path to a write the scheduler file.
-
-        Examples
-        --------
-        >>> client = Client()  # doctest: +SKIP
-        >>> client.write_scheduler_file('scheduler.json')  # doctest: +SKIP
-        # connect to previous client's scheduler
-        >>> client2 = Client(scheduler_file='scheduler.json')  # doctest: +SKIP
-        """
-        if self.scheduler_file:
-            raise ValueError("Scheduler file already set")
-        else:
-            self.scheduler_file = scheduler_file
-
-        with open(self.scheduler_file, "w") as f:
-            json.dump(self.scheduler_info(), f, indent=2)
-
-    def get_metadata(self, keys, default=no_default):
-        """Get arbitrary metadata from scheduler
-
-        See set_metadata for the full docstring with examples
+    def close(
+        self, timeout: float | str | None = config.timeouts["closing"], **kwargs: Any
+    ) -> None:
+        """Close the client connection
 
         Parameters
         ----------
-        keys : key or list
-            Key to access.  If a list then gets within a nested collection
-        default : optional
-            If the key does not exist then return this value instead.
-            If not provided then this raises a KeyError if the key is not
-            present
-
-        See Also
-        --------
-        Client.set_metadata
-        """
-        if not isinstance(keys, (list, tuple)):
-            keys = (keys,)
-        return self.sync(self.scheduler.get_metadata, keys=keys, default=default)
-
-    def get_scheduler_logs(self, n=None):
-        """Get logs from scheduler
-
-        Parameters
-        ----------
-        n : int
-            Number of logs to retrieve.  Maxes out at 10000 by default,
-            configurable via the ``distributed.admin.log-length``
-            configuration value.
-
-        Returns
-        -------
-        Logs in reversed order (newest first)
-        """
-        return self.sync(self.scheduler.logs, n=n)
-
-    def get_worker_logs(self, n=None, workers=None, nanny=False):
-        """Get logs from workers
-
-        Parameters
-        ----------
-        n : int
-            Number of logs to retrieve.  Maxes out at 10000 by default,
-            configurable via the ``distributed.admin.log-length``
-            configuration value.
-        workers : iterable
-            List of worker addresses to retrieve.  Gets all workers by default.
-        nanny : bool, default False
-            Whether to get the logs from the workers (False) or the nannies
-            (True). If specified, the addresses in `workers` should still be
-            the worker addresses, not the nanny addresses.
-
-        Returns
-        -------
-        Dictionary mapping worker address to logs.
-        Logs are returned in reversed order (newest first)
-        """
-        return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
-
-    def benchmark_hardware(self) -> dict:
-        """
-        Run a benchmark on the workers for memory, disk, and network bandwidths
-
-        Returns
-        -------
-        result: dict
-            A dictionary mapping the names "disk", "memory", and "network" to
-            dictionaries mapping sizes to bandwidths.  These bandwidths are
-            averaged over many workers running computations across the cluster.
-        """
-        return self.sync(self.scheduler.benchmark_hardware)
-
-    def log_event(self, topic: str | Collection[str], msg: Any):
-        """Log an event under a given topic
-
-        Parameters
-        ----------
-        topic : str, list[str]
-            Name of the topic under which to log an event. To log the same
-            event under multiple topics, pass a list of topic names.
-        msg
-            Event message to log. Note this must be msgpack serializable.
-
-        Examples
-        --------
-        >>> from time import time
-        >>> client.log_event("current-time", time())
-        """
-        if not _is_dumpable(msg):
-            raise TypeError(
-                f"Message must be msgpack serializable. Got {type(msg)=} instead."
-            )
-        return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
-
-    def get_events(self, topic: str | None = None):
-        """Retrieve structured topic logs
-
-        Parameters
-        ----------
-        topic : str, optional
-            Name of topic log to retrieve events for. If no ``topic`` is
-            provided, then logs for all topics will be returned.
-        """
-        return self.sync(self.scheduler.events, topic=topic)
-
-    async def _handle_event(self, topic, event):
-        if topic not in self._event_handlers:
-            self.unsubscribe_topic(topic)
-            return
-        handler = self._event_handlers[topic]
-        ret = handler(event)
-        if inspect.isawaitable(ret):
-            await ret
-
-    def subscribe_topic(self, topic, handler):
-        """Subscribe to a topic and execute a handler for every received event
-
-        Parameters
-        ----------
-        topic: str
-            The topic name
-        handler: callable or coroutine function
-            A handler called for every received event. The handler must accept a
-            single argument `event` which is a tuple `(timestamp, msg)` where
-            timestamp refers to the clock on the scheduler.
-
-        Examples
-        --------
-
-        >>> import logging
-        >>> logger = logging.getLogger("myLogger")  # Log config not shown
-        >>> client.subscribe_topic("topic-name", lambda: logger.info)
-
-        See Also
-        --------
-        dask.distributed.Client.unsubscribe_topic
-        dask.distributed.Client.get_events
-        dask.distributed.Client.log_event
-        """
-        if topic in self._event_handlers:
-            logger.info("Handler for %s already set. Overwriting.", topic)
-        self._event_handlers[topic] = handler
-        msg = {"op": "subscribe-topic", "topic": topic, "client": self.id}
-        self._send_to_scheduler(msg)
-
-    def unsubscribe_topic(self, topic):
-        """Unsubscribe from a topic and remove event handler
-
-        See Also
-        --------
-        dask.distributed.Client.subscribe_topic
-        dask.distributed.Client.get_events
-        dask.distributed.Client.log_event
-        """
-        if topic in self._event_handlers:
-            msg = {"op": "unsubscribe-topic", "topic": topic, "client": self.id}
-            self._send_to_scheduler(msg)
-        else:
-            raise ValueError(f"No event handler known for topic {topic}.")
-
-    def retire_workers(
-        self, workers: list[str] | None = None, close_workers: bool = True, **kwargs
-    ):
-        """Retire certain workers on the scheduler
-
-        See :meth:`distributed.Scheduler.retire_workers` for the full docstring.
-
-        Parameters
-        ----------
-        workers
-        close_workers
+        timeout : number, optional
+            Time in seconds to wait for the client to close gracefully.
         **kwargs : dict
-            Optional keyword arguments for the remote function
+            Optional keyword arguments for the remote function.
 
-        Examples
-        --------
-        You can get information about active workers using the following:
-
-        >>> workers = client.scheduler_info()['workers']
-
-        From that list you may want to select some workers to close
-
-        >>> client.retire_workers(workers=['tcp://address:port', ...])
-
-        See Also
-        --------
-        dask.distributed.Scheduler.retire_workers
         """
-        return self.sync(
-            self.scheduler.retire_workers,
-            workers=workers,
-            close_workers=close_workers,
-            **kwargs,
-        )
-
-    def set_metadata(self, key, value):
-        """Set arbitrary metadata in the scheduler
-
-        This allows you to store small amounts of data on the central scheduler
-        process for administrative purposes.  Data should be msgpack
-        serializable (ints, strings, lists, dicts)
-
-        If the key corresponds to a task then that key will be cleaned up when
-        the task is forgotten by the scheduler.
-
-        If the key is a list then it will be assumed that you want to index
-        into a nested dictionary structure using those keys.  For example if
-        you call the following::
-
-            >>> client.set_metadata(['a', 'b', 'c'], 123)
-
-        Then this is the same as setting
-
-            >>> scheduler.task_metadata['a']['b']['c'] = 123
-
-        The lower level dictionaries will be created on demand.
-
-        Examples
-        --------
-        >>> client.set_metadata('x', 123)  # doctest: +SKIP
-        >>> client.get_metadata('x')  # doctest: +SKIP
-        123
-
-        >>> client.set_metadata(['x', 'y'], 123)  # doctest: +SKIP
-        >>> client.get_metadata('x')  # doctest: +SKIP
-        {'y': 123}
-
-        >>> client.set_metadata(['x', 'w', 'z'], 456)  # doctest: +SKIP
-        >>> client.get_metadata('x')  # doctest: +SKIP
-        {'y': 123, 'w': {'z': 456}}
-
-        >>> client.get_metadata(['x', 'w'])  # doctest: +SKIP
-        {'z': 456}
-
-        See Also
-        --------
-        get_metadata
-        """
-        if not isinstance(key, list):
-            key = (key,)
-        return self.sync(self.scheduler.set_metadata, keys=key, value=value)
-
-    def get_versions(
-        self, check: bool = False, packages: Sequence[str] | None = None
-    ) -> VersionsDict | Coroutine[Any, Any, VersionsDict]:
-        """Return version info for the scheduler, all workers and myself
-
-        Parameters
-        ----------
-        check
-            raise ValueError if all required & optional packages
-            do not match
-        packages
-            Extra package names to check
-
-        Examples
-        --------
-        >>> c.get_versions()  # doctest: +SKIP
-
-        >>> c.get_versions(packages=['sklearn', 'geopandas'])  # doctest: +SKIP
-        """
-        return self.sync(self._get_versions, check=check, packages=packages or [])
-
-    async def _get_versions(
-        self, check: bool = False, packages: Sequence[str] | None = None
-    ) -> VersionsDict:
-        packages = packages or []
-        client = version_module.get_versions(packages=packages)
-        scheduler = await self.scheduler.versions(packages=packages)
-        workers = await self.scheduler.broadcast(
-            msg={"op": "versions", "packages": packages},
-            on_error="ignore",
-        )
-        result = VersionsDict(scheduler=scheduler, workers=workers, client=client)
-
-        if check:
-            msg = version_module.error_message(scheduler, workers, client)
-            if msg["warning"]:
-                warnings.warn(msg["warning"])
-            if msg["error"]:
-                raise ValueError(msg["error"])
-
-        return result
-
-    def futures_of(self, futures):
-        """Wrapper method of futures_of
-
-        Parameters
-        ----------
-        futures : tuple
-            The futures
-        """
-        return futures_of(futures, client=self)
-
-    @classmethod
-    def _expand_key(cls, k):
-        """
-        Expand a user-provided task key specification, e.g. in a resources
-        or retries dictionary.
-        """
-        if not isinstance(k, tuple):
-            k = (k,)
-        for kk in k:
-            if dask.is_dask_collection(kk):
-                yield from kk.__dask_keys__()
-            else:
-                yield kk
-
-    async def _story(self, *keys_or_stimuli: str, on_error="raise"):
-        assert on_error in ("raise", "ignore")
-
-        try:
-            flat_stories = await self.scheduler.get_story(
-                keys_or_stimuli=keys_or_stimuli
-            )
-            flat_stories = [("scheduler", *msg) for msg in flat_stories]
-        except Exception:
-            if on_error == "raise":
-                raise
-            elif on_error == "ignore":
-                flat_stories = []
-            else:
-                raise ValueError(f"on_error not in {'raise', 'ignore'}")
-
-        responses = await self.scheduler.broadcast(
-            msg={"op": "get_story", "keys_or_stimuli": keys_or_stimuli},
-            on_error=on_error,
-        )
-        for worker, stories in responses.items():
-            flat_stories.extend((worker, *msg) for msg in stories)
-        return flat_stories
-
-    def story(self, *keys_or_stimuli, on_error="raise"):
-        """Returns a cluster-wide story for the given keys or stimulus_id's"""
-        return self.sync(self._story, *keys_or_stimuli, on_error=on_error)
-
-    def get_task_stream(
-        self,
-        start=None,
-        stop=None,
-        count=None,
-        plot=False,
-        filename="task-stream.html",
-        bokeh_resources=None,
-    ):
-        """Get task stream data from scheduler
-
-        This collects the data present in the diagnostic "Task Stream" plot on
-        the dashboard.  It includes the start, stop, transfer, and
-        deserialization time of every task for a particular duration.
-
-        Note that the task stream diagnostic does not run by default.  You may
-        wish to call this function once before you start work to ensure that
-        things start recording, and then again after you have completed.
-
-        Parameters
-        ----------
-        start : Number or string
-            When you want to start recording
-            If a number it should be the result of calling time()
-            If a string then it should be a time difference before now,
-            like '60s' or '500 ms'
-        stop : Number or string
-            When you want to stop recording
-        count : int
-            The number of desired records, ignored if both start and stop are
-            specified
-        plot : boolean, str
-            If true then also return a Bokeh figure
-            If plot == 'save' then save the figure to a file
-        filename : str (optional)
-            The filename to save to if you set ``plot='save'``
-        bokeh_resources : bokeh.resources.Resources (optional)
-            Specifies if the resource component is INLINE or CDN
-
-        Examples
-        --------
-        >>> client.get_task_stream()  # prime plugin if not already connected
-        >>> x.compute()  # do some work
-        >>> client.get_task_stream()
-        [{'task': ...,
-          'type': ...,
-          'thread': ...,
-          ...}]
-
-        Pass the ``plot=True`` or ``plot='save'`` keywords to get back a Bokeh
-        figure
-
-        >>> data, figure = client.get_task_stream(plot='save', filename='myfile.html')
-
-        Alternatively consider the context manager
-
-        >>> from dask.distributed import get_task_stream
-        >>> with get_task_stream() as ts:
-        ...     x.compute()
-        >>> ts.data
-        [...]
-
-        Returns
-        -------
-        L: List[Dict]
-
-        See Also
-        --------
-        get_task_stream : a context manager version of this method
-        """
-        return self.sync(
-            self._get_task_stream,
-            start=start,
-            stop=stop,
-            count=count,
-            plot=plot,
-            filename=filename,
-            bokeh_resources=bokeh_resources,
-        )
-
-    async def _get_task_stream(
-        self,
-        start=None,
-        stop=None,
-        count=None,
-        plot=False,
-        filename="task-stream.html",
-        bokeh_resources=None,
-    ):
-        msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
-        if plot:
-            from distributed.diagnostics.task_stream import rectangles
-
-            rects = rectangles(msgs)
-            from distributed.dashboard.components.scheduler import task_stream_figure
-
-            source, figure = task_stream_figure(sizing_mode="stretch_both")
-            source.data.update(rects)
-            if plot == "save":
-                from bokeh.plotting import output_file, save
-
-                output_file(filename=filename, title="Dask Task Stream")
-                save(figure, filename=filename, resources=bokeh_resources)
-            return (msgs, figure)
+        if self.asynchronous:
+            # Trigger close, but don't wait for it
+            if self._status != Status.closing and self._status != Status.closed:
+                # Use ensure_future to avoid blocking the event loop
+                asyncio_ensure_future(self._close(timeout=timeout, **kwargs))
         else:
-            return msgs
+            # Synchronous close
+            if self._status != Status.closing and self._status != Status.closed:
+                # Ensure the IO loop is running
+                if not self._loop_runner.is_runnning:
+                    # Cannot close if loop is not running
+                    logger.warning("Cannot close client cleanly, event loop stopped.")
+                    return
 
-    def register_plugin(
-        self,
-        plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
-        name: str | None = None,
-        idempotent: bool | None = None,
-    ):
-        """Register a plugin.
+                try:
+                    self.sync(self._close, timeout=timeout, **kwargs)
+                except RuntimeError as e:
+                    if "cannot schedule new futures after shutdown" in str(e):
+                        # Loop already closed, cannot close cleanly
+                        pass
+                    else:
+                        raise
+                except TimeoutError:
+                    logger.warning("Client close timed out.")
+                except Exception:
+                    logger.exception("Error during client close:")
 
-        See https://distributed.readthedocs.io/en/latest/plugins.html
+    async def _close(self, timeout=None, fast=False):
+        """Asynchronous version of close"""
+        if self._status in (Status.closing, Status.closed):
+            # Already closing or closed
+            if self._close_future:
+                await self._close_future
+            return
 
-        Parameters
-        ----------
-        plugin :
-            A nanny, scheduler, or worker plugin to register.
-        name :
-            Name for the plugin; if None, a name is taken from the
-            plugin instance or automatically generated if not present.
-        idempotent :
-            Do not re-register if a plugin of the given name already exists.
-            If None, ``plugin.idempotent`` is taken if defined, False otherwise.
-        """
-        if name is None:
-            name = _get_plugin_name(plugin)
-        assert name
-        if idempotent is not None:
-            warnings.warn(
-                "The `idempotent` argument is deprecated and will be removed in a "
-                "future version. Please mark your plugin as idempotent by setting its "
-                "`.idempotent` attribute to `True`.",
-                FutureWarning,
-                stacklevel=2,
+        logger.info("Closing Dask client: %s", self.id)
+        self._status = Status.closing
+        self._close_future = asyncio.Future()
+
+        # Stop background tasks
+        if self._handle_report_task:
+            self._handle_report_task.cancel()
+        if self._handle_stream_task:
+            self._handle_stream_task.cancel()
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+        if self._wait_for_workers_task:
+            self._wait_for_workers_task.cancel()
+
+        # Clean up periodic callbacks
+        for pc in self._periodic_callbacks.values():
+            pc.stop()
+
+        # Remove from global list
+        cls = type(self)
+        with cls._global_clients_lock:
+            while self in cls._running_clients_on_this_process:
+                cls._running_clients_on_this_process.remove(self)
+            if self.id in cls._instances:
+                del cls._instances[self.id]
+            key = tokenize(self._start_kwargs)
+            if key in cls._active_clients and cls._active_clients[key] is self:
+                del cls._active_clients[key]
+        if _get_global_client() is self:
+            _set_global_client(None)
+
+        # Close scheduler connection
+        if self._scheduler_conn and not self._scheduler_conn.closed():
+            try:
+                if not fast:
+                    await self._scheduler.unregister_client(client=self.id)
+                await self._scheduler_conn.close()
+            except CommClosedError:
+                pass
+            except Exception:
+                logger.exception("Error during scheduler connection close:")
+
+        # Close cluster if owned
+        if self.cluster and self._shutdown_on_close:
+            try:
+                await self.cluster.close(timeout=timeout)
+            except Exception:
+                logger.exception("Error during cluster close:")
+
+        # Shutdown executor if owned
+        if self._executor:
+            self._executor.shutdown()
+
+        # Mark as closed
+        self._status = Status.closed
+        if self._close_future:
+            self._close_future.set_result(None)
+        self._closed = True
+        logger.info("Finished closing Dask client: %s", self.id)
+
+    def __del__(self):
+        if self._status != Status.closed:
+            self.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    async def __aenter__(self):
+        await self._started
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self._close()
+
+    # Configuration methods
+    def get_config(self, **kwargs):
+        """Get configuration settings from the scheduler"""
+        if self.asynchronous:
+            return self._get_config(**kwargs)
+        else:
+            return self.sync(self._get_config, **kwargs)
+
+    async def _get_config(self, **kwargs):
+        """Asynchronous version of get_config"""
+        response = await self._send_to_scheduler({"op": "get_config", **kwargs})
+        return response
+
+    def set_config(self, config: dict, **kwargs):
+        """Set configuration settings on the scheduler and workers"""
+        if self.asynchronous:
+            return self._set_config(config, **kwargs)
+        else:
+            self.sync(self._set_config, config, **kwargs)
+
+    async def _set_config(self, config: dict, **kwargs):
+        """Asynchronous version of set_config"""
+        await self._send_to_scheduler({"op": "set_config", "config": config, **kwargs})
+
+    # Utility methods
+    def _get_computation_keys(self, computation: Any) -> list[Hashable]:
+        """Get the keys associated with a computation"""
+        if isinstance(computation, Future):
+            return [computation.key]
+        elif isinstance(computation, (list, tuple)):
+            return list(
+                itertools.chain.from_iterable(
+                    self._get_computation_keys(c) for c in computation
+                )
+            )
+        elif isinstance(computation, dict):
+            return list(
+                itertools.chain.from_iterable(
+                    self._get_computation_keys(c) for c in computation.values()
+                )
             )
         else:
-            idempotent = getattr(plugin, "idempotent", False)
-        assert isinstance(idempotent, bool)
-        return self._register_plugin(plugin, name, idempotent)
+            return []
 
-    @singledispatchmethod
-    def _register_plugin(
-        self,
-        plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
-        name: str,
-        idempotent: bool,
-    ):
-        if isinstance(plugin, type):
-            raise TypeError("Please provide an instance of a plugin, not a type.")
-        if any(
-            "dask.distributed.diagnostics.plugin" in str(c)
-            for c in plugin.__class__.__bases__
-        ):
-            raise TypeError(
-                "Importing plugin base classes from `dask.distributed.diagnostics.plugin` is not supported. "
-                "Please import directly from `distributed.diagnostics.plugin` instead."
-            )
-        raise TypeError(
-            "Registering duck-typed plugins is not allowed. Please inherit from "
-            "NannyPlugin, WorkerPlugin, or SchedulerPlugin to create a plugin."
+    def _is_local(self) -> bool:
+        """Check if the client is connected to a local cluster"""
+        return isinstance(self.cluster, LocalCluster)
+
+    # Internal Future management
+    def _inc_client_ref(self, key: Hashable) -> None:
+        """Increment client-side reference count for a key"""
+        self._refcount[key] += 1
+
+    def _dec_client_ref(self, key: Hashable) -> None:
+        """Decrement client-side reference count for a key"""
+        if key not in self._refcount:
+            return
+        self._refcount[key] -= 1
+        if self._refcount[key] == 0:
+            del self._refcount[key]
+            self._release_key(key)
+
+    def _release_key(self, key: Hashable) -> None:
+        """Notify scheduler that client no longer needs a key"""
+        logger.debug("Client releases key %s", key)
+        self._send_to_scheduler_safe(
+            {"op": "client-releases-keys", "keys": [to_serialize(key)], "client": self.id}
         )
 
-    @_register_plugin.register
-    def _(self, plugin: SchedulerPlugin, name: str, idempotent: bool):
-        return self.sync(
-            self._register_scheduler_plugin,
-            plugin=plugin,
-            name=name,
-            idempotent=idempotent,
-        )
+    def _maybe_remove_future_later(self, key: Hashable, state_ref: weakref.ReferenceType) -> None:
+        """Schedule removal of future state if no longer referenced"""
+        self.loop.call_later(0.1, self._check_remove_future, key, state_ref)
 
-    @_register_plugin.register
-    def _(
-        self, plugin: NannyPlugin, name: str, idempotent: bool
-    ) -> dict[str, OKMessage]:
-        return self.sync(
-            self._register_nanny_plugin,
-            plugin=plugin,
-            name=name,
-            idempotent=idempotent,
-        )
+    def _check_remove_future(self, key: Hashable, state_ref: weakref.ReferenceType) -> None:
+        """Remove future state if no longer referenced"""
+        if key in self.futures and self.futures[key] is state_ref():
+            # Future state still exists and matches the original reference
+            # Check if it's still referenced by the client or other futures
+            if key not in self._refcount:
+                # No longer referenced, remove it
+                del self.futures[key]
 
-    @_register_plugin.register
-    def _(self, plugin: WorkerPlugin, name: str, idempotent: bool):
-        return self.sync(
-            self._register_worker_plugin,
-            plugin=plugin,
-            name=name,
-            idempotent=idempotent,
-        )
-
-    async def _register_scheduler_plugin(
-        self, plugin: SchedulerPlugin, name: str, idempotent: bool
-    ):
-        return await self.scheduler.register_scheduler_plugin(
-            plugin=dumps(plugin),
-            name=name,
-            idempotent=idempotent,
-        )
-
-    def register_scheduler_plugin(
-        self,
-        plugin: SchedulerPlugin,
-        name: str | None = None,
-        idempotent: bool | None = None,
-    ):
-        """
-        Register a scheduler plugin.
-
-        .. deprecated:: 2023.9.2
-            Use :meth:`Client.register_plugin` instead.
-
-        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
-
-        Parameters
-        ----------
-        plugin : SchedulerPlugin
-            SchedulerPlugin instance to pass to the scheduler.
-        name : str
-            Name for the plugin; if None, a name is taken from the
-            plugin instance or automatically generated if not present.
-        idempotent : bool
-            Do not re-register if a plugin of the given name already exists.
-        """
+    # Deprecated aliases
+    @property
+    def datasets(self):
         warnings.warn(
-            "`Client.register_scheduler_plugin` has been deprecated; "
-            "please `Client.register_plugin` instead",
+            "The `Client.datasets` attribute is deprecated. "
+            "Use `Client.list_datasets`, `Client.get_dataset`, etc. instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return cast(OKMessage, self.register_plugin(plugin, name, idempotent))
+        return self._datasets
 
-    async def _unregister_scheduler_plugin(self, name):
-        return await self.scheduler.unregister_scheduler_plugin(name=name)
-
-    def unregister_scheduler_plugin(self, name):
-        """Unregisters a scheduler plugin
-
-        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
-
-        Parameters
-        ----------
-        name : str
-            Name of the plugin to unregister. See the :meth:`Client.register_scheduler_plugin`
-            docstring for more information.
-
-        Examples
-        --------
-        >>> class MyPlugin(SchedulerPlugin):
-        ...     def __init__(self, *args, **kwargs):
-        ...         pass  # the constructor is up to you
-        ...     async def start(self, scheduler: Scheduler) -> None:
-        ...         pass
-        ...     async def before_close(self) -> None:
-        ...         pass
-        ...     async def close(self) -> None:
-        ...         pass
-        ...     def restart(self, scheduler: Scheduler) -> None:
-        ...         pass
-
-        >>> plugin = MyPlugin(1, 2, 3)
-        >>> client.register_plugin(plugin, name='foo')
-        >>> client.unregister_scheduler_plugin(name='foo')
-
-        See Also
-        --------
-        register_scheduler_plugin
-        """
-        return self.sync(self._unregister_scheduler_plugin, name=name)
-
-    def register_worker_callbacks(self, setup=None):
-        """
-        Registers a setup callback function for all current and future workers.
-
-        This registers a new setup function for workers in this cluster. The
-        function will run immediately on all currently connected workers. It
-        will also be run upon connection by any workers that are added in the
-        future. Multiple setup functions can be registered - these will be
-        called in the order they were added.
-
-        If the function takes an input argument named ``dask_worker`` then
-        that variable will be populated with the worker itself.
-
-        Parameters
-        ----------
-        setup : callable(dask_worker: Worker) -> None
-            Function to register and run on all workers
-        """
-        return self.register_plugin(_WorkerSetupPlugin(setup))
-
-    async def _register_worker_plugin(
-        self, plugin: WorkerPlugin, name: str, idempotent: bool
-    ) -> dict[str, OKMessage]:
-        responses = await self.scheduler.register_worker_plugin(
-            plugin=dumps(plugin), name=name, idempotent=idempotent
-        )
-        for response in responses.values():
-            if response["status"] == "error":
-                _, exc, tb = clean_exception(
-                    response["exception"], response["traceback"]
-                )
-                assert exc
-                raise exc.with_traceback(tb)
-        return cast(dict[str, OKMessage], responses)
-
-    async def _register_nanny_plugin(
-        self, plugin: NannyPlugin, name: str, idempotent: bool
-    ) -> dict[str, OKMessage]:
-        responses = await self.scheduler.register_nanny_plugin(
-            plugin=dumps(plugin), name=name, idempotent=idempotent
-        )
-        for response in responses.values():
-            if response["status"] == "error":
-                _, exc, tb = clean_exception(
-                    response["exception"], response["traceback"]
-                )
-                assert exc
-                raise exc.with_traceback(tb)
-        return cast(dict[str, OKMessage], responses)
-
-    def register_worker_plugin(
-        self,
-        plugin: NannyPlugin | WorkerPlugin,
-        name: str | None = None,
-        nanny: bool | None = None,
-    ):
-        """
-        Registers a lifecycle worker plugin for all current and future workers.
-
-        .. deprecated:: 2023.9.2
-            Use :meth:`Client.register_plugin` instead.
-
-        This registers a new object to handle setup, task state transitions and
-        teardown for workers in this cluster. The plugin will instantiate
-        itself on all currently connected workers. It will also be run on any
-        worker that connects in the future.
-
-        The plugin may include methods ``setup``, ``teardown``, ``transition``,
-        and ``release_key``.  See the
-        ``dask.distributed.WorkerPlugin`` class or the examples below for the
-        interface and docstrings.  It must be serializable with the pickle or
-        cloudpickle modules.
-
-        If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
-        used then that will control idempotency.  If a plugin with that name has
-        already been registered, then it will be removed and replaced by the new one.
-
-        For alternatives to plugins, you may also wish to look into preload
-        scripts.
-
-        Parameters
-        ----------
-        plugin : WorkerPlugin or NannyPlugin
-            WorkerPlugin or NannyPlugin instance to register.
-        name : str, optional
-            A name for the plugin.
-            Registering a plugin with the same name will have no effect.
-            If plugin has no name attribute a random name is used.
-        nanny : bool, optional
-            Whether to register the plugin with workers or nannies.
-
-        Examples
-        --------
-        >>> class MyPlugin(WorkerPlugin):
-        ...     def __init__(self, *args, **kwargs):
-        ...         pass  # the constructor is up to you
-        ...     def setup(self, worker: dask.distributed.Worker):
-        ...         pass
-        ...     def teardown(self, worker: dask.distributed.Worker):
-        ...         pass
-        ...     def transition(self, key: str, start: str, finish: str,
-        ...                    **kwargs):
-        ...         pass
-        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
-        ...         pass
-
-        >>> plugin = MyPlugin(1, 2, 3)
-        >>> client.register_plugin(plugin)
-
-        You can get access to the plugin with the ``get_worker`` function
-
-        >>> client.register_plugin(other_plugin, name='my-plugin')
-        >>> def f():
-        ...    worker = get_worker()
-        ...    plugin = worker.plugins['my-plugin']
-        ...    return plugin.my_state
-
-        >>> future = client.run(f)
-
-        See Also
-        --------
-        distributed.WorkerPlugin
-        unregister_worker_plugin
-        """
+    @property
+    def _loop(self):
         warnings.warn(
-            "`Client.register_worker_plugin` has been deprecated; "
-            "please use `Client.register_plugin` instead",
+            "The `Client._loop` attribute is deprecated. Use `Client.loop` instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        if name is None:
-            name = _get_plugin_name(plugin)
+        return self.loop
 
-        assert name
+    # Class-level state (for tracking instances)
+    _running_clients_on_this_process: ClassVar[list[Client]] = []
+    _active_clients: ClassVar[dict[Hashable, Client]] = {}
 
-        method: Callable
-        if isinstance(plugin, WorkerPlugin):
-            method = self._register_worker_plugin
-            if nanny is True:
-                warnings.warn(
-                    "Registering a `WorkerPlugin` as a nanny plugin is not "
-                    "allowed, registering as a worker plugin instead. "
-                    "To register as a nanny plugin, inherit from `NannyPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        elif isinstance(plugin, NannyPlugin):
-            method = self._register_nanny_plugin
-            if nanny is False:
-                warnings.warn(
-                    "Registering a `NannyPlugin` as a worker plugin is not "
-                    "allowed, registering as a nanny plugin instead. "
-                    "To register as a worker plugin, inherit from `WorkerPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        elif isinstance(plugin, SchedulerPlugin):  # type: ignore[unreachable]
-            if nanny:
-                warnings.warn(
-                    "Registering a `SchedulerPlugin` as a nanny plugin is not "
-                    "allowed, registering as a scheduler plugin instead. "
-                    "To register as a nanny plugin, inherit from `NannyPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            else:
-                warnings.warn(
-                    "Registering a `SchedulerPlugin` as a worker plugin is not "
-                    "allowed, registering as a scheduler plugin instead. "
-                    "To register as a worker plugin, inherit from `WorkerPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            method = self._register_scheduler_plugin
-        else:
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin inherits from `NannyPlugin` "
-                "or `WorkerPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if nanny is True:
-                method = self._register_nanny_plugin
-            else:
-                method = self._register_worker_plugin
 
-        return self.sync(method, plugin=plugin, name=name, idempotent=False)
+# Define ClientClosedError after Client class definition
+class ClientClosedError(RuntimeError):
+    """Raised when trying to use a closed client"""
 
-    async def _unregister_worker_plugin(self, name, nanny=None):
-        if nanny:
-            responses = await self.scheduler.unregister_nanny_plugin(name=name)
-        else:
-            responses = await self.scheduler.unregister_worker_plugin(name=name)
+    pass
 
-        for response in responses.values():
-            if response["status"] == "error":
-                _, exc, tb = clean_exception(**response)
-                raise exc.with_traceback(tb)
-        return responses
 
-    def unregister_worker_plugin(self, name, nanny=None):
-        """Unregisters a lifecycle worker plugin
-
-        This unregisters an existing worker plugin. As part of the unregistration process
-        the plugin's ``teardown`` method will be called.
-
-        Parameters
-        ----------
-        name : str
-            Name of the plugin to unregister. See the :meth:`Client.register_plugin`
-            docstring for more information.
-
-        Examples
-        --------
-        >>> class MyPlugin(WorkerPlugin):
-        ...     def __init__(self, *args, **kwargs):
-        ...         pass  # the constructor is up to you
-        ...     def setup(self, worker: dask.distributed.Worker):
-        ...         pass
-        ...     def teardown(self, worker: dask.distributed.Worker):
-        ...         pass
-        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
-        ...         pass
-        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
-        ...         pass
-
-        >>> plugin = MyPlugin(1, 2, 3)
-        >>> client.register_plugin(plugin, name='foo')
-        >>> client.unregister_worker_plugin(name='foo')
-
-        See Also
-        --------
-        register_plugin
-        """
-        return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
-
-    @property
-    def amm(self):
-        """Convenience accessors for the :doc:`active_memory_manager`"""
-        from distributed.active_memory_manager import AMMClientProxy
-
-        return AMMClientProxy(self)
-
-    def _handle_forwarded_log_record(self, event):
-        _, record_attrs = event
-        record = logging.makeLogRecord(record_attrs)
-        dest_logger = logging.getLogger(record.name)
-        dest_logger.handle(record)
-
-    def forward_logging(self, logger_name=None, level=logging.NOTSET):
-        """
-        Begin forwarding the given logger (by default the root) and all loggers
-        under it from worker tasks to the client process. Whenever the named
-        logger handles a LogRecord on the worker-side, the record will be
-        serialized, sent to the client, and handled by the logger with the same
-        name on the client-side.
-
-        Note that worker-side loggers will only handle LogRecords if their level
-        is set appropriately, and the client-side logger will only emit the
-        forwarded LogRecord if its own level is likewise set appropriately. For
-        example, if your submitted task logs a DEBUG message to logger "foo",
-        then in order for ``forward_logging()`` to cause that message to be
-        emitted in your client session, you must ensure that the logger "foo"
-        have its level set to DEBUG (or lower) in the worker process *and* in the
-        client process.
-
-        Parameters
-        ----------
-        logger_name : str, optional
-            The name of the logger to begin forwarding. The usual rules of the
-            ``logging`` module's hierarchical naming system apply. For example,
-            if ``name`` is ``"foo"``, then not only ``"foo"``, but also
-            ``"foo.bar"``, ``"foo.baz"``, etc. will be forwarded. If ``name`` is
-            ``None``, this indicates the root logger, and so *all* loggers will
-            be forwarded.
-
-            Note that a logger will only forward a given LogRecord if the
-            logger's level is sufficient for the LogRecord to be handled at all.
-
-        level : str | int, optional
-            Optionally restrict forwarding to LogRecords of this level or
-            higher, even if the forwarded logger's own level is lower.
-
-        Examples
-        --------
-        For purposes of the examples, suppose we configure client-side logging
-        as a user might: with a single StreamHandler attached to the root logger
-        with an output level of INFO and a simple output format::
-
-            import logging
-            import distributed
-            import io, yaml
-
-            TYPICAL_LOGGING_CONFIG = '''
-            version: 1
-            handlers:
-              console:
-                class : logging.StreamHandler
-                formatter: default
-                level   : INFO
-            formatters:
-              default:
-                format: '%(asctime)s %(levelname)-8s [worker %(worker)s] %(name)-15s %(message)s'
-                datefmt: '%Y-%m-%d %H:%M:%S'
-            root:
-              handlers:
-                - console
-            '''
-            config = yaml.safe_load(io.StringIO(TYPICAL_LOGGING_CONFIG))
-            logging.config.dictConfig(config)
-
-        Now create a client and begin forwarding the root logger from workers
-        back to our local client process.
-
-        >>> client = distributed.Client()
-        >>> client.forward_logging()  # forward the root logger at any handled level
-
-        Then submit a task that does some error logging on a worker. We see
-        output from the client-side StreamHandler.
-
-        >>> def do_error():
-        ...     logging.getLogger("user.module").error("Hello error")
-        ...     return 42
-        >>> client.submit(do_error).result()
-        2022-11-09 03:43:25 ERROR    [worker tcp://127.0.0.1:34783] user.module     Hello error
-        42
-
-        Note how an attribute ``"worker"`` is also added by dask to the
-        forwarded LogRecord, which our custom formatter uses. This is useful for
-        identifying exactly which worker logged the error.
-
-        One nuance worth highlighting: even though our client-side root logger
-        is configured with a level of INFO, the worker-side root loggers still
-        have their default level of ERROR because we haven't done any explicit
-        logging configuration on the workers. Therefore worker-side INFO logs
-        will *not* be forwarded because they never even get handled in the first
-        place.
-
-        >>> def do_info_1():
-        ...     # no output on the client side
-        ...     logging.getLogger("user.module").info("Hello info the first time")
-        ...     return 84
-        >>> client.submit(do_info_1).result()
-        84
-
-        It is necessary to set the client-side logger's level to INFO before the info
-        message will be handled and forwarded to the client. In other words, the
-        "effective" level of the client-side forwarded logging is the maximum of each
-        logger's client-side and worker-side levels.
-
-        >>> def do_info_2():
-        ...     logger = logging.getLogger("user.module")
-        ...     logger.setLevel(logging.INFO)
-        ...     # now produces output on the client side
-        ...     logger.info("Hello info the second time")
-        ...     return 84
-        >>> client.submit(do_info_2).result()
-        2022-11-09 03:57:39 INFO     [worker tcp://127.0.0.1:42815] user.module     Hello info the second time
-        84
-        """
-
-        plugin_name = f"forward-logging-{logger_name or '<root>'}"
-        topic = f"{TOPIC_PREFIX_FORWARDED_LOG_RECORD}-{plugin_name}"
-        # note that subscription is idempotent
-        self.subscribe_topic(topic, self._handle_forwarded_log_record)
-        # note that any existing plugin with the same name will automatically be
-        # removed and torn down (see distributed.worker.Worker.plugin_add()), so
-        # this is effectively idempotent, i.e., forwarding the same logger twice
-        # won't cause every LogRecord to be forwarded twice
-        return self.register_plugin(
-            ForwardLoggingPlugin(logger_name, level, topic), plugin_name
-        )
-
-    def unforward_logging(self, logger_name=None):
-        """
-        Stop forwarding the given logger (default root) from worker tasks to the
-        client process.
-        """
-        plugin_name = f"forward-logging-{logger_name or '<root>'}"
-        topic = f"{TOPIC_PREFIX_FORWARDED_LOG_RECORD}-{plugin_name}"
-        self.unsubscribe_topic(topic)
-        return self.unregister_worker_plugin(plugin_name)
-
-
-def _convert_dask_keys(keys: NestedKeys) -> List:
-    assert isinstance(keys, list)
-    new_keys: list[List | TaskRef] = []
-    for key in keys:
-        if isinstance(key, list):
-            new_keys.append(_convert_dask_keys(key))
-        else:
-            new_keys.append(TaskRef(key))
-    return List(*new_keys)
-
-
-class _WorkerSetupPlugin(WorkerPlugin):
-    """This is used to support older setup functions as callbacks"""
-
-    def __init__(self, setup):
-        self._setup = setup
-
-    def setup(self, worker):
-        if has_keyword(self._setup, "dask_worker"):
-            return self._setup(dask_worker=worker)
-        else:
-            return self._setup()
-
-
-def CompatibleExecutor(*args, **kwargs):
-    raise Exception("This has been moved to the Client.get_executor() method")
-
-
-ALL_COMPLETED = "ALL_COMPLETED"
-FIRST_COMPLETED = "FIRST_COMPLETED"
-
-
-async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
-    if timeout is not None and not isinstance(timeout, Number):
-        raise TypeError(
-            "timeout= keyword received a non-numeric value.\n"
-            "Beware that wait expects a list of values\n"
-            "  Bad:  wait(x, y, z)\n"
-            "  Good: wait([x, y, z])"
-        )
-    fs = futures_of(fs)
-    if return_when == ALL_COMPLETED:
-        future = distributed.utils.All({f._state.wait() for f in fs})
-    elif return_when == FIRST_COMPLETED:
-        future = distributed.utils.Any({f._state.wait() for f in fs})
-    else:
-        raise NotImplementedError(
-            "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"
-        )
-
-    if timeout is not None:
-        future = wait_for(future, timeout)
-    await future
-
-    done, not_done = (
-        {fu for fu in fs if fu.status != "pending"},
-        {fu for fu in fs if fu.status == "pending"},
-    )
-    cancelled_errors = defaultdict(list)
-    for f in done:
-        if not f.cancelled():
-            continue
-        exception = f._state.exception
-        assert isinstance(exception, FutureCancelledError)
-        cancelled_errors[exception.reason].append(exception)
-    if cancelled_errors:
-        groups = [
-            CancelledFuturesGroup(errors=errors, reason=reason)
-            for reason, errors in cancelled_errors.items()
-        ]
-        raise FuturesCancelledError(groups)
-
-    return DoneAndNotDoneFutures(done, not_done)
-
-
-def wait(fs, timeout=None, return_when=ALL_COMPLETED):
-    """Wait until all/any futures are finished
-
-    Parameters
-    ----------
-    fs : List[Future]
-    timeout : number, string, optional
-        Time after which to raise a ``dask.distributed.TimeoutError``.
-        Can be a string like ``"10 minutes"`` or a number of seconds to wait.
-    return_when : str, optional
-        One of `ALL_COMPLETED` or `FIRST_COMPLETED`
-
-    Returns
-    -------
-    Named tuple of completed, not completed
-    """
-    if timeout is not None and isinstance(timeout, (Number, str)):
-        timeout = parse_timedelta(timeout, default="s")
-    client = default_client()
-    result = client.sync(_wait, fs, timeout=timeout, return_when=return_when)
-    return result
-
-
-async def _as_completed(fs, queue):
-    fs = futures_of(fs)
-    groups = groupby(lambda f: f.key, fs)
-    firsts = [v[0] for v in groups.values()]
-    wait_iterator = gen.WaitIterator(
-        *map(asyncio.ensure_future, [f._state.wait() for f in firsts])
-    )
-
-    while not wait_iterator.done():
-        await wait_iterator.next()
-        # TODO: handle case of restarted futures
-        future = firsts[wait_iterator.current_index]
-        for f in groups[future.key]:
-            queue.put_nowait(f)
-
-
-async def _first_completed(futures):
-    """Return a single completed future
-
-    See Also:
-        _as_completed
-    """
-    q = asyncio.Queue()
-    await _as_completed(futures, q)
-    result = await q.get()
-    return result
-
-
-class as_completed:
-    """
-    Return futures in the order in which they complete
-
-    This returns an iterator that yields the input future objects in the order
-    in which they complete.  Calling ``next`` on the iterator will block until
-    the next future completes, irrespective of order.
-
-    Additionally, you can also add more futures to this object during
-    computation with the ``.add`` method
-
-    Parameters
-    ----------
-    futures: Collection of futures
-        A list of Future objects to be iterated over in the order in which they
-        complete
-    with_results: bool (False)
-        Whether to wait and include results of futures as well;
-        in this case ``as_completed`` yields a tuple of (future, result)
-    raise_errors: bool (True)
-        Whether we should raise when the result of a future raises an
-        exception; only affects behavior when ``with_results=True``.
-    timeout: int (optional)
-        The returned iterator raises a ``dask.distributed.TimeoutError``
-        if ``__next__()`` or ``__anext__()`` is called and the result
-        isn't available after timeout seconds from the original call to
-        ``as_completed()``. If timeout is not specified or ``None``, there is no limit
-        to the wait time.
-
-    Examples
-    --------
-    >>> x, y, z = client.map(inc, [1, 2, 3])  # doctest: +SKIP
-    >>> for future in as_completed([x, y, z]):  # doctest: +SKIP
-    ...     print(future.result())  # doctest: +SKIP
-    3
-    2
-    4
-
-    Add more futures during computation
-
-    >>> x, y, z = client.map(inc, [1, 2, 3])  # doctest: +SKIP
-    >>> ac = as_completed([x, y, z])  # doctest: +SKIP
-    >>> for future in ac:  # doctest: +SKIP
-    ...     print(future.result())  # doctest: +SKIP
-    ...     if random.random() < 0.5:  # doctest: +SKIP
-    ...         ac.add(c.submit(double, future))  # doctest: +SKIP
-    4
-    2
-    8
-    3
-    6
-    12
-    24
-
-    Optionally wait until the result has been gathered as well
-
-    >>> ac = as_completed([x, y, z], with_results=True)  # doctest: +SKIP
-    >>> for future, result in ac:  # doctest: +SKIP
-    ...     print(result)  # doctest: +SKIP
-    2
-    4
-    3
-    """
-
-    def __init__(
-        self,
-        futures=None,
-        loop=None,
-        with_results=False,
-        raise_errors=True,
-        *,
-        timeout=None,
-    ):
-        if futures is None:
-            futures = []
-        self.futures = defaultdict(int)
-        self.queue = pyQueue()
-        self.lock = threading.Lock()
-        self.loop = loop or default_client().loop
-        self.thread_condition = threading.Condition()
-        self.with_results = with_results
-        self.raise_errors = raise_errors
-        self._deadline = Deadline.after(parse_timedelta(timeout))
-
-        if futures:
-            self.update(futures)
-
-    @property
-    def condition(self):
-        try:
-            return self._condition
-        except AttributeError:
-            self._condition = asyncio.Condition()
-            return self._condition
-
-    async def _track_future(self, future):
-        try:
-            await _wait(future)
-        except CancelledError:
-            pass
-        if self.with_results:
-            try:
-                result = await future._result(raiseit=False)
-            except CancelledError as exc:
-                result = exc
-        with self.lock:
-            if future in self.futures:
-                self.futures[future] -= 1
-                if not self.futures[future]:
-                    del self.futures[future]
-                if self.with_results:
-                    self.queue.put_nowait((future, result))
-                else:
-                    self.queue.put_nowait(future)
-                async with self.condition:
-                    self.condition.notify()
-                with self.thread_condition:
-                    self.thread_condition.notify()
-
-    def update(self, futures):
-        """Add multiple futures to the collection.
-
-        The added futures will emit from the iterator once they finish"""
-        from distributed.actor import BaseActorFuture
-
-        with self.lock:
-            for f in futures:
-                if not isinstance(f, (Future, BaseActorFuture)):
-                    raise TypeError("Input must be a future, got %s" % f)
-                self.futures[f] += 1
-                self.loop.add_callback(self._track_future, f)
-
-    def add(self, future):
-        """Add a future to the collection
-
-        This future will emit from the iterator once it finishes
-        """
-        self.update((future,))
-
-    def is_empty(self):
-        """Returns True if there no completed or computing futures"""
-        return not self.count()
-
-    def has_ready(self):
-        """Returns True if there are completed futures available."""
-        return not self.queue.empty()
-
-    def count(self):
-        """Return the number of futures yet to be returned
-
-        This includes both the number of futures still computing, as well as
-        those that are finished, but have not yet been returned from this
-        iterator.
-        """
-        with self.lock:
-            return len(self.futures) + len(self.queue.queue)
-
-    def __repr__(self):
-        return "<as_completed: waiting={} done={}>".format(
-            len(self.futures), len(self.queue.queue)
-        )
-
-    def __iter__(self):
-        return self
-
-    def __aiter__(self):
-        return self
-
-    def _get_and_raise(self):
-        res = self.queue.get()
-        if self.with_results:
-            future, result = res
-            if self.raise_errors and future.status == "error":
-                typ, exc, tb = result
-                raise exc.with_traceback(tb)
-        return res
-
-    def __next__(self):
-        while self.queue.empty():
-            if self._deadline.expired:
-                raise TimeoutError()
-            if self.is_empty():
-                raise StopIteration()
-            with self.thread_condition:
-                self.thread_condition.wait(timeout=0.100)
-        return self._get_and_raise()
-
-    async def __anext__(self):
-        if not self._deadline.expires:
-            return await self._anext()
-        return await wait_for(self._anext(), self._deadline.remaining)
-
-    async def _anext(self):
-        if not self.futures and self.queue.empty():
-            raise StopAsyncIteration
-        while self.queue.empty():
-            if not self.futures:
-                raise StopAsyncIteration
-            async with self.condition:
-                await self.condition.wait()
-
-        return self._get_and_raise()
-
-    next = __next__
-
-    def next_batch(self, block=True):
-        """Get the next batch of completed futures.
-
-        Parameters
-        ----------
-        block : bool, optional
-            If True then wait until we have some result, otherwise return
-            immediately, even with an empty list.  Defaults to True.
-
-        Examples
-        --------
-        >>> ac = as_completed(futures)  # doctest: +SKIP
-        >>> client.gather(ac.next_batch())  # doctest: +SKIP
-        [4, 1, 3]
-
-        >>> client.gather(ac.next_batch(block=False))  # doctest: +SKIP
-        []
-
-        Returns
-        -------
-        List of futures or (future, result) tuples
-        """
-        if block:
-            batch = [next(self)]
-        else:
-            batch = []
-        while not self.queue.empty():
-            batch.append(self.queue.get())
-        return batch
-
-    def batches(self):
-        """
-        Yield all finished futures at once rather than one-by-one
-
-        This returns an iterator of lists of futures or lists of
-        (future, result) tuples rather than individual futures or individual
-        (future, result) tuples.  It will yield these as soon as possible
-        without waiting.
-
-        Examples
-        --------
-        >>> for batch in as_completed(futures).batches():  # doctest: +SKIP
-        ...     results = client.gather(batch)
-        ...     print(results)
-        [4, 2]
-        [1, 3, 7]
-        [5]
-        [6]
-        """
-        while True:
-            try:
-                yield self.next_batch(block=True)
-            except StopIteration:
-                return
-
-    def clear(self):
-        """Clear out all submitted futures"""
-        with self.lock:
-            self.futures.clear()
-            while not self.queue.empty():
-                self.queue.get()
-
-
-def AsCompleted(*args, **kwargs):
-    raise Exception("This has moved to as_completed")
-
-
+# Helper function for creating default client
 def default_client(c=None):
-    """Return a client if one has started
-
-    Parameters
-    ----------
-    c : Client
-        The client to return. If None, the default client is returned.
-
-    Returns
-    -------
-    c : Client
-        The client, if one has started
-
-    See also
-    --------
-    Client.current (alias)
-    """
-    c = c or _get_global_client()
+    """Return the default client"""
     if c:
         return c
     else:
-        raise ValueError(
-            "No clients found\n"
-            "Start a client and point it to the scheduler address\n"
-            "  from distributed import Client\n"
-            "  client = Client('ip-addr-of-scheduler:8786')\n"
-        )
-
-
-def ensure_default_client(client):
-    """Ensures the client passed as argument is set as the default
-
-    Parameters
-    ----------
-    client : Client
-        The client
-    """
-    _set_global_client(client)
-
-
-def redict_collection(c, dsk):
-    """Change the dictionary in the collection
-
-    Parameters
-    ----------
-    c : collection
-        The collection
-    dsk : dict
-        The dictionary
-
-    Returns
-    -------
-    c : Delayed
-        If the collection is a 'Delayed' object the collection is returned
-    cc : collection
-        If the collection is not a 'Delayed' object a copy of the
-        collection with xthe new dictionary is returned
-
-    """
-    from dask.delayed import Delayed
-
-    if isinstance(c, Delayed):
-        return Delayed(c.key, dsk)
-    else:
-        cc = copy.copy(c)
-        cc.dask = dsk
-        return cc
-
-
-def futures_of(o, client=None):
-    """Future objects in a collection
-
-    Parameters
-    ----------
-    o : collection
-        A possibly nested collection of Dask objects
-    client : Client, optional
-        The client
-
-    Examples
-    --------
-    >>> futures_of(my_dask_dataframe)
-    [<Future: finished key: ...>,
-     <Future: pending  key: ...>]
-
-    Raises
-    ------
-    CancelledError
-        If one of the futures is cancelled a CancelledError is raised
-
-    Returns
-    -------
-    futures : List[Future]
-        A list of futures held by those collections
-    """
-    stack = [o]
-    seen = set()
-    futures = list()
-    while stack:
-        x = stack.pop()
-        if type(x) in (tuple, set, list):
-            stack.extend(x)
-        elif type(x) is dict:
-            stack.extend(x.values())
-        elif isinstance(x, TaskRef):
-            if x not in seen:
-                seen.add(x)
-                if isinstance(x, Future):
-                    futures.append(x)
-        elif dask.is_dask_collection(x):
-            stack.extend(x.__dask_graph__().values())
-
-    if client is not None:
-        cancelled_errors = defaultdict(list)
-        for f in futures:
-            if not f.cancelled():
-                continue
-            exception = f._state.exception
-            assert isinstance(exception, FutureCancelledError)
-            cancelled_errors[exception.reason].append(exception)
-        if cancelled_errors:
-            groups = [
-                CancelledFuturesGroup(errors=errors, reason=reason)
-                for reason, errors in cancelled_errors.items()
-            ]
-            raise FuturesCancelledError(groups)
-    return futures[::-1]
-
-
-def fire_and_forget(obj):
-    """Run tasks at least once, even if we release the futures
-
-    Under normal operation Dask will not run any tasks for which there is not
-    an active future (this avoids unnecessary work in many situations).
-    However sometimes you want to just fire off a task, not track its future,
-    and expect it to finish eventually.  You can use this function on a future
-    or collection of futures to ask Dask to complete the task even if no active
-    client is tracking it.
-
-    The results will not be kept in memory after the task completes (unless
-    there is an active future) so this is only useful for tasks that depend on
-    side effects.
-
-    Parameters
-    ----------
-    obj : Future, list, dict, dask collection
-        The futures that you want to run at least once
-
-    Examples
-    --------
-    >>> fire_and_forget(client.submit(func, *args))  # doctest: +SKIP
-    """
-    futures = futures_of(obj)
-    for future in futures:
-        future.client._send_to_scheduler(
-            {
-                "op": "client-desires-keys",
-                "keys": [future.key],
-                "client": "fire-and-forget",
-            }
-        )
-
-
-class get_task_stream:
-    """
-    Collect task stream within a context block
-
-    This provides diagnostic information about every task that was run during
-    the time when this block was active.
-
-    This must be used as a context manager.
-
-    Parameters
-    ----------
-    plot: boolean, str
-        If true then also return a Bokeh figure
-        If plot == 'save' then save the figure to a file
-    filename: str (optional)
-        The filename to save to if you set ``plot='save'``
-
-    Examples
-    --------
-    >>> with get_task_stream() as ts:
-    ...     x.compute()
-    >>> ts.data
-    [...]
-
-    Get back a Bokeh figure and optionally save to a file
-
-    >>> with get_task_stream(plot='save', filename='task-stream.html') as ts:
-    ...    x.compute()
-    >>> ts.figure
-    <Bokeh Figure>
-
-    To share this file with others you may wish to upload and serve it online.
-    A common way to do this is to upload the file as a gist, and then serve it
-    on https://raw.githack.com ::
-
-       $ python -m pip install gist
-       $ gist task-stream.html
-       https://gist.github.com/8a5b3c74b10b413f612bb5e250856ceb
-
-    You can then navigate to that site, click the "Raw" button to the right of
-    the ``task-stream.html`` file, and then provide that URL to
-    https://raw.githack.com .  This process should provide a sharable link that
-    others can use to see your task stream plot.
-
-    See Also
-    --------
-    Client.get_task_stream: Function version of this context manager
-    """
-
-    def __init__(self, client=None, plot=False, filename="task-stream.html"):
-        self.data = []
-        self._plot = plot
-        self._filename = filename
-        self.figure = None
-        self.client = client or default_client()
-        self.client.get_task_stream(start=0, stop=0)  # ensure plugin
-
-    def __enter__(self):
-        self.start = time()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        L = self.client.get_task_stream(
-            start=self.start, plot=self._plot, filename=self._filename
-        )
-        if self._plot:
-            L, self.figure = L
-        self.data.extend(L)
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        L = await self.client.get_task_stream(
-            start=self.start, plot=self._plot, filename=self._filename
-        )
-        if self._plot:
-            L, self.figure = L
-        self.data.extend(L)
-
-
-class performance_report:
-    """Gather performance report
-
-    This creates a static HTML file that includes many of the same plots of the
-    dashboard for later viewing.
-
-    The resulting file uses JavaScript, and so must be viewed with a web
-    browser.  Locally we recommend using ``python -m http.server`` or hosting
-    the file live online.
-
-    Parameters
-    ----------
-    filename: str, optional
-        The filename to save the performance report locally
-
-    stacklevel: int, optional
-        The code execution frame utilized for populating the Calling Code section
-        of the report. Defaults to `1` which is the frame calling ``performance_report``
-
-    mode: str, optional
-        Mode parameter to pass to :func:`bokeh.io.output.output_file`. Defaults to ``None``.
-
-    storage_options: dict, optional
-         Any additional arguments to :func:`fsspec.open` when writing to a URL.
-
-    Examples
-    --------
-    >>> with performance_report(filename="myfile.html", stacklevel=1):
-    ...     x.compute()
-    """
-
-    def __init__(
-        self, filename="dask-report.html", stacklevel=1, mode=None, storage_options=None
-    ):
-        self.filename = filename
-        # stacklevel 0 or less - shows dask internals which likely isn't helpful
-        self._stacklevel = stacklevel if stacklevel > 0 else 1
-        self.mode = mode
-        self.storage_options = storage_options or {}
-
-    async def __aenter__(self):
-        self.start = time()
-        self.last_count = await get_client().run_on_scheduler(
-            lambda dask_scheduler: dask_scheduler.monitor.count
-        )
-        await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
-
-    async def __aexit__(self, exc_type, exc_value, traceback, code=None):
-        import fsspec
-
-        client = get_client()
-        if code is None:
-            frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
-            code = frames[0].code if frames else "<Code not available>"
-        data = await client.scheduler.performance_report(
-            start=self.start, last_count=self.last_count, code=code, mode=self.mode
-        )
-        with fsspec.open(
-            self.filename, mode="w", compression="infer", **self.storage_options
-        ) as f:
-            f.write(data)
-
-    def __enter__(self):
-        get_client().sync(self.__aenter__)
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        client = get_client()
-        frames = client._get_computation_code(self._stacklevel + 1, nframes=1)
-        code = frames[0].code if frames else "<Code not available>"
-        client.sync(self.__aexit__, exc_type, exc_value, traceback, code=code)
-
-
-class get_task_metadata:
-    """Collect task metadata within a context block
-
-    This gathers ``TaskState`` metadata and final state from the scheduler
-    for tasks which are submitted and finished within the scope of this
-    context manager.
-
-    Examples
-    --------
-    >>> with get_task_metadata() as tasks:
-    ...     x.compute()
-    >>> tasks.metadata
-    {...}
-    >>> tasks.state
-    {...}
-    """
-
-    def __init__(self):
-        self.name = f"task-metadata-{uuid.uuid4().hex}"
-        self.keys = set()
-        self.metadata = None
-        self.state = None
-
-    async def __aenter__(self):
-        await get_client().scheduler.start_task_metadata(name=self.name)
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        response = await get_client().scheduler.stop_task_metadata(name=self.name)
-        self.metadata = response["metadata"]
-        self.state = response["state"]
-
-    def __enter__(self):
-        return get_client().sync(self.__aenter__)
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return get_client().sync(self.__aexit__, exc_type, exc_value, traceback)
-
-
-@contextmanager
-def temp_default_client(c):
-    """Set the default client for the duration of the context
-
-    .. note::
-       This function should be used exclusively for unit testing the default
-       client functionality. In all other cases, please use
-       ``Client.as_current`` instead.
-
-    .. note::
-       Unlike ``Client.as_current``, this context manager is neither
-       thread-local nor task-local.
-
-    Parameters
-    ----------
-    c : Client
-        This is what default_client() will return within the with-block.
-    """
-    old_exec = default_client()
-    _set_global_client(c)
-    try:
-        with c.as_current():
-            yield
-    finally:
-        _set_global_client(old_exec)
-
-
-def _close_global_client():
-    """
-    Force close of global client.  This cleans up when a client
-    wasn't close explicitly, e.g. interactive sessions.
-    """
-    c = _get_global_client()
-    if c is not None:
-        c._should_close_loop = False
-        with suppress(TimeoutError, RuntimeError):
-            if c.asynchronous:
-                c.loop.add_callback(c.close, timeout=3)
+        return Client.current()
+
+
+# Helper function for synchronous execution
+def sync(loop, func, *args, callback_timeout=None, **kwargs):
+    """Run coroutine in loop running in separate thread.
+    We use this to run loop.sync() from within the loop thread"""
+    # TODO: remove this function when Tornado support is removed
+    e = threading.Event()
+    result = [None]
+    error = [False]
+
+    async def _sync_run():
+        try:
+            if is_coroutine_function(func):
+                res = await func(*args, **kwargs)
             else:
-                c.close(timeout=3)
+                res = func(*args, **kwargs)
+            result[0] = res
+        except Exception:
+            error[0] = sys.exc_info()
+        finally:
+            e.set()
+
+    # Ensure the loop is running
+    if not loop.asyncio_loop.is_running():
+        raise RuntimeError("Event loop is not running.")
+
+    # Schedule the coroutine
+    asyncio.run_coroutine_threadsafe(_sync_run(), loop.asyncio_loop)
+
+    # Wait for completion
+    if callback_timeout is not None:
+        timeout = parse_timedelta(callback_timeout, "s")
+        if not e.wait(timeout):
+            raise TimeoutError("timed out waiting for callback")
+    else:
+        e.wait()
+
+    # Raise errors if any
+    if error[0]:
+        typ, exc, tb = error[0]
+        raise exc.with_traceback(tb)
+    else:
+        return result[0]
 
 
-def get_collections_metadata(collection):
-    return {
-        "type": type(collection).__name__,
-    }
-
-
-atexit.register(_close_global_client)
+# Patch Dask configuration with client-specific settings
+dask.config.update(
+    dask.config.config,
+    {
+        "get": Client.get,
+        "compute": Client.compute,
+        "persist": Client.persist,
+        "futures.Future": Future,
+        "futures.Client": Client,
+        "distributed.Client": Client,
+        "distributed.Future": Future,
+    },
+    priority=10,
+)
