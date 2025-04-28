@@ -8295,3 +8295,58 @@ async def test_adjust_heartbeat(c, s):
         await asyncio.sleep(0.1)
     assert heartbeat_pc.callback_time == initial_value
     assert heartbeat_pc.callback_time == scheduler_info_pc.callback_time
+
+
+class CountSerialized:
+    """Simple wrapper on an object that counts the number of times it's
+    serialized."""
+
+    global_count = 0
+
+    def __init__(self, x):
+        self.x = x
+        self.local_count = 0
+
+    def __reduce__(self):
+        CountSerialized.global_count += 1
+        self.local_count += 1
+        return (CountSerialized, (self.x,))
+
+    def __dask_tokenize__(self):
+        # If no tokenization is registered, we'll pickle many times to get a
+        # deterministic token
+        return (self.__class__, self.x)
+
+
+def _task(foo, bar):
+    """Some dummy task on CountSerialized objects."""
+    return foo.x == bar.x == 1
+
+
+def _func(task_and_args):
+    f, args = task_and_args
+    return f(*args)
+
+
+@pytest.mark.parametrize("use_lambda", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_count_serialization(c, s, a, use_lambda):
+    CountSerialized.global_count = 0
+    x = CountSerialized(1)
+    if use_lambda:
+        task_and_args = _task, [x, x]
+        await c.submit(lambda: _func(task_and_args))
+        # The lambda will trigger an exception during serialization that will
+        # escalate and will attempt to serialize this repeatedly until falling
+        # back to cloudpickle.
+        # It also requires us to tokenize the lambda which again uses pickle.
+        # The same happens if _task or _func is defined in local scope.
+        expected_local = 3
+    else:
+        await c.submit(_task, x, x)
+        expected_local = 1
+
+    # once to the worker
+    expected_global = expected_local + 1
+    assert x.local_count <= expected_local
+    assert x.global_count <= expected_global
