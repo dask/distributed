@@ -2146,7 +2146,10 @@ class Client(SyncMethodMixin):
                     *(parse_input(a) for a in args),
                     **{k: parse_input(v) for k, v in kwargs.items()},
                 )
-            }
+            },
+            # We'd like to avoid hashing/tokenizing all of the above.
+            # The LLGExpr in this situation is as unique as it'll get.
+            _determ_token=uuid.uuid4().hex,
         )
         futures = self._graph_to_futures(
             expr,
