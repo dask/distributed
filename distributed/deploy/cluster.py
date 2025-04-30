@@ -252,7 +252,8 @@ class Cluster(SyncMethodMixin):
             self.scheduler_info["workers"].update(workers)
             self.scheduler_info.update(msg)
         elif op == "remove":
-            del self.scheduler_info["workers"][msg]
+            worker = msg['worker']
+            del self.scheduler_info["workers"][worker]
         else:  # pragma: no cover
             raise ValueError("Invalid op", op, msg)
 
