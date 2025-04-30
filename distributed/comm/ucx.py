@@ -93,7 +93,6 @@ def synchronize_stream(stream=0):
 
 def init_once():
     global ucp, device_array
-    global ucx_create_endpoint, ucx_create_listener
     global pre_existing_cuda_context, cuda_context_created
 
     if ucp is not None:

@@ -82,7 +82,9 @@ from distributed.worker_state_machine import (
     StateMachineEvent,
 )
 from distributed.worker_state_machine import TaskState as WorkerTaskState
-from distributed.worker_state_machine import WorkerState
+from distributed.worker_state_machine import (
+    WorkerState,
+)
 
 try:
     import dask.array  # register config

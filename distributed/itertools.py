@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Iterable, Iterator
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
-X = TypeVar("X")
-Y = TypeVar("Y")
+
+class _Comparable(Protocol):
+
+    @abstractmethod
+    def __ge__(self, other: _Comparable) -> bool: ...
+
+
+X = TypeVar("X", bound=_Comparable)
+Y = TypeVar("Y", bound=_Comparable)
 
 
 def ffill(x: Iterable[X], xp: Iterable[X], fp: Iterable[Y], left: Y) -> Iterator[Y]:
@@ -35,7 +43,7 @@ def ffill(x: Iterable[X], xp: Iterable[X], fp: Iterable[Y], left: Y) -> Iterator
     xp_done = False
     xp1, fp1 = None, left
     for xi in x:
-        while not xp_done and (xp1 is None or xi >= xp1):  # type: ignore[unreachable]
+        while not xp_done and (xp1 is None or xi >= xp1):
             fp0 = fp1
             try:
                 xp1, fp1 = next(it)
