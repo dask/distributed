@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import random
 from contextlib import suppress
 from operator import add
 from time import sleep
-import copy
 
 import pytest
 from tlz import concat, sliding_window

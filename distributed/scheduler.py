@@ -9410,11 +9410,13 @@ class WorkerStatusPlugin(SchedulerPlugin):
         except CommClosedError:
             scheduler.remove_plugin(name=self.name)
 
-    def remove_worker(self, scheduler: Scheduler, worker: str, name: str, **kwargs: Any) -> None:
+    def remove_worker(
+            self, scheduler: Scheduler, worker: str, name: str, **kwargs: Any
+        ) -> None:
         try:
             msg = {
-                'worker': worker,
-                'name': name,
+                "worker": worker,
+                "name": name,
             }
             self.bcomm.send(["remove", msg])
         except CommClosedError:

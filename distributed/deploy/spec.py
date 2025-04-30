@@ -397,12 +397,12 @@ class SpecCluster(Cluster):
 
     def _update_worker_status(self, op, msg):
         if op == "remove":
-            name = msg['name']
+            name = msg["name"]
 
             def f():
                 if (
                     name in self.workers
-                    and msg['worker'] not in self.scheduler_info["workers"]
+                    and msg["worker"] not in self.scheduler_info["workers"]
                     and not any(
                         d["name"] == name
                         for d in self.scheduler_info["workers"].values()
