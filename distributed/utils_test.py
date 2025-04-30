@@ -983,9 +983,7 @@ def gen_cluster(
                                 Worker=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
                                 worker_kwargs=worker_kwargs,
-                                # Cut this in half to allow for at least one
-                                # retry
-                                timeout=timeout // 2,
+                                timeout=timeout // 4,
                             )
                         except Exception as e:
                             logger.error(
