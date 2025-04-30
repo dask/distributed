@@ -5,13 +5,14 @@ import random
 from contextlib import suppress
 from operator import add
 from time import sleep
+import copy
 
 import pytest
 from tlz import concat, sliding_window
 
 from dask import delayed
 
-from distributed import Client, Nanny, Worker, wait
+from distributed import Client, Nanny, Worker, wait, SpecCluster
 from distributed.chaos import KillWorker
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
@@ -337,3 +338,39 @@ async def test_chaos_rechunk(c, s, *workers):
         await asyncio.sleep(0.1)
 
     await z.cancel()
+
+
+@pytest.mark.slow
+def test_stress_scale():
+    for n in range(30):
+        cluster_kwargs = {}
+        client_kwargs = {
+            'set_as_default': False,
+        }
+        spec = {}
+        template = {'cls': Nanny}
+        N = 24
+        for i in range(N):
+            w = spec[f'worker-{i}'] = copy.copy(template)
+        cluster = SpecCluster(
+            workers=spec,
+            worker=template,  # <- template for newly scaled up workers
+            **cluster_kwargs,
+        )
+        client = Client(cluster, **client_kwargs)
+        client.wait_for_workers(N)
+
+        # scale down:
+        print("down")
+        client.cluster.scale(n=1)
+
+        # scale up again:
+        print("up")
+        # client.cluster.worker_spec = copy.copy(spec)
+        client.cluster.scale(n=len(spec))
+        client.wait_for_workers(len(spec))
+
+        # shutdown:
+        print("shutdown")
+        client.close()
+        client.cluster.close(timeout=30)
