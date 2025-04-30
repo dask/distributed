@@ -7,11 +7,9 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 from tlz import merge
 
 from distributed import Client, Nanny, Queue, Scheduler, Worker, wait, worker_client
-from distributed.compatibility import LINUX
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils_test import (
@@ -91,7 +89,6 @@ async def test_scatter(c, s, a, b):
     assert yy == [20]
 
 
-@pytest.mark.skipif(LINUX, reason="https://github.com/dask/distributed/issues/9052")
 @gen_tls_cluster(client=True, Worker=Nanny)
 async def test_nanny(c, s, a, b):
     assert s.address.startswith("tls://")
@@ -191,7 +188,6 @@ async def test_worker_client_executor(c, s, a, b):
     assert result == 30 * 29
 
 
-@pytest.mark.skipif(LINUX, reason="https://github.com/dask/distributed/issues/9052")
 @gen_tls_cluster(client=True, Worker=Nanny)
 async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {a.worker_address, b.worker_address}
