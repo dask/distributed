@@ -2118,12 +2118,21 @@ async def test_badly_serialized_input_stderr(capsys, c):
     ],
 )
 def test_repr(loop, func):
-    with cluster(nworkers=3, worker_kwargs={"memory_limit": "2 GiB"}) as (s, [a, b, c]):
+    nworkers = 6
+    with cluster(nworkers=nworkers, worker_kwargs={"memory_limit": "2 GiB"}) as (
+        s,
+        *workers,
+    ):
         with Client(s["address"], loop=loop) as c:
+            # NOTE: Intentionally testing when we have more workers than the default
+            # in `client.scheduler_info()` (xref https://github.com/dask/distributed/issues/9065)
+            info = c.scheduler_info()
+            assert len(info["workers"]) < nworkers
+
             text = func(c)
             assert c.scheduler.address in text
-            assert "threads=3" in text or "Total threads: </strong>" in text
-            assert "6.00 GiB" in text
+            assert f"threads={nworkers}" in text or "Total threads: </strong>" in text
+            assert f"{2 * nworkers}.00 GiB" in text
             if "<table" not in text:
                 assert len(text) < 80
 
