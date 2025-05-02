@@ -1343,18 +1343,16 @@ class Client(SyncMethodMixin):
         info = self._scheduler_identity
         addr = info.get("address")
         if addr:
-            workers = info.get("workers", {})
-            nworkers = len(workers)
-            nthreads = sum(w["nthreads"] for w in workers.values())
+            nworkers = info.get("n_workers", 0)
+            nthreads = info.get("total_threads", 0)
             text = "<%s: %r processes=%d threads=%d" % (
                 self.__class__.__name__,
                 addr,
                 nworkers,
                 nthreads,
             )
-            memory = [w["memory_limit"] for w in workers.values()]
-            if all(memory):
-                text += ", memory=" + format_bytes(sum(memory))
+            memory = info.get("total_memory", 0)
+            text += ", memory=" + format_bytes(memory)
             text += ">"
             return text
 
