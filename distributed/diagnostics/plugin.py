@@ -190,7 +190,7 @@ class SchedulerPlugin:
         """
 
     def remove_worker(
-        self, scheduler: Scheduler, worker: str, name: str, *, stimulus_id: str, **kwargs: Any
+        self, scheduler: Scheduler, worker: str, *, name: str, stimulus_id: str, **kwargs: Any
     ) -> None | Awaitable[None]:
         """Run when a worker leaves the cluster
 
