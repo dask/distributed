@@ -8267,7 +8267,6 @@ def test_submit_persisted_collection_as_argument(c, do_wait):
     [
         (True, True),
         (False, True),
-        (False, False),
     ],
 )
 def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
@@ -8275,8 +8274,6 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
 ):
     da = pytest.importorskip("dask.array", exc_type=ImportError)
 
-    if not store_variable and not do_wait:
-        pytest.skip("This test is not making sense")
     # Note: sending collections like this should be considered an anti-pattern
     # but it is possible. As long as the user ensures the futures stay alive
     # this is fine but the cluster will not take over this responsibility. The
@@ -8319,7 +8316,7 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
     while c.run_on_scheduler(lambda dask_scheduler: len(dask_scheduler.tasks)) > 1:
         sleep(0.1)
     ev.set()
-    with pytest.raises(FutureCancelledError):
+    with pytest.raises(RuntimeError, match="Lost dependencies for keys"):
         future.result()
 
 
