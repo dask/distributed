@@ -2599,7 +2599,7 @@ class SchedulerState:
             if ts.who_wants:
                 ts.exception_blame = ts
                 ts.exception = Serialized(
-                    *serialize(ValueError("Worker holding Actor was lost"))
+                    *serialize(RuntimeError("Worker holding Actor was lost"))
                 )
                 return {ts.key: "erred"}, {}, {}  # don't try to recreate
 
@@ -2652,7 +2652,7 @@ class SchedulerState:
 
         if self.validate:
             assert ts.exception_blame
-            assert not ts.who_has
+            assert not ts.who_has or ts.actor
             assert not ts.waiting_on
 
         failing_ts = ts.exception_blame
@@ -2772,8 +2772,8 @@ class SchedulerState:
         self,
         key: Key,
         stimulus_id: str,
-        worker: str,
         *,
+        worker: str | None = None,
         cause: Key | None = None,
         exception: Serialized | None = None,
         traceback: Serialized | None = None,
@@ -2988,6 +2988,45 @@ class SchedulerState:
         ts.exception_blame = ts.exception = ts.traceback = None
         self.task_metadata.pop(key, None)
 
+    def _transition_memory_erred(self, key: Key, stimulus_id: str) -> RecsMsgs:
+        ts = self.tasks[key]
+        if self.validate:
+            assert ts.actor
+        recommendations: Recs = {}
+        client_msgs: Msgs = {}
+        worker_msgs: Msgs = {}
+        # XXX factor this out?
+        worker_msg = {
+            "op": "free-keys",
+            "keys": [key],
+            "stimulus_id": stimulus_id,
+        }
+        for ws in ts.who_has or ():
+            worker_msgs[ws.address] = [worker_msg]
+        self.remove_all_replicas(ts)
+
+        for dts in ts.dependents:
+            if not dts.who_has:
+                dts.exception_blame = ts
+                recommendations[dts.key] = "erred"
+        exception = Serialized(
+            *serialize(RuntimeError("Worker holding Actor was lost"))
+        )
+        report_msg = {
+            "op": "task-erred",
+            "key": key,
+            "exception": exception,
+        }
+        for cs in ts.who_wants or ():
+            client_msgs[cs.client_key] = [report_msg]
+
+        ts.state = "erred"
+        return self._propagate_erred(
+            ts,
+            cause=ts.key,
+            exception=exception,
+        )
+
     def _transition_memory_forgotten(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
 
@@ -3078,6 +3117,7 @@ class SchedulerState:
         ("no-worker", "processing"): _transition_no_worker_processing,
         ("no-worker", "erred"): _transition_no_worker_erred,
         ("released", "forgotten"): _transition_released_forgotten,
+        ("memory", "erred"): _transition_memory_erred,
         ("memory", "forgotten"): _transition_memory_forgotten,
         ("erred", "released"): _transition_erred_released,
         ("memory", "released"): _transition_memory_released,
@@ -5521,7 +5561,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         for ts in list(ws.has_what):
             self.remove_replica(ts, ws)
-            if not ts.who_has:
+            if ts in ws.actors:
+                recommendations[ts.key] = "erred"
+            elif not ts.who_has:
                 if ts.run_spec:
                     recompute_keys.add(ts.key)
                     recommendations[ts.key] = "released"
