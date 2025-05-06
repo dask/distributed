@@ -43,6 +43,7 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.bag as db
 from dask import delayed
+from dask.task_spec import Task, TaskRef
 from dask.tokenize import TokenizationError, tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
@@ -3107,6 +3108,36 @@ async def test_submit_on_cancelled_future(c, s, a, b):
 
     with pytest.raises(CancelledError):
         await c.submit(inc, x)
+
+
+@gen_cluster(client=True)
+async def test_compute_partially_forgotten(c, s, *workers):
+    # (CPython impl detail)
+    # While it is not possible to argue about what the iteration order of a set
+    # will be, it is determinisitic and only depends on the hash of the inserted
+    # elements. Therefore, converting the set to a list will alway yield the
+    # same order. We're initializing the keys in this very specific order to
+    # ensure that the scheduler internally arranges the keys in this way
+
+    # We'll need the list to be
+    # ['key', 'lost_dep_of_key']
+    keys = key, lost_dep_of_key = list({"foo", "bar"})
+
+    task = Task(key, inc, TaskRef(lost_dep_of_key))
+    res = c.get({task.key: task}, keys, sync=False)
+
+    res = c.get({task.key: task}, keys, sync=False)
+    assert res[1].key == lost_dep_of_key
+    with pytest.raises(Exception, match="lost"):
+        await res[1].result()
+
+    while (
+        len([msg[1]["action"] == "update-graph" for msg in s.get_events("scheduler")])
+        < 2
+    ):
+        await asyncio.sleep(0.01)
+    assert not s.get_events("transitions")
+    assert not s.tasks
 
 
 @gen_cluster(
