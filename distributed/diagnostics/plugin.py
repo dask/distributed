@@ -99,7 +99,6 @@ class SchedulerPlugin:
         keys: set[Key],
         tasks: list[Key],
         annotations: dict[str, dict[Key, Any]],
-        priority: dict[Key, tuple[int | float, ...]],
         stimulus_id: str,
         **kwargs: Any,
     ) -> None:
@@ -125,8 +124,6 @@ class SchedulerPlugin:
                         },
                         ...
                     }
-            priority:
-                Task calculated priorities as assigned to the tasks.
             stimulus_id:
                 ID of the stimulus causing the graph update
             **kwargs:

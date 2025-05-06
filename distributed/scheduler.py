@@ -4742,7 +4742,6 @@ class Scheduler(SchedulerState, ServerNode):
             # annotations.
             computation.annotations.update(global_annotations)
         (
-            runnable,
             touched_tasks,
             new_tasks,
             colliding_task_count,
@@ -4770,7 +4769,7 @@ class Scheduler(SchedulerState, ServerNode):
             user_priority=user_priority,
             fifo_timeout=fifo_timeout,
             start=start,
-            tasks=runnable,
+            tasks=touched_tasks,
         )
 
         self.client_desires_keys(keys=keys, client=client)
@@ -4784,19 +4783,17 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Compute recommendations
         recommendations: Recs = {}
-        priority = dict()
         for ts in sorted(
-            runnable,
+            filter(
+                lambda ts: ts.state == "released",
+                map(self.tasks.__getitem__, keys),
+            ),
             key=operator.attrgetter("priority"),
             reverse=True,
         ):
-            assert ts.priority  # mypy
-            priority[ts.key] = ts.priority
-            assert ts.run_spec
-            if ts.state == "released":
-                recommendations[ts.key] = "waiting"
+            recommendations[ts.key] = "waiting"
 
-        for ts in runnable:
+        for ts in touched_tasks:
             for dts in ts.dependencies:
                 if dts.exception_blame:
                     ts.exception_blame = dts.exception_blame
@@ -4817,7 +4814,7 @@ class Scheduler(SchedulerState, ServerNode):
             # TaskState may have also been created by client_desires_keys or scatter,
             # and only later gained a run_spec.
             span_annotations = spans_ext.observe_tasks(
-                runnable, span_metadata=span_metadata, code=code
+                touched_tasks, span_metadata=span_metadata, code=code
             )
             # In case of TaskGroup collision, spans may have changed
             # FIXME: Is this used anywhere besides tests?
@@ -4834,7 +4831,6 @@ class Scheduler(SchedulerState, ServerNode):
                     tasks=[ts.key for ts in touched_tasks],
                     keys=keys,
                     annotations=dict(annotations_for_plugin),
-                    priority=priority,
                     stimulus_id=stimulus_id,
                 )
             except Exception as e:
@@ -5004,7 +5000,6 @@ class Scheduler(SchedulerState, ServerNode):
         computation: Computation,
     ) -> tuple:
         # Get or create task states
-        runnable = list()
         new_tasks = []
         stack = list(keys)
         touched_keys = set()
@@ -5020,8 +5015,6 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is None:
                 ts = self.new_task(k, dsk.get(k), "released", computation=computation)
                 new_tasks.append(ts)
-                if ts.run_spec:
-                    runnable.append(ts)
             # It is possible to create the TaskState object before its runspec is known
             # to the scheduler. For instance, this is possible when using a Variable:
             # `f = c.submit(foo); await Variable().set(f)` since the Variable uses a
@@ -5031,8 +5024,6 @@ class Scheduler(SchedulerState, ServerNode):
             # see for example test_scatter_creates_ts
             elif ts.run_spec is None:
                 ts.run_spec = dsk.get(k)
-                if ts.run_spec:
-                    runnable.append(ts)
             # run_spec in the submitted graph may be None. This happens
             # when an already persisted future is part of the graph
             elif k in dsk:
@@ -5095,7 +5086,7 @@ class Scheduler(SchedulerState, ServerNode):
                 len(touched_tasks),
                 len(keys),
             )
-        return runnable, touched_tasks, new_tasks, colliding_task_count
+        return touched_tasks, new_tasks, colliding_task_count
 
     def _apply_annotations(
         self,
