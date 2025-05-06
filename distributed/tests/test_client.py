@@ -3110,20 +3110,30 @@ async def test_submit_on_cancelled_future(c, s, a, b):
         await c.submit(inc, x)
 
 
+@pytest.mark.parametrize("validate", [True, False])
 @gen_cluster(client=True)
-async def test_compute_partially_forgotten(c, s, *workers):
+async def test_compute_partially_forgotten(c, s, *workers, validate):
+    if not validate:
+        s.validate = False
     # (CPython impl detail)
-    # While it is not possible to argue about what the iteration order of a set
-    # will be, it is determinisitic and only depends on the hash of the inserted
+    # While it is not possible to know what the iteration order of a set will
+    # be, it is determinisitic and only depends on the hash of the inserted
     # elements. Therefore, converting the set to a list will alway yield the
     # same order. We're initializing the keys in this very specific order to
     # ensure that the scheduler internally arranges the keys in this way
 
     # We'll need the list to be
     # ['key', 'lost_dep_of_key']
+    # At the time of writing, it is unclear why the lost_dep_of_key is part of
+    # keys but this triggers an observed error
     keys = key, lost_dep_of_key = list({"foo", "bar"})
 
+    # Ordinarily this is not submitted as a graph but it could be if a persist
+    # was leading up to this
     task = Task(key, inc, TaskRef(lost_dep_of_key))
+    # Only happens if it is submitted twice. The first submission leaves a
+    # zombie task around after triggering the "lost deps" exception. That zombie
+    # causes the second one to trigger the transition error.
     res = c.get({task.key: task}, keys, sync=False)
 
     res = c.get({task.key: task}, keys, sync=False)
