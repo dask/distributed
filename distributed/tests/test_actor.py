@@ -13,6 +13,7 @@ from distributed import (
     Actor,
     BaseActorFuture,
     Client,
+    Event,
     Future,
     Nanny,
     as_completed,
@@ -23,7 +24,7 @@ from distributed import (
 from distributed.metrics import time
 from distributed.utils import LateLoopEvent
 from distributed.utils_test import cluster, double, gen_cluster, inc
-from distributed.worker import get_worker
+from distributed.worker import Worker, get_worker
 
 
 class Counter:
@@ -290,7 +291,7 @@ async def test_failed_worker(c, s, a, b):
 
     await a.close()
 
-    with pytest.raises(ValueError, match="Worker holding Actor was lost"):
+    with pytest.raises(RuntimeError, match="Worker holding Actor was lost"):
         await counter.increment()
 
 
@@ -824,3 +825,68 @@ async def test_get_worker(c, s, a, b):
 
     actor = await c.submit(Actor, actor=True, workers=[a.address])
     assert await actor.demo() == a.address
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_actor_worker_host_leaves_gracefully(c, s, a):
+    # see also test_actor_worker_host_dies
+    async with Worker(s.address, nthreads=1) as b:
+
+        counter = await c.submit(
+            Counter, actor=True, workers=[b.address], allow_other_workers=True
+        )
+
+        enter_ev = Event()
+        wait_ev = Event()
+
+        def foo(couner, enter_ev, wait_ev):
+            enter_ev.set()
+            wait_ev.wait()
+
+        fut = c.submit(
+            foo,
+            counter,
+            enter_ev,
+            wait_ev,
+            workers=[a.address],
+            allow_other_workers=True,
+        )
+
+        await enter_ev.wait()
+    await wait_ev.set()
+    with pytest.raises(RuntimeError, match="Worker holding Actor was lost"):
+        await fut.result()
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_actor_worker_host_dies(c, s, a):
+    # see also test_actor_worker_host_leaves_gracefully
+    async with Worker(s.address, nthreads=1) as b:
+
+        counter = await c.submit(
+            Counter, actor=True, workers=[b.address], allow_other_workers=True
+        )
+
+        enter_ev = Event()
+        wait_ev = Event()
+
+        def foo(couner, enter_ev, wait_ev):
+            enter_ev.set()
+            wait_ev.wait()
+
+        fut = c.submit(
+            foo,
+            counter,
+            enter_ev,
+            wait_ev,
+            workers=[a.address],
+            allow_other_workers=True,
+        )
+
+        await enter_ev.wait()
+        # Simulate the worker going down
+        s.stream_comms[b.address].close()
+        await b.finished()
+        await wait_ev.set()
+        with pytest.raises(RuntimeError, match="Worker holding Actor was lost"):
+            await fut.result()
