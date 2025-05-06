@@ -4831,6 +4831,7 @@ class Scheduler(SchedulerState, ServerNode):
                     tasks=[ts.key for ts in touched_tasks],
                     keys=keys,
                     annotations=dict(annotations_for_plugin),
+                    priority={ts.key: ts.priority for ts in touched_tasks},
                     stimulus_id=stimulus_id,
                 )
             except Exception as e:
