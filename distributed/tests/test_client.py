@@ -43,6 +43,7 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.bag as db
 from dask import delayed
+from dask.task_spec import Task, TaskRef
 from dask.tokenize import TokenizationError, tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
@@ -3107,6 +3108,46 @@ async def test_submit_on_cancelled_future(c, s, a, b):
 
     with pytest.raises(CancelledError):
         await c.submit(inc, x)
+
+
+@pytest.mark.parametrize("validate", [True, False])
+@gen_cluster(client=True)
+async def test_compute_partially_forgotten(c, s, *workers, validate):
+    if not validate:
+        s.validate = False
+    # (CPython impl detail)
+    # While it is not possible to know what the iteration order of a set will
+    # be, it is determinisitic and only depends on the hash of the inserted
+    # elements. Therefore, converting the set to a list will alway yield the
+    # same order. We're initializing the keys in this very specific order to
+    # ensure that the scheduler internally arranges the keys in this way
+
+    # We'll need the list to be
+    # ['key', 'lost_dep_of_key']
+    # At the time of writing, it is unclear why the lost_dep_of_key is part of
+    # keys but this triggers an observed error
+    keys = key, lost_dep_of_key = list({"foo", "bar"})
+
+    # Ordinarily this is not submitted as a graph but it could be if a persist
+    # was leading up to this
+    task = Task(key, inc, TaskRef(lost_dep_of_key))
+    # Only happens if it is submitted twice. The first submission leaves a
+    # zombie task around after triggering the "lost deps" exception. That zombie
+    # causes the second one to trigger the transition error.
+    res = c.get({task.key: task}, keys, sync=False)
+
+    res = c.get({task.key: task}, keys, sync=False)
+    assert res[1].key == lost_dep_of_key
+    with pytest.raises(CancelledError, match="lost dependencies"):
+        await res[1].result()
+
+    while (
+        len([msg[1]["action"] == "update-graph" for msg in s.get_events("scheduler")])
+        < 2
+    ):
+        await asyncio.sleep(0.01)
+    assert not s.get_events("transitions")
+    assert not s.tasks
 
 
 @gen_cluster(
@@ -8226,7 +8267,6 @@ def test_submit_persisted_collection_as_argument(c, do_wait):
     [
         (True, True),
         (False, True),
-        (False, False),
     ],
 )
 def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
@@ -8234,8 +8274,6 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
 ):
     da = pytest.importorskip("dask.array", exc_type=ImportError)
 
-    if not store_variable and not do_wait:
-        pytest.skip("This test is not making sense")
     # Note: sending collections like this should be considered an anti-pattern
     # but it is possible. As long as the user ensures the futures stay alive
     # this is fine but the cluster will not take over this responsibility. The

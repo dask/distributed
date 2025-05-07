@@ -4672,9 +4672,9 @@ class Scheduler(SchedulerState, ServerNode):
     def _find_lost_dependencies(
         self,
         dsk: dict[Key, T_runspec],
-        dependencies: dict[Key, set[Key]],
         keys: set[Key],
     ) -> set[Key]:
+        # FIXME: There is typically no need to walk the entire graph
         lost_keys = set()
         seen: set[Key] = set()
         sadd = seen.add
@@ -4696,8 +4696,6 @@ class Scheduler(SchedulerState, ServerNode):
                             k,
                             d,
                         )
-                        dependencies.pop(d, None)
-                        keys.discard(k)
                     continue
                 wupdate(dsk[d].dependencies)
         return lost_keys
@@ -4909,6 +4907,8 @@ class Scheduler(SchedulerState, ServerNode):
         start = time()
         stimulus_id = stimulus_id or f"update-graph-{start}"
         self._active_graph_updates += 1
+        evt_msg: dict[str, Any]
+
         try:
             logger.debug("Received new graph. Deserializing...")
             try:
@@ -4954,20 +4954,25 @@ class Scheduler(SchedulerState, ServerNode):
             # has to happen in the same event loop.
             # *************************************
 
-            lost_keys = self._find_lost_dependencies(dsk, dependencies, keys)
-
-            if lost_keys:
+            if self._find_lost_dependencies(dsk, keys):
                 self.report(
                     {
                         "op": "cancelled-keys",
-                        "keys": lost_keys,
+                        "keys": keys,
                         "reason": "lost dependencies",
                     },
                     client=client,
                 )
                 self.client_releases_keys(
-                    keys=lost_keys, client=client, stimulus_id=stimulus_id
+                    keys=keys, client=client, stimulus_id=stimulus_id
                 )
+                evt_msg = {
+                    "action": "update-graph",
+                    "stimulus_id": stimulus_id,
+                    "status": "cancelled",
+                }
+                self.log_event(["scheduler", client], evt_msg)
+                return
 
             before = len(self.tasks)
 
