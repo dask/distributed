@@ -3138,7 +3138,7 @@ async def test_compute_partially_forgotten(c, s, *workers, validate):
 
     res = c.get({task.key: task}, keys, sync=False)
     assert res[1].key == lost_dep_of_key
-    with pytest.raises(Exception, match="Lost dependencies"):
+    with pytest.raises(CancelledError, match="lost dependencies"):
         await res[1].result()
 
     while (
