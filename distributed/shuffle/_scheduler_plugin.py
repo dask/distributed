@@ -293,13 +293,15 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         # spec.pick_worker; it would return two identical sets of results on both calls
         # of this method... until the set of available workers changes between the two
         # calls, which would cause misaligned shuffle outputs and a deadlock.
-        seen = {barrier}
-        for dependent in barrier.dependents:
-            for possible_barrier in dependent.dependencies:
-                if possible_barrier in seen:
+        seen = {barrier.key}
+        for dependent_key in barrier.dependents:
+            for possible_barrier_key in self.scheduler.tasks[
+                dependent_key
+            ].dependencies:
+                if possible_barrier_key in seen:
                     continue
-                seen.add(possible_barrier)
-                if not (other_barrier_key := id_from_key(possible_barrier.key)):
+                seen.add(possible_barrier_key)
+                if not (other_barrier_key := id_from_key(possible_barrier_key)):
                     continue
                 if not (shuffle := self.active_shuffles.get(other_barrier_key)):
                     continue
@@ -350,7 +352,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         """
         barrier = self.scheduler.tasks[barrier_key(spec.id)]
         for dependent in barrier.dependents:
-            dependent._queueable = False
+            self.scheduler.tasks[dependent]._queueable = False
 
     @log_errors()
     def _set_restriction(self, ts: TaskState, worker: str) -> None:
@@ -368,9 +370,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         self.scheduler.set_restrictions({ts.key: {worker}})
 
     @log_errors()
-    def _unset_restriction(self, ts: TaskState) -> None:
+    def _unset_restriction(self, key: Key) -> None:
         # shuffle_original_restrictions is only set if the task was first scheduled
         # on the wrong worker
+        ts = self.scheduler.tasks[key]
         if (
             ts.annotations is None
             or "shuffle_original_restrictions" not in ts.annotations
@@ -383,10 +386,10 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         barrier_task = self.scheduler.tasks[barrier_key(id)]
         recs: Recs = {}
 
-        for dt in barrier_task.dependents:
-            if dt.state == "erred":
+        for dt_key in barrier_task.dependents:
+            if self.scheduler.tasks[dt_key].state == "erred":
                 return {}
-            recs.update({dt.key: "released"})
+            recs.update({dt_key: "released"})
 
         if barrier_task.state == "erred":
             # This should never happen, a dependent of the barrier should already
@@ -397,15 +400,15 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             )  # pragma: no cover
         recs.update({barrier_task.key: "released"})
 
-        for dt in barrier_task.dependencies:
-            if dt.state == "erred":
+        for dt_key in barrier_task.dependencies:
+            if self.scheduler.tasks[dt_key].state == "erred":
                 # This should never happen, a dependent of the barrier should already
                 # be `erred`
                 raise P2PIllegalStateError(
                     f"Expected barrier and its dependents to be "
-                    f"'erred' if the barrier's dependency {dt} is."
+                    f"'erred' if the barrier's dependency {dt_key} is."
                 )  # pragma: no cover
-            recs.update({dt.key: "released"})
+            recs.update({dt_key: "released"})
         return recs
 
     def _restart_shuffle(
