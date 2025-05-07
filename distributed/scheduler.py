@@ -4907,6 +4907,8 @@ class Scheduler(SchedulerState, ServerNode):
         start = time()
         stimulus_id = stimulus_id or f"update-graph-{start}"
         self._active_graph_updates += 1
+        evt_msg: dict[str, Any]
+
         try:
             logger.debug("Received new graph. Deserializing...")
             try:
@@ -4952,10 +4954,26 @@ class Scheduler(SchedulerState, ServerNode):
             # has to happen in the same event loop.
             # *************************************
 
-            lost_keys = self._find_lost_dependencies(dsk, keys)
+            if self._find_lost_dependencies(dsk, keys):
+                self.report(
+                    {
+                        "op": "cancelled-keys",
+                        "keys": keys,
+                        "reason": "lost dependencies",
+                    },
+                    client=client,
+                )
+                self.client_releases_keys(
+                    keys=keys, client=client, stimulus_id=stimulus_id
+                )
+                evt_msg = {
+                    "action": "update-graph",
+                    "stimulus_id": stimulus_id,
+                    "status": "cancelled",
+                }
+                self.log_event(["scheduler", client], evt_msg)
+                return
 
-            if lost_keys:
-                raise RuntimeError(f"Lost dependencies for keys {lost_keys & keys}.")
             before = len(self.tasks)
 
             self._remove_done_tasks_from_dsk(dsk, dependencies)

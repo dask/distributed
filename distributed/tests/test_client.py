@@ -2665,18 +2665,18 @@ async def test_futures_of_cancelled_raises(c, s, a, b):
     while x.key in s.tasks:
         await asyncio.sleep(0.01)
 
-    with pytest.raises(RuntimeError, match="Lost dependencies"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         get_obj = c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False)
         gather_obj = c.gather(get_obj)
         await gather_obj
 
-    with pytest.raises(RuntimeError, match="Lost dependencies"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.submit(inc, x)
 
-    with pytest.raises(RuntimeError, match="Lost dependencies"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.submit(add, 1, y=x)
 
-    with pytest.raises(RuntimeError, match="Lost dependencies"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.gather(c.map(add, [1], y=x))
 
 
@@ -3106,7 +3106,7 @@ async def test_submit_on_cancelled_future(c, s, a, b):
 
     await c.cancel(x)
 
-    with pytest.raises(RuntimeError, match="Lost dependencies"):
+    with pytest.raises(CancelledError):
         await c.submit(inc, x)
 
 
@@ -6033,7 +6033,7 @@ async def test_mixing_clients_different_scheduler(s, a, b):
         Client(s2.address, asynchronous=True) as c2,
     ):
         future = c1.submit(inc, 1)
-        with pytest.raises(RuntimeError, match="Lost dependencies"):
+        with pytest.raises(CancelledError):
             await c2.submit(inc, future)
 
 
@@ -8218,7 +8218,7 @@ async def test_release_persisted_collection(c, s, a, b):
     while s.tasks:
         await asyncio.sleep(0.01)
 
-    with pytest.raises(RuntimeError, match="Lost dependencies"):
+    with pytest.raises(CancelledError):
         await c.compute(arr)
 
 
@@ -8233,7 +8233,7 @@ def test_release_persisted_collection_sync(c):
     while c.run_on_scheduler(lambda dask_scheduler: len(dask_scheduler.tasks)) > 0:
         sleep(0.01)
 
-    with pytest.raises(RuntimeError, match="Lost dependencies for keys"):
+    with pytest.raises(CancelledError):
         # Note: dask.compute is actually calling client.get, i.e. what we are
         # submitting to the scheduler is different to what we are in
         # client.compute
@@ -8316,7 +8316,7 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
     while c.run_on_scheduler(lambda dask_scheduler: len(dask_scheduler.tasks)) > 1:
         sleep(0.1)
     ev.set()
-    with pytest.raises(RuntimeError, match="Lost dependencies for keys"):
+    with pytest.raises(FutureCancelledError):
         future.result()
 
 
