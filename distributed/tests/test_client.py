@@ -8397,3 +8397,26 @@ async def test_count_serialization(c, s, a, use_lambda):
     expected_global = expected_local + 1
     assert x.local_count <= expected_local
     assert x.global_count <= expected_global
+
+
+@pytest.mark.parametrize("use_kwarg", [False, "simple", "future"])
+@gen_cluster(client=True)
+async def test_map_accepts_nested_futures(c, s, a, b, use_kwarg):
+    def reducer(futs, *, offset=0, **kwargs):
+        return sum(futs) + offset
+
+    f1 = c.submit(lambda: 10)
+    f2 = c.submit(lambda: 20)
+    offset = None
+    if use_kwarg == "simple":
+        future = c.map(reducer, [[f1, f2]], foo=True)[0]
+    elif use_kwarg == "future":
+        offset = c.submit(lambda: 1)
+
+        future = c.map(reducer, [[f1, f2]], offset=offset)[0]
+
+    else:
+        future = c.map(reducer, [[f1, f2]])[0]
+
+    result = await future.result()
+    assert result == 30 if not offset else 31
