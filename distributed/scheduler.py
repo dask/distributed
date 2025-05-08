@@ -5563,7 +5563,10 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 try:
                     result = plugin.remove_worker(
-                        scheduler=self, worker=address, name=ws.name, stimulus_id=stimulus_id
+                        scheduler=self,
+                        worker=address,
+                        name=ws.name,
+                        stimulus_id=stimulus_id,
                     )
                 except TypeError:
                     parameters = inspect.signature(plugin.remove_worker).parameters
@@ -9411,8 +9414,8 @@ class WorkerStatusPlugin(SchedulerPlugin):
             scheduler.remove_plugin(name=self.name)
 
     def remove_worker(
-            self, scheduler: Scheduler, worker: str, name: str, **kwargs: Any
-        ) -> None:
+        self, scheduler: Scheduler, worker: str, name: Hashable, **kwargs: Any
+    ) -> None:
         try:
             msg = {
                 "worker": worker,
