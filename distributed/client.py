@@ -892,7 +892,7 @@ class _MapExpr(Expr):
 
         if not self.kwargs:
             dsk = {
-                key: Task(key, self.func, *args)
+                key: Task(key, self.func, *parse_input(args))  # type: ignore[misc]
                 for key, args in zip(self.keys, zip(*self.iterables))
             }
 
@@ -907,12 +907,17 @@ class _MapExpr(Expr):
                 else:
                     kwargs2[k] = parse_input(v)
 
-                dsk.update(
-                    {
-                        key: Task(key, self.func, *args, **kwargs2)
-                        for key, args in zip(self.keys, zip(*self.iterables))
-                    }
-                )
+            dsk.update(
+                {
+                    key: Task(
+                        key,
+                        self.func,
+                        *parse_input(args),  # type: ignore[misc]
+                        **kwargs2,
+                    )
+                    for key, args in zip(self.keys, zip(*self.iterables))
+                }
+            )
         return dsk
 
 
