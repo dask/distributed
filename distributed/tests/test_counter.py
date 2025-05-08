@@ -17,7 +17,7 @@ except ImportError:
         pytest.param(
             Digest,
             lambda x: x.size(),
-            marks=pytest.mark.skipif(not Digest, reason="no crick library"),
+            marks=pytest.mark.skipif(Digest is None, reason="no crick library"),
         ),
     ],
 )

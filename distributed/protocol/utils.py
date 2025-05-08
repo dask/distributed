@@ -232,7 +232,7 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
     base_start_addr = address_of_memoryview(base_mv)
     start_index = first_start_addr - base_start_addr
 
-    return base_mv[start_index : start_index + nbytes].cast(format)
+    return base_mv[start_index : start_index + nbytes].cast(format)  # type: ignore[call-overload]
 
 
 one_byte_carr = ctypes.c_byte * 1
