@@ -4823,15 +4823,17 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 annotations_for_plugin.pop("span", None)
 
+        tasks_for_plugin = [ts.key for ts in touched_tasks]
+        priorities_for_plugin = {ts.key: ts.priority for ts in touched_tasks}
         for plugin in list(self.plugins.values()):
             try:
                 plugin.update_graph(
                     self,
                     client=client,
-                    tasks=[ts.key for ts in touched_tasks],
+                    tasks=tasks_for_plugin,
                     keys=keys,
-                    annotations=dict(annotations_for_plugin),
-                    priority={ts.key: ts.priority for ts in touched_tasks},
+                    annotations=annotations_for_plugin,
+                    priority=priorities_for_plugin,
                     stimulus_id=stimulus_id,
                 )
             except Exception as e:
