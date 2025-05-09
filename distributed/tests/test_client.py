@@ -3139,9 +3139,10 @@ async def test_compute_partially_forgotten(c, s, *workers, validate, swap_keys):
     # causes the second one to trigger the transition error.
     res = c.get({task.key: task}, keys, sync=False)
     res = c.get({task.key: task}, keys, sync=False)
-    assert res[1].key == lost_dep_of_key
     with pytest.raises(CancelledError, match="lost dependencies"):
         await res[1].result()
+    with pytest.raises(CancelledError, match="lost dependencies"):
+        await res[0].result()
 
     # No transition errors
     while (
