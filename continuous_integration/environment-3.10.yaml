@@ -8,6 +8,7 @@ dependencies:
   - pip
   - asyncssh
   - bokeh
+  - crick  # Only tested here; also a dependency of dask
   - click
   - cloudpickle
   - coverage
@@ -58,5 +59,4 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/zict
-      - git+https://github.com/dask/crick  # Only tested here
       - keras
