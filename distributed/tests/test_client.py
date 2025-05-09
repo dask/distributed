@@ -3111,8 +3111,9 @@ async def test_submit_on_cancelled_future(c, s, a, b):
 
 
 @pytest.mark.parametrize("validate", [True, False])
+@pytest.mark.parametrize("swap_keys", [True, False])
 @gen_cluster(client=True)
-async def test_compute_partially_forgotten(c, s, *workers, validate):
+async def test_compute_partially_forgotten(c, s, *workers, validate, swap_keys):
     if not validate:
         s.validate = False
     # (CPython impl detail)
@@ -3127,6 +3128,8 @@ async def test_compute_partially_forgotten(c, s, *workers, validate):
     # At the time of writing, it is unclear why the lost_dep_of_key is part of
     # keys but this triggers an observed error
     keys = key, lost_dep_of_key = list({"foo", "bar"})
+    if swap_keys:
+        keys = lost_dep_of_key, key = [key, lost_dep_of_key]
 
     # Ordinarily this is not submitted as a graph but it could be if a persist
     # was leading up to this
@@ -3135,13 +3138,15 @@ async def test_compute_partially_forgotten(c, s, *workers, validate):
     # zombie task around after triggering the "lost deps" exception. That zombie
     # causes the second one to trigger the transition error.
     res = c.get({task.key: task}, keys, sync=False)
-
     res = c.get({task.key: task}, keys, sync=False)
-    assert res[1].key == lost_dep_of_key
     with pytest.raises(CancelledError, match="lost dependencies"):
         await res[1].result()
+    with pytest.raises(CancelledError, match="lost dependencies"):
+        await res[0].result()
 
+    # No transition errors
     while (
+        # This waits until update-graph is truly finished
         len([msg[1]["action"] == "update-graph" for msg in s.get_events("scheduler")])
         < 2
     ):

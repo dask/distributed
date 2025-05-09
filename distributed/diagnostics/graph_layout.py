@@ -46,9 +46,7 @@ class GraphLayout(SchedulerPlugin):
                 priority=priority,
             )
 
-    def update_graph(
-        self, scheduler, *, dependencies=None, priority=None, tasks=None, **kwargs
-    ):
+    def update_graph(self, scheduler, *, priority=None, tasks=None, **kwargs):
         stack = sorted(
             tasks, key=lambda k: TupleComparable(priority.get(k, 0)), reverse=True
         )
@@ -56,7 +54,7 @@ class GraphLayout(SchedulerPlugin):
             key = stack.pop()
             if key in self.x or key not in scheduler.tasks:
                 continue
-            deps = dependencies.get(key, ())
+            deps = [ts.key for ts in scheduler.tasks[key].dependencies]
             if deps:
                 if not all(dep in self.y for dep in deps):
                     stack.append(key)
