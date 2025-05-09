@@ -356,12 +356,13 @@ def test_stress_scale(monkeypatch):
     N = 5
     for i in range(N):
         w = spec[f"worker-{i}"] = copy.copy(template)
-    with SpecCluster(
-        scheduler=scheduler_spec,
-        workers=spec,
-        worker=template,  # <- template for newly scaled up workers
-        **cluster_kwargs,
-    ) as cluster:
+    try:
+        cluster = SpecCluster(
+            scheduler=scheduler_spec,
+            workers=spec,
+            worker=template,  # <- template for newly scaled up workers
+            **cluster_kwargs,
+        )
         # Introduce a delay in worker status message processing and allow
         # other async code to run in the meantime by monkeypatching the
         # read() function with an asyncio.sleep(). This slight delay greatly
@@ -395,4 +396,5 @@ def test_stress_scale(monkeypatch):
         # shutdown:
         print("shutdown")
         client.close()
+    finally:
         client.cluster.close(timeout=30)
