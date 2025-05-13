@@ -538,8 +538,8 @@ async def test_steal_resource_restrictions(c, s, a):
         while s.workers[b.address].status != Status.running:
             await asyncio.sleep(0.01)
 
-        s.extensions["stealing"].balance()
-        await asyncio.sleep(0.1)
+        while s.extensions["stealing"].balance():
+            await asyncio.sleep(0.1)
 
         assert 20 < len(b.state.tasks) < 80
         assert 20 < len(a.state.tasks) < 80
@@ -1557,17 +1557,25 @@ def test_balance_to_replica():
 
 def test_balance_multiple_to_replica():
     dependencies = {"a": 6}
-    dependency_placement = [["a"], ["a"], []]
-    task_placement = [[["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"]], [], []]
+    dependency_placement = [
+        ["a"],
+        ["a"],
+        [],
+    ]
+    task_placement = [
+        [["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"], ["a"]],
+        [],
+        [],
+    ]
 
     def _correct_placement(actual):
         actual_task_counts = [len(placed) for placed in actual]
-        # FIXME: A better task placement would be even but the current balancing
-        # logic only steals when a worker has an idle thread which makes it a
-        # little less aggressive
+        # FIXME: A more homogeneous task placement would be even but the current
+        # balancing logic only steals when a worker has an idle thread which
+        # makes it a little less aggressive
         return actual_task_counts == [
-            6,
-            2,
+            5,
+            3,
             0,
         ]
 
@@ -1970,7 +1978,9 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
 
         async with Worker(s.address, nthreads=1) as b:
             try:
-                await async_poll_for(lambda: any(not w.processing for w in s.workers.values()), timeout=5)
+                await async_poll_for(
+                    lambda: any(not w.processing for w in s.workers.values()), timeout=5
+                )
                 wsA = s.workers[a.address]
                 wsB = s.workers[b.address]
                 ts = next(iter(wsA.processing))
@@ -2041,7 +2051,9 @@ async def test_do_not_ping_pong(c, s, a):
 
         async with Worker(s.address, nthreads=1) as b:
             try:
-                await async_poll_for(lambda: any(not w.processing for w in s.workers.values()), timeout=5)
+                await async_poll_for(
+                    lambda: any(not w.processing for w in s.workers.values()), timeout=5
+                )
 
                 wsB = s.workers[b.address]
 
