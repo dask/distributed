@@ -77,7 +77,9 @@ from distributed.core import (
     pingpong,
 )
 from distributed.core import rpc as RPCType
-from distributed.core import send_recv
+from distributed.core import (
+    send_recv,
+)
 from distributed.diagnostics import nvml, rmm
 from distributed.diagnostics.plugin import WorkerPlugin, _get_plugin_name
 from distributed.diskutils import WorkSpace
@@ -1374,7 +1376,7 @@ class Worker(BaseWorker, ServerNode):
             last_time=self.monitor.last_time,
         )
         if nvml.device_get_count() > 0:
-            result["gpu_name"] = self.monitor.gpu_name
+            result["gpu_name"] = self.monitor.gpu_name  # type: ignore[assignment]
             result["gpu_memory_total"] = self.monitor.gpu_memory_total
         return result
 

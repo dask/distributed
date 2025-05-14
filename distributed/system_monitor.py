@@ -33,7 +33,7 @@ class SystemMonitor:
 
     cumulative_gil_contention: float
 
-    gpu_name: str | None
+    gpu_name: float | dict | None
     gpu_memory_total: int
 
     def __init__(
