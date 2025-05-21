@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import pyarrow
+import pyarrow.fs
 
 from distributed.protocol.serialize import dask_deserialize, dask_serialize
 
