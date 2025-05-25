@@ -1,4 +1,4 @@
-""" This module contains utility functions to construct and manipulate counting
+"""This module contains utility functions to construct and manipulate counting
 data structures for frames.
 
 When performing statistical profiling we obtain many call stacks.  We aggregate
