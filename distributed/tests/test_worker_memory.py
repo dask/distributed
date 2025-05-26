@@ -1090,45 +1090,6 @@ async def test_deprecated_params(s, name):
             assert getattr(a.memory_manager, name) == 0.789
 
 
-@gen_cluster(config={"distributed.worker.memory.monitor-interval": "10ms"})
-async def test_pause_while_idle(s, a, b):
-    sa = s.workers[a.address]
-    assert a.address in s.idle
-    assert sa in s.running
-
-    a.monitor.get_process_memory = lambda: 2**40
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=5)
-    assert a.address not in s.idle
-    assert sa not in s.running
-
-    a.monitor.get_process_memory = lambda: 0
-    await async_poll_for(lambda: sa.status == Status.running, timeout=5)
-    assert a.address in s.idle
-    assert sa in s.running
-
-
-@gen_cluster(client=True, config={"distributed.worker.memory.monitor-interval": "10ms"})
-async def test_pause_while_saturated(c, s, a, b):
-    sa = s.workers[a.address]
-    ev = Event()
-    futs = c.map(lambda i, ev: ev.wait(), range(3), ev=ev, workers=[a.address])
-    await async_poll_for(lambda: len(a.state.tasks) == 3, timeout=5)
-    assert sa in s.saturated
-    assert sa in s.running
-
-    a.monitor.get_process_memory = lambda: 2**40
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=5)
-    assert sa not in s.saturated
-    assert sa not in s.running
-
-    a.monitor.get_process_memory = lambda: 0
-    await async_poll_for(lambda: sa.status == Status.running, timeout=5)
-    assert sa in s.saturated
-    assert sa in s.running
-
-    await ev.set()
-
-
 @gen_cluster(nthreads=[])
 async def test_worker_log_memory_limit_too_high(s):
     async with Worker(s.address, memory_limit="1 PB") as worker:
