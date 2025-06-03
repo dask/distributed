@@ -29,7 +29,10 @@ class _DaskPickler(pickle.Pickler):
 
 
 def _always_use_pickle_for(x):
-    mod, _, _ = x.__class__.__module__.partition(".")
+    try:
+        mod, _, _ = x.__class__.__module__.partition(".")
+    except Exception:
+        return False
     if mod == "numpy":
         import numpy as np
 
