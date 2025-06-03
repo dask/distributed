@@ -28,7 +28,7 @@ dependencies:
   - prometheus_client
   - psutil
   - pyarrow
-  - pytest
+  - pytest<8.4  # Pin due to https://github.com/pytest-dev/pytest-cov/issues/693
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
