@@ -1329,6 +1329,23 @@ async def test_broadcast_deprecation(s, a, b):
     assert out == {a.address: b"pong", b.address: b"pong"}
 
 
+@pytest.mark.parametrize("reuse_broadcast_comm", [True, False])
+@gen_cluster()
+async def test_broadcast_reuse_comm(
+    s: Scheduler, a: Worker, b: Worker, reuse_broadcast_comm: bool
+) -> None:
+    with dask.config.set(
+        {"distributed.scheduler.reuse-broadcast-comm": reuse_broadcast_comm}
+    ):
+        out = await s.broadcast(msg={"op": "ping"})
+        assert out == {a.address: b"pong", b.address: b"pong"}
+
+    if reuse_broadcast_comm:
+        assert s.rpc.open == 2
+    else:
+        assert s.rpc.open == 0
+
+
 @gen_cluster(nthreads=[])
 async def test_worker_name(s):
     async with Worker(s.address, name="alice") as w:

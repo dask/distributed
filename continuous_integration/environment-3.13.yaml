@@ -28,14 +28,13 @@ dependencies:
   - prometheus_client
   - psutil
   - pyarrow
-  - pytest
+  - pytest<8.4  # Pin due to https://github.com/pytest-dev/pytest-cov/issues/693
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
   - requests
-  - s3fs  # overridden by git tip below
   - scikit-learn
   - scipy
   - sortedcollections
@@ -51,6 +50,5 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/zict
-      - git+https://github.com/dask/s3fs
       - git+https://github.com/fsspec/filesystem_spec
       - keras
