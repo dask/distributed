@@ -15,6 +15,8 @@ distributed:
     blocked-handlers: []
     contact-address: null
     default-data-size: 1kiB
+    # Whether to reuse the same Scheduler to Worker comm for repeated broadcasts.
+    reuse-broadcast-comm: True
     # Number of seconds to wait until workers or clients are removed from the events log
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h

@@ -42,7 +42,6 @@ dependencies:
   - python-snappy  # Only tested here
   - pytorch  # Only tested here
   - requests
-  - s3fs
   - scikit-learn
   - scipy
   - sortedcollections

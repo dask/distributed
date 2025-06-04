@@ -6747,13 +6747,18 @@ class Scheduler(SchedulerState, ServerNode):
 
         ERROR = object()
 
+        reuse_broadcast_comm = dask.config.get(
+            "distributed.scheduler.reuse-broadcast-comm", False
+        )
+        close = not reuse_broadcast_comm
+
         async def send_message(addr: str) -> Any:
             try:
                 comm = await self.rpc.connect(addr)
                 comm.name = "Scheduler Broadcast"
                 try:
                     resp = await send_recv(
-                        comm, close=True, serializers=serializers, **msg
+                        comm, close=close, serializers=serializers, **msg
                     )
                 finally:
                     self.rpc.reuse(addr, comm)
