@@ -58,7 +58,7 @@ from dask.utils import (
     typename,
 )
 
-from distributed import preloading, profile, utils
+from distributed import debugpy, preloading, profile, utils
 from distributed.batched import BatchedSend
 from distributed.collections import LRU
 from distributed.comm import Comm, connect, get_address_host, parse_address
@@ -2993,6 +2993,7 @@ def _run_task_simple(
             msg: RunTaskFailure = error_message(e)  # type: ignore
             msg["op"] = "task-erred"
             msg["actual_exception"] = e
+            debugpy.post_mortem()
         else:
             msg: RunTaskSuccess = {  # type: ignore
                 "op": "task-finished",
@@ -3039,6 +3040,7 @@ async def _run_task_async(
             msg: RunTaskFailure = error_message(e)  # type: ignore
             msg["op"] = "task-erred"
             msg["actual_exception"] = e
+            debugpy.post_mortem()
         else:
             msg: RunTaskSuccess = {  # type: ignore
                 "op": "task-finished",
