@@ -310,13 +310,13 @@ async def test_stress(
         async with Client(cluster, asynchronous=True) as client:
             rs = da.random.RandomState()
             x = rs.random((10000, 10000), chunks=(-1, chunksize))
-            [x] = client.persist([x])
+            x = client.persist(x)
             await wait(x)
 
             for _ in range(10):
                 x = x.rechunk((chunksize, -1))
                 x = x.rechunk((-1, chunksize))
-                [x] = client.persist([x])
+                x = client.persist(x)
                 await wait(x)
 
 
@@ -379,7 +379,7 @@ async def test_transpose(
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert cluster.scheduler_address.startswith("ucx://")
-            [x] = client.persist([da.ones((10000, 10000), chunks=(1000, 1000))])
+            x = client.persist(da.ones((10000, 10000), chunks=(1000, 1000)))
             await x
             y = (x + x.T).sum()
             await y
