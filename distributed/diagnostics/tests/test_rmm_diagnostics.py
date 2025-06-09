@@ -32,7 +32,7 @@ async def test_rmm_metrics(c, s, *workers):
     assert w.metrics["rmm"]["rmm-used"] == 0
     assert w.metrics["rmm"]["rmm-total"] == parse_bytes("10MiB")
     result = delayed(rmm.DeviceBuffer)(size=10)
-    result = result.persist()
+    [result] = c.persist([result])
 
     deadline = Deadline.after(5)
 
