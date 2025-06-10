@@ -193,7 +193,7 @@ will run on the Worker's event loop thread rather than a separate thread.
 
 .. code-block:: python
 
-   def Waiter:
+   class Waiter:
        def __init__(self):
            self.event = asyncio.Event()
 
