@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from asyncio import TimeoutError
+
 
 class Reschedule(Exception):
     """Reschedule this task
@@ -13,3 +15,34 @@ class Reschedule(Exception):
     load across the cluster has significantly changed since first scheduling
     the task.
     """
+
+
+class WorkerStartTimeoutError(TimeoutError):
+    """Raised when the expected number of workers to not start within the timeout period."""
+
+    def __init__(
+        self, available_workers: int, expected_workers: int, timeout: float
+    ) -> None:
+        super().__init__(available_workers, expected_workers, timeout)
+
+    @property
+    def available_workers(self) -> int:
+        """Number of workers that are available."""
+        return self.args[0]
+
+    @property
+    def expected_workers(self) -> int:
+        """Number of workers that were expected to be available."""
+        return self.args[1]
+
+    @property
+    def timeout(self) -> float:
+        """Timeout period in seconds."""
+        return self.args[2]
+
+    def __str__(self) -> str:
+        return "Only %d/%d workers arrived after %s" % (
+            self.available_workers,
+            self.expected_workers,
+            self.timeout,
+        )
