@@ -400,7 +400,6 @@ async def test_worker_same_host_replicas_missing(c, s, a, b, x):
     # See GH4784
     def mock_address_host(addr):
         # act as if A and X are on the same host
-        nonlocal a, b, x
         if addr in [a.address, x.address]:
             return "A"
         else:
