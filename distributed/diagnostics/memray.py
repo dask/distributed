@@ -131,7 +131,7 @@ def memray_workers(
     """
     directory = pathlib.Path(directory)
     client = get_client()
-    scheduler_info = client.scheduler_info()
+    scheduler_info = client.scheduler_info(n_workers=-1)
     worker_addr = scheduler_info["workers"]
     worker_names = {
         addr: winfo["name"] for addr, winfo in scheduler_info["workers"].items()
