@@ -6002,11 +6002,21 @@ def test_no_threads_lingering():
 
 @gen_cluster()
 async def test_direct_async(s, a, b):
+    # Keyword option
     async with Client(s.address, asynchronous=True, direct_to_workers=True) as c:
         assert c.direct_to_workers
 
     async with Client(s.address, asynchronous=True, direct_to_workers=False) as c:
         assert not c.direct_to_workers
+
+    # Config option
+    with dask.config.set({"distributed.client.direct-to-workers": True}):
+        async with Client(s.address, asynchronous=True) as c:
+            assert c.direct_to_workers
+
+    with dask.config.set({"distributed.client.direct-to-workers": False}):
+        async with Client(s.address, asynchronous=True) as c:
+            assert not c.direct_to_workers
 
 
 def test_direct_sync(c):
