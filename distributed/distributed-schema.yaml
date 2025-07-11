@@ -678,6 +678,11 @@ properties:
           Configuration settings for Dask Clients
 
         properties:
+          direct-to-workers:
+            type: [boolean, 'null']
+            description:
+              Whether to connect directly to workers for gather / scatter.
+
           heartbeat:
             type: string
             description:

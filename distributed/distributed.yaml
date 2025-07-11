@@ -201,6 +201,7 @@ distributed:
       OPENBLAS_NUM_THREADS: 1
 
   client:
+    direct-to-workers: null # Whether to connect directly to workers for gather / scatter
     heartbeat: 5s  # Interval between client heartbeats
     scheduler-info-interval: 2s  # Interval between scheduler-info updates
     security-loader: null  # A callable to load security credentials if none are provided explicitl
