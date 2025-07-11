@@ -6001,8 +6001,7 @@ def test_no_threads_lingering():
 
 
 @gen_cluster()
-@pytest.mark.parametrize("direct_to_workers", [True, False, None])
-async def test_direct_async(s, a, b, direct_to_workers):
+async def test_direct_async(s, a, b):
     # Keyword option
     async with Client(s.address, asynchronous=True, direct_to_workers=True) as c:
         assert c.direct_to_workers
