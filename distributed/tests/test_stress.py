@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import random
 from contextlib import suppress
 from operator import add
@@ -11,7 +12,7 @@ from tlz import concat, sliding_window
 
 from dask import delayed
 
-from distributed import Client, Nanny, Worker, wait
+from distributed import Client, Nanny, Scheduler, SpecCluster, Worker, wait
 from distributed.chaos import KillWorker
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
@@ -337,3 +338,63 @@ async def test_chaos_rechunk(c, s, *workers):
         await asyncio.sleep(0.1)
 
     await z.cancel()
+
+
+@pytest.mark.slow
+def test_stress_scale(monkeypatch):
+    cluster_kwargs = {}
+    client_kwargs = {
+        "set_as_default": False,
+    }
+    # No idea how else to handle contestion of port 8787
+    scheduler_spec = {
+        "cls": Scheduler,
+        "options": {"dashboard": False, "dashboard_address": 9876},
+    }
+    spec = {}
+    template = {"cls": Nanny}
+    N = 5
+    for i in range(N):
+        w = spec[f"worker-{i}"] = copy.copy(template)
+    try:
+        cluster = SpecCluster(
+            scheduler=scheduler_spec,
+            workers=spec,
+            worker=template,  # <- template for newly scaled up workers
+            **cluster_kwargs,
+        )
+        # Introduce a delay in worker status message processing and allow
+        # other async code to run in the meantime by monkeypatching the
+        # read() function with an asyncio.sleep(). This slight delay greatly
+        # increases the likelihood of discrepancies in worker inventory
+        # tracking.The chosen time is an empirical compromise between enough
+        # delay to cause discrepancies and not too much delay so that
+        # messages still arrive in time.
+        comm = cluster._watch_worker_status_comm
+        old_read = comm.read
+
+        async def new_read():
+            res = await old_read()
+            await asyncio.sleep(0.2)
+            return res
+
+        monkeypatch.setattr(comm, "read", new_read)
+
+        client = Client(cluster, **client_kwargs)
+        client.wait_for_workers(N)
+
+        # scale down:
+        print("down")
+        client.cluster.scale(n=1)
+
+        # scale up again:
+        print("up")
+        # client.cluster.worker_spec = copy.copy(spec)
+        client.cluster.scale(n=len(spec))
+        client.wait_for_workers(len(spec))
+
+        # shutdown:
+        print("shutdown")
+        client.close()
+    finally:
+        client.cluster.close(timeout=30)
