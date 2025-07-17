@@ -18,6 +18,7 @@ from dask.widgets import get_template
 from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
+from distributed.exceptions import WorkerStartTimeoutError
 from distributed.metrics import time
 from distributed.objects import SchedulerInfo
 from distributed.utils import (
@@ -610,9 +611,8 @@ class Cluster(SyncMethodMixin):
 
         while n_workers and running_workers(self.scheduler_info) < n_workers:
             if deadline and time() > deadline:
-                raise TimeoutError(
-                    "Only %d/%d workers arrived after %s"
-                    % (running_workers(self.scheduler_info), n_workers, timeout)
+                raise WorkerStartTimeoutError(
+                    running_workers(self.scheduler_info), n_workers, timeout
                 )
             await asyncio.sleep(0.1)
 
