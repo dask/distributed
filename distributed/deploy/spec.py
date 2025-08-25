@@ -154,6 +154,10 @@ class SpecCluster(Cluster):
         Whether or not we should silence logging when setting up the cluster.
     name: str, optional
         A name to use when printing out the cluster, defaults to type name
+    shutdown_on_close: bool
+        Whether or not to close the cluster when the program exits
+    shutdown_scheduler: bool
+        Whether or not to shut down the scheduler when the cluster is closed
 
     Examples
     --------
@@ -247,6 +251,7 @@ class SpecCluster(Cluster):
         name=None,
         shutdown_on_close=True,
         scheduler_sync_interval=1,
+        shutdown_scheduler=True,
     ):
         if loop is None and asynchronous:
             loop = IOLoop.current()
@@ -271,6 +276,7 @@ class SpecCluster(Cluster):
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
         self.shutdown_on_close = shutdown_on_close
+        self.shutdown_scheduler = shutdown_scheduler
 
         super().__init__(
             asynchronous=asynchronous,
@@ -450,13 +456,14 @@ class SpecCluster(Cluster):
 
             if self.scheduler_comm:
                 async with self._lock:
-                    with suppress(OSError):
-                        await self.scheduler_comm.terminate()
+                    if self.shutdown_scheduler:
+                        with suppress(OSError):
+                            await self.scheduler_comm.terminate()
                     await self.scheduler_comm.close_rpc()
             else:
                 logger.warning("Cluster closed without starting up")
 
-            if self.scheduler:
+            if self.scheduler and self.shutdown_scheduler:
                 await self.scheduler.close()
             for w in self._created:
                 assert w.status in {

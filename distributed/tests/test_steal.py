@@ -38,6 +38,7 @@ from distributed.utils import wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedGetData,
+    async_poll_for,
     captured_logger,
     freeze_batched_send,
     gen_cluster,
@@ -72,7 +73,11 @@ async def test_work_stealing(c, s, a, b):
     assert len(b.data) > 10
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_dont_steal_expensive_data_fast_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
 
@@ -91,7 +96,11 @@ async def test_dont_steal_expensive_data_fast_computation(c, s, a, b):
     assert len(a.data) == 12
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_steal_cheap_data_slow_computation(c, s, a, b):
     x = c.submit(slowinc, 100, delay=0.1)  # learn that slowinc is slow
     await wait(x)
@@ -104,7 +113,11 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)] * 2, config=NO_AMM)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "100ms", **NO_AMM},
+)
 async def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
 
@@ -121,7 +134,11 @@ async def test_steal_expensive_data_slow_computation(c, s, a, b):
     assert b.data  # not empty
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, config=NO_AMM)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 10,
+    config={"distributed.scheduler.work-stealing-interval": "100ms", **NO_AMM},
+)
 async def test_worksteal_many_thieves(c, s, *workers):
     x = c.submit(slowinc, -1, delay=0.1)
     await x
@@ -277,13 +294,18 @@ async def test_eventually_steal_unknown_functions(c, s, a, b):
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
     await wait(futures)
-    assert not s.unknown_durations
+    extension = s.extensions["stealing"]
+    assert not extension.unknown_durations
     assert len(a.data) >= 3, [len(a.data), len(b.data)]
     assert len(b.data) >= 3, [len(a.data), len(b.data)]
 
 
 @pytest.mark.skip(reason="")
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 3,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_steal_related_tasks(e, s, a, b, c):
     futures = e.map(
         slowinc, range(20), delay=0.05, workers=a.address, allow_other_workers=True
@@ -299,7 +321,11 @@ async def test_steal_related_tasks(e, s, a, b, c):
     assert nearby > 10
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 10,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     def do_nothing(x, y=None):
         pass
@@ -315,7 +341,11 @@ async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     assert len(s.workers[workers[0].address].has_what) == len(xs) + len(futures)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_dont_steal_fast_tasks_blocklist(c, s, a):
     async with BlockedGetData(s.address) as b:
         # create a dependency
@@ -358,7 +388,11 @@ async def test_dont_steal_fast_tasks_blocklist(c, s, a):
                 assert ts.who_has == {ws_a}
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], config=NO_AMM)
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1)],
+    config={"distributed.scheduler.work-stealing-interval": "100ms", **NO_AMM},
+)
 async def test_new_worker_steals(c, s, a):
     await wait(c.submit(slowinc, 1, delay=0.01))
 
@@ -380,7 +414,10 @@ async def test_new_worker_steals(c, s, a):
         assert b.data
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_work_steal_allow_other_workers(c, s, a, b):
     # Note: this test also verifies the baseline for all other tests below
     futures = c.map(
@@ -397,7 +434,10 @@ async def test_work_steal_allow_other_workers(c, s, a, b):
     assert result == sum(map(inc, range(100)))
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)])
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)],
+)
 async def test_dont_steal_worker_restrictions(c, s, a, b):
     futures = c.map(slowinc, range(100), delay=0.05, workers=a.address)
 
@@ -504,7 +544,11 @@ async def test_steal_resource_restrictions(c, s, a):
         assert 20 < len(a.state.tasks) < 80
 
 
-@gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 2, "C": 1}})])
+@gen_cluster(
+    client=True,
+    nthreads=[("", 1, {"resources": {"A": 2, "C": 1}})],
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_steal_resource_restrictions_asym_diff(c, s, a):
     # See https://github.com/dask/distributed/issues/5565
     future = c.submit(slowinc, 1, delay=0.1, workers=a.address)
@@ -541,7 +585,11 @@ async def test_balance_without_dependencies(c, s, *workers):
     assert max(durations) / min(durations) < 3
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 4)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 4)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_dont_steal_executing_tasks(c, s, a, b):
     futures = c.map(
         slowinc, range(4), delay=0.1, workers=a.address, allow_other_workers=True
@@ -797,7 +845,10 @@ async def test_restart(c, s, a, b):
     assert not any(x for L in steal.stealable.values() for x in L)
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_steal_twice(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
     await wait(x)
@@ -841,7 +892,10 @@ async def test_steal_twice(c, s, a, b):
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 3,
-    config={"distributed.worker.memory.pause": False},
+    config={
+        "distributed.worker.memory.pause": False,
+        "distributed.scheduler.work-stealing-interval": "100ms",
+    },
 )
 async def test_paused_workers_must_not_steal(c, s, w1, w2, w3):
     w2.status = Status.paused
@@ -859,7 +913,10 @@ async def test_paused_workers_must_not_steal(c, s, w1, w2, w3):
     assert w3.data
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_dont_steal_already_released(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.05, workers=a.address)
     key = future.key
@@ -886,7 +943,11 @@ async def test_dont_steal_already_released(c, s, a, b):
             await asyncio.sleep(0.05)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_dont_steal_long_running_tasks(c, s, a, b):
     def long(delay):
         with worker_client() as c:
@@ -974,7 +1035,7 @@ async def test_lose_task(c, s, a, b):
     assert "Error" not in out
 
 
-@pytest.mark.parametrize("interval, expected", [(None, 100), ("500ms", 500), (2, 2)])
+@pytest.mark.parametrize("interval, expected", [(None, 1000), ("500ms", 500), (2, 2)])
 @gen_cluster(nthreads=[], config={"distributed.scheduler.work-stealing": False})
 async def test_parse_stealing_interval(s, interval, expected):
     from distributed.scheduler import WorkStealing
@@ -991,7 +1052,10 @@ async def test_parse_stealing_interval(s, interval, expected):
         assert s.periodic_callbacks["stealing"].callback_time == expected
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+)
 async def test_balance_with_longer_task(c, s, a, b):
     np = pytest.importorskip("numpy")
 
@@ -1020,8 +1084,11 @@ async def test_blocklist_shuffle_split(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "tasks"}):
         graph = df.shuffle(
             "A",
-            # If we don't have enough partitions, we'll fall back to a simple shuffle
+            # If we don't have enough partitions, we'll fall back to a
+            # simple shuffle
             max_branch=npart - 1,
+            # Block optimizer from killing the shuffle
+            force=True,
         ).sum()
     res = c.compute(graph)
 
@@ -1877,3 +1944,125 @@ async def test_trivial_workload_should_not_cause_work_stealing(c, s, *workers):
     await c.gather(futs)
     events = s.get_events("stealing")
     assert len(events) == 0
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    config={"distributed.scheduler.worker-saturation": "inf"},
+)
+async def test_stealing_objective_accounts_for_in_flight(c, s, a):
+    """Regression test that work-stealing's objective correctly accounts for in-flight data requests"""
+    in_event = Event()
+    block_event = Event()
+
+    def block(i: int, in_event: Event, block_event: Event) -> int:
+        in_event.set()
+        block_event.wait()
+        return i
+
+    # Stop stealing for deterministic testing
+    extension = s.extensions["stealing"]
+    await extension.stop()
+
+    try:
+        futs = c.map(block, range(20), in_event=in_event, block_event=block_event)
+        await in_event.wait()
+
+        async with Worker(s.address, nthreads=1) as b:
+            try:
+                await async_poll_for(lambda: s.idle, timeout=5)
+                wsA = s.workers[a.address]
+                wsB = s.workers[b.address]
+                ts = next(iter(wsA.processing))
+
+                occupancies = {ws: ws.occupancy for ws in s.workers.values()}
+                # No in-flight requests, so both match
+                assert extension.stealing_objective(
+                    ts, wsA, occupancies=occupancies
+                ) == s.worker_objective(ts, wsA)
+                assert extension.stealing_objective(
+                    ts, wsB, occupancies=occupancies
+                ) == s.worker_objective(ts, wsB)
+
+                extension.balance()
+                assert extension.in_flight
+                # We move tasks from a to b
+                assert extension.stealing_objective(
+                    ts, wsA, occupancies=occupancies
+                ) < s.worker_objective(ts, wsA)
+                assert extension.stealing_objective(
+                    ts, wsB, occupancies=occupancies
+                ) > s.worker_objective(ts, wsB)
+
+                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                occupancies = {ws: ws.occupancy for ws in s.workers.values()}
+                # No in-flight requests, so both match
+                assert extension.stealing_objective(
+                    ts, wsA, occupancies=occupancies
+                ) == s.worker_objective(ts, wsA)
+                assert extension.stealing_objective(
+                    ts, wsB, occupancies=occupancies
+                ) == s.worker_objective(ts, wsB)
+            finally:
+                await block_event.set()
+    finally:
+        await block_event.set()
+
+
+@gen_cluster(
+    nthreads=[("", 1)],
+    client=True,
+    config={"distributed.scheduler.worker-saturation": "inf"},
+)
+async def test_do_not_ping_pong(c, s, a):
+    """Regression test that work-stealing does not contihuously move all tasks between
+    two workers without reaching a stable state, eating up CPU time while doing so.
+    """
+    in_event = Event()
+    block_event = Event()
+
+    def block(i: int, in_event: Event, block_event: Event) -> int:
+        in_event.set()
+        block_event.wait()
+        return i
+
+    # Stop stealing for deterministic testing
+    extension = s.extensions["stealing"]
+    await extension.stop()
+
+    try:
+        futs = c.map(block, range(20), in_event=in_event, block_event=block_event)
+        await in_event.wait()
+
+        # This is the pre-condition for the observed problem:
+        # There are tasks that execute for a long time but do not have an average
+        s.task_prefixes["block"].add_exec_time(100)
+        assert s.task_prefixes["block"].duration_average == -1
+
+        async with Worker(s.address, nthreads=1) as b:
+            try:
+                await async_poll_for(lambda: s.idle, timeout=5)
+
+                wsB = s.workers[b.address]
+
+                extension.balance()
+                assert 10 >= len(extension.in_flight) >= 5
+                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                # On first try, we may try to balance the task executing on a
+                assert 10 >= len(wsB.processing) >= 5 - 1
+
+                extension.balance()
+                # On second try we may want to rebalance a single task if we failed to
+                # rebalance the task executing on a
+                assert len(extension.in_flight) <= 1
+                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                assert 10 >= len(wsB.processing) >= 5
+
+                # On third try, the balancing should be stable
+                extension.balance()
+                assert not extension.in_flight
+            finally:
+                await block_event.set()
+    finally:
+        await block_event.set()

@@ -803,7 +803,7 @@ async def test_malloc_trim_threshold(c, s, a):
     da = pytest.importorskip("dask.array")
 
     arr = da.random.random(2**29 // 8, chunks="512 kiB")  # 0.5 GiB
-    arr = arr.persist()
+    arr = c.persist(arr)
     await wait(arr)
     # Wait for heartbeat
     await async_poll_for(lambda: s.memory.process > 2**29, timeout=5)

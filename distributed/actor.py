@@ -141,7 +141,7 @@ class Actor(TaskRef):
 
     def __getattr__(self, key):
         if self._future and self._future.status not in ("finished", "pending"):
-            raise ValueError(
+            raise RuntimeError(
                 "Worker holding Actor was lost.  Status: " + self._future.status
             )
         self._try_bind_worker_client()

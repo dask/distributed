@@ -15,13 +15,15 @@ distributed:
     blocked-handlers: []
     contact-address: null
     default-data-size: 1kiB
+    # Whether to reuse the same Scheduler to Worker comm for repeated broadcasts.
+    reuse-broadcast-comm: True
     # Number of seconds to wait until workers or clients are removed from the events log
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
     idle-timeout: null       # Shut down after this duration, like "1h" or "30 minutes"
     no-workers-timeout: null # If a task remains unrunnable for longer than this, it fails.
     work-stealing: True     # workers should steal tasks from each other
-    work-stealing-interval: 100ms  # Callback time for work stealing
+    work-stealing-interval: 1s  # Callback time for work stealing
     worker-saturation: 1.1  # Send this fraction of nthreads root tasks to workers
     rootish-taskgroup: 5  # number of dependencies of a rootish tg
     rootish-taskgroup-dependencies: 5  # number of dependencies of the dependencies of the rootish tg
@@ -199,6 +201,7 @@ distributed:
       OPENBLAS_NUM_THREADS: 1
 
   client:
+    direct-to-workers: null # Whether to connect directly to workers for gather / scatter
     heartbeat: 5s  # Interval between client heartbeats
     scheduler-info-interval: 2s  # Interval between scheduler-info updates
     security-loader: null  # A callable to load security credentials if none are provided explicitl
@@ -282,6 +285,7 @@ distributed:
         - dask
         - debugpy
         - distributed
+        - ipykernel
         - coiled
         - cudf
         - cuml

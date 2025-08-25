@@ -63,6 +63,15 @@ properties:
 
               This is used by the scheduler in some scheduling decisions
 
+          reuse-broadcast-comm:
+            type: boolean
+            description: |
+              Whether to reuse the Scheduler to Worker Comm for repeated broadcasts.
+
+              This can be useful to avoid the overhead of creating and destroying Comms when sending multiple
+              small messages in methods like ``Client.run``. The scheduler will persist an open
+              Comm object for each worker. Set this to False if you want to close the Comm after each broadcast.
+
           events-cleanup-delay:
             type: string
             description: |
@@ -669,6 +678,11 @@ properties:
           Configuration settings for Dask Clients
 
         properties:
+          direct-to-workers:
+            type: [boolean, 'null']
+            description:
+              Whether to connect directly to workers for gather / scatter.
+
           heartbeat:
             type: string
             description:

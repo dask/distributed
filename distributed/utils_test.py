@@ -761,6 +761,7 @@ async def start_cluster(
     Worker: type[ServerNode] = Worker,
     scheduler_kwargs: dict[str, Any] | None = None,
     worker_kwargs: dict[str, Any] | None = None,
+    timeout: float = _TEST_TIMEOUT // 4,
 ) -> tuple[Scheduler, list[ServerNode]]:
     scheduler_kwargs = scheduler_kwargs or {}
     worker_kwargs = worker_kwargs or {}
@@ -797,13 +798,15 @@ async def start_cluster(
         or any(comm.comm is None for comm in s.stream_comms.values())
     ):
         await asyncio.sleep(0.01)
-        if time() > start + 30:
+        if time() > start + timeout:
             await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close()
             check_invalid_worker_transitions(s)
             check_invalid_task_states(s)
             check_worker_fail_hard(s)
-            raise TimeoutError("Cluster creation timeout")
+            raise TimeoutError(
+                "Cluster creation timeout. Workers did not come up and register in time."
+            )
     return s, workers
 
 
@@ -969,18 +972,18 @@ def gen_cluster(
                 workers = []
                 s = None
                 try:
-                    for _ in range(60):
+                    while True:
                         try:
+                            if not deadline.remaining:
+                                raise TimeoutError("Timeout on cluster creation")
                             s, ws = await start_cluster(
                                 nthreads,
                                 scheduler,
                                 security=security,
                                 Worker=Worker,
                                 scheduler_kwargs=scheduler_kwargs,
-                                worker_kwargs=merge(
-                                    {"death_timeout": min(15, int(deadline.remaining))},
-                                    worker_kwargs,
-                                ),
+                                worker_kwargs=worker_kwargs,
+                                timeout=timeout // 4,
                             )
                         except Exception as e:
                             logger.error(
@@ -988,7 +991,6 @@ def gen_cluster(
                                 f"{e.__class__.__name__}: {e}; retrying",
                                 exc_info=True,
                             )
-                            await asyncio.sleep(1)
                         else:
                             workers[:] = ws
                             break

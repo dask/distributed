@@ -137,7 +137,9 @@ async def test_counters(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True, config={"distributed.scheduler.work-stealing-interval": "100ms"}
+)
 async def test_stealing_events(c, s, a, b):
     se = StealingEvents(s)
 
@@ -831,9 +833,9 @@ async def test_TaskGraph(c, s, a, b):
     json.dumps(gp.node_source.data)
 
     da = pytest.importorskip("dask.array")
-    x = da.random.random((20, 20), chunks=(10, 10)).persist()
+    x = c.persist(da.random.random((20, 20), chunks=(10, 10)))
     y = (x + x.T) - x.mean(axis=0)
-    y = y.persist()
+    y = c.persist(y)
     await wait(y)
 
     gp.update()
@@ -910,12 +912,12 @@ async def test_TaskGraph_complex(c, s, a, b):
     da = pytest.importorskip("dask.array")
     gp = TaskGraph(s)
     x = da.random.random((2000, 2000), chunks=(1000, 1000))
-    y = ((x + x.T) - x.mean(axis=0)).persist()
+    y = c.persist((x + x.T) - x.mean(axis=0))
     await wait(y)
     gp.update()
     assert len(gp.layout.index) == len(gp.node_source.data["x"])
     assert len(gp.layout.index) == len(s.tasks)
-    z = (x - y).sum().persist()
+    z = c.persist((x - y).sum())
     await wait(z)
     gp.update()
     assert len(gp.layout.index) == len(gp.node_source.data["x"])
@@ -1175,10 +1177,10 @@ async def test_memory_by_key(c, s, a, b):
     mbk = MemoryByKey(s)
 
     da = pytest.importorskip("dask.array")
-    x = (da.random.random((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+    x = c.persist(da.random.random((20, 20), chunks=(10, 10)) + 1, optimize_graph=False)
     await x
 
-    y = await dask.delayed(inc)(1).persist()
+    y = await c.persist(dask.delayed(inc)(1))
 
     mbk.update()
     assert mbk.source.data["name"] == ["add", "inc"]
@@ -1258,10 +1260,10 @@ async def test_aggregate_action(c, s, a, b):
     mbk = AggregateAction(s)
 
     da = pytest.importorskip("dask.array")
-    x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+    x = c.persist(da.ones((20, 20), chunks=(10, 10)) + 1, optimize_graph=False)
 
     await x
-    y = await dask.delayed(inc)(1).persist()
+    y = await c.persist(dask.delayed(inc)(1))
     z = (x + x.T) - x.mean(axis=0)
     await c.compute(z.sum())
 
@@ -1287,9 +1289,9 @@ async def test_compute_per_key(c, s, a, b):
     mbk = ComputePerKey(s)
 
     da = pytest.importorskip("dask.array")
-    x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+    x = c.persist(da.ones((20, 20), chunks=(10, 10)) + 1, optimize_graph=False)
     await x
-    y = await dask.delayed(inc)(1).persist()
+    y = await c.persist(dask.delayed(inc)(1))
     z = (x + x.T) - x.mean(axis=0)
     zsum = z.sum()
     await c.compute(zsum)
@@ -1327,6 +1329,23 @@ async def test_prefix_bokeh(s, a, b):
     assert bokeh_app.prefix == f"/{prefix}"
 
 
+@gen_cluster(
+    client=True, scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True}
+)
+async def test_prefix_redirect_bokeh(c, s, a, b):
+    prefix = "foo-bar"
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(
+        f"http://localhost:{s.http_server.port}/{prefix}"
+    )
+    assert response.code == 200
+    assert "/status" in response.effective_url
+
+    bokeh_app = s.http_application.applications[0]
+    assert isinstance(bokeh_app, BokehTornado)
+    assert bokeh_app.prefix == f"/{prefix}"
+
+
 @gen_cluster(scheduler_kwargs={"dashboard": True})
 async def test_bokeh_relative(s, a, b):
     http_client = AsyncHTTPClient()
@@ -1348,7 +1367,7 @@ async def test_shuffling(c, s, a, b):
         freq="10 s",
     )
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
-        df2 = df.shuffle("x").persist()
+        df2 = c.persist(df.shuffle("x"))
     start = time()
     while not ss.source.data["comm_written"]:
         await asyncio.gather(*[a.heartbeat(), b.heartbeat()])

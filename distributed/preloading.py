@@ -251,8 +251,8 @@ class PreloadManager(Sequence[Preload]):
 
 def process_preloads(
     dask_server: Server | Client,
-    preload: str | list[str],
-    preload_argv: list[str] | list[list[str]],
+    preload: str | Sequence[str],
+    preload_argv: Sequence[str] | Sequence[Sequence[str]],
     *,
     file_dir: str | None = None,
 ) -> PreloadManager:

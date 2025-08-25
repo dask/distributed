@@ -225,7 +225,12 @@ class ProfileTimePlot(DashboardComponent):
         )
         self.ts_plot.line("time", "count", source=self.ts_source)
         self.ts_plot.circle(
-            "time", "count", source=self.ts_source, color=None, selection_color="orange"
+            "time",
+            "count",
+            source=self.ts_source,
+            color=None,
+            selection_color="orange",
+            radius=1,
         )
         self.ts_plot.yaxis.visible = False
         self.ts_plot.grid.visible = False
@@ -373,7 +378,12 @@ class ProfileServer(DashboardComponent):
         )
         self.ts_plot.line("time", "count", source=self.ts_source)
         self.ts_plot.circle(
-            "time", "count", source=self.ts_source, color=None, selection_color="orange"
+            "time",
+            "count",
+            source=self.ts_source,
+            color=None,
+            selection_color="orange",
+            radius=1,
         )
         self.ts_plot.yaxis.visible = False
         self.ts_plot.grid.visible = False

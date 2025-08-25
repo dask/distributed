@@ -11,6 +11,7 @@ sphinx:
 
 python:
   install:
+    - requirements: docs/requirements-pin-pip.txt
     - requirements: docs/requirements.txt
     - method: pip
       path: .

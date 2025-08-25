@@ -236,8 +236,6 @@ class TaskState:
     #: The next state of the task. It is not None iff :attr:`state` == resumed.
     next: Literal["fetch", "waiting", None] = None
 
-    #: Expected duration of the task
-    duration: float | None = None
     #: The priority this task given by the scheduler. Determines run order.
     priority: tuple[int, ...] | None = None
     #: Addresses of workers that we believe have this data
@@ -509,8 +507,9 @@ class RescheduleMsg(SendMessageToScheduler):
 class LongRunningMsg(SendMessageToScheduler):
     op = "long-running"
 
-    __slots__ = ("key", "compute_duration")
+    __slots__ = ("key", "run_id", "compute_duration")
     key: Key
+    run_id: int
     compute_duration: float | None
 
 
@@ -736,7 +735,6 @@ class ComputeTaskEvent(StateMachineEvent):
     who_has: dict[Key, Collection[str]]
     nbytes: dict[Key, int]
     priority: tuple[int, ...]
-    duration: float
     run_spec: T_runspec | None
     resource_restrictions: dict[str, float]
     actor: bool
@@ -782,7 +780,6 @@ class ComputeTaskEvent(StateMachineEvent):
         who_has: dict[Key, Collection[str]] | None = None,
         nbytes: dict[Key, int] | None = None,
         priority: tuple[int, ...] = (0,),
-        duration: float = 1.0,
         resource_restrictions: dict[str, float] | None = None,
         actor: bool = False,
         annotations: dict | None = None,
@@ -797,7 +794,6 @@ class ComputeTaskEvent(StateMachineEvent):
             who_has=who_has or {},
             nbytes=nbytes or {k: 1 for k in who_has or ()},
             priority=priority,
-            duration=duration,
             run_spec=ComputeTaskEvent.dummy_runspec(key),
             resource_restrictions=resource_restrictions or {},
             actor=actor,
@@ -2171,7 +2167,10 @@ class WorkerState:
             ts.state = "long-running"
             ts.previous = None
             smsg = LongRunningMsg(
-                key=ts.key, compute_duration=None, stimulus_id=stimulus_id
+                key=ts.key,
+                run_id=ts.run_id,
+                compute_duration=None,
+                stimulus_id=stimulus_id,
             )
             return {}, [smsg]
         else:
@@ -2276,7 +2275,10 @@ class WorkerState:
         self.long_running.add(ts)
 
         smsg = LongRunningMsg(
-            key=ts.key, compute_duration=compute_duration, stimulus_id=stimulus_id
+            key=ts.key,
+            run_id=ts.run_id,
+            compute_duration=compute_duration,
+            stimulus_id=stimulus_id,
         )
         return merge_recs_instructions(
             ({}, [smsg]),
@@ -2863,7 +2865,6 @@ class WorkerState:
             ts.exception_text = ""
             ts.traceback_text = ""
             ts.priority = priority
-            ts.duration = ev.duration
             ts.annotations = ev.annotations
             ts.span_id = ev.span_id
 

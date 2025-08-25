@@ -124,7 +124,7 @@ def get_mp_context():
 
         from distributed.versions import optional_packages, required_packages
 
-        for pkg, _ in required_packages + optional_packages:
+        for pkg in required_packages + optional_packages:
             try:
                 importlib.import_module(pkg)
             except ImportError:
@@ -171,10 +171,23 @@ def get_fileno_limit():
 @toolz.memoize
 def _get_ip(host, port, family):
     def hostname_fallback():
-        addr_info = socket.getaddrinfo(
-            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
-        )[0]
-        return addr_info[4][0]
+        try:
+            addr_info = socket.getaddrinfo(
+                socket.gethostname(),
+                port,
+                family,
+                socket.SOCK_DGRAM,
+                socket.IPPROTO_UDP,
+            )[0]
+            return addr_info[4][0]
+        # If getaddrinfo() fails, relay the error and return a sane default
+        except socket.gaierror as e:
+            warnings.warn(
+                f"Couldn't detect a suitable IP address ({e}). "
+                "Falling back to 127.0.0.1.",
+                RuntimeWarning,
+            )
+            return "127.0.0.1"
 
     # By using a UDP socket, we don't actually try to connect but
     # simply select the local address through which *host* is reachable.

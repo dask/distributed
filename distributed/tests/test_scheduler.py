@@ -37,6 +37,7 @@ from distributed import (
     SchedulerPlugin,
     Worker,
     fire_and_forget,
+    get_client,
     wait,
 )
 from distributed.comm.addressing import parse_host_port
@@ -45,7 +46,7 @@ from distributed.core import ConnectionPool, Status, clean_exception, connect, r
 from distributed.metrics import time
 from distributed.protocol import serialize
 from distributed.protocol.pickle import dumps, loads
-from distributed.protocol.serialize import ToPickle
+from distributed.protocol.serialize import Serialize, Serialized
 from distributed.scheduler import (
     KilledWorker,
     MemoryState,
@@ -231,7 +232,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
             )
             random_keys = set(flatten(x.__dask_keys__()))
 
-        xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
+        xx, xsum = c.persist([x, x.sum(axis=1, split_every=20)])
         await xsum
 
         # Check that each chunk-row of the array is (mostly) stored on the same worker
@@ -1328,6 +1329,23 @@ async def test_broadcast_deprecation(s, a, b):
     assert out == {a.address: b"pong", b.address: b"pong"}
 
 
+@pytest.mark.parametrize("reuse_broadcast_comm", [True, False])
+@gen_cluster()
+async def test_broadcast_reuse_comm(
+    s: Scheduler, a: Worker, b: Worker, reuse_broadcast_comm: bool
+) -> None:
+    with dask.config.set(
+        {"distributed.scheduler.reuse-broadcast-comm": reuse_broadcast_comm}
+    ):
+        out = await s.broadcast(msg={"op": "ping"})
+        assert out == {a.address: b"pong", b.address: b"pong"}
+
+    if reuse_broadcast_comm:
+        assert s.rpc.open == 2
+    else:
+        assert s.rpc.open == 0
+
+
 @gen_cluster(nthreads=[])
 async def test_worker_name(s):
     async with Worker(s.address, name="alice") as w:
@@ -1420,10 +1438,9 @@ async def test_update_graph_culls(s, a, b):
         dependencies={"foo": set()},
     )
 
-    header, frames = serialize(ToPickle(dsk), on_error="raise")
+    expr = Serialized(*serialize(Serialize(dsk), on_error="raise"))
     await s.update_graph(
-        graph_header=header,
-        graph_frames=frames,
+        expr_ser=expr,
         keys=["y"],
         client="client",
         internal_priority={k: 0 for k in "xyz"},
@@ -1465,7 +1482,7 @@ async def test_story(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_scatter_no_workers(c, s, direct):
     with pytest.raises(TimeoutError):
-        await s.scatter(data={"x": 1}, client="alice", timeout=0.1)
+        await s.scatter(data={"x": 1}, client="alice", timeout=0.1, workers=None)
 
     start = time()
     with pytest.raises(TimeoutError):
@@ -2169,78 +2186,81 @@ async def test_missing_data_errant_worker(c, s, w1, w2, w3):
         await wait(y)
 
 
+def inc_only_once(key):
+    def inc(x):
+        k = f"{x}-{key}"
+        if (c := get_client()).get_metadata(k, default=None):
+            raise RuntimeError("Must only be called once")
+        c.set_metadata(k, True)
+        return x + 1
+
+    return inc
+
+
+def div_only_once(key):
+    def div(x, y):
+        k = f"{x}-{y}-{key}"
+        if (c := get_client()).get_metadata(k, default=None):
+            raise RuntimeError("Must only be called once")
+        c.set_metadata(k, True)
+        return x / y
+
+    return div
+
+
 @gen_cluster(client=True)
 async def test_dont_recompute_if_persisted(c, s, a, b):
-    x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(inc)(x, dask_key_name="y")
+    x = delayed(inc_only_once("x"))(1, dask_key_name="x")
+    y = delayed(inc_only_once("y"))(x, dask_key_name="y")
 
-    yy = y.persist()
-    await wait(yy)
+    yy = c.persist(y)
+    await c.compute(yy)
 
-    old = list(s.transition_log)
-
-    yyy = y.persist()
-    await wait(yyy)
-
-    await asyncio.sleep(0.100)
-    assert list(s.transition_log) == old
+    yyy = c.persist(y)
+    await c.compute(yyy)
 
 
 @gen_cluster(client=True)
 async def test_dont_recompute_if_persisted_2(c, s, a, b):
-    x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(inc)(x, dask_key_name="y")
-    z = delayed(inc)(y, dask_key_name="z")
+    x = delayed(inc_only_once("x"))(1, dask_key_name="x")
+    y = delayed(inc_only_once("y"))(x, dask_key_name="y")
+    z = delayed(inc_only_once("z"))(y, dask_key_name="z")
 
-    yy = y.persist()
-    await wait(yy)
+    yy = c.persist(y)
+    await c.compute(yy)
 
-    old = s.story("x", "y")
-
-    zz = z.persist()
-    await wait(zz)
-
-    await asyncio.sleep(0.100)
-    assert s.story("x", "y") == old
+    zz = c.persist(z)
+    await c.compute(zz)
 
 
 @gen_cluster(client=True)
 async def test_dont_recompute_if_persisted_3(c, s, a, b):
-    x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(inc)(2, dask_key_name="y")
-    z = delayed(inc)(y, dask_key_name="z")
+    x = delayed(inc_only_once("x"))(1, dask_key_name="x")
+    y = delayed(inc_only_once("y"))(2, dask_key_name="y")
+    z = delayed(inc_only_once("z"))(y, dask_key_name="z")
     w = delayed(operator.add)(x, z, dask_key_name="w")
 
-    ww = w.persist()
-    await wait(ww)
+    ww = c.persist(w)
+    await c.compute(ww)
 
-    old = list(s.transition_log)
-
-    www = w.persist()
-    await wait(www)
-    await asyncio.sleep(0.100)
-    assert list(s.transition_log) == old
+    www = c.persist(w)
+    await c.compute(www)
 
 
 @gen_cluster(client=True)
 async def test_dont_recompute_if_persisted_4(c, s, a, b):
     x = delayed(inc)(1, dask_key_name="x")
-    y = delayed(inc)(x, dask_key_name="y")
-    z = delayed(inc)(x, dask_key_name="z")
+    y = delayed(inc_only_once("y"))(x, dask_key_name="y")
+    z = delayed(inc_only_once("z"))(x, dask_key_name="z")
 
-    yy = y.persist()
-    await wait(yy)
-
-    old = s.story("x")
+    yy = c.persist(y)
+    await c.compute(yy)
 
     while s.tasks["x"].state == "memory":
         await asyncio.sleep(0.01)
 
-    yyy, zzz = dask.persist(y, z)
-    await wait([yyy, zzz])
-
-    new = s.story("x")
-    assert len(new) > len(old)
+    yyy, zzz = c.persist([y, z])
+    await c.gather(c.compute([yyy, zzz]))
 
 
 @gen_cluster(client=True)
@@ -2259,20 +2279,50 @@ async def test_dont_forget_released_keys(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_dont_recompute_if_erred(c, s, a, b):
+async def test_dont_recompute_if_erred_transition_log(c, s, a, b):
+    """This is a more low level version of test_dont_recompute_if_erred
+    that verifies that there are indeed no transition logs.
+
+    At the time of https://github.com/dask/distributed/pull/9036 it was not
+    entirely safe to run pre-computed tasks through the state machine since
+    there was something wrong with queued tasks. This was triggered by, e.g.
+    `test_threadsafe_get`. If this issue goes away, this test can be safely
+    removed in favor of `test_dont_recompute_if_erred`.
+    """
     x = delayed(inc)(1, dask_key_name="x")
     y = delayed(div)(x, 0, dask_key_name="y")
 
-    yy = y.persist()
+    yy = c.persist(y)
     await wait(yy)
 
     old = list(s.transition_log)
 
-    yyy = y.persist()
+    yyy = c.persist(y)
     await wait(yyy)
 
     await asyncio.sleep(0.100)
     assert list(s.transition_log) == old
+
+
+@gen_cluster(client=True)
+async def test_dont_recompute_if_erred(c, s, a, b):
+
+    x = delayed(inc_only_once("x"))(1, dask_key_name="x")
+    y = delayed(div_only_once("y"))(x, 0, dask_key_name="y")
+
+    yy = c.persist(y)
+    with pytest.raises(ZeroDivisionError):
+        await c.compute(yy)
+
+    yyy = c.persist(y)
+    with pytest.raises(ZeroDivisionError):
+        await c.compute(yyy)
+
+    # If they did run a second time, the error would be different
+    with pytest.raises(RuntimeError, match="Must only be called once"):
+        inc_only_once("x")(1)
+    with pytest.raises(RuntimeError, match="Must only be called once"):
+        div_only_once("y")(1, 1)
 
 
 @gen_cluster()
@@ -2788,24 +2838,26 @@ async def test_retire_workers_bad_params(c, s, a, b):
 @gen_cluster(
     client=True, config={"distributed.scheduler.default-task-durations": {"inc": 100}}
 )
-async def test_get_task_duration(c, s, a, b):
+async def test_get_prefix_duration(c, s, a, b):
     future = c.submit(inc, 1)
     await future
     assert 10 < s.task_prefixes["inc"].duration_average < 100
 
     ts_pref1 = s.new_task("inc-abcdefab", None, "released")
-    assert 10 < s.get_task_duration(ts_pref1) < 100
+    assert 10 < s._get_prefix_duration(ts_pref1.prefix) < 100
 
+    extension = s.extensions["stealing"]
     # make sure get_task_duration adds TaskStates to unknown dict
-    assert len(s.unknown_durations) == 0
+    assert len(extension.unknown_durations) == 0
     x = c.submit(slowinc, 1, delay=0.5)
     while len(s.tasks) < 3:
         await asyncio.sleep(0.01)
 
     ts = s.tasks[x.key]
-    assert s.get_task_duration(ts) == 0.5  # default
-    assert len(s.unknown_durations) == 1
-    assert len(s.unknown_durations["slowinc"]) == 1
+    assert s._get_prefix_duration(ts.prefix) == 0.5  # default
+
+    assert len(extension.unknown_durations) == 1
+    assert len(extension.unknown_durations["slowinc"]) == 1
 
 
 @gen_cluster(client=True)
@@ -2823,8 +2875,11 @@ async def test_default_task_duration_splits(c, s, a, b):
     with dask.config.set({"dataframe.shuffle.method": "tasks"}):
         graph = df.shuffle(
             "A",
-            # If we don't have enough partitions, we'll fall back to a simple shuffle
+            # If we don't have enough partitions, we'll fall back to a
+            # simple shuffle
             max_branch=npart - 1,
+            # Block optimizer from killing the shuffle
+            force=True,
         ).sum()
     fut = c.compute(graph)
     await wait(fut)
@@ -2856,7 +2911,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
 
     start = time()
     x = da.arange(100, chunks=(20,))
-    y = (x + 1).persist(optimize_graph=False)
+    y = c.persist(x + 1, optimize_graph=False)
     y = await y
     stop = time()
 
@@ -2916,7 +2971,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert "array" in str(tg.types)
     assert "array" in str(tp.types)
 
-    z = y[:20].persist(optimize_graph=False)
+    z = c.persist(y[:20], optimize_graph=False)
     z = await z
     del y
 
@@ -3096,13 +3151,13 @@ async def test_task_prefix(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
-    y = (x + 1).sum().persist()
+    y = c.persist((x + 1).sum())
     y = await y
 
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 1
 
     a = da.arange(101, chunks=(20,))
-    b = (a + 1).sum().persist()
+    b = c.persist((a + 1).sum())
     b = await b
 
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 2
@@ -3127,7 +3182,7 @@ async def test_task_group_non_tuple_key(c, s, a, b):
     np = pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
-    y = (x + 1).sum().persist()
+    y = c.persist((x + 1).sum())
     y = await y
 
     assert s.task_prefixes["sum"].states["released"] == 4
@@ -3338,10 +3393,11 @@ async def test_unknown_task_duration_config(client, s, a, b):
     future = client.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.001)
-    assert sum(s.get_task_duration(ts) for ts in s.tasks.values()) == 3600
-    assert len(s.unknown_durations) == 1
+    assert sum(s._get_prefix_duration(ts.prefix) for ts in s.tasks.values()) == 3600
+    extension = s.extensions["stealing"]
+    assert len(extension.unknown_durations) == 1
     await wait(future)
-    assert len(s.unknown_durations) == 0
+    assert len(extension.unknown_durations) == 0
 
 
 @gen_cluster()
@@ -4295,6 +4351,9 @@ async def test_Scheduler__to_dict(c, s, a):
         "extensions",
         "services",
         "started",
+        "n_workers",
+        "total_threads",
+        "total_memory",
         "workers",
         "status",
         "thread_id",
@@ -4510,12 +4569,6 @@ async def test_worker_state_unique_regardless_of_address(s, w):
     assert ws1 is not ws2
     assert ws1 != ws2
     assert hash(ws1) != ws2
-
-
-@gen_cluster(nthreads=[("", 1)])
-async def test_scheduler_close_fast_deprecated(s, w):
-    with pytest.warns(FutureWarning):
-        await s.close(fast=True)
 
 
 def test_runspec_regression_sync(loop):
@@ -4915,7 +4968,7 @@ async def test_refuse_to_schedule_huge_task(c, s, *workers, finalize):
         fut = c.compute(bg)
         match += r".* you called client.compute()"
     else:
-        bg = bg.repartition(npartitions=1).persist()
+        bg = c.persist(bg.repartition(npartitions=1))
         fut = list(c.futures_of(bg))[0]
 
     with pytest.raises(MemoryError, match=match):
@@ -4943,147 +4996,6 @@ async def test_html_repr(c, s, a, b):
     await f
 
 
-@pytest.mark.parametrize("deps", ["same", "less", "more"])
-@gen_cluster(client=True, nthreads=[])
-async def test_resubmit_different_task_same_key_before_previous_is_done(c, s, deps):
-    """If an intermediate key has a different run_spec (either the callable function or
-    the dependencies / arguments) that will conflict with what was previously defined,
-    it should raise an error since this can otherwise break in many different places and
-    cause either spurious exceptions or even deadlocks.
-
-    In this specific test, the previous run_spec has not been computed yet.
-    See also test_resubmit_different_task_same_key_after_previous_is_done.
-
-    For a real world example where this can trigger, see
-    https://github.com/dask/dask/issues/9888
-    """
-    seen = False
-
-    def _match(event):
-        _, msg = event
-        return (
-            isinstance(msg, dict)
-            and msg.get("action", None) == "update-graph"
-            and msg["metrics"]["key_collisions"] > 0
-        )
-
-    def handler(ev):
-        if _match(ev):
-            nonlocal seen
-            seen = True
-
-    c.subscribe_topic("scheduler", handler)
-
-    x1 = c.submit(inc, 1, key="x1")
-    y_old = c.submit(inc, x1, key="y")
-
-    x1b = x1 if deps != "less" else 2
-    x2 = delayed(inc)(10, dask_key_name="x2") if deps == "more" else 11
-    y_new = delayed(sum)([x1b, x2], dask_key_name="y")
-    z = delayed(inc)(y_new, dask_key_name="z")
-
-    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
-        fut = c.compute(z)
-        await wait_for_state("z", "waiting", s)
-
-    assert "Detected different `run_spec` for key 'y'" in log.getvalue()
-
-    await async_poll_for(lambda: seen, timeout=5)
-
-    async with Worker(s.address):
-        # Used old run_spec
-        assert await y_old == 3
-        assert await fut == 4
-
-
-@pytest.mark.parametrize("deps", ["same", "less", "more"])
-@pytest.mark.parametrize("release_previous", [False, True])
-@gen_cluster(client=True)
-async def test_resubmit_different_task_same_key_after_previous_is_done(
-    c, s, a, b, deps, release_previous
-):
-    """Same as test_resubmit_different_task_same_key, but now the replaced task has
-    already been computed and is either in memory or released, and so are its old
-    dependencies, so they may need to be recomputed.
-    """
-    x1 = delayed(inc)(1, dask_key_name="x1")
-    x1fut = c.compute(x1)
-    y_old = c.submit(inc, x1fut, key="y")
-    z1 = c.submit(inc, y_old, key="z1")
-    await wait(z1)
-    if release_previous:
-        del x1fut, y_old
-        await wait_for_state("x1", "released", s)
-        await wait_for_state("y", "released", s)
-
-    x1b = x1 if deps != "less" else 2
-    x2 = delayed(inc)(10, dask_key_name="x2") if deps == "more" else 11
-    y_new = delayed(sum)([x1b, x2], dask_key_name="y")
-    z2 = delayed(inc)(y_new, dask_key_name="z2")
-
-    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
-        fut = c.compute(z2)
-        # Used old run_spec
-        assert await fut == 4
-        assert "x2" not in s.tasks
-
-    # _generate_taskstates won't run for a dependency that's already in memory
-    has_warning = "Detected different `run_spec` for key 'y'" in log.getvalue()
-    assert has_warning is (release_previous or deps == "less")
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_resubmit_different_task_same_key_many_clients(c, s):
-    """Two different clients submit a task with the same key but different run_spec's."""
-    async with Client(s.address, asynchronous=True) as c2:
-        with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
-            x1 = c.submit(inc, 1, key="x")
-            x2 = c2.submit(inc, 2, key="x")
-
-            await wait_for_state("x", ("no-worker", "queued"), s)
-            who_wants = s.tasks["x"].who_wants
-            await async_poll_for(
-                lambda: {cs.client_key for cs in who_wants} == {c.id, c2.id}, timeout=5
-            )
-
-        assert "Detected different `run_spec` for key 'x'" in log.getvalue()
-
-        async with Worker(s.address):
-            assert await x1 == 2
-            assert await x2 == 2  # kept old run_spec
-
-
-@pytest.mark.parametrize(
-    "before,after,expect_msg",
-    [
-        (object(), 123, True),
-        (123, object(), True),
-        (o := object(), o, False),
-    ],
-)
-@gen_cluster(client=True, nthreads=[])
-async def test_resubmit_nondeterministic_task_same_deps(
-    c, s, before, after, expect_msg
-):
-    """Some run_specs can't be tokenized deterministically. Silently skip comparison on
-    the run_spec when both lhs and rhs are nondeterministic.
-    Dependencies must be the same.
-    """
-    x1 = c.submit(lambda x: x, before, key="x")
-    x2 = delayed(lambda x: x)(after, dask_key_name="x")
-    y = delayed(lambda x: x)(x2, dask_key_name="y")
-
-    with captured_logger("distributed.scheduler", level=logging.WARNING) as log:
-        fut = c.compute(y)
-        await async_poll_for(lambda: "y" in s.tasks, timeout=5)
-
-    has_msg = "Detected different `run_spec` for key 'x'" in log.getvalue()
-    assert has_msg == expect_msg
-
-    async with Worker(s.address):
-        assert type(await fut) is type(before)
-
-
 @pytest.mark.parametrize("add_deps", [False, True])
 @gen_cluster(client=True, nthreads=[])
 async def test_resubmit_nondeterministic_task_different_deps(c, s, add_deps):
@@ -5093,7 +5005,7 @@ async def test_resubmit_nondeterministic_task_different_deps(c, s, add_deps):
     o = object()
     x1 = c.submit(inc, 1, key="x1") if not add_deps else 2
     x2 = c.submit(inc, 2, key="x2")
-    y1 = delayed(lambda i, j: i)(x1, o, dask_key_name="y").persist()
+    y1 = c.persist(delayed(lambda i, j: i)(x1, o, dask_key_name="y"))
     y2 = delayed(lambda i, j: i)(x2, o, dask_key_name="y")
     z = delayed(inc)(y2, dask_key_name="z")
 
@@ -5104,39 +5016,6 @@ async def test_resubmit_nondeterministic_task_different_deps(c, s, add_deps):
 
     async with Worker(s.address):
         assert await fut == 3
-
-
-@pytest.mark.parametrize(
-    "loglevel,expect_loglines", [(logging.DEBUG, 2), (logging.WARNING, 1)]
-)
-@gen_cluster(client=True, nthreads=[])
-async def test_resubmit_different_task_same_key_warns_only_once(
-    c, s, loglevel, expect_loglines
-):
-    """If all tasks of a layer are affected by the same run_spec collision, warn
-    only once.
-    """
-    y1s = c.map(inc, [0, 1, 2], key=[("y", 0), ("y", 1), ("y", 2)])
-    dsk = {
-        "x": 3,
-        ("y", 0): (inc, "x"),  # run_spec and dependencies change
-        ("y", 1): (inc, 4),  # run_spec changes, dependencies don't
-        ("y", 2): (inc, 2),  # Doesn't change
-        ("z", 0): (inc, ("y", 0)),
-        ("z", 1): (inc, ("y", 1)),
-        ("z", 2): (inc, ("y", 2)),
-    }
-    with captured_logger("distributed.scheduler", level=loglevel) as log:
-        zs = c.get(dsk, [("z", 0), ("z", 1), ("z", 2)], sync=False)
-        await wait_for_state(("z", 2), "waiting", s)
-
-    actual_loglines = len(
-        re.findall("Detected different `run_spec` for key ", log.getvalue())
-    )
-    assert actual_loglines == expect_loglines
-
-    async with Worker(s.address):
-        assert await c.gather(zs) == [2, 3, 4]  # Kept old ys
 
 
 def block(x, in_event, block_event):
@@ -5312,7 +5191,7 @@ async def test_alias_resolving_break_queuing(c, s, a):
     arr = da.random.random((90, 100), chunks=(10, 50))
     result = arr.rechunk(((10, 7, 7, 6) * 3, (50, 50)))
     result = result.sum(split_every=1000)
-    x = result.persist()
+    x = c.persist(result)
     while not s.tasks:
         await asyncio.sleep(0.01)
     assert sum([s.is_rootish(v) for v in s.tasks.values()]) == 18
@@ -5326,6 +5205,8 @@ async def test_data_producers(c, s, a):
         return 100
 
     class MyArray(DaskMethodsMixin):
+        __dask_optimize__ = None
+
         def __dask_graph__(self):
             return {
                 "a": DataNode("a", 10),

@@ -19,6 +19,7 @@ import sys
 import threading
 import traceback
 import types
+import uuid
 import weakref
 import zipfile
 from collections import deque, namedtuple
@@ -42,7 +43,8 @@ from tornado.ioloop import IOLoop
 import dask
 import dask.bag as db
 from dask import delayed
-from dask.tokenize import tokenize
+from dask.task_spec import Task, TaskRef
+from dask.tokenize import TokenizationError, tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
 
 from distributed import (
@@ -62,6 +64,7 @@ from distributed import (
 )
 from distributed.client import (
     Client,
+    ClosedClientError,
     Future,
     FutureCancelledError,
     FuturesCancelledError,
@@ -271,6 +274,13 @@ async def test_custom_key_with_batches(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_compute_no_collection_or_future(c, s, *workers):
+    assert c.compute(1) == 1
+
+    assert await c.gather(c.compute((1, delayed(inc)(1)))) == [1, 2]
+
+
+@gen_cluster(client=True)
 async def test_compute_retries(c, s, a, b):
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
 
@@ -401,7 +411,7 @@ async def test_future_repr(c, s, a, b):
 async def test_future_tuple_repr(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
-    y = da.arange(10, chunks=(5,)).persist()
+    y = c.persist(da.arange(10, chunks=(5,)))
     f = futures_of(y)[0]
     for func in [repr, lambda x: x._repr_html_()]:
         for k in f.key:
@@ -2109,12 +2119,21 @@ async def test_badly_serialized_input_stderr(capsys, c):
     ],
 )
 def test_repr(loop, func):
-    with cluster(nworkers=3, worker_kwargs={"memory_limit": "2 GiB"}) as (s, [a, b, c]):
+    nworkers = 6
+    with cluster(nworkers=nworkers, worker_kwargs={"memory_limit": "2 GiB"}) as (
+        s,
+        *workers,
+    ):
         with Client(s["address"], loop=loop) as c:
+            # NOTE: Intentionally testing when we have more workers than the default
+            # in `client.scheduler_info()` (xref https://github.com/dask/distributed/issues/9065)
+            info = c.scheduler_info()
+            assert len(info["workers"]) < nworkers
+
             text = func(c)
             assert c.scheduler.address in text
-            assert "threads=3" in text or "Total threads: </strong>" in text
-            assert "6.00 GiB" in text
+            assert f"threads={nworkers}" in text or "Total threads: </strong>" in text
+            assert f"{2 * nworkers}.00 GiB" in text
             if "<table" not in text:
                 assert len(text) < 80
 
@@ -2641,28 +2660,23 @@ async def test_futures_of_cancelled_raises(c, s, a, b):
         await asyncio.sleep(0.01)
     await c.cancel([x], reason="testreason")
 
-    # Note: The scheduler currently doesn't remember the reason but rather
-    # forgets the task immediately. The reason is currently. only raised if the
-    # client checks on it. Therefore, we expect an unknown reason and definitely
-    # not a scheduler disconnected which would otherwise indicate a bug, e.g. an
-    # AssertionError during transitioning.
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: testreason"):
         await x
     while x.key in s.tasks:
         await asyncio.sleep(0.01)
 
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         get_obj = c.get({"x": (inc, x), "y": (inc, 2)}, ["x", "y"], sync=False)
         gather_obj = c.gather(get_obj)
         await gather_obj
 
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.submit(inc, x)
 
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.submit(add, 1, y=x)
 
-    with pytest.raises(CancelledError, match="(reason: unknown|testreason)"):
+    with pytest.raises(CancelledError, match="reason: lost dependencies"):
         await c.gather(c.map(add, [1], y=x))
 
 
@@ -3096,6 +3110,51 @@ async def test_submit_on_cancelled_future(c, s, a, b):
         await c.submit(inc, x)
 
 
+@pytest.mark.parametrize("validate", [True, False])
+@pytest.mark.parametrize("swap_keys", [True, False])
+@gen_cluster(client=True)
+async def test_compute_partially_forgotten(c, s, *workers, validate, swap_keys):
+    if not validate:
+        s.validate = False
+    # (CPython impl detail)
+    # While it is not possible to know what the iteration order of a set will
+    # be, it is determinisitic and only depends on the hash of the inserted
+    # elements. Therefore, converting the set to a list will alway yield the
+    # same order. We're initializing the keys in this very specific order to
+    # ensure that the scheduler internally arranges the keys in this way
+
+    # We'll need the list to be
+    # ['key', 'lost_dep_of_key']
+    # At the time of writing, it is unclear why the lost_dep_of_key is part of
+    # keys but this triggers an observed error
+    keys = key, lost_dep_of_key = list({"foo", "bar"})
+    if swap_keys:
+        keys = lost_dep_of_key, key = [key, lost_dep_of_key]
+
+    # Ordinarily this is not submitted as a graph but it could be if a persist
+    # was leading up to this
+    task = Task(key, inc, TaskRef(lost_dep_of_key))
+    # Only happens if it is submitted twice. The first submission leaves a
+    # zombie task around after triggering the "lost deps" exception. That zombie
+    # causes the second one to trigger the transition error.
+    res = c.get({task.key: task}, keys, sync=False)
+    res = c.get({task.key: task}, keys, sync=False)
+    with pytest.raises(CancelledError, match="lost dependencies"):
+        await res[1].result()
+    with pytest.raises(CancelledError, match="lost dependencies"):
+        await res[0].result()
+
+    # No transition errors
+    while (
+        # This waits until update-graph is truly finished
+        len([msg[1]["action"] == "update-graph" for msg in s.get_events("scheduler")])
+        < 2
+    ):
+        await asyncio.sleep(0.01)
+    assert not s.get_events("transitions")
+    assert not s.tasks
+
+
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 10,
@@ -3405,68 +3464,6 @@ def test_default_get(loop_in_thread):
                 assert dask.base.get_scheduler() == c2.get
             assert dask.base.get_scheduler() == c1.get
         assert dask.base.get_scheduler() == pre_get
-
-
-@gen_cluster(config={"scheduler": "sync"}, nthreads=[])
-async def test_get_scheduler_default_client_config_interleaving(s):
-    # This test is using context managers intentionally. We should not refactor
-    # this to use it in more places to make the client closing cleaner.
-    with pytest.warns(UserWarning):
-        assert dask.base.get_scheduler() == dask.local.get_sync
-        with dask.config.set(scheduler="threads"):
-            assert dask.base.get_scheduler() == dask.threaded.get
-            client = await Client(s.address, set_as_default=False, asynchronous=True)
-            try:
-                assert dask.base.get_scheduler() == dask.threaded.get
-            finally:
-                await client.close()
-
-            client = await Client(s.address, set_as_default=True, asynchronous=True)
-            try:
-                assert dask.base.get_scheduler() == client.get
-            finally:
-                await client.close()
-            assert dask.base.get_scheduler() == dask.threaded.get
-
-            # FIXME: As soon as async with uses as_current this will be true as well
-            # async with Client(s.address, set_as_default=False, asynchronous=True) as c:
-            #     assert dask.base.get_scheduler() == c.get
-            # assert dask.base.get_scheduler() == dask.threaded.get
-
-            client = await Client(s.address, set_as_default=False, asynchronous=True)
-            try:
-                assert dask.base.get_scheduler() == dask.threaded.get
-                with client.as_current():
-                    sc = dask.base.get_scheduler()
-                    assert sc == client.get
-                assert dask.base.get_scheduler() == dask.threaded.get
-            finally:
-                await client.close()
-
-            # If it comes to a race between default and current, current wins
-            client = await Client(s.address, set_as_default=True, asynchronous=True)
-            client2 = await Client(s.address, set_as_default=False, asynchronous=True)
-            try:
-                with client2.as_current():
-                    assert dask.base.get_scheduler() == client2.get
-                assert dask.base.get_scheduler() == client.get
-            finally:
-                await client.close()
-                await client2.close()
-
-            assert dask.base.get_scheduler() == dask.threaded.get
-
-        assert dask.base.get_scheduler() == dask.local.get_sync
-
-        client = await Client(s.address, set_as_default=True, asynchronous=True)
-        try:
-            assert dask.base.get_scheduler() == client.get
-            with dask.config.set(scheduler="threads"):
-                assert dask.base.get_scheduler() == dask.threaded.get
-                with client.as_current():
-                    assert dask.base.get_scheduler() == client.get
-        finally:
-            await client.close()
 
 
 @gen_cluster()
@@ -3982,6 +3979,10 @@ def test_scheduler_info(c):
     assert isinstance(info, dict)
     assert len(info["workers"]) == 2
     assert isinstance(info["started"], float)
+    info = c.scheduler_info(n_workers=1)
+    assert len(info["workers"]) == 1
+    info = c.scheduler_info(n_workers=-1)
+    assert len(info["workers"]) == 2
 
 
 def test_write_scheduler_file(c, loop):
@@ -4571,50 +4572,6 @@ def test_normalize_collection_with_released_futures(c):
     assert res == sol
 
 
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
-@gen_cluster(client=True)
-async def test_auto_normalize_collection(c, s, a, b):
-    da = pytest.importorskip("dask.array")
-
-    x = da.ones(10, chunks=5)
-    assert len(x.dask) == 2
-
-    with dask.config.set(optimizations=[c._optimize_insert_futures]):
-        y = x.map_blocks(inc, dtype=x.dtype)
-        yy = c.persist(y)
-
-        await wait(yy)
-
-        start = time()
-        future = c.compute(y.sum())
-        await future
-        end = time()
-        assert end - start < 1
-
-        start = time()
-        z = c.persist(y + 1)
-        await wait(z)
-        end = time()
-        assert end - start < 1
-
-
-@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
-def test_auto_normalize_collection_sync(c):
-    da = pytest.importorskip("dask.array")
-    x = da.ones(10, chunks=5)
-
-    y = x.map_blocks(inc, dtype=x.dtype)
-    yy = c.persist(y)
-
-    wait(yy)
-
-    with dask.config.set(optimizations=[c._optimize_insert_futures]):
-        start = time()
-        y.sum().compute()
-        end = time()
-        assert end - start < 1
-
-
 def assert_no_data_loss(scheduler):
     for key, start, finish, recommendations, _, _ in scheduler.transition_log:
         if start == "memory" and finish == "released":
@@ -4745,9 +4702,9 @@ def test_recreate_error_sync(c):
     y0 = c.submit(dec, 1)
     x = c.submit(div, 1, x0)
     y = c.submit(div, 1, y0)
-    tot = c.submit(sum, x, y)
-    f = c.compute(tot)
-
+    f = c.submit(sum, x, y)
+    wait(f)
+    assert f.status == "error"
     with pytest.raises(ZeroDivisionError):
         c.recreate_error_locally(f)
     assert f.status == "error"
@@ -4764,8 +4721,8 @@ def test_recreate_task_sync(c):
     y0 = c.submit(dec, 2)
     x = c.submit(div, 1, x0)
     y = c.submit(div, 1, y0)
-    tot = c.submit(sum, [x, y])
-    f = c.compute(tot)
+    f = c.submit(sum, [x, y])
+    wait(f)
 
     assert c.recreate_task_locally(f) == 2
 
@@ -4808,7 +4765,7 @@ async def test_restart_workers(c, s, a, b):
     # Persist futures and perform a computation
     size = 100
     x = da.ones(size, chunks=10)
-    x = x.persist()
+    x = c.persist(x)
     assert await c.compute(x.sum()) == size
 
     # Restart a single worker
@@ -4916,12 +4873,22 @@ class MyException(Exception):
 
 @gen_cluster(client=True)
 async def test_robust_unserializable(c, s, a, b):
-    class Foo:
+    class NoTokenization:
         def __getstate__(self):
             raise MyException()
 
-    with pytest.raises(TypeError, match="Could not serialize"):
-        future = c.submit(identity, Foo())
+    with pytest.raises((TypeError, TokenizationError), match="serialize"):
+        future = c.submit(identity, NoTokenization())
+
+    class TokenBrokenGet:
+        def __dask_tokenize__(self):
+            return uuid.uuid4().hex
+
+        def __getstate__(self):
+            raise MyException()
+
+    with pytest.raises((TypeError, TokenizationError), match="serialize"):
+        future = c.submit(identity, TokenBrokenGet())
 
     futures = c.map(inc, range(10))
     results = await c.gather(futures)
@@ -4930,16 +4897,24 @@ async def test_robust_unserializable(c, s, a, b):
     assert a.data and b.data
 
 
+class BrokenSetState:
+    def __getstate__(self):
+        return 1
+
+    def __dask_tokenize__(self):
+        return uuid.uuid4().hex
+
+    def __setstate__(self, state):
+        raise MyException("hello")
+
+    def __call__(self):
+        return 1
+
+
 @gen_cluster(client=True)
 async def test_robust_undeserializable(c, s, a, b):
-    class Foo:
-        def __getstate__(self):
-            return 1
 
-        def __setstate__(self, state):
-            raise MyException("hello")
-
-    future = c.submit(identity, Foo())
+    future = c.submit(identity, BrokenSetState())
     await wait(future)
     assert future.status == "error"
     with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
@@ -4953,18 +4928,9 @@ async def test_robust_undeserializable(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_robust_undeserializable_function(c, s, a, b, monkeypatch):
-    class Foo:
-        def __getstate__(self):
-            return 1
+async def test_robust_undeserializable_function(c, s, a, b):
 
-        def __setstate__(self, state):
-            raise MyException("hello")
-
-        def __call__(self, *args):
-            return 1
-
-    future = c.submit(Foo(), 1)
+    future = c.submit(BrokenSetState(), 1)
     await wait(future)
     assert future.status == "error"
     with raises_with_cause(RuntimeError, "deserialization", MyException, "hello"):
@@ -5178,7 +5144,7 @@ async def test_serialize_collections(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
-    x = da.arange(10, chunks=(5,)).persist()
+    x = c.persist(da.arange(10, chunks=(5,)))
 
     def f(x):
         assert isinstance(x, da.Array)
@@ -5360,7 +5326,7 @@ async def test_serialize_collections_of_futures(c, s, a, b):
     from dask.dataframe.utils import assert_eq
 
     df = pd.DataFrame({"x": [1, 2, 3]})
-    ddf = dd.from_pandas(df, npartitions=2).persist()
+    ddf = c.persist(dd.from_pandas(df, npartitions=2))
     future = await c.scatter(ddf)
 
     ddf2 = await future
@@ -5410,17 +5376,6 @@ def test_dynamic_workloads_sync(c):
 def test_dynamic_workloads_sync_random(c):
     future = c.submit(_dynamic_workload, 0, delay="random")
     assert future.result(timeout=20) == 52
-
-
-@gen_cluster(client=True)
-async def test_bytes_keys(c, s, a, b):
-    key = b"inc-123"
-    future = c.submit(inc, 1, key=key)
-    result = await future
-    assert type(future.key) is bytes
-    assert set(s.tasks) == {key}
-    assert key in a.data or key in b.data
-    assert result == 2
 
 
 @gen_cluster(client=True)
@@ -5520,7 +5475,7 @@ async def test_call_stack_collections(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
-    x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
+    x = c.persist(da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5))
     while not a.state.executing_count and not b.state.executing_count:
         await asyncio.sleep(0.001)
     result = await c.call_stack(x)
@@ -5532,7 +5487,7 @@ async def test_call_stack_collections_all(c, s, a, b):
     pytest.importorskip("numpy")
     da = pytest.importorskip("dask.array")
 
-    x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
+    x = c.persist(da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5))
     while not a.state.executing_count and not b.state.executing_count:
         await asyncio.sleep(0.001)
     result = await c.call_stack()
@@ -5812,6 +5767,19 @@ async def test_warn_when_submitting_large_values_memoryview(c, s):
         c.submit(lambda: a)
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_closed_client_send_message(c, s):
+    # Ensure a meaningful, but concise error is raised when
+    # a closed client attempts to send a message to the scheduler
+    await c.close()
+    with pytest.raises(ClosedClientError, match="update-graph") as exc_info:
+        c.submit(lambda x: x + 1)
+
+    msg = str(exc_info.value)
+    assert "Can't send update-graph" in msg
+    assert len(msg) < 100
+
+
 @gen_cluster(client=True)
 async def test_unhashable_function(c, s, a, b):
     func = _UnhashableCallable()
@@ -6034,11 +6002,21 @@ def test_no_threads_lingering():
 
 @gen_cluster()
 async def test_direct_async(s, a, b):
+    # Keyword option
     async with Client(s.address, asynchronous=True, direct_to_workers=True) as c:
         assert c.direct_to_workers
 
     async with Client(s.address, asynchronous=True, direct_to_workers=False) as c:
         assert not c.direct_to_workers
+
+    # Config option
+    with dask.config.set({"distributed.client.direct-to-workers": True}):
+        async with Client(s.address, asynchronous=True) as c:
+            assert c.direct_to_workers
+
+    with dask.config.set({"distributed.client.direct-to-workers": False}):
+        async with Client(s.address, asynchronous=True) as c:
+            assert not c.direct_to_workers
 
 
 def test_direct_sync(c):
@@ -6190,7 +6168,7 @@ async def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
     dd = pytest.importorskip("dask.dataframe")
 
     df = pd.DataFrame({"x": range(1, 11)})
-    ddf = dd.from_pandas(df, npartitions=2).persist()
+    ddf = c.persist(dd.from_pandas(df, npartitions=2))
     ddf = ddf.map_partitions(lambda x: x)
     ddf["x"] = ddf["x"].astype("f8")
     ddf = ddf.map_partitions(lambda x: x)
@@ -6250,10 +6228,10 @@ async def test_file_descriptors_dont_leak(Worker):
         async with (
             Worker(s.address),
             Worker(s.address),
-            Client(s.address, asynchronous=True),
+            Client(s.address, asynchronous=True) as c,
         ):
             assert proc.num_fds() > before
-            await df.sum().persist()
+            await c.persist(df.sum())
 
     start = time()
     while proc.num_fds() > before:
@@ -6351,7 +6329,7 @@ async def test_config_inherited_by_subprocess():
 
 @gen_cluster(client=True)
 async def test_futures_of_sorted(c, s, a, b):
-    b = dask.bag.from_sequence(range(10), npartitions=5).persist()
+    b = c.persist(dask.bag.from_sequence(range(10), npartitions=5))
     futures = futures_of(b)
     assert [fut.key for fut in futures] == [k for k in b.__dask_keys__()]
 
@@ -6778,7 +6756,7 @@ async def test_annotations_task_state(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.annotations["qux"] == "bar"
@@ -6833,7 +6811,7 @@ async def test_annotations_priorities(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.priority[0] == -15
@@ -6849,7 +6827,7 @@ async def test_annotations_workers(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.annotations["workers"] == [a.address]
@@ -6868,7 +6846,7 @@ async def test_annotations_retries(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.retries == 2
@@ -6921,7 +6899,7 @@ async def test_annotations_resources(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert ts.resource_restrictions == {"GPU": 1}
@@ -6960,7 +6938,7 @@ async def test_annotations_loose_restrictions(c, s, a, b):
         x = da.ones(10, chunks=(5,))
 
     with dask.config.set(optimization__fuse__active=False):
-        x = await x.persist()
+        x = await c.persist(x)
 
     for ts in s.tasks.values():
         assert not ts.worker_restrictions
@@ -7240,7 +7218,7 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
     x = da.ones((10, 10), chunks=(3, 3))
-    future = x.sum().persist()
+    future = c.persist(x.sum())
     await future
 
     test_function_code = inspect.getsource(
@@ -8279,13 +8257,10 @@ def test_release_persisted_collection_sync(c):
 
 @pytest.mark.slow()
 @pytest.mark.parametrize("do_wait", [True, False])
-def test_worker_clients_do_not_claim_ownership_of_serialize_futures(c, do_wait):
-    # Note: sending collections like this should be considered an anti-pattern
-    # but it is possible. As long as the user ensures the futures stay alive
-    # this is fine but the cluster will not take over this responsibility. The
-    # client will not unpack the collection when using submit and will therefore
-    # not handle the dependencies in any way.
-    # See also https://github.com/dask/distributed/issues/7498
+def test_submit_persisted_collection_as_argument(c, do_wait):
+    # See also test_worker_clients_do_not_claim_ownership_of_serialize_futures
+    # This is just a test to verify that this is indeed possible since otherwise
+    # the other test is not making sense
     da = pytest.importorskip("dask.array", exc_type=ImportError)
     x = da.arange(10, chunks=(5,)).persist()
     if do_wait:
@@ -8297,19 +8272,166 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(c, do_wait):
 
     future = c.submit(f, x)
     result = future.result()
+
     assert result == sum(range(10))
-    del x, future, result
 
-    # Now we delete the persisted collection before computing the result
-    y = da.arange(10, chunks=(4,)).persist()
-    if do_wait:
-        wait(y)
-    future = c.submit(f, y)
-    del y
+
+@pytest.mark.slow()
+@pytest.mark.parametrize(
+    "do_wait, store_variable",
+    [
+        (True, True),
+        (False, True),
+    ],
+)
+def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
+    c, do_wait, store_variable
+):
+    da = pytest.importorskip("dask.array", exc_type=ImportError)
+
+    # Note: sending collections like this should be considered an anti-pattern
+    # but it is possible. As long as the user ensures the futures stay alive
+    # this is fine but the cluster will not take over this responsibility. The
+    # client will not unpack the collection when using submit and will therefore
+    # not handle the dependencies in any way.
+    # See also https://github.com/dask/distributed/issues/7498
+    # We delete the persisted collection before computing the result
+
+    # We're using the event to control ordering since the task is executed in a
+    # different process such that we cannot rely on msg ordering
+    #
+    # 1. The alive futures have to be serialized as part of the submit payload
+    # 2. The future arive at the worker but the worker client doesn't claim
+    #    ownership
+    # 3. We're deleting them and the cancellation goes through to the scheduler
+    #    such that it can release the futures
+    # 4. Then the worker client submits a workload thinking the futures are
+    #    still alive. This is rejected by the scheduler and it raises a proper
+    #    CancelledError.
+    #
+
+    def f(x, ev):
+        assert isinstance(x, da.Array)
+        ev.wait()
+        return x.sum().compute()
+
+    ev = Event()
+    if store_variable:
+        y = da.arange(10, chunks=(4,)).persist()
+        if do_wait:
+            wait(y)
+        future = c.submit(f, y, ev=ev)
+        del y
+
+    else:
+        ev = Event()
+        future = c.submit(f, da.arange(10, chunks=(4,)).persist(), ev=ev)
+
+    # Wait for persisted collection to vanish
+    while c.run_on_scheduler(lambda dask_scheduler: len(dask_scheduler.tasks)) > 1:
+        sleep(0.1)
+    ev.set()
     with pytest.raises(FutureCancelledError):
         future.result()
-    del future
 
-    future = c.submit(f, da.arange(10, chunks=(4,)).persist())
-    with pytest.raises(FutureCancelledError):
-        future.result()
+
+@gen_cluster(client=True, nthreads=[])
+async def test_adjust_heartbeat(c, s):
+    assert "heartbeat" in c._periodic_callbacks
+    heartbeat_pc = c._periodic_callbacks["heartbeat"]
+    scheduler_info_pc = c._periodic_callbacks["scheduler-info"]
+    assert 0 < (initial_value := heartbeat_pc.callback_time) < 10_000
+
+    clients = []
+    for _ in range(20):
+        clients.append(Client(s.address, asynchronous=True))
+    await asyncio.gather(*clients)
+
+    while initial_value == heartbeat_pc.callback_time:
+        await asyncio.sleep(0.1)
+    assert (newvalue := heartbeat_pc.callback_time) > initial_value
+    assert heartbeat_pc.callback_time == scheduler_info_pc.callback_time
+
+    await asyncio.gather(*[cc.close() for cc in clients])
+    while newvalue == heartbeat_pc.callback_time:
+        await asyncio.sleep(0.1)
+    assert heartbeat_pc.callback_time == initial_value
+    assert heartbeat_pc.callback_time == scheduler_info_pc.callback_time
+
+
+class CountSerialized:
+    """Simple wrapper on an object that counts the number of times it's
+    serialized."""
+
+    global_count = 0
+
+    def __init__(self, x):
+        self.x = x
+        self.local_count = 0
+
+    def __reduce__(self):
+        CountSerialized.global_count += 1
+        self.local_count += 1
+        return (CountSerialized, (self.x,))
+
+    def __dask_tokenize__(self):
+        # If no tokenization is registered, we'll pickle many times to get a
+        # deterministic token
+        return (self.__class__, self.x)
+
+
+def _task(foo, bar):
+    """Some dummy task on CountSerialized objects."""
+    return foo.x == bar.x == 1
+
+
+def _func(task_and_args):
+    f, args = task_and_args
+    return f(*args)
+
+
+@pytest.mark.parametrize("use_lambda", [True, False])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_count_serialization(c, s, a, use_lambda):
+    CountSerialized.global_count = 0
+    x = CountSerialized(1)
+    if use_lambda:
+        task_and_args = _task, [x, x]
+        await c.submit(lambda: _func(task_and_args))
+        # The lambda will trigger an exception during serialization that will
+        # escalate and will attempt to serialize this repeatedly until falling
+        # back to cloudpickle.
+        # It also requires us to tokenize the lambda which again uses pickle.
+        # The same happens if _task or _func is defined in local scope.
+        expected_local = 3
+    else:
+        await c.submit(_task, x, x)
+        expected_local = 1
+
+    # once to the worker
+    expected_global = expected_local + 1
+    assert x.local_count <= expected_local
+    assert x.global_count <= expected_global
+
+
+@pytest.mark.parametrize("use_kwarg", [False, "simple", "future"])
+@gen_cluster(client=True)
+async def test_map_accepts_nested_futures(c, s, a, b, use_kwarg):
+    def reducer(futs, *, offset=0, **kwargs):
+        return sum(futs) + offset
+
+    f1 = c.submit(lambda: 10)
+    f2 = c.submit(lambda: 20)
+    offset = None
+    if use_kwarg == "simple":
+        future = c.map(reducer, [[f1, f2]], foo=True)[0]
+    elif use_kwarg == "future":
+        offset = c.submit(lambda: 1)
+
+        future = c.map(reducer, [[f1, f2]], offset=offset)[0]
+
+    else:
+        future = c.map(reducer, [[f1, f2]])[0]
+
+    result = await future.result()
+    assert result == 30 if not offset else 31

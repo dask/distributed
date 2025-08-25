@@ -219,7 +219,7 @@ async def test_resources_str(c, s, a, b):
 
     x = dd.from_pandas(pd.DataFrame({"A": [1, 2], "B": [3, 4]}), npartitions=1)
     y = x.apply(lambda row: row.sum(), axis=1, meta=(None, "int64"))
-    yy = y.persist(resources={"MyRes": 1})
+    yy = c.persist(y, resources={"MyRes": 1})
     await wait(yy)
 
     ts_first = s.tasks[y.__dask_keys__()[0]]
@@ -575,11 +575,13 @@ def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
     assert ws.available_resources == {"R": 0}
 
     instructions = ws.handle_stimulus(
-        ComputeTaskEvent.dummy("x", stimulus_id="s2", resource_restrictions={"R": 0.4})
+        ComputeTaskEvent.dummy(
+            "x", run_id=0, stimulus_id="s2", resource_restrictions={"R": 0.4}
+        )
     )
     if prev_state == "long-running":
         assert instructions == [
-            LongRunningMsg(key="x", compute_duration=None, stimulus_id="s2")
+            LongRunningMsg(key="x", run_id=0, compute_duration=None, stimulus_id="s2")
         ]
     else:
         assert not instructions

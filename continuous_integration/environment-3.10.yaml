@@ -8,12 +8,13 @@ dependencies:
   - pip
   - asyncssh
   - bokeh
+  - crick  # Only tested here; also a dependency of dask
   - click
   - cloudpickle
   - coverage
   - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
-  - filesystem-spec  # overridden by git tip below
+  - fsspec
   - gilknocker
   - h5py
   - ipykernel
@@ -32,7 +33,7 @@ dependencies:
   - psutil
   - pyarrow
   - pynvml  # Only tested here
-  - pytest
+  - pytest<8.4  # Pin due to https://github.com/pytest-dev/pytest-cov/issues/693
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
@@ -41,7 +42,6 @@ dependencies:
   - python-snappy  # Only tested here
   - pytorch  # Only tested here
   - requests
-  - s3fs  # overridden by git tip below
   - scikit-learn
   - scipy
   - sortedcollections
@@ -58,8 +58,4 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/zict
-      - git+https://github.com/dask/crick  # Only tested here
-      # Revert after https://github.com/dask/distributed/issues/8614 is fixed
-      # - git+https://github.com/dask/s3fs
-      # - git+https://github.com/fsspec/filesystem_spec
       - keras

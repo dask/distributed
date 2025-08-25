@@ -519,3 +519,28 @@ async def test_bad_close():
         await cluster.close()
 
     assert not record
+
+
+@gen_test()
+async def test_shutdown_scheduler_disabled():
+    async with SpecCluster(
+        workers=worker_spec,
+        scheduler=scheduler,
+        asynchronous=True,
+        shutdown_scheduler=False,
+    ) as cluster:
+        s = cluster.scheduler
+        assert isinstance(s, Scheduler)
+
+    assert s.status == Status.running
+
+
+@gen_test()
+async def test_shutdown_scheduler():
+    async with SpecCluster(
+        workers=worker_spec, scheduler=scheduler, asynchronous=True
+    ) as cluster:
+        s = cluster.scheduler
+        assert isinstance(s, Scheduler)
+
+    assert s.status == Status.closed
