@@ -402,7 +402,9 @@ class SpecCluster(Cluster):
             # Closure to handle removal of a worker from the cluster
             def f():
                 # Check if worker is truly gone from scheduler
-                active_workers = {d["name"] for d in self.scheduler_info.get("workers", {}).values()}
+                active_workers = {
+                    d["name"] for d in self.scheduler_info.get("workers", {}).values()
+                }
                 if removed_worker_name in active_workers:
                     return
 
