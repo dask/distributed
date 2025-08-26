@@ -397,25 +397,45 @@ class SpecCluster(Cluster):
 
     def _update_worker_status(self, op, msg):
         if op == "remove":
-            name = self.scheduler_info["workers"][msg]["name"]
+            removed_worker_name = self.scheduler_info["workers"][msg]["name"]
 
+            # Closure to handle removal of a worker from the cluster
             def f():
-                if (
-                    name in self.workers
-                    and msg not in self.scheduler_info["workers"]
-                    and not any(
-                        d["name"] == name
-                        for d in self.scheduler_info["workers"].values()
-                    )
-                ):
-                    self._futures.add(asyncio.ensure_future(self.workers[name].close()))
-                    del self.workers[name]
+                # Check if worker is truly gone from scheduler
+                active_workers = {d["name"] for d in self.scheduler_info.get("workers", {}).values()}
+                if removed_worker_name in active_workers:
+                    return
 
-            delay = parse_timedelta(
-                dask.config.get("distributed.deploy.lost-worker-timeout")
-            )
+                # Build mapping from individual worker names to their worker spec names
+                # - For non-grouped workers: worker name == spec name (1:1)
+                # - For grouped workers: multiple workers map to one spec entry
+                worker_to_spec = {}
+                for worker_spec_name, spec in self.worker_spec.items():
+                    if "group" not in spec:
+                        worker_to_spec[worker_spec_name] = worker_spec_name
+                    else:
+                        grouped_workers = {
+                            str(worker_spec_name) + suffix: worker_spec_name
+                            for suffix in spec["group"]
+                        }
+                        worker_to_spec.update(grouped_workers)
 
+                # Find and remove the worker spec entry
+                # Note: For grouped workers, we remove the entire spec when ANY worker dies.
+                # This assumes that partial failure means the whole group is compromised
+                # (e.g., in HPC systems, if one process in a multi-process job fails, the
+                # entire job allocation is typically lost).
+                worker_spec_name = worker_to_spec.get(removed_worker_name)
+                if worker_spec_name and worker_spec_name in self.worker_spec:
+                    # Close and remove the worker object
+                    if worker_spec_name in self.workers:
+                        self._futures.add(asyncio.ensure_future(self.workers[worker_spec_name].close()))
+                        del self.workers[worker_spec_name]
+                    del self.worker_spec[worker_spec_name]
+
+            delay = parse_timedelta(dask.config.get("distributed.deploy.lost-worker-timeout"))
             asyncio.get_running_loop().call_later(delay, f)
+
         super()._update_worker_status(op, msg)
 
     def __await__(self: Self) -> Generator[Any, Any, Self]:
