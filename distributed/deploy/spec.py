@@ -429,11 +429,17 @@ class SpecCluster(Cluster):
                 if worker_spec_name and worker_spec_name in self.worker_spec:
                     # Close and remove the worker object
                     if worker_spec_name in self.workers:
-                        self._futures.add(asyncio.ensure_future(self.workers[worker_spec_name].close()))
+                        self._futures.add(
+                            asyncio.ensure_future(
+                                self.workers[worker_spec_name].close()
+                            )
+                        )
                         del self.workers[worker_spec_name]
                     del self.worker_spec[worker_spec_name]
 
-            delay = parse_timedelta(dask.config.get("distributed.deploy.lost-worker-timeout"))
+            delay = parse_timedelta(
+                dask.config.get("distributed.deploy.lost-worker-timeout")
+            )
             asyncio.get_running_loop().call_later(delay, f)
 
         super()._update_worker_status(op, msg)
