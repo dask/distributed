@@ -230,7 +230,6 @@ omit = [
     "distributed/deploy/ssh.py",
     "distributed/_version.py",
     "distributed/pytest_resourceleaks.py",
-    "distributed/comm/ucx.py",
 ]
 
 [tool.coverage.report]

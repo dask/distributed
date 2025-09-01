@@ -22,10 +22,5 @@ def _register_transports():
     backends["tcp"] = tcp.TCPBackend()
     backends["tls"] = tcp.TLSBackend()
 
-    try:
-        from distributed.comm import ucx
-    except ImportError:
-        pass
-
 
 _register_transports()

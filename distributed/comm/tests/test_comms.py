@@ -570,16 +570,6 @@ async def check_client_server(
     listener.stop()
 
 
-@pytest.mark.gpu
-@gen_test()
-async def test_ucx_client_server(ucx_loop):
-    pytest.importorskip("distributed.comm.ucx")
-    ucp = pytest.importorskip("ucp")
-
-    addr = ucp.get_address()
-    await check_client_server("ucx://" + addr)
-
-
 def tcp_eq(expected_host, expected_port=None):
     def checker(loc):
         host, port = parse_host_port(loc)
@@ -1395,7 +1385,6 @@ async def test_do_not_share_buffers(tcp, list_cls):
     See Also
     --------
     test_share_buffer_with_header
-    test_ucx.py::test_do_not_share_buffers
     """
     np = pytest.importorskip("numpy")
 
