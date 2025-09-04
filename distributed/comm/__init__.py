@@ -23,9 +23,14 @@ def _register_transports():
     backends["tls"] = tcp.TLSBackend()
 
     try:
-        from distributed.comm import ucx
+        # If `distributed-ucxx` is installed, it takes over the protocol="ucx" support
+        import distributed_ucxx
     except ImportError:
-        pass
+        try:
+            # Else protocol="ucx" will raise a deprecation warning and exception
+            from distributed.comm import ucx
+        except ImportError:
+            pass
 
 
 _register_transports()

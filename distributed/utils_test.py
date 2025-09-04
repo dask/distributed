@@ -2089,48 +2089,6 @@ def raises_with_cause(
             raise exc
 
 
-def ucx_exception_handler(loop, context):
-    """UCX exception handler for `ucx_loop` during test.
-
-    Prints the exception and its message.
-
-    Parameters
-    ----------
-    loop: object
-        Reference to the running event loop
-    context: dict
-        Dictionary containing exception details.
-    """
-    msg = context.get("exception", context["message"])
-    print(msg)
-
-
-# Let's make sure that UCX gets time to cancel
-# progress tasks before closing the event loop.
-@pytest.fixture(scope="function")
-def ucx_loop():
-    """Allows UCX to cancel progress tasks before closing event loop.
-
-    When UCX tasks are not completed in time (e.g., by unexpected Endpoint
-    closure), clean up tasks before closing the event loop to prevent unwanted
-    errors from being raised.
-    """
-    ucp = pytest.importorskip("ucp")
-
-    loop = asyncio.new_event_loop()
-    loop.set_exception_handler(ucx_exception_handler)
-    ucp.reset()
-    yield loop
-    ucp.reset()
-    loop.close()
-
-    # Reset also Distributed's UCX initialization, i.e., revert the effects of
-    # `distributed.comm.ucx.init_once()`.
-    import distributed.comm.ucx
-
-    distributed.comm.ucx.ucp = None
-
-
 def wait_for_log_line(
     match: bytes, stream: IO[bytes] | None, max_lines: int | None = 10
 ) -> bytes:
