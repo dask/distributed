@@ -25,6 +25,7 @@ from bokeh.models import (
     ColumnDataSource,
     CustomJSHover,
     DataRange1d,
+    DatetimeTickFormatter,
     FactorRange,
     GroupFilter,
     HelpTool,
@@ -2216,6 +2217,7 @@ def task_stream_figure(clear_interval="20s", **kwargs):
     root.yaxis.major_label_text_alpha = 0
     root.yaxis.minor_tick_line_alpha = 0
     root.yaxis.major_tick_line_alpha = 0
+    root.xaxis[0].formatter = DatetimeTickFormatter(context=None)
     root.xgrid.visible = False
 
     hover = HoverTool(
