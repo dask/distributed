@@ -86,6 +86,7 @@ from distributed.diagnostics.plugin import (
     WorkerPlugin,
     _get_plugin_name,
 )
+from distributed.exceptions import WorkerStartTimeoutError
 from distributed.metrics import time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
 from distributed.protocol import serialize, to_serialize
@@ -1631,10 +1632,8 @@ class Client(SyncMethodMixin):
 
         while running_workers(info) < n_workers:
             if deadline and time() > deadline:
-                raise TimeoutError(
-                    "Only %d/%d workers arrived after %s"
-                    % (running_workers(info), n_workers, timeout)
-                )
+                assert timeout is not None
+                raise WorkerStartTimeoutError(running_workers(info), n_workers, timeout)
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity(n_workers=-1)
             self._scheduler_identity = SchedulerInfo(info)
