@@ -562,18 +562,18 @@ async def test_adaptive_grouped_workers():
             async with Client(cluster, asynchronous=True) as client:
                 # Scale to 2 worker groups (4 individual workers total)
                 cluster.adapt(minimum=2, maximum=2)
-                
+
                 # Wait for all workers to start
                 await client.wait_for_workers(4)
                 assert len(cluster.workers) == 2
                 assert len(cluster.worker_spec) == 2
-                
+
                 # Get initial worker group names
                 initial_spec_names = set(cluster.worker_spec.keys())
-                
+
                 # Submit some work to ensure cluster is active
                 futures = client.map(lambda x: x + 1, range(10))
-                
+
                 # Kill one worker from the first group
                 # This should trigger removal of the entire group
                 worker_info = cluster.scheduler.workers
@@ -582,44 +582,43 @@ async def test_adaptive_grouped_workers():
                 first_spec_name = list(initial_spec_names)[0]
                 first_group_workers = [
                     (addr, info.name)
-                    for addr, info
-                    in worker_info.items()
-                    if info.name.split('-')[0] == str(first_spec_name)
+                    for addr, info in worker_info.items()
+                    if info.name.split("-")[0] == str(first_spec_name)
                 ]
                 assert len(first_group_workers) == 2
-                
+
                 # Close one worker from the group to simulate partial failure
                 # Strategy:
                 #   - get the MultiWorker instance
                 #   - close one of its internal workers
                 worker_to_kill_name = first_group_workers[0][1]
-                spec_name_to_kill = worker_to_kill_name.split('-')[0]
+                spec_name_to_kill = worker_to_kill_name.split("-")[0]
                 if spec_name_to_kill.isdigit():
                     spec_name_to_kill = int(spec_name_to_kill)
                 multi_worker = cluster.workers[spec_name_to_kill]
                 await multi_worker.workers[0].close()
-                
+
                 # Wait for the group to be removed
                 start = time()
                 while len(cluster.worker_spec) > 1:
                     await asyncio.sleep(0.01)
                     if time() - start > 5:
                         raise TimeoutError("Worker group was not removed in time")
-                
+
                 # Adaptive should bring back the group
                 start = time()
                 while len(cluster.worker_spec) < 2:
                     await asyncio.sleep(0.01)
                     if time() - start > 5:
                         raise TimeoutError("Worker group was not recreated in time")
-                
+
                 # Wait for new workers to register
                 await client.wait_for_workers(4)
-                
+
                 # Verify work completes successfully
                 results = await client.gather(futures)
                 assert results == list(range(1, 11))
-                
+
                 # Verify we have 2 worker groups again
                 assert len(cluster.workers) == 2
                 assert len(cluster.worker_spec) == 2
