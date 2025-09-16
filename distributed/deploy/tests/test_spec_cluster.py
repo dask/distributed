@@ -588,16 +588,15 @@ async def test_adaptive_grouped_workers():
                 ]
                 assert len(first_group_workers) == 2
                 
-                # Close one worker from the group
-                # We need to close the worker from the cluster's worker object, not the scheduler's
+                # Close one worker from the group to simulate partial failure
+                # Strategy:
+                #   - get the MultiWorker instance
+                #   - close one of its internal workers
                 worker_to_kill_name = first_group_workers[0][1]
                 spec_name_to_kill = worker_to_kill_name.split('-')[0]
                 if spec_name_to_kill.isdigit():
                     spec_name_to_kill = int(spec_name_to_kill)
-                
-                # Get the MultiWorker instance and close one of its internal workers
                 multi_worker = cluster.workers[spec_name_to_kill]
-                # Close one of the internal workers to simulate partial failure
                 await multi_worker.workers[0].close()
                 
                 # Wait for the group to be removed
