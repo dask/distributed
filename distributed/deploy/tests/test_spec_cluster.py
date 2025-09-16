@@ -544,3 +544,83 @@ async def test_shutdown_scheduler():
         assert isinstance(s, Scheduler)
 
     assert s.status == Status.closed
+
+
+@gen_test()
+async def test_adaptive_grouped_workers():
+    """Test that grouped workers recover properly when individual workers die"""
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "100ms"}):
+        async with SpecCluster(
+            scheduler=scheduler,
+            worker={
+                "cls": MultiWorker,
+                "options": {"n": 2, "nthreads": 2, "memory_limit": "2 GB"},
+                "group": ["-0", "-1"],
+            },
+            asynchronous=True,
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                # Scale to 2 worker groups (4 individual workers total)
+                cluster.adapt(minimum=2, maximum=2)
+                
+                # Wait for all workers to start
+                await client.wait_for_workers(4)
+                assert len(cluster.workers) == 2
+                assert len(cluster.worker_spec) == 2
+                
+                # Get initial worker group names
+                initial_spec_names = set(cluster.worker_spec.keys())
+                
+                # Submit some work to ensure cluster is active
+                futures = client.map(lambda x: x + 1, range(10))
+                
+                # Kill one worker from the first group
+                # This should trigger removal of the entire group
+                worker_info = cluster.scheduler.workers
+                # Worker names should be like "0-0", "0-1", "1-0", "1-1"
+                # Group them by their prefix (before the last dash)
+                first_spec_name = list(initial_spec_names)[0]
+                first_group_workers = [
+                    (addr, info.name)
+                    for addr, info
+                    in worker_info.items()
+                    if info.name.split('-')[0] == str(first_spec_name)
+                ]
+                assert len(first_group_workers) == 2
+                
+                # Close one worker from the group
+                # We need to close the worker from the cluster's worker object, not the scheduler's
+                worker_to_kill_name = first_group_workers[0][1]
+                spec_name_to_kill = worker_to_kill_name.split('-')[0]
+                if spec_name_to_kill.isdigit():
+                    spec_name_to_kill = int(spec_name_to_kill)
+                
+                # Get the MultiWorker instance and close one of its internal workers
+                multi_worker = cluster.workers[spec_name_to_kill]
+                # Close one of the internal workers to simulate partial failure
+                await multi_worker.workers[0].close()
+                
+                # Wait for the group to be removed
+                start = time()
+                while len(cluster.worker_spec) > 1:
+                    await asyncio.sleep(0.01)
+                    if time() - start > 5:
+                        raise TimeoutError("Worker group was not removed in time")
+                
+                # Adaptive should bring back the group
+                start = time()
+                while len(cluster.worker_spec) < 2:
+                    await asyncio.sleep(0.01)
+                    if time() - start > 5:
+                        raise TimeoutError("Worker group was not recreated in time")
+                
+                # Wait for new workers to register
+                await client.wait_for_workers(4)
+                
+                # Verify work completes successfully
+                results = await client.gather(futures)
+                assert results == list(range(1, 11))
+                
+                # Verify we have 2 worker groups again
+                assert len(cluster.workers) == 2
+                assert len(cluster.worker_spec) == 2
