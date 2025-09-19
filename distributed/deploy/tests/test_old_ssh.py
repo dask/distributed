@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from time import sleep
 
 import pytest
@@ -32,6 +33,8 @@ def test_cluster(loop):
                 assert time() < start + 5
 
 
+# https://github.com/dask/distributed/issues/9114
+@pytest.mark.skipif(sys.platform == "win32", reason="Hangs on Windows in CI")
 def test_old_ssh_nprocs_renamed_to_n_workers():
     with pytest.warns(FutureWarning, match="renamed to n_workers"):
         with SSHCluster(
