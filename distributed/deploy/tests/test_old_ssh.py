@@ -11,9 +11,11 @@ from distributed import Client
 from distributed.deploy.old_ssh import SSHCluster
 from distributed.metrics import time
 
-
 # https://github.com/dask/distributed/issues/9114
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Hangs on Windows in CI")
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="Hangs on Windows in CI"
+)
+
 
 @pytest.mark.avoid_ci
 def test_cluster(loop):
