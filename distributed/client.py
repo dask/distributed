@@ -5456,6 +5456,57 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
 
+    def has_plugin(
+        self, 
+        name: str | list[str], 
+        plugin_type: str = "worker"
+    ) -> bool | dict[str, bool]:
+        """Check if plugin(s) are registered
+        
+        Checks whether plugin(s) are registered in the scheduler's plugin registry.
+        This only verifies registration - not whether plugins are actually running
+        or functioning correctly.
+        
+        Parameters
+        ----------
+        name : str or list[str]
+            Plugin name(s) to check
+        plugin_type : str, optional  
+            Type of plugin: 'worker', 'scheduler', or 'nanny'. Defaults to 'worker'.
+            
+        Returns
+        -------
+        bool or dict[str, bool]
+            If name is str: True if plugin is registered, False otherwise
+            If name is list: dict mapping names to registration status
+            
+        See Also
+        --------
+        register_plugin
+        unregister_worker_plugin
+        """
+        if isinstance(name, str):
+            result = self.sync(
+                self._get_plugin_registration_status, 
+                names=[name], 
+                plugin_type=plugin_type
+            )
+            return result[name]
+        else:
+            return self.sync(
+                self._get_plugin_registration_status,
+                names=name,
+                plugin_type=plugin_type
+            )
+
+    async def _get_plugin_registration_status(
+        self, names: list[str], plugin_type: str
+    ) -> dict[str, bool]:
+        """Async implementation for checking plugin registration"""
+        return await self.scheduler.get_plugin_registration_status(
+            names=names, plugin_type=plugin_type
+        )
+
     @property
     def amm(self):
         """Convenience accessors for the :doc:`active_memory_manager`"""
