@@ -11,7 +11,7 @@ import sys
 import tempfile
 import uuid
 import zipfile
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Hashable
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from dask.typing import Key
@@ -187,7 +187,13 @@ class SchedulerPlugin:
         """
 
     def remove_worker(
-        self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
+        self,
+        scheduler: Scheduler,
+        worker: str,
+        *,
+        name: Hashable,
+        stimulus_id: str,
+        **kwargs: Any,
     ) -> None | Awaitable[None]:
         """Run when a worker leaves the cluster
 
