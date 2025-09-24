@@ -5457,55 +5457,69 @@ class Client(SyncMethodMixin):
         return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
 
     def has_plugin(
-        self, 
-        name: str | list[str], 
-        plugin_type: str = "worker"
+        self, plugin: str | WorkerPlugin | SchedulerPlugin | NannyPlugin | list
     ) -> bool | dict[str, bool]:
         """Check if plugin(s) are registered
-        
-        Checks whether plugin(s) are registered in the scheduler's plugin registry.
-        This only verifies registration - not whether plugins are actually running
-        or functioning correctly.
-        
+
         Parameters
         ----------
-        name : str or list[str]
-            Plugin name(s) to check
-        plugin_type : str, optional  
-            Type of plugin: 'worker', 'scheduler', or 'nanny'. Defaults to 'worker'.
-            
+        plugin : str | plugin object | list
+            Plugin to check. You can use the plugin object directly or the plugin name. For plugin objects, they must have a 'name' attribute. You can also pass a list of plugin objects or names.
+
         Returns
         -------
         bool or dict[str, bool]
             If name is str: True if plugin is registered, False otherwise
             If name is list: dict mapping names to registration status
-            
-        See Also
+
+        Examples
         --------
-        register_plugin
-        unregister_worker_plugin
+        >>> logging_plugin = LoggingConfigPlugin()  # Has name = "logging-config"
+        >>> client.register_plugin(logging_plugin)
+        >>> client.has_plugin(logging_plugin)
+        True
+
+        >>> client.has_plugin('logging-config')
+        True
+
+        >>> client.has_plugin([logging_plugin, 'other-plugin'])
+        {'logging-config': True, 'other-plugin': False}
         """
-        if isinstance(name, str):
+        if isinstance(plugin, str):
+            result = self.sync(self._get_plugin_registration_status, names=[plugin])
+            return result[plugin]
+
+        elif isinstance(plugin, (WorkerPlugin, SchedulerPlugin, NannyPlugin)):
+            plugin_name = getattr(plugin, "name", None)
+            if plugin_name is None:
+                raise ValueError(
+                    f"Plugin {funcname(type(plugin))} has no 'name' attribute. "
+                    "Please add a 'name' attribute to your plugin class."
+                )
             result = self.sync(
-                self._get_plugin_registration_status, 
-                names=[name], 
-                plugin_type=plugin_type
+                self._get_plugin_registration_status, names=[plugin_name]
             )
-            return result[name]
-        else:
-            return self.sync(
-                self._get_plugin_registration_status,
-                names=name,
-                plugin_type=plugin_type
-            )
+            return result[plugin_name]
+
+        elif isinstance(plugin, list):
+            names_to_check = []
+            for p in plugin:
+                if isinstance(p, str):
+                    names_to_check.append(p)
+                else:
+                    plugin_name = getattr(p, "name", None)
+                    if plugin_name is None:
+                        raise ValueError(
+                            f"Plugin {funcname(type(p))} has no 'name' attribute"
+                        )
+                    names_to_check.append(plugin_name)
+            return self.sync(self._get_plugin_registration_status, names=names_to_check)
 
     async def _get_plugin_registration_status(
-        self, names: list[str], plugin_type: str
+        self, names: list[str]
     ) -> dict[str, bool]:
         """Async implementation for checking plugin registration"""
-        return await self.scheduler.get_plugin_registration_status(
-            names=names, plugin_type=plugin_type
-        )
+        return await self.scheduler.get_plugin_registration_status(names=names)
 
     @property
     def amm(self):

@@ -8697,41 +8697,50 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return dict(zip(self.workers, results))
 
-    async def get_plugin_registration_status(
-        self, names: list[str], plugin_type: str = "worker"
-    ) -> dict[str, bool]:
-        """Check if plugins are registered
-        
+    async def get_plugin_registration_status(self, names: list[str]) -> dict[str, bool]:
+        """Check if plugins are registered in any plugin registry
+
+        Checks all plugin registries (worker, scheduler, nanny) and returns True
+        if the plugin is found in any of them.
+
         Parameters
         ----------
         names : list[str]
             List of plugin names to check
-        plugin_type : str, optional
-            Type of plugin to check: 'worker', 'scheduler', or 'nanny'
-            
+
         Returns
         -------
         dict[str, bool]
-            Dict mapping plugin names to their registration status
-            
-        Raises
-        ------
-        ValueError
-            If plugin_type is not one of 'worker', 'scheduler', 'nanny'
+            Dict mapping plugin names to their registration status across all registries
         """
-        if plugin_type == "worker":
-            plugin_dict = self.worker_plugins
-        elif plugin_type == "scheduler":
-            plugin_dict = self.plugins
-        elif plugin_type == "nanny":
-            plugin_dict = self.nanny_plugins
-        else:
-            raise ValueError(
-                f"plugin_type must be 'worker', 'scheduler', or 'nanny', got {plugin_type!r}"
+        result = {}
+        for name in names:
+            # Check if plugin exists in any registry
+            result[name] = (
+                name in self.worker_plugins
+                or name in self.plugins
+                or name in self.nanny_plugins
             )
-        
-        return {name: name in plugin_dict for name in names}
-        
+        return result
+
+    async def get_worker_plugin_registration_status(
+        self, names: list[str]
+    ) -> dict[str, bool]:
+        """Check if worker plugins are registered"""
+        return {name: name in self.worker_plugins for name in names}
+
+    async def get_scheduler_plugin_registration_status(
+        self, names: list[str]
+    ) -> dict[str, bool]:
+        """Check if scheduler plugins are registered"""
+        return {name: name in self.plugins for name in names}
+
+    async def get_nanny_plugin_registration_status(
+        self, names: list[str]
+    ) -> dict[str, bool]:
+        """Check if nanny plugins are registered"""
+        return {name: name in self.nanny_plugins for name in names}
+
     ###########
     # Cleanup #
     ###########
