@@ -754,140 +754,137 @@ async def test_register_non_idempotent_plugins_directly(s):
     assert "nonidempotentplugin" in s.plugins
     assert s.plugins["nonidempotentplugin"].instance == "third"
 
+
 @gen_cluster(client=True)
 async def test_has_scheduler_plugin_by_name(c, s, a, b):
     """Test checking if scheduler plugin is registered using string name"""
-    
+
     class Dummy1(SchedulerPlugin):
         name = "Dummy1"
-        
+
         def start(self, scheduler):
             scheduler.foo = "bar"
-    
+
     # Check non-existent plugin
-    assert not await c.has_plugin("Dummy1")  
-    
+    assert not await c.has_plugin("Dummy1")
+
     # Register plugin
     await c.register_plugin(Dummy1())
     assert s.foo == "bar"
-    
+
     # Check using string name
-    assert await c.has_plugin("Dummy1")  
-    
+    assert await c.has_plugin("Dummy1")
+
     # Unregister and check again
     await c.unregister_scheduler_plugin("Dummy1")
-    assert not await c.has_plugin("Dummy1")  
+    assert not await c.has_plugin("Dummy1")
 
 
 @gen_cluster(client=True)
 async def test_has_scheduler_plugin_by_object(c, s, a, b):
     """Test checking if scheduler plugin is registered using plugin object"""
-    
+
     class Dummy2(SchedulerPlugin):
         name = "Dummy2"
-        
+
         def start(self, scheduler):
             scheduler.check_value = 42
-    
+
     plugin = Dummy2()
-    
+
     # Check before registration
-    assert not await c.has_plugin(plugin)  
-    
+    assert not await c.has_plugin(plugin)
+
     # Register and check
     await c.register_plugin(plugin)
     assert s.check_value == 42
-    assert await c.has_plugin(plugin)  
-    
+    assert await c.has_plugin(plugin)
+
     # Unregister and check
     await c.unregister_scheduler_plugin("Dummy2")
-    assert not await c.has_plugin(plugin)  
+    assert not await c.has_plugin(plugin)
 
 
 @gen_cluster(client=True)
 async def test_has_plugin_mixed_scheduler_and_worker_types(c, s, a, b):
     """Test checking scheduler and worker plugins together"""
     from distributed import WorkerPlugin
-    
+
     class MyPlugin(SchedulerPlugin):
         name = "MyPlugin"
-        
+
         def start(self, scheduler):
             scheduler.my_value = "scheduler"
-    
+
     class MyWorkerPlugin(WorkerPlugin):
         name = "MyWorkerPlugin"
-        
+
         def setup(self, worker):
             worker.my_value = "worker"
-    
+
     sched_plugin = MyPlugin()
     work_plugin = MyWorkerPlugin()
-    
+
     # Register both types
     await c.register_plugin(sched_plugin)
     await c.register_plugin(work_plugin)
-    
+
     # Verify both registered
     assert s.my_value == "scheduler"
     assert a.my_value == "worker"
     assert b.my_value == "worker"
-    
+
     # Check both with list of names
-    result = await c.has_plugin(["MyPlugin", "MyWorkerPlugin"])  
+    result = await c.has_plugin(["MyPlugin", "MyWorkerPlugin"])
     assert result == {"MyPlugin": True, "MyWorkerPlugin": True}
-    
+
     # Check both with objects
-    assert await c.has_plugin(sched_plugin)  
-    assert await c.has_plugin(work_plugin)  
-    
+    assert await c.has_plugin(sched_plugin)
+    assert await c.has_plugin(work_plugin)
+
     # Check non-existent alongside real ones
     result = await c.has_plugin(["MyPlugin", "nonexistent", "MyWorkerPlugin"])
-    assert result == {
-        "MyPlugin": True, 
-        "nonexistent": False, 
-        "MyWorkerPlugin": True
-    }
+    assert result == {"MyPlugin": True, "nonexistent": False, "MyWorkerPlugin": True}
 
 
 @gen_cluster(client=True, nthreads=[])
 async def test_has_scheduler_plugin_no_workers(c, s):
     """Test checking scheduler plugin when no workers exist"""
-    
+
     class Plugin(SchedulerPlugin):
         name = "plugin"
-        
+
         def start(self, scheduler):
             scheduler.no_worker_test = True
-    
+
     # Check before registration
-    assert not await c.has_plugin("plugin")  
-    
+    assert not await c.has_plugin("plugin")
+
     # Register plugin when no workers exist
     await c.register_plugin(Plugin())
     assert s.no_worker_test is True
-    
+
     # Check after registration
-    assert await c.has_plugin("plugin")  
+    assert await c.has_plugin("plugin")
 
 
 @gen_cluster(client=True)
 async def test_has_scheduler_plugin_custom_name_override(c, s, a, b):
     """Test scheduler plugin registered with custom name different from class name"""
-    
+
     class Dummy3(SchedulerPlugin):
         name = "Dummy3"
-        
+
         def start(self, scheduler):
             scheduler.name_test = "custom"
-    
+
     plugin = Dummy3()
-    
+
     # Register with custom name (overriding the class name attribute)
     await c.register_plugin(plugin, name="custom-override")
-    
+
     # Check with custom name works
-    assert await c.has_plugin("custom-override")  
-    
+    assert await c.has_plugin("custom-override")
+
     # Original name won't work since we overrode it
     assert not await c.has_plugin("Dummy3")

@@ -5464,8 +5464,8 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         plugin : str | plugin object | Sequence
-            Plugin to check. You can use the plugin object directly or the plugin name. 
-            For plugin objects, they must have a 'name' attribute. You can also pass 
+            Plugin to check. You can use the plugin object directly or the plugin name.
+            For plugin objects, they must have a 'name' attribute. You can also pass
             a sequence of plugin objects or names.
 
         Returns
@@ -5493,7 +5493,7 @@ class Client(SyncMethodMixin):
         self, plugin: str | WorkerPlugin | SchedulerPlugin | NannyPlugin | Sequence
     ) -> bool | dict[str, bool]:
         """Async implementation for checking plugin registration"""
-        
+
         # Convert plugin to list of names
         if isinstance(plugin, str):
             names_to_check = [plugin]
@@ -5524,10 +5524,12 @@ class Client(SyncMethodMixin):
             raise TypeError(
                 f"plugin must be a plugin object, name string, or Sequence. Got {type(plugin)}"
             )
-        
+
         # Get status from scheduler
-        result = await self.scheduler.get_plugin_registration_status(names=names_to_check)
-        
+        result = await self.scheduler.get_plugin_registration_status(
+            names=names_to_check
+        )
+
         # Return single bool or dict based on input
         if return_single:
             return result[names_to_check[0]]
