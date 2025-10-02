@@ -2148,6 +2148,31 @@ async def test_multiple_executors(c, s):
         assert "Dask-Foo-Threads" in gpu_result
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_executor_inherit_threadname_from_worker(c, s):
+    def get_thread_name():
+        return threading.current_thread().name
+
+    async with Worker(
+        s.address,
+        nthreads=1,
+        name="WorkerName",
+    ):
+        result = await c.gather(c.submit(get_thread_name, pure=False))
+        assert "WorkerName-Dask-Default-Threads" in result
+
+    async with Worker(
+        s.address,
+        nthreads=1,
+        name="ALongWorkerNameThatNoOneWillProbablyEverAssignButThisTestsTheRobustnessOfLogic",
+    ):
+        result = await c.gather(c.submit(get_thread_name, pure=False))
+        assert (
+            "ALongWorkerNameThatNoOneWillProbablyEverAssignButThisTestsTheRobustnessOfLogic-Dask-Default-Threads"
+            in result
+        )
+
+
 @gen_cluster(client=True)
 async def test_bad_executor_annotation(c, s, a, b):
     with dask.annotate(executor="bad"):

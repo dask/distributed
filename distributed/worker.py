@@ -647,10 +647,15 @@ class Worker(BaseWorker, ServerNode):
         if scheduler_sni:
             self.connection_args["server_hostname"] = scheduler_sni
 
+        self.name = name
+
+        executor_pool_prefix = f"{self.name}-" if self.name else ""
         # Common executors always available
         self.executors = {
             "offload": utils._offload_executor,
-            "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
+            "actor": ThreadPoolExecutor(
+                1, thread_name_prefix=f"{executor_pool_prefix}Dask-Actor-Threads"
+            ),
         }
 
         # Find the default executor
@@ -660,13 +665,14 @@ class Worker(BaseWorker, ServerNode):
             self.executors.update(executor)
         elif executor is not None:
             self.executors["default"] = executor
+
         if "default" not in self.executors:
             self.executors["default"] = ThreadPoolExecutor(
-                nthreads, thread_name_prefix="Dask-Default-Threads"
+                nthreads,
+                thread_name_prefix=f"{executor_pool_prefix}Dask-Default-Threads",
             )
 
         self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
-        self.name = name
         self.scheduler_delay = 0
         self.stream_comms = {}
 
