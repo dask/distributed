@@ -2161,6 +2161,17 @@ async def test_executor_inherit_threadname_from_worker(c, s):
         result = await c.gather(c.submit(get_thread_name, pure=False))
         assert "WorkerName-Dask-Default-Threads" in result
 
+    async with Worker(
+        s.address,
+        nthreads=1,
+        name="ALongWorkerNameThatNoOneWillProbablyEverAssignButThisTestsTheRobustnessOfLogic",
+    ):
+        result = await c.gather(c.submit(get_thread_name, pure=False))
+        assert (
+            "ALongWorkerNameThatNoOneWillProbablyEverAssignButThisTestsTheRobustnessOfLogic-Dask-Default-Threads"
+            in result
+        )
+
 
 @gen_cluster(client=True)
 async def test_bad_executor_annotation(c, s, a, b):
