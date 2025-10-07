@@ -577,6 +577,93 @@ class SpecCluster(Cluster):
         """
         return str(spec_number)
 
+    def _spec_name_to_worker_names(self, spec_name: str) -> set[str]:
+        """Convert a spec name to the set of worker names it generates.
+
+        For regular workers, the spec name equals the worker name (1:1 mapping).
+        For grouped workers, one spec name maps to multiple worker names (1:many).
+
+        Parameters
+        ----------
+        spec_name : str
+            The spec name (key in worker_spec dict)
+
+        Returns
+        -------
+        set[str]
+            Set of worker names the scheduler will see for this spec
+
+        Examples
+        --------
+        Regular worker (no "group" key):
+        >>> cluster.worker_spec = {"0": {"cls": Worker, "options": {}}}
+        >>> cluster._spec_name_to_worker_names("0")
+        {"0"}
+
+        Grouped worker (has "group" key):
+        >>> cluster.worker_spec = {
+        ...     "0": {"cls": MultiWorker, "options": {}, "group": ["-0", "-1", "-2"]}
+        ... }
+        >>> cluster._spec_name_to_worker_names("0")
+        {"0-0", "0-1", "0-2"}
+        """
+        if spec_name not in self.worker_spec:
+            return set()
+
+        spec = self.worker_spec[spec_name]
+        if "group" in spec:
+            # Grouped worker: concatenate spec_name with each suffix
+            return {spec_name + suffix for suffix in spec["group"]}
+        else:
+            # Regular worker: spec name == worker name
+            return {spec_name}
+
+    def _worker_name_to_spec_name(self, worker_name: str) -> str | None:
+        """Convert a worker name to its corresponding spec name.
+
+        For regular workers, the worker name equals the spec name.
+        For grouped workers, extract the spec name prefix from the worker name.
+
+        Parameters
+        ----------
+        worker_name : str
+            The worker name (as seen by the scheduler)
+
+        Returns
+        -------
+        str | None
+            The spec name (key in worker_spec dict), or None if not found
+
+        Examples
+        --------
+        Regular worker:
+        >>> cluster.worker_spec = {"0": {"cls": Worker, "options": {}}}
+        >>> cluster._worker_name_to_spec_name("0")
+        "0"
+
+        Grouped worker:
+        >>> cluster.worker_spec = {
+        ...     "0": {"cls": MultiWorker, "options": {}, "group": ["-0", "-1", "-2"]}
+        ... }
+        >>> cluster._worker_name_to_spec_name("0-1")
+        "0"
+
+        Not found:
+        >>> cluster._worker_name_to_spec_name("nonexistent")
+        None
+        """
+        # First check if worker_name is directly a spec name (regular worker)
+        if worker_name in self.worker_spec:
+            return worker_name
+
+        # For grouped workers, check each spec to see if this worker belongs to it
+        for spec_name in self.worker_spec:
+            worker_names = self._spec_name_to_worker_names(spec_name)
+            if worker_name in worker_names:
+                return spec_name
+
+        return None
+
     def new_worker_spec(self) -> dict[str, dict[str, Any]]:
         """Return name and spec for the next worker spec
 

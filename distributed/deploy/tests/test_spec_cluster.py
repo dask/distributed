@@ -589,3 +589,120 @@ async def test_worker_spec_keys_are_strings():
             assert isinstance(
                 key, str
             ), f"Expected str key, got {type(key).__name__}: {key}"
+
+
+@gen_test()
+async def test_spec_name_to_worker_names_regular():
+    """Test _spec_name_to_worker_names() with regular (non-grouped) workers."""
+    worker_template = {"cls": Worker, "options": {"nthreads": 1}}
+    async with SpecCluster(
+        workers={}, scheduler=scheduler, worker=worker_template, asynchronous=True
+    ) as cluster:
+        # Scale to create regular workers
+        cluster.scale(2)
+        await cluster
+
+        # Regular workers: spec name == worker name (1:1)
+        assert cluster._spec_name_to_worker_names("0") == {"0"}
+        assert cluster._spec_name_to_worker_names("1") == {"1"}
+
+        # Non-existent spec returns empty set
+        assert cluster._spec_name_to_worker_names("nonexistent") == set()
+
+
+@gen_test()
+async def test_spec_name_to_worker_names_grouped():
+    """Test _spec_name_to_worker_names() with grouped workers."""
+    async with SpecCluster(
+        workers={
+            "0": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-0", "-1", "-2"],
+            },
+            "1": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-a", "-b"],
+            },
+        },
+        scheduler=scheduler,
+        asynchronous=True,
+    ) as cluster:
+        # Grouped workers: one spec name → multiple worker names
+        assert cluster._spec_name_to_worker_names("0") == {"0-0", "0-1", "0-2"}
+        assert cluster._spec_name_to_worker_names("1") == {"1-a", "1-b"}
+
+
+@gen_test()
+async def test_worker_name_to_spec_name_regular():
+    """Test _worker_name_to_spec_name() with regular (non-grouped) workers."""
+    worker_template = {"cls": Worker, "options": {"nthreads": 1}}
+    async with SpecCluster(
+        workers={}, scheduler=scheduler, worker=worker_template, asynchronous=True
+    ) as cluster:
+        # Scale to create regular workers
+        cluster.scale(2)
+        await cluster
+
+        # Regular workers: worker name == spec name
+        assert cluster._worker_name_to_spec_name("0") == "0"
+        assert cluster._worker_name_to_spec_name("1") == "1"
+
+        # Non-existent worker returns None
+        assert cluster._worker_name_to_spec_name("nonexistent") is None
+
+
+@gen_test()
+async def test_worker_name_to_spec_name_grouped():
+    """Test _worker_name_to_spec_name() with grouped workers."""
+    async with SpecCluster(
+        workers={
+            "0": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-0", "-1", "-2"],
+            },
+            "1": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-a", "-b"],
+            },
+        },
+        scheduler=scheduler,
+        asynchronous=True,
+    ) as cluster:
+        # All workers from group "0" map back to spec "0"
+        assert cluster._worker_name_to_spec_name("0-0") == "0"
+        assert cluster._worker_name_to_spec_name("0-1") == "0"
+        assert cluster._worker_name_to_spec_name("0-2") == "0"
+
+        # All workers from group "1" map back to spec "1"
+        assert cluster._worker_name_to_spec_name("1-a") == "1"
+        assert cluster._worker_name_to_spec_name("1-b") == "1"
+
+        # Non-existent worker returns None
+        assert cluster._worker_name_to_spec_name("nonexistent") is None
+
+
+@gen_test()
+async def test_worker_name_to_spec_name_mixed():
+    """Test _worker_name_to_spec_name() with mixed regular and grouped workers."""
+    async with SpecCluster(
+        workers={
+            "regular": {"cls": Worker, "options": {"nthreads": 1}},
+            "grouped": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-0", "-1"],
+            },
+        },
+        scheduler=scheduler,
+        asynchronous=True,
+    ) as cluster:
+        # Regular worker
+        assert cluster._worker_name_to_spec_name("regular") == "regular"
+
+        # Grouped workers
+        assert cluster._worker_name_to_spec_name("grouped-0") == "grouped"
+        assert cluster._worker_name_to_spec_name("grouped-1") == "grouped"
