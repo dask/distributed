@@ -191,6 +191,186 @@ async def test_unexpected_closed_worker():
             assert len(cluster.workers) == 2
 
 
+@gen_test()
+async def test_unexpected_close_single_grouped_worker():
+    """Test that cluster recovers when a worker in a grouped worker dies."""
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "100ms"}):
+        async with SpecCluster(
+            scheduler=scheduler,
+            worker={
+                "cls": MultiWorker,
+                "options": {"n": 2, "nthreads": 2, "memory_limit": "2 GB"},
+                "group": ["-0", "-1"],
+            },
+            asynchronous=True,
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                # Use adaptive mode to maintain 4 workers (2 groups of 2 workers each)
+                cluster.adapt(minimum=4, maximum=4)
+
+                # Wait for all workers to start
+                await client.wait_for_workers(4)
+                assert len(cluster.workers) == 2
+                assert len(cluster.worker_spec) == 2
+
+                # Get the initial worker spec names
+                initial_spec_names = set(cluster.worker_spec.keys())
+
+                # Submit some work to ensure cluster is active and drives adaptive scaling
+                futures = client.map(lambda x: x + 1, range(10))
+
+                # Get info about workers from scheduler
+                worker_info = cluster.scheduler.workers
+                first_spec_name = list(initial_spec_names)[0]
+                first_group_workers = [
+                    (addr, info.name)
+                    for addr, info in worker_info.items()
+                    if info.name.split("-")[0] == str(first_spec_name)
+                ]
+                assert len(first_group_workers) == 2
+
+                # Kill ONE worker in the first group to simulate pre-emption
+                # When one worker in a group dies, the whole group is removed
+                # This simulates SLURM killing a process in a multi-process job
+                spec_name_to_kill = str(first_spec_name)
+                if spec_name_to_kill.isdigit():
+                    spec_name_to_kill = int(spec_name_to_kill)
+                multi_worker = cluster.workers[spec_name_to_kill]
+
+                # Kill one worker from the group
+                await multi_worker.workers[0].close()
+
+                # Wait for the group to be removed
+                start = time()
+                while len(cluster.worker_spec) > 1:
+                    await asyncio.sleep(0.01)
+                    if time() - start > 5:
+                        raise TimeoutError("Worker group was not removed in time")
+
+                # Adaptive should automatically bring back the group
+                start = time()
+                while len(cluster.worker_spec) < 2:
+                    await asyncio.sleep(0.01)
+                    if time() - start > 5:
+                        raise TimeoutError("Worker group was not recreated in time")
+
+                # Wait for workers to register
+                await client.wait_for_workers(4)
+
+                # Verify work completes successfully
+                results = await client.gather(futures)
+                assert results == list(range(1, 11))
+
+                # Verify we have 2 worker groups again
+                assert len(cluster.workers) == 2
+                assert len(cluster.worker_spec) == 2
+
+
+@gen_test()
+async def test_unexpected_close_whole_worker_group():
+    """Test that cluster recovers when an entire grouped worker is killed."""
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "500ms"}):
+        async with SpecCluster(
+            scheduler=scheduler,
+            worker={
+                "cls": MultiWorker,
+                "options": {"n": 2, "nthreads": 2, "memory_limit": "2 GB"},
+                "group": ["-0", "-1"],
+            },
+            asynchronous=True,
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                # Enable adaptive scaling to maintain 4 workers (2 groups of 2)
+                cluster.adapt(minimum=4, maximum=4)
+
+                # Wait for all workers to start
+                await client.wait_for_workers(4)
+                assert len(cluster.worker_spec) == 2
+                assert len(cluster.workers) == 2
+
+                # Get initial worker names
+                initial_worker_names = [
+                    ws.name for ws in cluster.scheduler.workers.values()
+                ]
+                assert len(initial_worker_names) == 4
+
+                # Identify workers from the first group
+                first_spec_name = list(cluster.worker_spec.keys())[0]
+                first_group_workers = [
+                    name
+                    for name in initial_worker_names
+                    if name.startswith(f"{first_spec_name}-")
+                ]
+                assert len(first_group_workers) == 2
+
+                # Submit some work
+                futures = client.map(lambda x: x + 1, range(10))
+
+                # Simulate pre-emption by forcefully removing ALL workers from one group
+                # This mimics what happens when a SLURM job is killed - workers just vanish
+                for worker_name in first_group_workers:
+                    worker_state = next(
+                        (
+                            ws
+                            for ws in cluster.scheduler.workers.values()
+                            if ws.name == worker_name
+                        ),
+                        None,
+                    )
+                    if worker_state:
+                        await cluster.scheduler.remove_worker(
+                            address=worker_state.address,
+                            stimulus_id="preempt-test",
+                            close=False,  # Simulate abrupt termination, not graceful close
+                        )
+
+                # Wait for cluster to detect the worker loss
+                # The lost-worker-timeout should trigger cleanup
+                await asyncio.sleep(1.5)
+
+                # Trigger _correct_state to ensure it runs and checks for dead workers
+                await cluster._correct_state()
+
+                # Adaptive scaling should detect the loss and recreate workers
+                # We expect the lost spec to be removed and a new one created
+                # Final state should be 2 specs with 4 workers total
+                start = time()
+                while (
+                    len(cluster.worker_spec) != 2
+                    or first_spec_name in cluster.worker_spec
+                ):
+                    await asyncio.sleep(0.01)
+                    if time() - start > 5:
+                        raise TimeoutError(
+                            f"Cluster did not recover properly. "
+                            f"Specs: {list(cluster.worker_spec.keys())}, "
+                            f"Expected: 2 specs without spec {first_spec_name}"
+                        )
+
+                # Wait for new workers to register
+                await client.wait_for_workers(4)
+
+                # Verify we're back to 4 workers with 2 groups
+                final_worker_names = [
+                    ws.name for ws in cluster.scheduler.workers.values()
+                ]
+                assert len(final_worker_names) == 4
+                assert len(cluster.worker_spec) == 2
+                assert len(cluster.workers) == 2
+
+                # Verify the new group has different names than the pre-empted group
+                surviving_workers = [
+                    name
+                    for name in final_worker_names
+                    if name in initial_worker_names and name not in first_group_workers
+                ]
+                assert len(surviving_workers) == 2  # The workers from the second group
+
+                # Verify work completes successfully even after pre-emption
+                results = await client.gather(futures)
+                assert results == list(range(1, 11))
+
+
 @gen_test(timeout=60)
 async def test_restart():
     """Regression test for https://github.com/dask/distributed/issues/3062"""
@@ -435,7 +615,7 @@ async def test_MultiWorker():
     ) as cluster:
         s = cluster.scheduler
         async with Client(cluster, asynchronous=True) as client:
-            cluster.scale(2)
+            cluster.scale(4)  # 4 workers = 2 specs with 2 workers each
             await cluster
             assert len(cluster.worker_spec) == 2
             await client.wait_for_workers(4)
@@ -448,7 +628,7 @@ async def test_MultiWorker():
             workers_line = re.search("(Workers.+)", cluster._repr_html_()).group(1)
             assert re.match("Workers.*4", workers_line)
 
-            cluster.scale(1)
+            cluster.scale(2)  # scale to 2 workers = 1 spec with 2 workers
             await cluster
             assert len(s.workers) == 2
 
@@ -560,8 +740,8 @@ async def test_adaptive_grouped_workers():
             asynchronous=True,
         ) as cluster:
             async with Client(cluster, asynchronous=True) as client:
-                # Scale to 2 worker groups (4 individual workers total)
-                cluster.adapt(minimum=2, maximum=2)
+                # Scale to maintain 4 workers (2 groups of 2 workers each)
+                cluster.adapt(minimum=4, maximum=4)
 
                 # Wait for all workers to start
                 await client.wait_for_workers(4)

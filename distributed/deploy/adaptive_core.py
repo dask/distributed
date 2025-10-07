@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from collections.abc import Iterable
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import tlz as toolz
@@ -17,6 +19,16 @@ if TYPE_CHECKING:
     from distributed.scheduler import WorkerState
 
 logger = logging.getLogger(__name__)
+
+# Set up file logging for adaptive operations
+_slurm_job_id = os.environ.get("SLURM_JOB_ID", "unknown")
+_log_file = Path.home() / f"byelayer-dask-log-{_slurm_job_id}"
+_file_handler = logging.FileHandler(_log_file)
+_file_handler.setLevel(logging.INFO)
+_file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(_file_handler)
 
 
 class AdaptiveCore(ABC):
@@ -197,6 +209,10 @@ class AdaptiveCore(ABC):
 
         try:
             target = await self.safe_target()
+            print(
+                f"Adaptive target: {target}, plan: {len(self.plan)}, requested: {len(self.requested)}, observed: {len(self.observed)}"
+            )
+
             recommendations = await self.recommendations(target)
 
             if recommendations["status"] != "same":

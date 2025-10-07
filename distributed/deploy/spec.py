@@ -340,6 +340,55 @@ class SpecCluster(Cluster):
             await self._close()
             raise RuntimeError(f"Cluster failed to start: {e}") from e
 
+    def _spec_name_to_worker_names(self, spec_name):
+        """Convert a spec name to the set of worker names it represents.
+
+        For regular workers, returns {spec_name} as a string.
+        For grouped workers, returns {spec_name + suffix for suffix in group}.
+
+        Parameters
+        ----------
+        spec_name : int or str
+            The spec name (key in worker_spec)
+
+        Returns
+        -------
+        set of str
+            The worker names that the scheduler knows about
+        """
+        spec = self.worker_spec.get(spec_name)
+        if spec and "group" in spec:
+            return {str(spec_name) + suffix for suffix in spec["group"]}
+        return {str(spec_name)}
+
+    def _worker_name_to_spec_name(self, worker_name):
+        """Convert a worker name to its spec name.
+
+        For regular workers, returns the worker name (converted to int if numeric).
+        For grouped workers, extracts the prefix before the first "-".
+
+        Parameters
+        ----------
+        worker_name : str or int
+            The worker name from the scheduler
+
+        Returns
+        -------
+        int or str
+            The spec name (key in worker_spec)
+        """
+        worker_name_str = str(worker_name)
+        if "-" in worker_name_str:
+            spec_name = worker_name_str.split("-")[0]
+            # Convert to int if numeric to match worker_spec keys
+            if spec_name.isdigit():
+                return int(spec_name)
+            return spec_name
+        # Try to convert to int if numeric
+        if worker_name_str.isdigit():
+            return int(worker_name_str)
+        return worker_name
+
     def _correct_state(self):
         if self._correct_state_waiting:
             # If people call this frequently, we only want to run it once
@@ -356,7 +405,29 @@ class SpecCluster(Cluster):
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:
-                    await self.scheduler_comm.retire_workers(workers=list(to_close))
+                    # For grouped workers, we need to retire the actual worker names
+                    # that the scheduler knows about, not the spec names
+                    actual_workers_to_retire = []
+                    active_worker_names = {
+                        str(w["name"])
+                        for w in self.scheduler_info.get("workers", {}).values()
+                    }
+
+                    for spec_name in to_close:
+                        # Get all worker names for this spec (handles both regular and grouped)
+                        expected_worker_names = self._spec_name_to_worker_names(
+                            spec_name
+                        )
+                        # Only retire workers that actually exist in the scheduler
+                        for worker_name in expected_worker_names:
+                            if worker_name in active_worker_names:
+                                actual_workers_to_retire.append(worker_name)
+
+                    if actual_workers_to_retire:
+                        await self.scheduler_comm.retire_workers(
+                            workers=actual_workers_to_retire
+                        )
+
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
                     for w in to_close
@@ -397,6 +468,11 @@ class SpecCluster(Cluster):
 
     def _update_worker_status(self, op, msg):
         if op == "remove":
+            # Get worker name - might already be gone from scheduler_info
+            if msg not in self.scheduler_info.get("workers", {}):
+                super()._update_worker_status(op, msg)
+                return
+
             removed_worker_name = self.scheduler_info["workers"][msg]["name"]
 
             # Closure to handle removal of a worker from the cluster
@@ -408,35 +484,26 @@ class SpecCluster(Cluster):
                 if removed_worker_name in active_workers:
                     return
 
-                # Build mapping from individual worker names to their worker spec names
-                # - For non-grouped workers: worker name == spec name (1:1)
-                # - For grouped workers: multiple workers map to one spec entry
-                worker_to_spec = {}
-                for worker_spec_name, spec in self.worker_spec.items():
-                    if "group" not in spec:
-                        worker_to_spec[worker_spec_name] = worker_spec_name
-                    else:
-                        grouped_workers = {
-                            str(worker_spec_name) + suffix: worker_spec_name
-                            for suffix in spec["group"]
-                        }
-                        worker_to_spec.update(grouped_workers)
+                # Convert worker name to spec name using helper method
+                worker_spec_name = self._worker_name_to_spec_name(removed_worker_name)
 
-                # Find and remove the worker spec entry
-                # Note: For grouped workers, we remove the entire spec when ANY worker dies.
-                # This assumes that partial failure means the whole group is compromised
+                # Check if this is a grouped worker
+                spec = self.worker_spec.get(worker_spec_name)
+                is_grouped = spec and "group" in spec
+
+                # Close and remove the worker object
+                if worker_spec_name in self.workers:
+                    self._futures.add(
+                        asyncio.ensure_future(self.workers[worker_spec_name].close())
+                    )
+                    del self.workers[worker_spec_name]
+
+                # Only remove spec for grouped workers
+                # For grouped workers: when ANY worker dies, the whole group is compromised
                 # (e.g., in HPC systems, if one process in a multi-process job fails, the
                 # entire job allocation is typically lost).
-                worker_spec_name = worker_to_spec.get(removed_worker_name)
-                if worker_spec_name and worker_spec_name in self.worker_spec:
-                    # Close and remove the worker object
-                    if worker_spec_name in self.workers:
-                        self._futures.add(
-                            asyncio.ensure_future(
-                                self.workers[worker_spec_name].close()
-                            )
-                        )
-                        del self.workers[worker_spec_name]
+                # For regular workers: keep spec so cluster can recreate them
+                if is_grouped and worker_spec_name in self.worker_spec:
                     del self.worker_spec[worker_spec_name]
 
             delay = parse_timedelta(
@@ -541,24 +608,57 @@ class SpecCluster(Cluster):
         )
 
     def scale(self, n=0, memory=None, cores=None):
-        if memory is not None:
-            n = max(n, int(math.ceil(parse_bytes(memory) / self._memory_per_worker())))
+        # For grouped workers, n represents number of workers, but memory/cores
+        # calculations represent number of specs (since _memory_per_worker and
+        # _threads_per_worker return values for the entire MultiWorker spec)
+        if self.new_spec and "group" in self.new_spec:
+            workers_per_spec = len(self.new_spec["group"])
 
-        if cores is not None:
-            n = max(n, int(math.ceil(cores / self._threads_per_worker())))
+            # Convert n from number of workers to number of specs
+            target_specs_from_n = int(math.ceil(n / workers_per_spec)) if n > 0 else 0
 
-        if len(self.worker_spec) > n:
-            not_yet_launched = set(self.worker_spec) - {
-                v["name"] for v in self.scheduler_info["workers"].values()
-            }
-            while len(self.worker_spec) > n and not_yet_launched:
+            # memory/cores calculations already give us number of specs
+            if memory is not None:
+                target_specs_from_memory = int(
+                    math.ceil(parse_bytes(memory) / self._memory_per_worker())
+                )
+                target_specs = max(target_specs_from_n, target_specs_from_memory)
+            else:
+                target_specs = target_specs_from_n
+
+            if cores is not None:
+                target_specs_from_cores = int(
+                    math.ceil(cores / self._threads_per_worker())
+                )
+                target_specs = max(target_specs, target_specs_from_cores)
+        else:
+            # For regular workers, everything is in terms of workers (which equals specs)
+            if memory is not None:
+                n = max(
+                    n, int(math.ceil(parse_bytes(memory) / self._memory_per_worker()))
+                )
+
+            if cores is not None:
+                n = max(n, int(math.ceil(cores / self._threads_per_worker())))
+
+            target_specs = n
+
+        if len(self.worker_spec) > target_specs:
+            # Build set of spec names that have launched at least one worker
+            launched_spec_names = set()
+            for worker_info in self.scheduler_info.get("workers", {}).values():
+                spec_name = self._worker_name_to_spec_name(worker_info["name"])
+                launched_spec_names.add(spec_name)
+
+            not_yet_launched = set(self.worker_spec) - launched_spec_names
+            while len(self.worker_spec) > target_specs and not_yet_launched:
                 del self.worker_spec[not_yet_launched.pop()]
 
-        while len(self.worker_spec) > n:
+        while len(self.worker_spec) > target_specs:
             self.worker_spec.popitem()
 
         if self.status not in (Status.closing, Status.closed):
-            while len(self.worker_spec) < n:
+            while len(self.worker_spec) < target_specs:
                 self.worker_spec.update(self.new_worker_spec())
 
         self.loop.add_callback(self._correct_state)
@@ -597,17 +697,9 @@ class SpecCluster(Cluster):
         return bool(self.new_spec)
 
     async def scale_down(self, workers):
-        # We may have groups, if so, map worker addresses to job names
+        # Convert worker names to spec names (handles both regular and grouped workers)
         if not all(w in self.worker_spec for w in workers):
-            mapping = {}
-            for name, spec in self.worker_spec.items():
-                if "group" in spec:
-                    for suffix in spec["group"]:
-                        mapping[str(name) + suffix] = name
-                else:
-                    mapping[name] = name
-
-            workers = {mapping.get(w, w) for w in workers}
+            workers = {self._worker_name_to_spec_name(w) for w in workers}
 
         for w in workers:
             if w in self.worker_spec:
