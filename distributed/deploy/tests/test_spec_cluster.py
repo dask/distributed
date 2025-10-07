@@ -497,7 +497,7 @@ async def test_run_spec_cluster_custom_spec_names():
     ) as cluster:
         cluster.scale(2)
         await cluster
-        spec_names = [0, 1]
+        spec_names = ["0", "1"]
         assert list(cluster.worker_spec) == spec_names
         assert sorted(list(cluster.workers)) == spec_names
 
