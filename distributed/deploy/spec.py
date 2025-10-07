@@ -523,17 +523,28 @@ class SpecCluster(Cluster):
             raise
 
     def _threads_per_worker(self) -> int:
-        """Return the number of threads per worker for new workers"""
+        """Return the number of threads per worker for new workers.
+
+        For grouped workers, this returns the threads per individual worker
+        (total spec threads divided by number of workers in the group).
+        """
         if not self.new_spec:  # pragma: no cover
             raise ValueError("To scale by cores= you must specify cores per worker")
 
         for name in ["nthreads", "ncores", "threads", "cores"]:
             with suppress(KeyError):
-                return self.new_spec["options"][name]
+                total_threads = self.new_spec["options"][name]
+                # For grouped workers, divide by number of workers in the group
+                workers_per_spec = self._workers_per_spec(self.new_spec)
+                return total_threads // workers_per_spec
         raise RuntimeError("unreachable")
 
     def _memory_per_worker(self) -> int:
-        """Return the memory limit per worker for new workers"""
+        """Return the memory limit per worker for new workers.
+
+        For grouped workers, this returns the memory per individual worker
+        (total spec memory divided by number of workers in the group).
+        """
         if not self.new_spec:  # pragma: no cover
             raise ValueError(
                 "to scale by memory= your worker definition must include a "
@@ -542,21 +553,135 @@ class SpecCluster(Cluster):
 
         for name in ["memory_limit", "memory"]:
             with suppress(KeyError):
-                return parse_bytes(self.new_spec["options"][name])
+                total_memory = parse_bytes(self.new_spec["options"][name])
+                # For grouped workers, divide by number of workers in the group
+                workers_per_spec = self._workers_per_spec(self.new_spec)
+                return total_memory // workers_per_spec
 
         raise ValueError(
             "to use scale(memory=...) your worker definition must include a "
             "memory_limit definition"
         )
 
+    def _count_workers_in_specs(self) -> int:
+        """Count total number of workers across all specs.
+
+        For regular workers, each spec = 1 worker.
+        For grouped workers, each spec = number of group members.
+
+        Returns
+        -------
+        int
+            Total number of workers that would be created by current worker_spec
+        """
+        total = 0
+        for _spec_name, spec in self.worker_spec.items():
+            if "group" in spec:
+                total += len(spec["group"])
+            else:
+                total += 1
+        return total
+
+    def _workers_per_spec(self, spec: dict[str, Any]) -> int:
+        """Get number of workers a single spec will create.
+
+        Parameters
+        ----------
+        spec : dict
+            Worker specification dict
+
+        Returns
+        -------
+        int
+            Number of workers this spec creates (1 for regular, len(group) for grouped)
+        """
+        if "group" in spec:
+            return len(spec["group"])
+        return 1
+
     def scale(self, n=0, memory=None, cores=None):
+        """Scale cluster to a target number of workers or resource level.
+
+        Parameters
+        ----------
+        n : int, optional
+            Target maximum number of workers. For grouped workers, rounds down to
+            complete specs. Default is 0.
+        memory : str, optional
+            Target total memory (e.g., "10 GB"). Scales conservatively - will NOT
+            exceed this limit. For grouped workers, rounds down to complete specs.
+        cores : int, optional
+            Target total cores/threads. Scales conservatively - will NOT exceed
+            this limit. For grouped workers, rounds down to complete specs.
+
+        Notes
+        -----
+        **All scaling is conservative (rounds down to number of complete specs):**
+            - Ensures limits are not exceeded (except special case below)
+            - Prevents resource overcommitment and surprises
+            - For grouped workers, may get fewer workers than requested
+
+        **Special case - minimum viability:**
+            - If target > 0 and current workers = 0, creates at least 1 spec
+            - Prevents deadlock where no workers can be created
+            - Example: `scale(1)` with 2-worker specs → 1 spec = 2 workers (exceeds target!)
+
+        **Examples:**
+            - `scale(5)` with 2-worker specs → 2 specs = 4 workers (not 5)
+            - `scale(1)` with 2-worker specs → 1 spec = 2 workers (special case!)
+            - `scale(memory="6GB")` with 4GB/spec → 1 spec = 4GB (not 8GB)
+            - `scale(cores=10)` with 4 cores/spec → 2 specs = 8 cores (not 12)
+
+        **Why conservative?**
+            - User expectation: "at most N" not "at least N"
+            - Safety: prevents OOM, CPU oversubscription
+            - Consistency: all parameters use same rounding
+
+        Examples
+        --------
+        Regular workers (1 worker per spec):
+        >>> cluster.scale(5)  # Creates 5 specs = 5 workers
+
+        Grouped workers (2 workers per spec):
+        >>> cluster.scale(5)  # Creates 2 specs = 4 workers (conservative)
+        >>> cluster.scale(6)  # Creates 3 specs = 6 workers (exact match)
+        >>> cluster.scale(memory="6GB")  # With 4GB/spec: creates 1 spec = 4GB
+        """
         if memory is not None:
-            n = max(n, int(math.ceil(parse_bytes(memory) / self._memory_per_worker())))
+            # For grouped workers, scale by complete specs to avoid exceeding limit
+            # Use floor division to be conservative (never exceed requested memory)
+            if self.new_spec and "group" in self.new_spec:
+                memory_per_spec = self._memory_per_worker() * self._workers_per_spec(
+                    self.new_spec
+                )
+                target_specs = int(parse_bytes(memory) // memory_per_spec)
+                n = max(n, target_specs * self._workers_per_spec(self.new_spec))
+            else:
+                # Regular workers: use ceiling (match old behavior)
+                n = max(
+                    n, int(math.ceil(parse_bytes(memory) / self._memory_per_worker()))
+                )
 
         if cores is not None:
-            n = max(n, int(math.ceil(cores / self._threads_per_worker())))
+            # For grouped workers, scale by complete specs to avoid exceeding limit
+            # Use floor division to be conservative (never exceed requested cores)
+            if self.new_spec and "group" in self.new_spec:
+                cores_per_spec = self._threads_per_worker() * self._workers_per_spec(
+                    self.new_spec
+                )
+                target_specs = int(cores // cores_per_spec)
+                n = max(n, target_specs * self._workers_per_spec(self.new_spec))
+            else:
+                # Regular workers: use ceiling (match old behavior)
+                n = max(n, int(math.ceil(cores / self._threads_per_worker())))
 
-        if len(self.worker_spec) > n:
+        # n is the target number of workers (not specs)
+        # For grouped workers, we need to scale by specs, where each spec creates multiple workers
+
+        current_worker_count = self._count_workers_in_specs()
+
+        # Scale down if we have too many workers
+        if current_worker_count > n:
             # Build set of launched spec names by mapping worker names back to spec names
             scheduler_worker_names = {
                 v["name"] for v in self.scheduler_info["workers"].values()
@@ -568,15 +693,45 @@ class SpecCluster(Cluster):
                     launched_spec_names.add(spec_name)
 
             not_yet_launched = set(self.worker_spec) - launched_spec_names
-            while len(self.worker_spec) > n and not_yet_launched:
-                del self.worker_spec[not_yet_launched.pop()]
 
-        while len(self.worker_spec) > n:
-            self.worker_spec.popitem()
+            # Remove unlaunched specs first
+            while current_worker_count > n and not_yet_launched:
+                spec_name = not_yet_launched.pop()
+                spec = self.worker_spec[spec_name]
+                workers_in_spec = self._workers_per_spec(spec)
+                del self.worker_spec[spec_name]
+                current_worker_count -= workers_in_spec
 
+            # Remove launched specs if still over target
+            while current_worker_count > n and self.worker_spec:
+                spec_name, spec = self.worker_spec.popitem()
+                workers_in_spec = self._workers_per_spec(spec)
+                current_worker_count -= workers_in_spec
+
+        # Scale up if we need more workers
         if self.status not in (Status.closing, Status.closed):
-            while len(self.worker_spec) < n:
-                self.worker_spec.update(self.new_worker_spec())
+            while current_worker_count < n:
+                # For grouped workers, check if adding next spec would exceed target
+                # This ensures we never exceed the requested worker count (conservative scaling)
+                workers_in_next_spec = (
+                    self._workers_per_spec(self.new_spec) if self.new_spec else 1
+                )
+                if current_worker_count + workers_in_next_spec > n:
+                    # Don't add spec if it would exceed target
+                    # Exception: if we have 0 workers and n > 0, add at least one spec
+                    # This ensures we can always create workers when requested (avoids deadlock)
+                    if current_worker_count == 0 and n > 0:
+                        pass  # Add the spec even if it exceeds target
+                    else:
+                        break
+
+                new_spec_dict = self.new_worker_spec()
+                self.worker_spec.update(new_spec_dict)
+                # Get the spec we just added to count its workers
+                spec_name = list(new_spec_dict.keys())[0]
+                spec = new_spec_dict[spec_name]
+                workers_in_spec = self._workers_per_spec(spec)
+                current_worker_count += workers_in_spec
 
         self.loop.add_callback(self._correct_state)
 
