@@ -148,6 +148,11 @@ class SpecCluster(Cluster):
     For **regular workers**: spec name == worker name (one-to-one mapping)
     For **grouped workers**: one spec name → multiple worker names (one-to-many mapping)
 
+    **Important**: The ``self.workers`` dict is always keyed by **spec names** (not worker
+    names), mapping to Worker class instances. When accessing this dict with
+    a worker name from the scheduler, you must first map it to a spec name using
+    ``_worker_name_to_spec_name()``.
+
     Grouped Workers
     ---------------
     A single spec entry can generate multiple Dask workers by including a ``"group"``
@@ -429,24 +434,34 @@ class SpecCluster(Cluster):
             name = self.scheduler_info["workers"][msg]["name"]
 
             def f():
-                if (
-                    name in self.workers
-                    and msg not in self.scheduler_info["workers"]
-                    and not any(
-                        d["name"] == name
-                        for d in self.scheduler_info["workers"].values()
-                    )
-                ):
-                    self._futures.add(asyncio.ensure_future(self.workers[name].close()))
-                    del self.workers[name]
-
+                # Find the spec this worker belongs to
                 spec_name = self._worker_name_to_spec_name(name)
-                if spec_name and spec_name in self.worker_spec:
-                    spec = self.worker_spec[spec_name]
 
-                    # Grouped worker: remove entire spec so adaptive can recreate it
-                    if "group" in spec:
-                        del self.worker_spec[spec_name]
+                # Check if worker/spec is still missing (not re-registered)
+                if msg not in self.scheduler_info["workers"] and not any(
+                    d["name"] == name for d in self.scheduler_info["workers"].values()
+                ):
+                    # For regular workers: close and remove from self.workers
+                    if spec_name and spec_name == name and name in self.workers:
+                        self._futures.add(
+                            asyncio.ensure_future(self.workers[name].close())
+                        )
+                        del self.workers[name]
+
+                    # For grouped workers: remove the entire spec
+                    if spec_name and spec_name in self.worker_spec:
+                        spec = self.worker_spec[spec_name]
+                        if "group" in spec:
+                            # Close the MultiWorker instance
+                            if spec_name in self.workers:
+                                self._futures.add(
+                                    asyncio.ensure_future(
+                                        self.workers[spec_name].close()
+                                    )
+                                )
+                                del self.workers[spec_name]
+                            # Remove the spec so adaptive can recreate it
+                            del self.worker_spec[spec_name]
 
             delay = parse_timedelta(
                 dask.config.get("distributed.deploy.lost-worker-timeout")

@@ -536,6 +536,111 @@ async def test_grouped_worker_death_removes_spec():
                 assert spec_names[1] in cluster.worker_spec
 
 
+@gen_test()
+async def test_grouped_worker_spec_removal_multiple_rounds():
+    """Test that spec removal works correctly for multiple rounds with different spec names.
+
+    This test ensures that the spec removal mechanism in _update_worker_status() correctly:
+    1. Maps worker names to spec names (e.g., "2-0" -> "2")
+    2. Closes and removes the MultiWorker instance from self.workers
+    3. Removes the spec from worker_spec
+    4. Works for any spec name, not just "0"
+
+    This catches bugs where worker names ("0-0") were incorrectly checked against
+    self.workers keys (which are spec names like "0").
+    """
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "100ms"}):
+        async with SpecCluster(
+            scheduler=scheduler,
+            worker={
+                "cls": MultiWorker,
+                "options": {"n": 2, "nthreads": 2, "memory_limit": "2 GB"},
+                "group": ["-0", "-1"],
+            },
+            asynchronous=True,
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                # Scale to 4 workers (2 specs)
+                cluster.scale(4)
+                await cluster
+                await client.wait_for_workers(4)
+
+                # Initial state: 2 specs, 2 MultiWorker instances
+                assert len(cluster.worker_spec) == 2
+                assert len(cluster.workers) == 2
+                initial_specs = set(cluster.worker_spec.keys())
+
+                # Round 1: Remove spec "0"
+                spec_to_remove = "0"
+                assert spec_to_remove in cluster.worker_spec
+                assert spec_to_remove in cluster.workers
+
+                worker_names = cluster._spec_name_to_worker_names(spec_to_remove)
+                worker_to_kill = list(worker_names)[0]
+                worker_addr = [
+                    addr
+                    for addr, ws in cluster.scheduler.workers.items()
+                    if ws.name == worker_to_kill
+                ][0]
+
+                await cluster.scheduler.remove_worker(
+                    address=worker_addr, close=False, stimulus_id="test-round-1"
+                )
+                await asyncio.sleep(0.2)
+
+                # Verify spec "0" is completely removed
+                assert spec_to_remove not in cluster.worker_spec
+                assert (
+                    spec_to_remove not in cluster.workers
+                )  # MultiWorker instance removed
+                assert len(cluster.worker_spec) == 1
+                assert len(cluster.workers) == 1
+
+                # Scale back up to create a new spec (will be "2" since "0" was removed)
+                cluster.scale(4)
+                await client.wait_for_workers(4)
+
+                # Should have 2 specs again, but with different names
+                assert len(cluster.worker_spec) == 2
+                assert len(cluster.workers) == 2
+                current_specs = set(cluster.worker_spec.keys())
+
+                # Specs should be "1" and "2" (not "0")
+                assert "0" not in current_specs
+                assert "1" in current_specs
+                assert "2" in current_specs
+
+                # Round 2: Remove spec "2" (this would fail with the old buggy code)
+                spec_to_remove = "2"
+                assert spec_to_remove in cluster.worker_spec
+                assert spec_to_remove in cluster.workers
+
+                worker_names = cluster._spec_name_to_worker_names(spec_to_remove)
+                worker_to_kill = list(worker_names)[0]
+                worker_addr = [
+                    addr
+                    for addr, ws in cluster.scheduler.workers.items()
+                    if ws.name == worker_to_kill
+                ][0]
+
+                await cluster.scheduler.remove_worker(
+                    address=worker_addr, close=False, stimulus_id="test-round-2"
+                )
+                await asyncio.sleep(0.2)
+
+                # Verify spec "2" is completely removed
+                assert spec_to_remove not in cluster.worker_spec
+                assert (
+                    spec_to_remove not in cluster.workers
+                )  # MultiWorker instance removed
+                assert len(cluster.worker_spec) == 1
+                assert len(cluster.workers) == 1
+
+                # Only spec "1" should remain
+                assert list(cluster.worker_spec.keys()) == ["1"]
+                assert list(cluster.workers.keys()) == ["1"]
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_run_spec(c, s):
     workers = await run_spec(worker_spec, s.address)
