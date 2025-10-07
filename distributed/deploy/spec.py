@@ -371,7 +371,21 @@ class SpecCluster(Cluster):
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:
-                    await self.scheduler_comm.retire_workers(workers=list(to_close))
+                    # Map spec names to worker names for retirement
+                    workers_to_retire: list[str] = []
+                    for spec_name in to_close:
+                        worker_names = self._spec_name_to_worker_names(spec_name)
+                        # Only retire workers that actually exist in the scheduler
+                        scheduler_worker_names = {
+                            w["name"] for w in self.scheduler_info["workers"].values()
+                        }
+                        workers_to_retire.extend(worker_names & scheduler_worker_names)
+
+                    if workers_to_retire:
+                        await self.scheduler_comm.retire_workers(
+                            workers=workers_to_retire
+                        )
+
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
                     for w in to_close
@@ -425,6 +439,14 @@ class SpecCluster(Cluster):
                 ):
                     self._futures.add(asyncio.ensure_future(self.workers[name].close()))
                     del self.workers[name]
+
+                spec_name = self._worker_name_to_spec_name(name)
+                if spec_name and spec_name in self.worker_spec:
+                    spec = self.worker_spec[spec_name]
+
+                    # Grouped worker: remove entire spec so adaptive can recreate it
+                    if "group" in spec:
+                        del self.worker_spec[spec_name]
 
             delay = parse_timedelta(
                 dask.config.get("distributed.deploy.lost-worker-timeout")
@@ -535,9 +557,17 @@ class SpecCluster(Cluster):
             n = max(n, int(math.ceil(cores / self._threads_per_worker())))
 
         if len(self.worker_spec) > n:
-            not_yet_launched = set(self.worker_spec) - {
+            # Build set of launched spec names by mapping worker names back to spec names
+            scheduler_worker_names = {
                 v["name"] for v in self.scheduler_info["workers"].values()
             }
+            launched_spec_names = set()
+            for worker_name in scheduler_worker_names:
+                spec_name = self._worker_name_to_spec_name(worker_name)
+                if spec_name:
+                    launched_spec_names.add(spec_name)
+
+            not_yet_launched = set(self.worker_spec) - launched_spec_names
             while len(self.worker_spec) > n and not_yet_launched:
                 del self.worker_spec[not_yet_launched.pop()]
 
@@ -689,22 +719,28 @@ class SpecCluster(Cluster):
         return bool(self.new_spec)
 
     async def scale_down(self, workers: Iterable[str]) -> None:
-        """Scale down by removing worker specs."""
-        # We may have groups, if so, map worker addresses to job names
-        if not all(w in self.worker_spec for w in workers):
-            mapping = {}
-            for name, spec in self.worker_spec.items():
-                if "group" in spec:
-                    for suffix in spec["group"]:
-                        mapping[str(name) + suffix] = name
-                else:
-                    mapping[name] = name
+        """Scale down by removing worker specs.
 
-            workers = {mapping.get(w, w) for w in workers}
+        Parameters
+        ----------
+        workers : Iterable[str]
+            Worker names (as seen by the scheduler) to scale down
+        """
+        # Map worker names to spec names (handles both regular and grouped workers)
+        spec_names_to_remove = set()
+        for worker_name in workers:
+            # First check if it's directly a spec name (for backward compatibility)
+            if worker_name in self.worker_spec:
+                spec_names_to_remove.add(worker_name)
+            else:
+                # Otherwise, map worker name to spec name
+                spec_name = self._worker_name_to_spec_name(worker_name)
+                if spec_name:
+                    spec_names_to_remove.add(spec_name)
 
-        for w in workers:
-            if w in self.worker_spec:
-                del self.worker_spec[w]
+        for spec_name in spec_names_to_remove:
+            if spec_name in self.worker_spec:
+                del self.worker_spec[spec_name]
         await self
 
     scale_up = scale  # backwards compatibility
