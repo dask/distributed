@@ -484,30 +484,31 @@ async def test_run_spec(c, s):
 
 
 @gen_test()
-async def test_run_spec_cluster_worker_names():
+async def test_run_spec_cluster_custom_spec_names():
+    """Test that _new_spec_name() can be overridden to customize spec names"""
     worker = {"cls": Worker, "options": {"nthreads": 1}}
 
     class MyCluster(SpecCluster):
-        def _new_worker_name(self, worker_number):
-            return f"prefix-{self.name}-{worker_number}-suffix"
+        def _new_spec_name(self, spec_number):
+            return f"prefix-{self.name}-{spec_number}-suffix"
 
     async with SpecCluster(
         asynchronous=True, scheduler=scheduler, worker=worker
     ) as cluster:
         cluster.scale(2)
         await cluster
-        worker_names = [0, 1]
-        assert list(cluster.worker_spec) == worker_names
-        assert sorted(list(cluster.workers)) == worker_names
+        spec_names = [0, 1]
+        assert list(cluster.worker_spec) == spec_names
+        assert sorted(list(cluster.workers)) == spec_names
 
     async with MyCluster(
         asynchronous=True, scheduler=scheduler, worker=worker, name="test-name"
     ) as cluster:
-        worker_names = ["prefix-test-name-0-suffix", "prefix-test-name-1-suffix"]
+        spec_names = ["prefix-test-name-0-suffix", "prefix-test-name-1-suffix"]
         cluster.scale(2)
         await cluster
-        assert list(cluster.worker_spec) == worker_names
-        assert sorted(list(cluster.workers)) == worker_names
+        assert list(cluster.worker_spec) == spec_names
+        assert sorted(list(cluster.workers)) == spec_names
 
 
 @gen_test()
@@ -544,3 +545,47 @@ async def test_shutdown_scheduler():
         assert isinstance(s, Scheduler)
 
     assert s.status == Status.closed
+
+
+@gen_test()
+async def test_new_spec_name_returns_string():
+    """Test that _new_spec_name() returns strings, not integers.
+
+    Spec names (keys in worker_spec dict) should always be strings, whether
+    auto-generated or user-provided. This ensures type consistency and
+    eliminates int/str conversion issues throughout the codebase.
+    """
+    async with SpecCluster(
+        workers={}, scheduler=scheduler, asynchronous=True
+    ) as cluster:
+        # Test that _new_spec_name returns a string
+        name = cluster._new_spec_name(0)
+        assert isinstance(name, str), f"Expected str, got {type(name).__name__}"
+        assert name == "0"
+
+        name = cluster._new_spec_name(42)
+        assert isinstance(name, str), f"Expected str, got {type(name).__name__}"
+        assert name == "42"
+
+
+@gen_test()
+async def test_worker_spec_keys_are_strings():
+    """Test that worker_spec keys are strings after scaling.
+
+    When workers are added via scale(), the resulting spec names (keys in
+    worker_spec dict) should be strings to maintain consistency with
+    user-provided specs.
+    """
+    worker_template = {"cls": Worker, "options": {"nthreads": 1}}
+    async with SpecCluster(
+        workers={}, scheduler=scheduler, worker=worker_template, asynchronous=True
+    ) as cluster:
+        # Scale up to create auto-generated worker specs
+        cluster.scale(2)
+        await cluster
+
+        # All keys in worker_spec should be strings
+        for key in cluster.worker_spec.keys():
+            assert isinstance(
+                key, str
+            ), f"Expected str key, got {type(key).__name__}: {key}"

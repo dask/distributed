@@ -7,10 +7,10 @@ import copy
 import logging
 import math
 import weakref
-from collections.abc import Awaitable, Generator
+from collections.abc import Awaitable, Generator, Iterable
 from contextlib import suppress
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
 
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -137,16 +137,48 @@ class SpecCluster(Cluster):
     and tearing things down at the right times.  Hopefully it can form a base
     for other more user-centric classes.
 
+    Terminology
+    -----------
+    **Spec name**: The string key in the ``worker_spec`` dictionary (e.g., ``"0"``,
+    ``"my-worker"``). This identifies a worker specification entry.
+
+    **Worker name**: The actual name a worker reports to the scheduler (e.g., ``"0"``,
+    ``"0-0"``, ``"0-1"``). This is what appears in ``scheduler.workers``.
+
+    For **regular workers**: spec name == worker name (one-to-one mapping)
+    For **grouped workers**: one spec name → multiple worker names (one-to-many mapping)
+
+    Grouped Workers
+    ---------------
+    A single spec entry can generate multiple Dask workers by including a ``"group"``
+    element with suffixes. This is useful for:
+    - HPC systems (e.g., SLURM) where multiple processes are allocated together
+    - Any worker class that manages multiple workers as a unit (e.g., MultiWorker)
+
+    >>> cluster.worker_spec = {
+    ...     "0": {"cls": MultiWorker, "options": {"processes": 3}, "group": ["-0", "-1", "-2"]},
+    ...     "1": {"cls": MultiWorker, "options": {"processes": 2}, "group": ["-0", "-1"]}
+    ... }
+
+    The scheduler sees individual workers with concatenated names:
+
+    >>> [ws.name for ws in cluster.scheduler.workers.values()]
+    ["0-0", "0-1", "0-2", "1-0", "1-1"]
+
+    When any worker in a group fails, the entire spec is removed so the group
+    can be recreated as a unit (important for HPC where the whole allocation fails).
+
     Parameters
     ----------
-    workers: dict
-        A dictionary mapping names to worker classes and their specifications
-        See example below
+    workers: dict[str, dict], optional
+        A dictionary mapping spec names (strings) to worker specifications.
+        Each worker spec is a dict with 'cls' and optionally 'options' and 'group'.
+        Spec names must be strings.
     scheduler: dict, optional
-        A similar mapping for a scheduler
-    worker: dict
-        A specification of a single worker.
-        This is used for any new workers that are created.
+        A specification for the scheduler with 'cls' and 'options' keys
+    worker: dict, optional
+        A worker specification template used when calling scale().
+        This template is used to auto-generate new worker specs.
     asynchronous: bool
         If this is intended to be used directly within an event loop with
         async/await
@@ -161,17 +193,17 @@ class SpecCluster(Cluster):
 
     Examples
     --------
-    To create a SpecCluster you specify how to set up a Scheduler and Workers
+    To create a SpecCluster you specify worker specifications and a scheduler spec
 
     >>> from dask.distributed import Scheduler, Worker, Nanny
     >>> scheduler = {'cls': Scheduler, 'options': {"dashboard_address": ':8787'}}
-    >>> workers = {
+    >>> worker_spec = {
     ...     'my-worker': {"cls": Worker, "options": {"nthreads": 1}},
     ...     'my-nanny': {"cls": Nanny, "options": {"nthreads": 2}},
     ... }
-    >>> cluster = SpecCluster(scheduler=scheduler, workers=workers)
+    >>> cluster = SpecCluster(scheduler=scheduler, workers=worker_spec)
 
-    The worker spec is stored as the ``.worker_spec`` attribute
+    The worker specs are stored in the ``.worker_spec`` attribute
 
     >>> cluster.worker_spec
     {
@@ -179,8 +211,8 @@ class SpecCluster(Cluster):
        'my-nanny': {"cls": Nanny, "options": {"nthreads": 2}},
     }
 
-    While the instantiation of this spec is stored in the ``.workers``
-    attribute
+    The actual Worker instances created from these specs are stored in the
+    ``.workers`` attribute
 
     >>> cluster.workers
     {
@@ -188,53 +220,36 @@ class SpecCluster(Cluster):
         'my-nanny': <Nanny ...>
     }
 
-    Should the spec change, we can await the cluster or call the
-    ``._correct_state`` method to align the actual state to the specified
-    state.
+    Should the worker_spec change, we can await the cluster or call the
+    ``._correct_state`` method to align the actual Worker instances to the
+    specified state.
 
-    We can also ``.scale(...)`` the cluster, which adds new workers of a given
-    form.
+    We can also ``.scale(...)`` the cluster, which adds new worker specs using
+    the template provided via the ``worker`` parameter.
 
-    >>> worker = {'cls': Worker, 'options': {}}
-    >>> cluster = SpecCluster(scheduler=scheduler, worker=worker)
+    >>> worker_template = {'cls': Worker, 'options': {}}
+    >>> cluster = SpecCluster(scheduler=scheduler, worker=worker_template)
     >>> cluster.worker_spec
     {}
 
     >>> cluster.scale(3)
     >>> cluster.worker_spec
     {
-        0: {'cls': Worker, 'options': {}},
-        1: {'cls': Worker, 'options': {}},
-        2: {'cls': Worker, 'options': {}},
+        "0": {'cls': Worker, 'options': {}},
+        "1": {'cls': Worker, 'options': {}},
+        "2": {'cls': Worker, 'options': {}},
     }
 
     Note that above we are using the standard ``Worker`` and ``Nanny`` classes,
     however in practice other classes could be used that handle resource
-    management like ``KubernetesPod`` or ``SLURMJob``.  The spec does not need
-    to conform to the expectations of the standard Dask Worker class.  It just
-    needs to be called with the provided options, support ``__await__`` and
-    ``close`` methods and the ``worker_address`` property..
+    management like ``KubernetesPod`` or ``SLURMJob``.  Worker specs do not need
+    to conform to the expectations of the standard Dask Worker class.  They just
+    need to be called with the provided options, support ``__await__`` and
+    ``close`` methods and the ``worker_address`` property.
 
-    Also note that uniformity of the specification is not required.  Other API
-    could be added externally (in subclasses) that adds workers of different
-    specifications into the same dictionary.
-
-    If a single entry in the spec will generate multiple dask workers then
-    please provide a `"group"` element to the spec, that includes the suffixes
-    that will be added to each name (this should be handled by your worker
-    class).
-
-    >>> cluster.worker_spec
-    {
-        0: {"cls": MultiWorker, "options": {"processes": 3}, "group": ["-0", "-1", -2"]}
-        1: {"cls": MultiWorker, "options": {"processes": 2}, "group": ["-0", "-1"]}
-    }
-
-    These suffixes should correspond to the names used by the workers when
-    they deploy.
-
-    >>> [ws.name for ws in cluster.scheduler.workers.values()]
-    ["0-0", "0-1", "0-2", "1-0", "1-1"]
+    Also note that uniformity of worker specs is not required.  Other API
+    could be added externally (in subclasses) that adds worker specs of different
+    types into the same worker_spec dictionary.
     """
 
     _instances: ClassVar[weakref.WeakSet[SpecCluster]] = weakref.WeakSet()
@@ -260,10 +275,10 @@ class SpecCluster(Cluster):
         self._created = weakref.WeakSet()
 
         self.scheduler_spec = copy.copy(scheduler)
-        self.worker_spec = copy.copy(workers) or {}
-        self.new_spec = copy.copy(worker)
+        self.worker_spec: dict[str, dict[str, Any]] = copy.copy(workers) or {}
+        self.new_spec: dict[str, Any] | None = copy.copy(worker)
         self.scheduler = None
-        self.workers = {}
+        self.workers: dict[str, Worker | Nanny] = {}
         self._i = 0
         self.security = security or Security()
         self._futures = set()
@@ -538,37 +553,56 @@ class SpecCluster(Cluster):
         if self.asynchronous:
             return NoOpAwaitable()
 
-    def _new_worker_name(self, worker_number):
-        """Returns new worker name.
+    def _new_spec_name(self, spec_number: int) -> str:
+        """Returns new spec name (key for worker_spec dict).
 
-        This can be overridden in SpecCluster derived classes to customise the
-        worker names.
-        """
-        return worker_number
+        This generates a spec name for auto-created worker specs. For regular
+        workers, the spec name will also be the worker name. For grouped workers,
+        the spec name is the prefix, and actual worker names will have suffixes
+        appended (e.g., spec name "0" with group ["-0", "-1"] creates workers
+        "0-0" and "0-1").
 
-    def new_worker_spec(self):
-        """Return name and spec for the next worker
+        This can be overridden in SpecCluster derived classes to customize spec
+        naming.
+
+        Parameters
+        ----------
+        spec_number : int
+            The numeric identifier for this spec (typically from self._i)
 
         Returns
         -------
-        d: dict mapping names to worker specs
+        str
+            The spec name to use as a key in worker_spec dict
+        """
+        return str(spec_number)
+
+    def new_worker_spec(self) -> dict[str, dict[str, Any]]:
+        """Return name and spec for the next worker spec
+
+        Returns
+        -------
+        dict[str, dict]
+            A dictionary with a single entry mapping a spec name (string) to
+            a worker specification dict
 
         See Also
         --------
         scale
         """
-        new_worker_name = self._new_worker_name(self._i)
-        while new_worker_name in self.worker_spec:
+        spec_name = self._new_spec_name(self._i)
+        while spec_name in self.worker_spec:
             self._i += 1
-            new_worker_name = self._new_worker_name(self._i)
+            spec_name = self._new_spec_name(self._i)
 
-        return {new_worker_name: self.new_spec}
+        return {spec_name: cast(dict[str, Any], self.new_spec)}
 
     @property
     def _supports_scaling(self):
         return bool(self.new_spec)
 
-    async def scale_down(self, workers):
+    async def scale_down(self, workers: Iterable[str]) -> None:
+        """Scale down by removing worker specs."""
         # We may have groups, if so, map worker addresses to job names
         if not all(w in self.worker_spec for w in workers):
             mapping = {}
