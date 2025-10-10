@@ -31,10 +31,12 @@ from typing import (
     Any,
     Callable,
     ClassVar,
+    Generic,
     Literal,
     NamedTuple,
     TypedDict,
     cast,
+    TypeVar,
 )
 
 from packaging.version import parse as parse_version
@@ -138,6 +140,7 @@ DEFAULT_EXTENSIONS: dict[str, Any] = {}
 
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
+_T = TypeVar("_T")
 
 class FutureCancelledError(CancelledError):
     key: str
@@ -241,7 +244,7 @@ def _del_global_client(c: Client) -> None:
             pass
 
 
-class Future(TaskRef):
+class Future(TaskRef, Generic[_T]):
     """A remotely running computation
 
     A Future is a local proxy to a result running on a remote worker.  A user
@@ -371,7 +374,7 @@ class Future(TaskRef):
         """
         return self._state.done()
 
-    def result(self, timeout=None):
+    def result(self, timeout=None) -> _T:
         """Wait until computation completes, gather result to local process.
 
         Parameters
@@ -2033,7 +2036,7 @@ class Client(SyncMethodMixin):
 
     def submit(
         self,
-        func,
+        func: Callable[..., _T],
         *args,
         key=None,
         workers=None,
@@ -2046,7 +2049,7 @@ class Client(SyncMethodMixin):
         actors=False,
         pure=True,
         **kwargs,
-    ):
+    ) -> Future[_T]:
         """Submit a function application to the scheduler
 
         Parameters
@@ -2181,7 +2184,7 @@ class Client(SyncMethodMixin):
 
     def map(
         self,
-        func: Callable,
+        func: Callable[..., _T],
         *iterables: Collection,
         key: str | list | None = None,
         workers: str | Iterable[str] | None = None,
@@ -2195,7 +2198,7 @@ class Client(SyncMethodMixin):
         pure: bool = True,
         batch_size=None,
         **kwargs,
-    ):
+    ) -> list[Future[_T]]:
         """Map a function on a sequence of arguments
 
         Arguments can be normal objects or Futures
