@@ -1129,7 +1129,10 @@ class MultiprocessingAuthkeyPlugin(WorkerPlugin):
 
     def __init__(self) -> None:
         import multiprocessing.process
-        os.environ["_DASK_MULTIPROCESSING_AUTHKEY"] = multiprocessing.process.current_process().authkey.hex()
+
+        os.environ["_DASK_MULTIPROCESSING_AUTHKEY"] = (
+            multiprocessing.process.current_process().authkey.hex()
+        )
 
     def setup(self, worker: Worker) -> None:
         import multiprocessing.process
@@ -1137,4 +1140,3 @@ class MultiprocessingAuthkeyPlugin(WorkerPlugin):
         multiprocessing.process.current_process().authkey = bytes.fromhex(
             os.environ["_DASK_MULTIPROCESSING_AUTHKEY"]
         )
-
