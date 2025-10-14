@@ -35,8 +35,8 @@ from typing import (
     Literal,
     NamedTuple,
     TypedDict,
-    cast,
     TypeVar,
+    cast,
 )
 
 from packaging.version import parse as parse_version
@@ -141,6 +141,7 @@ DEFAULT_EXTENSIONS: dict[str, Any] = {}
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
 _T = TypeVar("_T")
+
 
 class FutureCancelledError(CancelledError):
     key: str
@@ -2157,7 +2158,7 @@ class Client(SyncMethodMixin):
                     key,
                     func,
                     *(parse_input(a) for a in args),
-                    **{k: parse_input(v) for k, v in kwargs.items()},
+                    **{k: parse_input(v) for k, v in kwargs.items()},  # type: ignore
                 )
             },
             # We'd like to avoid hashing/tokenizing all of the above.
