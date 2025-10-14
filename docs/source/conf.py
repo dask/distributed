@@ -387,8 +387,8 @@ epub_exclude_files = ["search.html"]
 # Link to GitHub issues and pull requests using :pr:`1234` and :issue:`1234`
 # syntax
 extlinks = {
-    "issue": ("https://github.com/dask/distributed/issues/%s", "GH#"),
-    "pr": ("https://github.com/dask/distributed/pull/%s", "GH#"),
+    "issue": ("https://github.com/dask/distributed/issues/%s", "GH#%s"),
+    "pr": ("https://github.com/dask/distributed/pull/%s", "GH#%s"),
 }
 
 # Configuration for intersphinx: refer to the Python standard library
