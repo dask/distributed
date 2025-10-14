@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from docutils.parsers.rst import directives
 
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
@@ -86,7 +88,7 @@ release = distributed.__version__
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = "en"
 
 # There are two options for replacing |today|: either, you set today to some
 # non-false value, then it is used:
@@ -432,9 +434,8 @@ def copy_legacy_redirects(app, docname):
     if app.builder.name == "html":
         for html_src_path, new in redirect_files:
             page = redirect_template.format(new=new)
-            target_path = app.outdir + "/" + html_src_path
-            with open(target_path, "w") as f:
-                f.write(page)
+            target_path = Path(app.outdir) / html_src_path
+            target_path.write_text(page)
 
 
 class AutoAutoSummary(Autosummary):
