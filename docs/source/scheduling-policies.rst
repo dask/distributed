@@ -268,7 +268,7 @@ Adjusting or disabling queuing
 *adjusting this parameter.*
 
 Queuing behavior is controlled by the ``distributed.scheduler.worker-saturation`` config
-value. This is set via the :doc:`Dask configuration system <configuration>`. The config
+value. This is set via the :external+dask:doc:`Dask configuration system <configuration>`. The config
 value must be set on the scheduler, before the scheduler starts.
 
 The value controls how many initial chunks of data workers will have in memory at once.
