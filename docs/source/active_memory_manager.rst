@@ -28,7 +28,7 @@ causes increased overall memory usage across the cluster.
 
 Enabling the Active Memory Manager
 ----------------------------------
-The AMM is enabled by default. It can be disabled or tweaked through the :doc:`Dask
+The AMM is enabled by default. It can be disabled or tweaked through the :external+dask:doc:`Dask
 configuration file <configuration>`:
 
 .. code-block:: yaml
