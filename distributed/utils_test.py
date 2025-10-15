@@ -2599,3 +2599,9 @@ async def padded_time(before=0.05, after=0.05):
     t = time()
     await asyncio.sleep(after)
     return t
+
+
+def report_worker_authkey():
+    import multiprocessing.process
+
+    return multiprocessing.process.current_process().authkey
