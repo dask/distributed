@@ -1626,8 +1626,10 @@ class Worker(BaseWorker, ServerNode):
         # Give some time for a UCX scheduler to complete closing endpoints
         # before closing self.batched_stream, otherwise the local endpoint
         # may be closed too early and errors be raised on the scheduler when
-        # trying to send closing message.
-        if self._protocol == "ucx":  # pragma: no cover
+        # trying to send closing message. Using startswith supports variations
+        # of the protocols, e.g., `ucx` and `ucxx` which are both valid in
+        # distributed-ucxx.
+        if self._protocol.startswith("ucx"):  # pragma: no cover
             await asyncio.sleep(0.2)
 
         self.batched_send({"op": "close-stream"})
