@@ -479,3 +479,107 @@ async def test_plugin_with_broken_teardown_logs_on_close(c, s):
     logs = caplog.getvalue()
     assert "TestPlugin1 failed to teardown" in logs
     assert "test error" in logs
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_has_worker_plugin_by_name(c, s, a):
+    """Test checking if worker plugin is registered using string name"""
+
+    class MyPlugin(WorkerPlugin):
+        name = "MyPlugin"
+
+        def __init__(self, data, expected_notifications=None):
+            self.data = data
+            self.expected_notifications = expected_notifications
+
+    # Check non-existent plugin
+    assert not await c.has_plugin("MyPlugin")  # ← await
+
+    # Register plugin
+    await c.register_plugin(MyPlugin(123, None))
+
+    # Check using string name
+    assert await c.has_plugin("MyPlugin")  # ← await
+
+    # Unregister and check again
+    await c.unregister_worker_plugin("MyPlugin")
+    assert not await c.has_plugin("MyPlugin")  # ← await
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_has_worker_plugin_by_object(c, s, a):
+    """Test checking if worker plugin is registered using plugin object"""
+    plugin = MyPlugin(456)
+
+    # Check before registration
+    assert not await c.has_plugin(plugin)  # ← await
+
+    # Register and check
+    await c.register_plugin(plugin)
+    assert await c.has_plugin(plugin)  # ← await
+
+    # Unregister and check
+    await c.unregister_worker_plugin("MyPlugin")
+    assert not await c.has_plugin(plugin)  # ← await
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_has_plugin_list(c, s, a):
+    """Test checking multiple plugins at once"""
+    plugin1 = MyPlugin(1)
+
+    class AnotherPlugin(WorkerPlugin):
+        name = "AnotherPlugin"
+
+    plugin2 = AnotherPlugin()
+
+    # Check multiple plugins before registration
+    result = await c.has_plugin(["MyPlugin", "AnotherPlugin", "NonExistent"])  # ← await
+    assert result == {
+        "MyPlugin": False,
+        "AnotherPlugin": False,
+        "NonExistent": False,
+    }
+
+    # Register first plugin
+    await c.register_plugin(plugin1)
+    result = await c.has_plugin(["MyPlugin", "AnotherPlugin"])  # ← await
+    assert result == {"MyPlugin": True, "AnotherPlugin": False}
+
+    # Register second plugin
+    await c.register_plugin(plugin2)
+    result = await c.has_plugin(["MyPlugin", "AnotherPlugin"])  # ← await
+    assert result == {"MyPlugin": True, "AnotherPlugin": True}
+
+    # Can also pass list of objects
+    result = await c.has_plugin([plugin1, plugin2])  # ← await
+    assert result == {"MyPlugin": True, "AnotherPlugin": True}
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_has_plugin_without_name_attribute(c, s, a):
+    """Test error when plugin has no name attribute"""
+
+    class PluginWithoutName(WorkerPlugin):
+        pass  # No name attribute
+
+    plugin = PluginWithoutName()
+
+    # Should raise error when checking
+    with pytest.raises(ValueError, match="has no 'name' attribute"):
+        await c.has_plugin(plugin)  # ← await
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_has_plugin_custom_name(c, s, a):
+    """Test plugin registered with custom name"""
+    plugin = MyPlugin(789)
+
+    # Register with custom name
+    await c.register_plugin(plugin, name="custom-name")
+
+    # Check with custom name
+    assert await c.has_plugin("custom-name")  # ← await
+
+    # Original name won't work
+    assert not await c.has_plugin("MyPlugin")  # ← await
