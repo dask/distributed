@@ -435,7 +435,8 @@ async def test_MultiWorker():
     ) as cluster:
         s = cluster.scheduler
         async with Client(cluster, asynchronous=True) as client:
-            cluster.scale(2)
+            # Scale to 4 workers (2 specs with 2 workers each)
+            cluster.scale(4)
             await cluster
             assert len(cluster.worker_spec) == 2
             await client.wait_for_workers(4)
@@ -448,20 +449,26 @@ async def test_MultiWorker():
             workers_line = re.search("(Workers.+)", cluster._repr_html_()).group(1)
             assert re.match("Workers.*4", workers_line)
 
-            cluster.scale(1)
+            # Scale to 2 workers (1 spec with 2 workers)
+            cluster.scale(2)
             await cluster
             assert len(s.workers) == 2
 
+            # Scale to 6 GB memory: 4GB per spec, conservatively scales to 1 spec = 4GB
+            # (rounds DOWN to avoid exceeding 6GB limit)
             cluster.scale(memory="6GB")
             await cluster
-            assert len(cluster.worker_spec) == 2
-            assert len(s.workers) == 4
+            assert len(cluster.worker_spec) == 1
+            assert len(s.workers) == 2
             assert cluster.plan == {ws.name for ws in s.workers.values()}
 
+            # Scale to 10 cores: 4 cores per spec, conservatively scales to 2 specs = 8 cores
+            # (rounds DOWN to avoid exceeding 10 cores limit)
             cluster.scale(cores=10)
             await cluster
-            assert len(cluster.workers) == 3
+            assert len(cluster.workers) == 2
 
+            # Adaptive with maximum=4 means maximum 4 workers = 2 specs
             adapt = cluster.adapt(minimum=0, maximum=4)
 
             for _ in range(adapt.wait_count):  # relax down to 0 workers
@@ -469,9 +476,169 @@ async def test_MultiWorker():
             await cluster
             assert not s.workers
 
+            # Submit work - adaptive will request workers based on workload
             future = client.submit(lambda x: x + 1, 10)
             await future
-            assert len(cluster.workers) == 1
+            # With 2-worker specs and conservative scaling with minimum viability:
+            # When adaptive requests 1 worker, scale creates 1 spec = 2 workers
+            # (special case: creates at least 1 spec when scaling from 0)
+            assert len(cluster.workers) == 1  # 1 spec created
+
+
+@gen_test()
+async def test_grouped_worker_death_removes_spec():
+    """Test that when a single worker in a group dies, the entire spec is removed."""
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "100ms"}):
+        async with SpecCluster(
+            scheduler=scheduler,
+            worker={
+                "cls": MultiWorker,
+                "options": {"n": 2, "nthreads": 2, "memory_limit": "2 GB"},
+                "group": ["-0", "-1"],
+            },
+            asynchronous=True,
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                # Scale to 4 workers (2 specs with 2 workers each)
+                cluster.scale(4)
+                await cluster
+                assert len(cluster.worker_spec) == 2
+                await client.wait_for_workers(4)
+
+                # Get the spec names
+                spec_names = list(cluster.worker_spec.keys())
+                assert len(spec_names) == 2
+
+                # Get worker names for the first spec
+                first_spec_name = spec_names[0]
+                worker_names = cluster._spec_name_to_worker_names(first_spec_name)
+                assert len(worker_names) == 2
+
+                # Kill one worker from the first group
+                worker_to_kill = list(worker_names)[0]
+                worker_addr = [
+                    addr
+                    for addr, ws in cluster.scheduler.workers.items()
+                    if ws.name == worker_to_kill
+                ][0]
+
+                # Simulate abrupt worker death (like HPC pre-emption)
+                await cluster.scheduler.remove_worker(
+                    address=worker_addr, close=False, stimulus_id="test"
+                )
+
+                # Wait for lost-worker-timeout
+                await asyncio.sleep(0.2)
+
+                # The entire spec should be removed (not just the one worker)
+                assert first_spec_name not in cluster.worker_spec
+                # The other spec should still exist
+                assert spec_names[1] in cluster.worker_spec
+
+
+@gen_test()
+async def test_grouped_worker_spec_removal_multiple_rounds():
+    """Test that spec removal works correctly for multiple rounds with different spec names.
+
+    This test ensures that the spec removal mechanism in _update_worker_status() correctly:
+    1. Maps worker names to spec names (e.g., "2-0" -> "2")
+    2. Closes and removes the MultiWorker instance from self.workers
+    3. Removes the spec from worker_spec
+    4. Works for any spec name, not just "0"
+
+    This catches bugs where worker names ("0-0") were incorrectly checked against
+    self.workers keys (which are spec names like "0").
+    """
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "100ms"}):
+        async with SpecCluster(
+            scheduler=scheduler,
+            worker={
+                "cls": MultiWorker,
+                "options": {"n": 2, "nthreads": 2, "memory_limit": "2 GB"},
+                "group": ["-0", "-1"],
+            },
+            asynchronous=True,
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                # Scale to 4 workers (2 specs)
+                cluster.scale(4)
+                await cluster
+                await client.wait_for_workers(4)
+
+                # Initial state: 2 specs, 2 MultiWorker instances
+                assert len(cluster.worker_spec) == 2
+                assert len(cluster.workers) == 2
+                initial_specs = set(cluster.worker_spec.keys())
+
+                # Round 1: Remove spec "0"
+                spec_to_remove = "0"
+                assert spec_to_remove in cluster.worker_spec
+                assert spec_to_remove in cluster.workers
+
+                worker_names = cluster._spec_name_to_worker_names(spec_to_remove)
+                worker_to_kill = list(worker_names)[0]
+                worker_addr = [
+                    addr
+                    for addr, ws in cluster.scheduler.workers.items()
+                    if ws.name == worker_to_kill
+                ][0]
+
+                await cluster.scheduler.remove_worker(
+                    address=worker_addr, close=False, stimulus_id="test-round-1"
+                )
+                await asyncio.sleep(0.2)
+
+                # Verify spec "0" is completely removed
+                assert spec_to_remove not in cluster.worker_spec
+                assert (
+                    spec_to_remove not in cluster.workers
+                )  # MultiWorker instance removed
+                assert len(cluster.worker_spec) == 1
+                assert len(cluster.workers) == 1
+
+                # Scale back up to create a new spec (will be "2" since "0" was removed)
+                cluster.scale(4)
+                await client.wait_for_workers(4)
+
+                # Should have 2 specs again, but with different names
+                assert len(cluster.worker_spec) == 2
+                assert len(cluster.workers) == 2
+                current_specs = set(cluster.worker_spec.keys())
+
+                # Specs should be "1" and "2" (not "0")
+                assert "0" not in current_specs
+                assert "1" in current_specs
+                assert "2" in current_specs
+
+                # Round 2: Remove spec "2" (this would fail with the old buggy code)
+                spec_to_remove = "2"
+                assert spec_to_remove in cluster.worker_spec
+                assert spec_to_remove in cluster.workers
+
+                worker_names = cluster._spec_name_to_worker_names(spec_to_remove)
+                worker_to_kill = list(worker_names)[0]
+                worker_addr = [
+                    addr
+                    for addr, ws in cluster.scheduler.workers.items()
+                    if ws.name == worker_to_kill
+                ][0]
+
+                await cluster.scheduler.remove_worker(
+                    address=worker_addr, close=False, stimulus_id="test-round-2"
+                )
+                await asyncio.sleep(0.2)
+
+                # Verify spec "2" is completely removed
+                assert spec_to_remove not in cluster.worker_spec
+                assert (
+                    spec_to_remove not in cluster.workers
+                )  # MultiWorker instance removed
+                assert len(cluster.worker_spec) == 1
+                assert len(cluster.workers) == 1
+
+                # Only spec "1" should remain
+                assert list(cluster.worker_spec.keys()) == ["1"]
+                assert list(cluster.workers.keys()) == ["1"]
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -484,30 +651,31 @@ async def test_run_spec(c, s):
 
 
 @gen_test()
-async def test_run_spec_cluster_worker_names():
+async def test_run_spec_cluster_custom_spec_names():
+    """Test that _new_spec_name() can be overridden to customize spec names"""
     worker = {"cls": Worker, "options": {"nthreads": 1}}
 
     class MyCluster(SpecCluster):
-        def _new_worker_name(self, worker_number):
-            return f"prefix-{self.name}-{worker_number}-suffix"
+        def _new_spec_name(self, spec_number):
+            return f"prefix-{self.name}-{spec_number}-suffix"
 
     async with SpecCluster(
         asynchronous=True, scheduler=scheduler, worker=worker
     ) as cluster:
         cluster.scale(2)
         await cluster
-        worker_names = [0, 1]
-        assert list(cluster.worker_spec) == worker_names
-        assert sorted(list(cluster.workers)) == worker_names
+        spec_names = ["0", "1"]
+        assert list(cluster.worker_spec) == spec_names
+        assert sorted(list(cluster.workers)) == spec_names
 
     async with MyCluster(
         asynchronous=True, scheduler=scheduler, worker=worker, name="test-name"
     ) as cluster:
-        worker_names = ["prefix-test-name-0-suffix", "prefix-test-name-1-suffix"]
+        spec_names = ["prefix-test-name-0-suffix", "prefix-test-name-1-suffix"]
         cluster.scale(2)
         await cluster
-        assert list(cluster.worker_spec) == worker_names
-        assert sorted(list(cluster.workers)) == worker_names
+        assert list(cluster.worker_spec) == spec_names
+        assert sorted(list(cluster.workers)) == spec_names
 
 
 @gen_test()
@@ -544,3 +712,320 @@ async def test_shutdown_scheduler():
         assert isinstance(s, Scheduler)
 
     assert s.status == Status.closed
+
+
+@gen_test()
+async def test_new_spec_name_returns_string():
+    """Test that _new_spec_name() returns strings, not integers.
+
+    Spec names (keys in worker_spec dict) should always be strings, whether
+    auto-generated or user-provided. This ensures type consistency and
+    eliminates int/str conversion issues throughout the codebase.
+    """
+    async with SpecCluster(
+        workers={}, scheduler=scheduler, asynchronous=True
+    ) as cluster:
+        # Test that _new_spec_name returns a string
+        name = cluster._new_spec_name(0)
+        assert isinstance(name, str), f"Expected str, got {type(name).__name__}"
+        assert name == "0"
+
+        name = cluster._new_spec_name(42)
+        assert isinstance(name, str), f"Expected str, got {type(name).__name__}"
+        assert name == "42"
+
+
+@gen_test()
+async def test_worker_spec_keys_are_strings():
+    """Test that worker_spec keys are strings after scaling.
+
+    When workers are added via scale(), the resulting spec names (keys in
+    worker_spec dict) should be strings to maintain consistency with
+    user-provided specs.
+    """
+    worker_template = {"cls": Worker, "options": {"nthreads": 1}}
+    async with SpecCluster(
+        workers={}, scheduler=scheduler, worker=worker_template, asynchronous=True
+    ) as cluster:
+        # Scale up to create auto-generated worker specs
+        cluster.scale(2)
+        await cluster
+
+        # All keys in worker_spec should be strings
+        for key in cluster.worker_spec.keys():
+            assert isinstance(
+                key, str
+            ), f"Expected str key, got {type(key).__name__}: {key}"
+
+
+@gen_test()
+async def test_spec_name_to_worker_names_regular():
+    """Test _spec_name_to_worker_names() with regular (non-grouped) workers."""
+    worker_template = {"cls": Worker, "options": {"nthreads": 1}}
+    async with SpecCluster(
+        workers={}, scheduler=scheduler, worker=worker_template, asynchronous=True
+    ) as cluster:
+        # Scale to create regular workers
+        cluster.scale(2)
+        await cluster
+
+        # Regular workers: spec name == worker name (1:1)
+        assert cluster._spec_name_to_worker_names("0") == {"0"}
+        assert cluster._spec_name_to_worker_names("1") == {"1"}
+
+        # Non-existent spec returns empty set
+        assert cluster._spec_name_to_worker_names("nonexistent") == set()
+
+
+@gen_test()
+async def test_spec_name_to_worker_names_grouped():
+    """Test _spec_name_to_worker_names() with grouped workers."""
+    async with SpecCluster(
+        workers={
+            "0": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-0", "-1", "-2"],
+            },
+            "1": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-a", "-b"],
+            },
+        },
+        scheduler=scheduler,
+        asynchronous=True,
+    ) as cluster:
+        # Grouped workers: one spec name → multiple worker names
+        assert cluster._spec_name_to_worker_names("0") == {"0-0", "0-1", "0-2"}
+        assert cluster._spec_name_to_worker_names("1") == {"1-a", "1-b"}
+
+
+@gen_test()
+async def test_worker_name_to_spec_name_regular():
+    """Test _worker_name_to_spec_name() with regular (non-grouped) workers."""
+    worker_template = {"cls": Worker, "options": {"nthreads": 1}}
+    async with SpecCluster(
+        workers={}, scheduler=scheduler, worker=worker_template, asynchronous=True
+    ) as cluster:
+        # Scale to create regular workers
+        cluster.scale(2)
+        await cluster
+
+        # Regular workers: worker name == spec name
+        assert cluster._worker_name_to_spec_name("0") == "0"
+        assert cluster._worker_name_to_spec_name("1") == "1"
+
+        # Non-existent worker returns None
+        assert cluster._worker_name_to_spec_name("nonexistent") is None
+
+
+@gen_test()
+async def test_worker_name_to_spec_name_grouped():
+    """Test _worker_name_to_spec_name() with grouped workers."""
+    async with SpecCluster(
+        workers={
+            "0": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-0", "-1", "-2"],
+            },
+            "1": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-a", "-b"],
+            },
+        },
+        scheduler=scheduler,
+        asynchronous=True,
+    ) as cluster:
+        # All workers from group "0" map back to spec "0"
+        assert cluster._worker_name_to_spec_name("0-0") == "0"
+        assert cluster._worker_name_to_spec_name("0-1") == "0"
+        assert cluster._worker_name_to_spec_name("0-2") == "0"
+
+        # All workers from group "1" map back to spec "1"
+        assert cluster._worker_name_to_spec_name("1-a") == "1"
+        assert cluster._worker_name_to_spec_name("1-b") == "1"
+
+        # Non-existent worker returns None
+        assert cluster._worker_name_to_spec_name("nonexistent") is None
+
+
+@gen_test()
+async def test_worker_name_to_spec_name_mixed():
+    """Test _worker_name_to_spec_name() with mixed regular and grouped workers."""
+    async with SpecCluster(
+        workers={
+            "regular": {"cls": Worker, "options": {"nthreads": 1}},
+            "grouped": {
+                "cls": Worker,
+                "options": {"nthreads": 1},
+                "group": ["-0", "-1"],
+            },
+        },
+        scheduler=scheduler,
+        asynchronous=True,
+    ) as cluster:
+        # Regular worker
+        assert cluster._worker_name_to_spec_name("regular") == "regular"
+
+        # Grouped workers
+        assert cluster._worker_name_to_spec_name("grouped-0") == "grouped"
+        assert cluster._worker_name_to_spec_name("grouped-1") == "grouped"
+
+
+@gen_test()
+async def test_unexpected_close_whole_worker_group():
+    """Test that when all workers in a group die abruptly, the spec is removed and recreated."""
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "100ms"}):
+        async with SpecCluster(
+            scheduler=scheduler,
+            worker={
+                "cls": MultiWorker,
+                "options": {"n": 2, "nthreads": 2, "memory_limit": "2 GB"},
+                "group": ["-0", "-1"],
+            },
+            asynchronous=True,
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                # Scale to 4 workers (2 specs with 2 workers each)
+                cluster.scale(4)
+                await cluster
+                assert len(cluster.worker_spec) == 2
+                await client.wait_for_workers(4)
+
+                # Get the spec names
+                spec_names = list(cluster.worker_spec.keys())
+                assert len(spec_names) == 2
+
+                # Get all worker names for the first spec
+                first_spec_name = spec_names[0]
+                worker_names = cluster._spec_name_to_worker_names(first_spec_name)
+                assert len(worker_names) == 2
+
+                # Kill all workers from the first group (simulate HPC job kill)
+                for worker_name in worker_names:
+                    worker_addr = [
+                        addr
+                        for addr, ws in cluster.scheduler.workers.items()
+                        if ws.name == worker_name
+                    ][0]
+                    await cluster.scheduler.remove_worker(
+                        address=worker_addr, close=False, stimulus_id="test"
+                    )
+
+                # Wait for lost-worker-timeout
+                await asyncio.sleep(0.2)
+
+                # The entire spec should be removed
+                assert first_spec_name not in cluster.worker_spec
+                # The other spec should still exist
+                assert spec_names[1] in cluster.worker_spec
+                # Should have 1 spec remaining
+                assert len(cluster.worker_spec) == 1
+
+                # With adaptive enabled (minimum=4 workers), the cluster should recreate the missing spec
+                cluster.adapt(minimum=4, maximum=4)
+                await client.wait_for_workers(4)
+
+                # Should have 2 specs again (but with a new spec name for the recreated one)
+                assert len(cluster.worker_spec) == 2
+                # Old spec name should not exist
+                assert first_spec_name not in cluster.worker_spec
+                # Should have 4 workers total
+                assert len(cluster.scheduler.workers) == 4
+
+
+@gen_test()
+async def test_scale_down_with_grouped_workers():
+    """Test that scale_down correctly maps worker names to spec names."""
+    async with SpecCluster(
+        scheduler=scheduler,
+        worker={
+            "cls": MultiWorker,
+            "options": {"n": 2, "nthreads": 2, "memory_limit": "2 GB"},
+            "group": ["-0", "-1"],
+        },
+        asynchronous=True,
+    ) as cluster:
+        # Scale to 4 workers (2 specs with 2 workers each)
+        cluster.scale(4)
+        await cluster
+        assert len(cluster.worker_spec) == 2
+
+        # Get spec names
+        spec_names = list(cluster.worker_spec.keys())
+        first_spec_name = spec_names[0]
+
+        # Get worker names for the first spec
+        worker_names = cluster._spec_name_to_worker_names(first_spec_name)
+        worker_names_list = list(worker_names)
+
+        # Call scale_down with actual worker names (what scheduler knows)
+        await cluster.scale_down(worker_names_list)
+
+        # The first spec should be removed
+        assert first_spec_name not in cluster.worker_spec
+        # The second spec should still exist
+        assert spec_names[1] in cluster.worker_spec
+        # Should have 1 spec and 2 workers left
+        assert len(cluster.worker_spec) == 1
+
+
+@gen_test()
+async def test_mixed_regular_and_grouped_workers():
+    """Test cluster with both regular and grouped worker specs."""
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "100ms"}):
+        async with SpecCluster(
+            workers={
+                "regular-1": {"cls": Worker, "options": {"nthreads": 2}},
+                "regular-2": {"cls": Worker, "options": {"nthreads": 2}},
+                "grouped": {
+                    "cls": MultiWorker,
+                    "options": {"n": 2, "nthreads": 2},
+                    "group": ["-0", "-1"],
+                },
+            },
+            scheduler=scheduler,
+            asynchronous=True,
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                # Should have 3 specs, 4 workers total (2 regular + 2 grouped)
+                await client.wait_for_workers(4)
+                assert len(cluster.worker_spec) == 3
+
+                # Test regular worker failure - spec should remain
+                regular_addr = [
+                    addr
+                    for addr, ws in cluster.scheduler.workers.items()
+                    if ws.name == "regular-1"
+                ][0]
+                await cluster.scheduler.remove_worker(
+                    address=regular_addr, close=False, stimulus_id="test"
+                )
+                await asyncio.sleep(0.2)
+
+                # Regular worker spec should still exist (cluster can recreate it)
+                assert "regular-1" in cluster.worker_spec
+                assert len(cluster.worker_spec) == 3
+
+                # Test grouped worker failure - entire spec should be removed
+                grouped_worker_names = cluster._spec_name_to_worker_names("grouped")
+                one_grouped_worker = list(grouped_worker_names)[0]
+                grouped_addr = [
+                    addr
+                    for addr, ws in cluster.scheduler.workers.items()
+                    if ws.name == one_grouped_worker
+                ][0]
+                await cluster.scheduler.remove_worker(
+                    address=grouped_addr, close=False, stimulus_id="test"
+                )
+                await asyncio.sleep(0.2)
+
+                # Grouped spec should be removed entirely
+                assert "grouped" not in cluster.worker_spec
+                # Regular specs should still exist
+                assert "regular-1" in cluster.worker_spec
+                assert "regular-2" in cluster.worker_spec
+                assert len(cluster.worker_spec) == 2
