@@ -27,7 +27,7 @@ from dask.utils import parse_timedelta
 from distributed import preloading
 from distributed._async_taskgroup import AsyncTaskGroupClosedError
 from distributed.comm import get_address_host
-from distributed.comm.addressing import address_from_user_args
+from distributed.comm.addressing import address_from_user_args, unparse_host_port
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import (
@@ -276,7 +276,7 @@ class Nanny(ServerNode):
             and not interface
             and not self.scheduler_addr.startswith("inproc://")
         ):
-            host = get_ip(get_address_host(self.scheduler.address))
+            host = unparse_host_port(get_ip(get_address_host(self.scheduler.address)))
 
         self._start_port = port
         self._start_host = host

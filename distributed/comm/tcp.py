@@ -39,7 +39,7 @@ from distributed.comm.utils import (
 )
 from distributed.protocol.utils import host_array, pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_ip, ensure_memoryview, get_ip, get_ipv6, nbytes
+from distributed.utils import ensure_ip, ensure_memoryview, get_ip, nbytes
 
 logger = logging.getLogger(__name__)
 
@@ -759,10 +759,7 @@ class BaseTCPBackend(Backend):
     def get_local_address_for(self, loc):
         host, port = parse_host_port(loc)
         host = ensure_ip(host)
-        if ":" in host:
-            local_host = get_ipv6(host)
-        else:
-            local_host = get_ip(host)
+        local_host = get_ip(host)
         return unparse_host_port(local_host, None)
 
 
