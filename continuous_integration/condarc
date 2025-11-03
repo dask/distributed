@@ -2,7 +2,6 @@ channels:
   - conda-forge
   - defaults
 channel_priority: true
-auto_activate_base: false
 remote_backoff_factor: 20
 remote_connect_timeout_secs: 20.0
 remote_max_retries: 10
