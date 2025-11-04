@@ -1,12 +1,12 @@
 [build-system]
-requires = ["setuptools>=62.6", "versioneer[toml]==0.29"]
+requires = ["setuptools>=62.6", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "distributed"
 description = "Distributed scheduler for Dask"
-maintainers = [{name = "Matthew Rocklin", email = "mrocklin@gmail.com"}]
-license = {text = "BSD-3-Clause"}
+maintainers = [{ name = "Matthew Rocklin", email = "mrocklin@gmail.com" }]
+license = { text = "BSD-3-Clause" }
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -68,17 +68,18 @@ exclude = ["*tests*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"*" = [
-    "templates/index.html",
-    "template.html",
-]
-distributed = [
-    "http/templates/*.html",
-    "py.typed",
-]
+"*" = ["templates/index.html", "template.html"]
+distributed = ["http/templates/*.html", "py.typed"]
 
 [tool.isort]
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "DISTRIBUTED", "FIRSTPARTY", "LOCALFOLDER"]
+sections = [
+    "FUTURE",
+    "STDLIB",
+    "THIRDPARTY",
+    "DISTRIBUTED",
+    "FIRSTPARTY",
+    "LOCALFOLDER",
+]
 profile = "black"
 skip_gitignore = true
 force_to_top = ["true"]
@@ -87,13 +88,8 @@ known_first_party = ["distributed"]
 known_distributed = ["dask", "zict"]
 add_imports = ["from __future__ import annotations"]
 
-[tool.versioneer]
-VCS = "git"
-style = "pep440"
-versionfile_source = "distributed/_version.py"
-versionfile_build = "distributed/_version.py"
-tag_prefix = ""
-parentdir_prefix = "distributed-"
+[tool.setuptools_scm]
+version_file = "distributed/_version.py"
 
 [tool.pytest.ini_options]
 addopts = '''
@@ -161,11 +157,11 @@ minversion = "6"
 markers = [
     "ci1: marks tests as belonging to 1 out of 2 partitions to run on CI ('-m \"not ci1\"' for second partition)",
     "extra_packages: marks tests that require a special dependency to run.",
-    "slow: marks tests as slow (deselected by default", # select with '--runslow')
+    "slow: marks tests as slow (deselected by default",                                                                            # select with '--runslow')
     "avoid_ci: marks tests as flaky or broken on CI on all OSs",
     "ipython: marks tests as exercising IPython",
     "gpu: marks tests we want to run on GPUs",
-    "leaking: ignore leaked resources", # see pytest_resourceleaks.py for usage
+    "leaking: ignore leaked resources",                                                                                            # see pytest_resourceleaks.py for usage
     "workerstate: deterministic test for the worker state machine. Automatically applied to all tests that use the 'ws' fixture.",
 ]
 # pytest-timeout settings
@@ -248,7 +244,7 @@ exclude_lines = [
     "except ImportError",
     "@overload",
     "@abstractmethod",
-    "@abc.abstractmethod"
+    "@abc.abstractmethod",
 ]
 
 [tool.coverage.html]

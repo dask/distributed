@@ -5,7 +5,7 @@
 # https://flake8.readthedocs.io/en/latest/user/error-codes.html
 
 # Note: there cannot be spaces after commas here
-exclude = __init__.py,versioneer.py,distributed/_concurrent_futures_thread.py
+exclude = __init__.py,distributed/_concurrent_futures_thread.py
 ignore =
     # Ignores below are aligned with black https://github.com/psf/black/blob/main/.flake8
     # Whitespace before ':'
