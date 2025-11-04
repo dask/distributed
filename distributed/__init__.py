@@ -19,7 +19,6 @@ weakref.finalize(lambda: None, lambda: None)
 import dask
 from dask.config import config  # type: ignore
 
-from distributed._version import get_versions
 from distributed.actor import Actor, ActorFuture, BaseActorFuture
 from distributed.client import (
     Client,
@@ -132,7 +131,6 @@ __all__ = [
     "get_client",
     "get_task_metadata",
     "get_task_stream",
-    "get_versions",
     "get_worker",
     "local_client",
     "performance_report",
