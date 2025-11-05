@@ -33,7 +33,7 @@ def main() -> None:
     try:
         freqs = psutil.cpu_freq(percpu=True)
     # https://github.com/giampaolo/psutil/issues/2382
-    except RuntimeError:
+    except (AttributeError, RuntimeError):
         print("CPU frequency: not available")
     else:
         print("CPU frequency:")

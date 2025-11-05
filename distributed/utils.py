@@ -67,6 +67,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import _deprecated
 from dask.utils import ensure_bytes as _ensure_bytes
 from dask.utils import key_split
 from dask.utils import parse_timedelta as _parse_timedelta
@@ -213,12 +214,18 @@ def get_ip(host="8.8.8.8", port=80):
     """
     Get the local IP address through which the *host* is reachable.
 
+    It will try to get ipv4 or ipv6 adaptively depending on the *host* to reach.
+
     *host* defaults to a well-known Internet host (one of Google's public
     DNS servers).
     """
-    return _get_ip(host, port, family=socket.AF_INET)
+    if ":" in host:
+        return _get_ip(host, port, family=socket.AF_INET6)
+    else:
+        return _get_ip(host, port, family=socket.AF_INET)
 
 
+@_deprecated(use_instead="get_ip")
 def get_ipv6(host="2001:4860:4860::8888", port=80):
     """
     The same as get_ip(), but for IPv6.

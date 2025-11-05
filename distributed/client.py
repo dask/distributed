@@ -31,9 +31,11 @@ from typing import (
     Any,
     Callable,
     ClassVar,
+    Generic,
     Literal,
     NamedTuple,
     TypedDict,
+    TypeVar,
     cast,
 )
 
@@ -86,6 +88,7 @@ from distributed.diagnostics.plugin import (
     WorkerPlugin,
     _get_plugin_name,
 )
+from distributed.exceptions import WorkerStartTimeoutError
 from distributed.metrics import time
 from distributed.objects import HasWhat, SchedulerInfo, WhoHas
 from distributed.protocol import serialize, to_serialize
@@ -136,6 +139,8 @@ _current_client: ContextVar[Client | None] = ContextVar("_current_client", defau
 DEFAULT_EXTENSIONS: dict[str, Any] = {}
 
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
+
+_T = TypeVar("_T")
 
 
 class FutureCancelledError(CancelledError):
@@ -240,7 +245,7 @@ def _del_global_client(c: Client) -> None:
             pass
 
 
-class Future(TaskRef):
+class Future(TaskRef, Generic[_T]):
     """A remotely running computation
 
     A Future is a local proxy to a result running on a remote worker.  A user
@@ -370,7 +375,7 @@ class Future(TaskRef):
         """
         return self._state.done()
 
-    def result(self, timeout=None):
+    def result(self, timeout=None) -> _T:
         """Wait until computation completes, gather result to local process.
 
         Parameters
@@ -1084,6 +1089,8 @@ class Client(SyncMethodMixin):
         if deserializers is None:
             deserializers = serializers
         self._deserializers = deserializers
+        if direct_to_workers is None:
+            direct_to_workers = dask.config.get("distributed.client.direct-to-workers")
         self.direct_to_workers = direct_to_workers
         self._previous_as_current = None
 
@@ -1629,10 +1636,8 @@ class Client(SyncMethodMixin):
 
         while running_workers(info) < n_workers:
             if deadline and time() > deadline:
-                raise TimeoutError(
-                    "Only %d/%d workers arrived after %s"
-                    % (running_workers(info), n_workers, timeout)
-                )
+                assert timeout is not None
+                raise WorkerStartTimeoutError(running_workers(info), n_workers, timeout)
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity(n_workers=-1)
             self._scheduler_identity = SchedulerInfo(info)
@@ -2032,7 +2037,7 @@ class Client(SyncMethodMixin):
 
     def submit(
         self,
-        func,
+        func: Callable[..., _T],
         *args,
         key=None,
         workers=None,
@@ -2045,7 +2050,7 @@ class Client(SyncMethodMixin):
         actors=False,
         pure=True,
         **kwargs,
-    ):
+    ) -> Future[_T]:
         """Submit a function application to the scheduler
 
         Parameters
@@ -2153,7 +2158,7 @@ class Client(SyncMethodMixin):
                     key,
                     func,
                     *(parse_input(a) for a in args),
-                    **{k: parse_input(v) for k, v in kwargs.items()},
+                    **{k: parse_input(v) for k, v in kwargs.items()},  # type: ignore
                 )
             },
             # We'd like to avoid hashing/tokenizing all of the above.
@@ -2180,7 +2185,7 @@ class Client(SyncMethodMixin):
 
     def map(
         self,
-        func: Callable,
+        func: Callable[..., _T],
         *iterables: Collection,
         key: str | list | None = None,
         workers: str | Iterable[str] | None = None,
@@ -2194,7 +2199,7 @@ class Client(SyncMethodMixin):
         pure: bool = True,
         batch_size=None,
         **kwargs,
-    ):
+    ) -> list[Future[_T]]:
         """Map a function on a sequence of arguments
 
         Arguments can be normal objects or Futures

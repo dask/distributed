@@ -28,7 +28,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 3.0.0",
-    "dask == 2025.5.1",
+    "dask == 2025.10.0",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.2",
@@ -230,7 +230,6 @@ omit = [
     "distributed/deploy/ssh.py",
     "distributed/_version.py",
     "distributed/pytest_resourceleaks.py",
-    "distributed/comm/ucx.py",
 ]
 
 [tool.coverage.report]

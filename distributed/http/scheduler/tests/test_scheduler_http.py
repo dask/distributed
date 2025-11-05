@@ -726,6 +726,53 @@ async def test_retire_workers(c, s, a, b):
         + ["distributed.http.scheduler.api"]
     },
 )
+async def test_retire_workers_with_tuple_keys(c, s, a, b):
+    aiohttp = pytest.importorskip("aiohttp")
+
+    worker_address = "tcp://172.17.0.3:39571"
+
+    async def mock_retire_workers(*args, **kwargs):
+        # Return problematic data structure
+        # tuple are not json serializable
+        return {
+            worker_address: {
+                "type": "Worker",
+                "metrics": {
+                    "digests_total_since_heartbeat": {
+                        (
+                            "execute",
+                            "slowadd",
+                            "thread-cpu",
+                            "seconds",
+                        ): 0.0003396660000000093,
+                    },
+                },
+            }
+        }
+
+    # Replace the method with our mock
+    s.retire_workers = mock_retire_workers
+
+    async with aiohttp.ClientSession() as session:
+        params = {"workers": [a.address, b.address]}
+        async with session.post(
+            "http://localhost:%d/api/v1/retire_workers" % s.http_server.port,
+            json=params,
+        ) as resp:
+            assert resp.status == 200
+            assert resp.headers["Content-Type"] == "application/json"
+            retired_workers_info = json.loads(await resp.text())
+            assert worker_address in retired_workers_info
+
+
+@gen_cluster(
+    client=True,
+    clean_kwargs={"threads": False},
+    config={
+        "distributed.scheduler.http.routes": DEFAULT_ROUTES
+        + ["distributed.http.scheduler.api"]
+    },
+)
 async def test_get_workers(c, s, a, b):
     aiohttp = pytest.importorskip("aiohttp")
 

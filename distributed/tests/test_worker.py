@@ -1450,21 +1450,6 @@ async def test_interface_async(Worker):
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 
 
-@pytest.mark.gpu
-@pytest.mark.parametrize("Worker", [Worker, Nanny])
-@gen_test()
-async def test_protocol_from_scheduler_address(ucx_loop, Worker):
-    pytest.importorskip("ucp")
-
-    async with Scheduler(protocol="ucx", dashboard_address=":0") as s:
-        assert s.address.startswith("ucx://")
-        async with Worker(s.address) as w:
-            assert w.address.startswith("ucx://")
-            async with Client(s.address, asynchronous=True) as c:
-                info = c.scheduler_info()
-                assert info["address"].startswith("ucx://")
-
-
 @gen_test()
 async def test_host_uses_scheduler_protocol(monkeypatch):
     # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
@@ -2161,6 +2146,31 @@ async def test_multiple_executors(c, s):
         default_result, gpu_result = await c.gather(futures)
         assert "Dask-Default-Threads" in default_result
         assert "Dask-Foo-Threads" in gpu_result
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_executor_inherit_threadname_from_worker(c, s):
+    def get_thread_name():
+        return threading.current_thread().name
+
+    async with Worker(
+        s.address,
+        nthreads=1,
+        name="WorkerName",
+    ):
+        result = await c.gather(c.submit(get_thread_name, pure=False))
+        assert "WorkerName-Dask-Default-Threads" in result
+
+    async with Worker(
+        s.address,
+        nthreads=1,
+        name="ALongWorkerNameThatNoOneWillProbablyEverAssignButThisTestsTheRobustnessOfLogic",
+    ):
+        result = await c.gather(c.submit(get_thread_name, pure=False))
+        assert (
+            "ALongWorkerNameThatNoOneWillProbablyEverAssignButThisTestsTheRobustnessOfLogic-Dask-Default-Threads"
+            in result
+        )
 
 
 @gen_cluster(client=True)

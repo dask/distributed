@@ -61,7 +61,7 @@ The client connects to and submits computation to a Dask cluster (such as a :cla
 
 .. autosummary::
    as_completed
-   distributed.diagnostics.progressbar.progress
+   diagnostics.progressbar.progress
    wait
    fire_and_forget
    futures_of
@@ -73,10 +73,10 @@ The client connects to and submits computation to a Dask cluster (such as a :cla
 **Utilities**
 
 .. autosummary::
-   distributed.utils.Log
-   distributed.utils.Logs
-   distributed.diagnostics.memray.memray_scheduler
-   distributed.diagnostics.memray.memray_workers
+   utils.Log
+   utils.Logs
+   diagnostics.memray.memray_scheduler
+   diagnostics.memray.memray_workers
 
 
 Asynchronous methods
