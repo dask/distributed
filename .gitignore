@@ -5,13 +5,11 @@
 # Cython files
 *.c
 *.so
-distributed/scheduler.html
 
 build/
 dist/
 *.egg-info
 docs/build
-continuous_integration/hdfs-initialized
 .DS_Store
 .cache
 .coverage
@@ -32,6 +30,12 @@ tags
 .venv/
 .mypy_cache/
 
+# Project specific
+continuous_integration/hdfs-initialized
+distributed/scheduler.html
+distributed/_version.py
+
+# Test reports
 reports/
 test_report*.html
 test_report*.db

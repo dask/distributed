@@ -19,7 +19,6 @@ weakref.finalize(lambda: None, lambda: None)
 import dask
 from dask.config import config  # type: ignore
 
-from distributed._version import get_versions
 from distributed.actor import Actor, ActorFuture, BaseActorFuture
 from distributed.client import (
     Client,
@@ -77,23 +76,13 @@ from distributed.worker import (
 )
 from distributed.worker_client import local_client, worker_client
 
-
-def __getattr__(name):
-    global __version__, __git_revision__
-
-    if name == "__version__":
-        from importlib.metadata import version
-
-        __version__ = version("distributed")
-        return __version__
-
-    if name == "__git_revision__":
-        from distributed._version import get_versions
-
-        __git_revision__ = get_versions()["full-revisionid"]
-        return __git_revision__
-
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+try:
+    # Backwards compatibility with versioneer
+    from distributed._version import __commit_id__ as __git_revision__
+    from distributed._version import __version__
+except ImportError:
+    __git_revision__ = "unknown"
+    __version__ = "unknown"
 
 
 __all__ = [
@@ -142,7 +131,6 @@ __all__ = [
     "get_client",
     "get_task_metadata",
     "get_task_stream",
-    "get_versions",
     "get_worker",
     "local_client",
     "performance_report",

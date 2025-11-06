@@ -27,8 +27,8 @@ requirements:
     - python >=3.10
     - pip
     - dask-core {{ dask_version }}
-    - versioneer =0.29
-    - setuptools >=62.6
+    - setuptools-scm
+    - setuptools >=80
     - tomli # [py<311]
   run:
     - python >=3.10
