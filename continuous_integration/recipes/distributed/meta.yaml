@@ -43,7 +43,7 @@ requirements:
     - psutil >=5.8.0
     - pyyaml >=5.4.1
     - sortedcontainers >=2.0.5
-    - tblib >=1.6.0
+    - tblib >=1.6.0,<3.2
     - toolz >=0.10.0
     - tornado >=6.2.0
     - urllib3 >=1.26.5
