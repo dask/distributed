@@ -38,7 +38,7 @@ dependencies:
   - scikit-learn
   - scipy
   - sortedcollections
-  - tblib
+  - tblib <3.2
   - toolz
   - tornado
   - zict  # overridden by git tip below
