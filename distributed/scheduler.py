@@ -5558,7 +5558,10 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 try:
                     result = plugin.remove_worker(
-                        scheduler=self, worker=address, stimulus_id=stimulus_id
+                        scheduler=self,
+                        worker=address,
+                        name=ws.name,
+                        stimulus_id=stimulus_id,
                     )
                 except TypeError:
                     parameters = inspect.signature(plugin.remove_worker).parameters
@@ -9410,9 +9413,15 @@ class WorkerStatusPlugin(SchedulerPlugin):
         except CommClosedError:
             scheduler.remove_plugin(name=self.name)
 
-    def remove_worker(self, scheduler: Scheduler, worker: str, **kwargs: Any) -> None:
+    def remove_worker(
+        self, scheduler: Scheduler, worker: str, name: Hashable, **kwargs: Any
+    ) -> None:
         try:
-            self.bcomm.send(["remove", worker])
+            msg = {
+                "worker": worker,
+                "name": name,
+            }
+            self.bcomm.send(["remove", msg])
         except CommClosedError:
             scheduler.remove_plugin(name=self.name)
 
