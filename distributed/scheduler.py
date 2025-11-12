@@ -6566,7 +6566,7 @@ class Scheduler(SchedulerState, ServerNode):
             :meth:`Client.wait_for_workers` for granular control over how many workers to
             wait for.
         on_error:
-            If 'raise' (the default), raise if any nanny times out while restarting the
+            If "raise" (the default), raise if any nanny times out while restarting the
             worker. If 'return', return error messages.
 
         Returns
