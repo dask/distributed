@@ -45,7 +45,7 @@ dependencies:
   - scikit-learn
   - scipy
   - sortedcollections
-  - tblib
+  - tblib !=3.2.0,!=3.2.1
   - toolz
   - torchvision  # Only tested here
   - tornado
