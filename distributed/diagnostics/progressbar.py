@@ -426,13 +426,14 @@ class MultiProgressWidget(MultiProgressBar):
             )
         else:
             self.elapsed_time.value = (
-                '<div style="padding: 0px 10px 5px 10px"><b>Finished:</b> '
-                + format_time(self.elapsed)
-                + "</div>"
+                '<div style="padding: 0px 10px 5px 10px">'
+                f"<b>Finished:</b> {format_time(self.elapsed)}"
+                f"{' (no tasks given)' if not self.keys else ''}"
+                "</div>"
             )
 
     def _draw_bar(self, remaining, all, status, **kwargs):
-        if self.keys and not self.widget.children:
+        if not self.widget.children:
             self.make_widget(all)
         for k, ntasks in all.items():
             ndone = ntasks - remaining[k]
