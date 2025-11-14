@@ -427,8 +427,7 @@ class MultiProgressWidget(MultiProgressBar):
         else:
             self.elapsed_time.value = (
                 '<div style="padding: 0px 10px 5px 10px">'
-                f"<b>Finished:</b> {format_time(self.elapsed)}"
-                f"{' (no tasks given)' if not self.keys else ''}"
+                f"<b>Finished:</b> {format_time(self.elapsed) if self.keys else 'no tasks given'}</div>"
                 "</div>"
             )
 
