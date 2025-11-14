@@ -873,7 +873,7 @@ class CustomBase(BaseException):
 async def test_comm_closed_on_write_error(tcp, exc_type):
     # Internal errors from comm.stream.write, such as
     # BufferError should lead to the stream being closed
-    # and not re-used. See GitHub #4133
+    # and not reused. See GitHub #4133
 
     reader, writer = await get_tcp_comm_pair()
 
@@ -1365,7 +1365,7 @@ def test_register_backend_entrypoint(tmp_path):
 
 
 class OpaqueList(list):
-    """Don't let the serialization layer travese this object"""
+    """Don't let the serialization layer traverse this object"""
 
     pass
 

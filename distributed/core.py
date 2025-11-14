@@ -1546,7 +1546,7 @@ class ConnectionPool:
         """
         Reuse an open communication to the given address.  For internal use.
         """
-        # if the pool is asked to re-use a comm it does not know about, ignore
+        # if the pool is asked to reuse a comm it does not know about, ignore
         # this comm: just close it.
         if comm not in self.occupied[addr]:
             IOLoop.current().add_callback(comm.close)

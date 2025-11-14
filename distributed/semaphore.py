@@ -349,7 +349,7 @@ class Semaphore(SyncMethodMixin):
         if lease_timeout == "inf":
             return
 
-        ## Below is all code for the lease timout validation
+        ## Below is all code for the lease timeout validation
 
         lease_timeout = parse_timedelta(
             dask.config.get("distributed.scheduler.locks.lease-timeout"),

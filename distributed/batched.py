@@ -104,7 +104,7 @@ class BatchedSend:
                 # and we're using `yield` and not `await`, the `write` coroutine object
                 # will not actually have been awaited, and it will remain sitting around
                 # for someone to retrieve it. At interpreter exit, this will warn
-                # sommething like `RuntimeWarning: coroutine 'TCP.write' was never
+                # something like `RuntimeWarning: coroutine 'TCP.write' was never
                 # awaited`. By using the `closing` contextmanager, the `write` coroutine
                 # object is always cleaned up, even if `yield` raises `GeneratorExit`.
                 with contextlib.closing(

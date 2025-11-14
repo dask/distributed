@@ -308,7 +308,7 @@ async def test_broken_worker_during_computation(c, s, a, b):
             )
 
         await asyncio.sleep(random.random() / 20)
-        with suppress(CommClosedError):  # comm will be closed abrupty
+        with suppress(CommClosedError):  # comm will be closed abruptly
             await c.run(os._exit, 1, workers=[n.worker_address])
 
         await asyncio.sleep(random.random() / 20)

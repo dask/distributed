@@ -244,7 +244,7 @@ async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
     # same task prefix. This ensures that we have tasks queued up but all of
     # them are still classified as unknown.
     # The lock allows us to control the duration of the first task without
-    # delaying test runtime or flakyness
+    # delaying test runtime or flakiness
     def blocked_task(x, lock):
         if x == 0:
             with lock:
