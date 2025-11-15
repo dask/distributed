@@ -203,7 +203,7 @@ def test_pickle_by_value_when_registered():
                 module = f"{d}/mymodule.py"
                 with open(module, "w") as f:
                     f.write("def myfunc(x):\n    return x + 1")
-                import mymodule  # noqa
+                import mymodule
 
                 assert dumps(mymodule.myfunc) == pickle.dumps(
                     mymodule.myfunc, protocol=HIGHEST_PROTOCOL

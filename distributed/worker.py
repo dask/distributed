@@ -3233,7 +3233,7 @@ else:
 # avoid importing cuDF unless explicitly enabled
 if dask.config.get("distributed.diagnostics.cudf"):
     try:
-        import cudf as _cudf  # noqa: F401
+        import cudf as _cudf
     except Exception:
         pass
     else:

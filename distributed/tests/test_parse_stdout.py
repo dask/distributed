@@ -15,7 +15,6 @@ parse_stdout = pytest.importorskip("parse_stdout")
 
 
 # Note: test_timeout below ends with a whitespace!
-# flake8: noqa: W291
 stdout = """
 Unrelated row, must ignore
 distributed/tests/test1.py::test_fail [31mFAILED[0m[31m                             [ 10%][0m
