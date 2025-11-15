@@ -148,8 +148,9 @@ from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
 from distributed.sizeof import sizeof
 
 if TYPE_CHECKING:
+    from typing import TypeAlias
+
     import numpy as np
-    from typing_extensions import TypeAlias
 
     import dask.array as da
 

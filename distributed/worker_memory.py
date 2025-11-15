@@ -48,7 +48,7 @@ from distributed.utils import RateLimiterFilter, has_arg, log_errors
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
     # Circular imports
     from distributed.nanny import Nanny

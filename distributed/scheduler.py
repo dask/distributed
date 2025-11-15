@@ -148,9 +148,9 @@ from distributed.variable import VariableExtension
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
     # TODO import from typing (requires Python >=3.11)
-    from typing import TypeVar
+    from typing import TypeAlias, TypeVar
 
-    from typing_extensions import Self, TypeAlias
+    from typing_extensions import Self
 
     from dask._expr import Expr
 

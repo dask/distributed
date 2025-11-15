@@ -23,7 +23,7 @@ from distributed.utils import ensure_memoryview, nbytes
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
 # TODO remove quotes (requires Python >=3.10)
 AnyBytes: TypeAlias = "bytes | bytearray | memoryview"

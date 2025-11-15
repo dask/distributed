@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 from datetime import timedelta
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Callable, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from tornado.ioloop import IOLoop
 
@@ -18,7 +18,7 @@ from distributed.protocol import pickle
 from distributed.utils import log_errors
 
 if TYPE_CHECKING:
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
     import distributed
     from distributed.deploy.cluster import Cluster

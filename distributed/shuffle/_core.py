@@ -49,7 +49,9 @@ from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import ParamSpec, TypeAlias
+    from typing import TypeAlias
+
+    from typing_extensions import ParamSpec
 
     _P = ParamSpec("_P")
 

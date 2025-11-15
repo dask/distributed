@@ -437,7 +437,7 @@ class Suggestion(NamedTuple):
 
 if TYPE_CHECKING:
     # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
 SuggestionGenerator: TypeAlias = Generator[
     Suggestion, Union["scheduler_module.WorkerState", None], None

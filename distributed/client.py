@@ -17,7 +17,14 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Coroutine,
+    Iterable,
+    Iterator,
+    Sequence,
+)
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -29,7 +36,6 @@ from queue import Queue as pyQueue
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     ClassVar,
     Generic,
     Literal,
@@ -125,7 +131,7 @@ from distributed.utils_comm import (
 from distributed.worker import get_client, get_worker, secede
 
 if TYPE_CHECKING:
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
 logger = logging.getLogger(__name__)
 

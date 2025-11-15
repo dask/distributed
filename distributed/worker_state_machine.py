@@ -49,7 +49,9 @@ logger = logging.getLogger("distributed.worker.state_machine")
 if TYPE_CHECKING:
     # TODO import from typing (ParamSpec and TypeAlias requires Python >=3.10)
     # TODO import from typing (NotRequired requires Python >=3.11)
-    from typing_extensions import NotRequired, ParamSpec, TypeAlias
+    from typing import TypeAlias
+
+    from typing_extensions import NotRequired, ParamSpec
 
     P = ParamSpec("P")
 

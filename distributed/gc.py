@@ -4,7 +4,8 @@ import gc
 import logging
 import threading
 from collections import deque
-from typing import Callable, Final
+from collections.abc import Callable
+from typing import Final
 
 import psutil
 
