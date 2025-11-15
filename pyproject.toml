@@ -92,6 +92,7 @@ ignore = [
     "E714",   # Test for object identity should be `is not`
     "E721",   # Use `is` and `is not` for type comparisons, or `isinstance()` for isinstance checks
     "E741",   # Ambiguous variable name: `l`
+    "UP031",  # TODO: apply this rule
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]
