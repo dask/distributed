@@ -1121,9 +1121,7 @@ class Client(SyncMethodMixin):
                 security = getattr(self.cluster, "security", None)
         elif address is not None and not isinstance(address, str):
             raise TypeError(
-                "Scheduler address must be a string or a Cluster instance, got {}".format(
-                    type(address)
-                )
+                f"Scheduler address must be a string or a Cluster instance, got {type(address)}"
             )
 
         # If connecting to an address and no explicit security is configured, attempt
@@ -1375,10 +1373,7 @@ class Client(SyncMethodMixin):
             return text
 
         elif self.scheduler is not None:
-            return "<{}: scheduler={!r}>".format(
-                self.__class__.__name__,
-                self.scheduler.address,
-            )
+            return f"<{self.__class__.__name__}: scheduler={self.scheduler.address!r}>"
         else:
             return f"<{self.__class__.__name__}: No scheduler connected>"
 
@@ -5892,8 +5887,8 @@ class as_completed:
             return len(self.futures) + len(self.queue.queue)
 
     def __repr__(self):
-        return "<as_completed: waiting={} done={}>".format(
-            len(self.futures), len(self.queue.queue)
+        return (
+            f"<as_completed: waiting={len(self.futures)} done={len(self.queue.queue)}>"
         )
 
     def __iter__(self):
