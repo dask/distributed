@@ -41,9 +41,9 @@ def _python_exit():
     global _shutdown
     _shutdown = True
     items = list(_threads_queues.items())
-    for t, q in items:
+    for _t, q in items:
         q.put(None)
-    for t, q in items:
+    for t, _q in items:
         t.join()
 
 
