@@ -13,5 +13,7 @@ recursive-exclude distributed **/tests/*
 
 exclude distributed/pytest_resourceleaks.py
 
+prune .github
+prune continuous_integration
 prune docs/_build
 include distributed/_version.py
