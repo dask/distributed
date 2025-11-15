@@ -468,7 +468,7 @@ class _CollectErrorThread:
         def wrapper() -> None:
             try:
                 target()
-            except BaseException as e:  # noqa: B036
+            except BaseException as e:
                 self._exception = e
 
         self._thread = thread = threading.Thread(

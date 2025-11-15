@@ -6390,7 +6390,7 @@ async def test_profile_server_disabled(c, s, a, b):
 async def test_await_future(c, s, a, b):
     future = c.submit(inc, 1)
 
-    async def f():  # flake8: noqa
+    async def f():
         result = await future
         assert result == 2
 
