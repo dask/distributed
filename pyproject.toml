@@ -73,6 +73,32 @@ distributed = [
     "py.typed",
 ]
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+extend-select = [
+    "B",
+    "UP",
+]
+ignore = [
+    "B011",   # Do not `assert False`, raise `AssertionError()`
+    "B018",   # Found useless expression
+    "B028",   # FIXME: No explicit `stacklevel` keyword argument found
+    "B904",   # Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+    "B905",   # `zip()` without an explicit `strict=` parameter
+    "F841",   # Local variable `futures` is assigned to but never used
+    "E402",   # Module level import not at top of file
+    "E714",   # Test for object identity should be `is not`
+    "E721",   # Use `is` and `is not` for type comparisons, or `isinstance()` for isinstance checks
+    "E741",   # Ambiguous variable name: `l`
+]
+
+[tool.ruff.lint.extend-per-file-ignores]
+"**__init__.py" = ["F401", "F811"]
+"distributed/shuffle/tests/test_shuffle.py" = ["F601"]
+"distributed/utils.py" = ["F821"]
+
 [tool.isort]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "DISTRIBUTED", "FIRSTPARTY", "LOCALFOLDER"]
 profile = "black"
