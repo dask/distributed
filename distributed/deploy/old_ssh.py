@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import socket
 import sys
 import traceback
 import warnings
@@ -136,7 +135,7 @@ def async_ssh(cmd_dict):
                     )
                 )
                 line = stdout.readline()
-        except (PipeTimeout, socket.timeout):
+        except (TimeoutError, PipeTimeout):
             pass
 
     def read_from_stderr():
@@ -155,7 +154,7 @@ def async_ssh(cmd_dict):
                     + bcolors.ENDC
                 )
                 line = stderr.readline()
-        except (PipeTimeout, socket.timeout):
+        except (TimeoutError, PipeTimeout):
             pass
 
     def communicate():
