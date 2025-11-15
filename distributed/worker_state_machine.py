@@ -25,7 +25,7 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod, wraps
 from itertools import chain
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, Union, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, cast
 
 from tlz import peekn
 
@@ -1022,7 +1022,7 @@ class SecedeEvent(StateMachineEvent):
 
 # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
 # Not to be confused with distributed.scheduler.Recs
-Recs: TypeAlias = dict[TaskState, Union[TaskStateState, tuple]]
+Recs: TypeAlias = dict[TaskState, TaskStateState | tuple]
 Instructions: TypeAlias = list[Instruction]
 RecsInstrs: TypeAlias = tuple[Recs, Instructions]
 
