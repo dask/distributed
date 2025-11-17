@@ -8301,7 +8301,7 @@ def test_worker_clients_do_not_claim_ownership_of_serialize_futures(
     # different process such that we cannot rely on msg ordering
     #
     # 1. The alive futures have to be serialized as part of the submit payload
-    # 2. The future alive at the worker but the worker client doesn't claim
+    # 2. The future arrive at the worker but the worker client doesn't claim
     #    ownership
     # 3. We're deleting them and the cancellation goes through to the scheduler
     #    such that it can release the futures
