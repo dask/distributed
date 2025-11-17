@@ -59,10 +59,6 @@ dask-ssh = "distributed.cli.dask_ssh:main"
 dask-scheduler = "distributed.cli.dask_scheduler:main"
 dask-worker = "distributed.cli.dask_worker:main"
 
-[tool.setuptools]
-include-package-data = true
-zip-safe = false
-
 [tool.setuptools.packages.find]
 exclude = ["*tests*"]
 namespaces = false
