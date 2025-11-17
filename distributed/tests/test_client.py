@@ -6428,7 +6428,7 @@ async def test_as_completed_async_for_results(c, s, a, b):
     results = []
 
     async def f():
-        async for _future, result in ac:
+        async for _, result in ac:
             results.append(result)
 
     await f()
@@ -8199,7 +8199,7 @@ async def test_client_disconnect_exception_on_cancelled_futures(c, s, a, b):
     with pytest.raises(FuturesCancelledError, match="connection to the scheduler"):
         futures_of(fut, client=c)
 
-    async for _fut, res in as_completed([fut], with_results=True):
+    async for _, res in as_completed([fut], with_results=True):
         assert isinstance(res, FutureCancelledError)
         assert "connection to the scheduler" in res.msg
 
