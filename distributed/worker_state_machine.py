@@ -47,11 +47,10 @@ from distributed.utils import recursive_to_dict
 logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
-    # TODO import from typing (ParamSpec and TypeAlias requires Python >=3.10)
-    # TODO import from typing (NotRequired requires Python >=3.11)
-    from typing import TypeAlias
+    from typing import ParamSpec, TypeAlias
 
-    from typing_extensions import NotRequired, ParamSpec
+    # TODO import from typing (NotRequired requires Python >=3.11)
+    from typing_extensions import NotRequired
 
     P = ParamSpec("P")
 

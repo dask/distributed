@@ -48,7 +48,6 @@ from distributed.utils import run_in_executor_with_context, sync
 from distributed.utils_comm import retry
 
 if TYPE_CHECKING:
-    # TODO import from typing (requires Python >=3.10)
     from typing import TypeAlias
 
     from typing_extensions import ParamSpec

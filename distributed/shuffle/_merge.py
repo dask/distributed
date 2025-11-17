@@ -10,7 +10,6 @@ from distributed.shuffle._core import ShuffleId, get_worker_plugin
 from distributed.shuffle._shuffle import shuffle_transfer
 
 if TYPE_CHECKING:
-    # TODO import from typing (requires Python >=3.10)
     from typing import TypeAlias
 
     import pandas as pd

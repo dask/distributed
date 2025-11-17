@@ -22,7 +22,6 @@ from distributed.metrics import context_meter
 from distributed.utils import ensure_memoryview, nbytes
 
 if TYPE_CHECKING:
-    # TODO import from typing (requires Python >=3.10)
     from typing import TypeAlias
 
 # TODO remove quotes (requires Python >=3.10)

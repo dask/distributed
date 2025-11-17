@@ -20,7 +20,6 @@ from distributed.shuffle._limiter import ResourceLimiter
 from distributed.utils import log_errors, sync
 
 if TYPE_CHECKING:
-    # TODO import from typing (requires Python >=3.10)
     import pandas as pd
 
     from distributed.worker import Worker

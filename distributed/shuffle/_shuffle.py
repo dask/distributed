@@ -41,7 +41,6 @@ from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
-    # TODO import from typing (requires Python >=3.10)
     from typing import TypeAlias
 
     import pandas as pd
