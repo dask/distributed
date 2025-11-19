@@ -30,7 +30,7 @@ def _cascade_future(future, cf_future):
         try:
             typ, exc, tb = result
             raise exc.with_traceback(tb)
-        except BaseException as exc:  # noqa: B036
+        except BaseException as exc:
             cf_future.set_exception(exc)
 
 

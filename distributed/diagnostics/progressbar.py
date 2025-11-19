@@ -5,9 +5,9 @@ import logging
 import sys
 import warnings
 import weakref
+from collections.abc import Callable
 from contextlib import suppress
 from timeit import default_timer
-from typing import Callable
 
 from tlz import valmap
 from tornado.ioloop import IOLoop

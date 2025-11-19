@@ -6390,7 +6390,7 @@ async def test_profile_server_disabled(c, s, a, b):
 async def test_await_future(c, s, a, b):
     future = c.submit(inc, 1)
 
-    async def f():  # flake8: noqa
+    async def f():
         result = await future
         assert result == 2
 
@@ -6428,7 +6428,7 @@ async def test_as_completed_async_for_results(c, s, a, b):
     results = []
 
     async def f():
-        async for future, result in ac:
+        async for _, result in ac:
             results.append(result)
 
     await f()
@@ -8199,7 +8199,7 @@ async def test_client_disconnect_exception_on_cancelled_futures(c, s, a, b):
     with pytest.raises(FuturesCancelledError, match="connection to the scheduler"):
         futures_of(fut, client=c)
 
-    async for fut, res in as_completed([fut], with_results=True):
+    async for _, res in as_completed([fut], with_results=True):
         assert isinstance(res, FutureCancelledError)
         assert "connection to the scheduler" in res.msg
 

@@ -2994,7 +2994,7 @@ def _run_task_simple(
             # Any other `BaseException` types would ultimately be ignored by asyncio if
             # raised here, after messing up the worker state machine along their way.
             raise
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
             # aren't a reason to shut down the whole system (since we allow the
             # system-shutting-down `SystemExit` and `KeyboardInterrupt` to pass through)
@@ -3038,7 +3038,7 @@ async def _run_task_async(
             # Any other `BaseException` types would ultimately be ignored by asyncio if
             # raised here, after messing up the worker state machine along their way.
             raise
-        except BaseException as e:  # noqa: B036
+        except BaseException as e:
             # NOTE: this includes `CancelledError`! Since it's a user task, that's _not_
             # a reason to shut down the worker.
             # Users _shouldn't_ use `BaseException`s, but if they do, we can assume they
@@ -3233,7 +3233,7 @@ else:
 # avoid importing cuDF unless explicitly enabled
 if dask.config.get("distributed.diagnostics.cudf"):
     try:
-        import cudf as _cudf  # noqa: F401
+        import cudf as _cudf
     except Exception:
         pass
     else:

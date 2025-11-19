@@ -137,15 +137,11 @@ class Worker(Process):
 
         result = await self.connection.run("uname")
         if result.exit_status == 0:
-            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                dask.config.serialize(dask.config.global_config)
-            )
+            set_env = f'env DASK_INTERNAL_INHERIT_CONFIG="{dask.config.serialize(dask.config.global_config)}"'
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
-                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    dask.config.serialize(dask.config.global_config)
-                )
+                set_env = f"set DASK_INTERNAL_INHERIT_CONFIG={dask.config.serialize(dask.config.global_config)} &&"
             else:
                 raise Exception(
                     "Worker failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
@@ -237,15 +233,11 @@ class Scheduler(Process):
 
         result = await self.connection.run("uname")
         if result.exit_status == 0:
-            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                dask.config.serialize(dask.config.global_config)
-            )
+            set_env = f'env DASK_INTERNAL_INHERIT_CONFIG="{dask.config.serialize(dask.config.global_config)}"'
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
-                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    dask.config.serialize(dask.config.global_config)
-                )
+                set_env = f"set DASK_INTERNAL_INHERIT_CONFIG={dask.config.serialize(dask.config.global_config)} &&"
             else:
                 raise Exception(
                     "Scheduler failed to set DASK_INTERNAL_INHERIT_CONFIG variable "

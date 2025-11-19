@@ -17,7 +17,14 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Coroutine,
+    Iterable,
+    Iterator,
+    Sequence,
+)
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -29,7 +36,6 @@ from queue import Queue as pyQueue
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     ClassVar,
     Generic,
     Literal,
@@ -125,7 +131,7 @@ from distributed.utils_comm import (
 from distributed.worker import get_client, get_worker, secede
 
 if TYPE_CHECKING:
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
 logger = logging.getLogger(__name__)
 
@@ -1121,9 +1127,7 @@ class Client(SyncMethodMixin):
                 security = getattr(self.cluster, "security", None)
         elif address is not None and not isinstance(address, str):
             raise TypeError(
-                "Scheduler address must be a string or a Cluster instance, got {}".format(
-                    type(address)
-                )
+                f"Scheduler address must be a string or a Cluster instance, got {type(address)}"
             )
 
         # If connecting to an address and no explicit security is configured, attempt
@@ -1375,10 +1379,7 @@ class Client(SyncMethodMixin):
             return text
 
         elif self.scheduler is not None:
-            return "<{}: scheduler={!r}>".format(
-                self.__class__.__name__,
-                self.scheduler.address,
-            )
+            return f"<{self.__class__.__name__}: scheduler={self.scheduler.address!r}>"
         else:
             return f"<{self.__class__.__name__}: No scheduler connected>"
 
@@ -2368,7 +2369,7 @@ class Client(SyncMethodMixin):
                 "Cannot gather Futures created by another client. "
                 f"These are the {len(mismatched_futures)} (out of {len(futures)}) "
                 f"mismatched Futures and their client IDs (this client is {self.id}): "
-                f"{ {f: f.client.id for f in mismatched_futures} }"  # noqa: E201, E202
+                f"{ {f: f.client.id for f in mismatched_futures} }"
             )
         keys = [future.key for future in future_set]
         bad_data = dict()
@@ -5892,8 +5893,8 @@ class as_completed:
             return len(self.futures) + len(self.queue.queue)
 
     def __repr__(self):
-        return "<as_completed: waiting={} done={}>".format(
-            len(self.futures), len(self.queue.queue)
+        return (
+            f"<as_completed: waiting={len(self.futures)} done={len(self.queue.queue)}>"
         )
 
     def __iter__(self):

@@ -11,8 +11,8 @@ import sys
 import tempfile
 import uuid
 import zipfile
-from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any, Callable, ClassVar
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from dask.typing import Key
 from dask.utils import _deprecated_kwarg, funcname, tmpfile

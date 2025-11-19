@@ -29,7 +29,7 @@ import warnings
 from collections.abc import Callable, Container, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import psutil
 
@@ -47,25 +47,24 @@ from distributed.spill import ManualEvictProto, SpillBuffer
 from distributed.utils import RateLimiterFilter, has_arg, log_errors
 
 if TYPE_CHECKING:
-    # TODO import from typing (requires Python >=3.10)
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
     # Circular imports
     from distributed.nanny import Nanny
     from distributed.worker import Worker
 
-WorkerDataParameter: TypeAlias = Union[
+WorkerDataParameter: TypeAlias = (
     # pre-initialized
-    MutableMapping[Key, object],
+    MutableMapping[Key, object]
     # constructor
-    Callable[[], MutableMapping[Key, object]],
+    | Callable[[], MutableMapping[Key, object]]
     # constructor, passed worker.local_directory
-    Callable[[str], MutableMapping[Key, object]],
+    | Callable[[str], MutableMapping[Key, object]]
     # (constructor, kwargs to constructor)
-    tuple[Callable[..., MutableMapping[Key, object]], dict[str, Any]],
+    | tuple[Callable[..., MutableMapping[Key, object]], dict[str, Any]]
     # initialize internally
-    None,
-]
+    | None
+)
 
 worker_logger = logging.getLogger("distributed.worker.memory")
 worker_logger.addFilter(RateLimiterFilter(r"Unmanaged memory use is high", rate="300s"))

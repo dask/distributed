@@ -25,7 +25,7 @@ from copy import copy
 from dataclasses import dataclass, field
 from functools import lru_cache, partial, singledispatchmethod, wraps
 from itertools import chain
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, Union, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, cast
 
 from tlz import peekn
 
@@ -47,9 +47,10 @@ from distributed.utils import recursive_to_dict
 logger = logging.getLogger("distributed.worker.state_machine")
 
 if TYPE_CHECKING:
-    # TODO import from typing (ParamSpec and TypeAlias requires Python >=3.10)
+    from typing import ParamSpec, TypeAlias
+
     # TODO import from typing (NotRequired requires Python >=3.11)
-    from typing_extensions import NotRequired, ParamSpec, TypeAlias
+    from typing_extensions import NotRequired
 
     P = ParamSpec("P")
 
@@ -1022,7 +1023,7 @@ class SecedeEvent(StateMachineEvent):
 
 # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
 # Not to be confused with distributed.scheduler.Recs
-Recs: TypeAlias = dict[TaskState, Union[TaskStateState, tuple]]
+Recs: TypeAlias = dict[TaskState, TaskStateState | tuple]
 Instructions: TypeAlias = list[Instruction]
 RecsInstrs: TypeAlias = tuple[Recs, Instructions]
 

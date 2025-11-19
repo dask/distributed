@@ -189,11 +189,7 @@ def main(
     import distributed
 
     print("\n---------------------------------------------------------------")
-    print(
-        "                 Dask.distributed v{version}\n".format(
-            version=distributed.__version__
-        )
-    )
+    print(f"                 Dask.distributed v{distributed.__version__}\n")
     print(f"Worker nodes: {len(hostnames)}")
     for i, host in enumerate(hostnames):
         print(f"  {i}: {host}")

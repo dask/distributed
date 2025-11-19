@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import socket
 import sys
 import traceback
 import warnings
@@ -136,7 +135,7 @@ def async_ssh(cmd_dict):
                     )
                 )
                 line = stdout.readline()
-        except (PipeTimeout, socket.timeout):
+        except (TimeoutError, PipeTimeout):
             pass
 
     def read_from_stderr():
@@ -155,7 +154,7 @@ def async_ssh(cmd_dict):
                     + bcolors.ENDC
                 )
                 line = stderr.readline()
-        except (PipeTimeout, socket.timeout):
+        except (TimeoutError, PipeTimeout):
             pass
 
     def communicate():
@@ -208,16 +207,12 @@ def async_ssh(cmd_dict):
 def start_scheduler(
     logdir, addr, port, ssh_username, ssh_port, ssh_private_key, remote_python=None
 ):
-    cmd = "{python} -m distributed.cli.dask_scheduler --port {port}".format(
-        python=remote_python or sys.executable, port=port
-    )
+    cmd = f"{remote_python or sys.executable} -m distributed.cli.dask_scheduler --port {port}"
 
     # Optionally re-direct stdout and stderr to a logfile
     if logdir is not None:
         cmd = f"mkdir -p {logdir} && {cmd}"
-        cmd += "&> {logdir}/dask_scheduler_{addr}:{port}.log".format(
-            addr=addr, port=port, logdir=logdir
-        )
+        cmd += f"&> {logdir}/dask_scheduler_{addr}:{port}.log"
 
     # Format output labels we can prepend to each line of output, and create
     # a 'status' key to keep track of jobs that terminate prematurely.
@@ -297,16 +292,11 @@ def start_worker(
     )
 
     if local_directory is not None:
-        cmd += " --local-directory {local_directory}".format(
-            local_directory=local_directory
-        )
+        cmd += f" --local-directory {local_directory}"
 
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:
-        cmd = f"mkdir -p {logdir} && {cmd}"
-        cmd += "&> {logdir}/dask_scheduler_{addr}.log".format(
-            addr=worker_addr, logdir=logdir
-        )
+        cmd = f"mkdir -p {logdir} && {cmd}&> {logdir}/dask_scheduler_{worker_addr}.log"
 
     label = f"worker {worker_addr}"
 
@@ -401,10 +391,8 @@ class SSHCluster:
                 "dask-ssh_" + datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S"),
             )
             print(
-                bcolors.WARNING + "Output will be redirected to logfiles "
-                'stored locally on individual worker nodes under "{logdir}".'.format(
-                    logdir=logdir
-                )
+                bcolors.WARNING
+                + f'Output will be redirected to logfiles stored locally on individual worker nodes under "{logdir}".'
                 + bcolors.ENDC
             )
         self.logdir = logdir

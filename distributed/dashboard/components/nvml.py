@@ -151,9 +151,8 @@ class GPUCurrentLoad(DashboardComponent):
             "escaped_worker": [url_escape(w) for w in worker],
         }
 
-        self.memory_figure.title.text = "GPU Memory: {} / {}".format(
-            format_bytes(sum(memory)),
-            format_bytes(memory_total),
+        self.memory_figure.title.text = (
+            f"GPU Memory: {format_bytes(sum(memory))} / {format_bytes(memory_total)}"
         )
         self.memory_figure.x_range.end = memory_max
 
