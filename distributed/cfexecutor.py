@@ -125,8 +125,7 @@ class ClientExecutor(cf.Executor):
         if timeout is not None:
             timeout = parse_timedelta(timeout)
             end_time = timeout + time()
-        if "chunksize" in kwargs:
-            del kwargs["chunksize"]
+        kwargs.pop("chunksize", None)
         if kwargs:
             raise TypeError("unexpected arguments to map(): %s" % sorted(kwargs))
 
