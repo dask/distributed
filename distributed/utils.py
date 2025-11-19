@@ -46,9 +46,8 @@ from importlib.util import cache_from_source
 from pickle import PickleBuffer
 from time import sleep
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, TypeVar, overload
 from typing import Any as AnyType
-from typing import ClassVar, TypeVar, overload
 
 import psutil
 import tblib.pickling_support
@@ -67,9 +66,8 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
-from dask.utils import _deprecated
+from dask.utils import _deprecated, key_split
 from dask.utils import ensure_bytes as _ensure_bytes
-from dask.utils import key_split
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
