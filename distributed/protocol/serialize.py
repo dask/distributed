@@ -126,7 +126,7 @@ def import_allowed_module(name):
         return _cached_allowed_modules[name]
     else:
         raise RuntimeError(
-            f"Importing {repr(name)} is not allowed, please add it to the list of "
+            f"Importing {name!r} is not allowed, please add it to the list of "
             "allowed modules the scheduler can import via the "
             "distributed.scheduler.allowed-imports configuration setting."
         )
