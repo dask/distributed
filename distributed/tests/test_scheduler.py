@@ -5063,7 +5063,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await block_hb.set()
         await block_f.clear()
 
-        # Remove the new instance of the 'b' worker while it processes 'f'
+        # Remove the new instance of the 'b' worker while it processes 'f'
         # to trigger an transition for 'f' to 'erred'
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b:
             await in_f.wait()
@@ -5118,7 +5118,7 @@ async def test_stimulus_from_erred_task(c, s, a):
             await s.remove_worker(b1.address, stimulus_id="remove_b1")
             await block_f.clear()
 
-        # Remove the new instance of the 'b' worker while it processes 'f'
+        # Remove the new instance of the 'b' worker while it processes 'f'
         # to trigger a transition for 'f' to 'erred'
         async with Worker(s.address, nthreads=1, resources={"b": 1}) as b2:
             await in_f.wait()
