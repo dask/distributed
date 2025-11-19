@@ -61,6 +61,8 @@ try:
 except ImportError:
     resource = None  # type: ignore
 
+import operator
+
 import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -1473,8 +1475,10 @@ def cli_keywords(
             out = '"' + out + '"'
         return out
 
-    return sum(
-        (["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()), []
+    return functools.reduce(
+        operator.iadd,
+        (["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()),
+        [],
     )
 
 

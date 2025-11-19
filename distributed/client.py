@@ -7,6 +7,7 @@ import inspect
 import itertools
 import json
 import logging
+import operator
 import os
 import pickle
 import re
@@ -29,7 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
-from functools import partial, singledispatchmethod
+from functools import partial, reduce, singledispatchmethod
 from importlib.metadata import PackageNotFoundError, version
 from numbers import Number
 from queue import Queue as pyQueue
@@ -2297,7 +2298,8 @@ class Client(SyncMethodMixin):
                 keys = [list(element) for element in partition_all(batch_size, key)]
             else:
                 keys = [key for _ in range(len(batches))]
-            return sum(
+            return reduce(
+                operator.iadd,
                 (
                     self.map(
                         func,
