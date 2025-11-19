@@ -241,7 +241,7 @@ def SubprocessCluster(
         n_workers = max(1, CPU_COUNT // threads_per_worker)
     if n_workers and threads_per_worker is None:
         # Overcommit threads per worker, rather than undercommit
-        threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
+        threads_per_worker = max(1, math.ceil(CPU_COUNT / n_workers))
     if n_workers and "memory_limit" not in worker_kwargs:
         worker_kwargs["memory_limit"] = parse_memory_limit(
             "auto", 1, n_workers, logger=logger

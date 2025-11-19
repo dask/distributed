@@ -293,7 +293,7 @@ class WorkStealing(SchedulerPlugin):
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         cost_multiplier = transfer_time / compute_time
 
-        level = int(round(log2(cost_multiplier) + 6))
+        level = round(log2(cost_multiplier) + 6)
 
         if level < 1:
             level = 1
