@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 import pickle
 import threading
@@ -19,7 +20,7 @@ def test_wall_clock(name):
         t = getattr(time, name)()
         samples = [getattr(metrics, name)() for _ in range(100)]
         # Resolution
-        deltas = [sj - si for si, sj in zip(samples[:-1], samples[1:])]
+        deltas = [sj - si for si, sj in itertools.pairwise(samples)]
         assert min(deltas) >= 0.0, deltas
         assert max(deltas) <= 0.005, deltas
         assert any(0.0 < d < 0.0001 for d in deltas), deltas

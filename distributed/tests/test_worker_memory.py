@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import glob
+import itertools
 import logging
 import os
 import signal
@@ -1033,7 +1034,7 @@ async def test_release_evloop_while_spilling(c, s, a):
     # (this is because everything is pickled twice:
     # https://github.com/dask/distributed/issues/1371).
     # We should regain control of the event loop every 0.5s.
-    c = Counter(round(t1 - t0, 1) for t0, t1 in zip(ts, ts[1:]))
+    c = Counter(round(t1 - t0, 1) for t0, t1 in itertools.pairwise(ts))
     # Depending on the implementation of WorkerMemoryMonitor._maybe_spill:
     # if it calls sleep(0) every 0.5s:
     #   {0.0: 315, 0.5: 4}
