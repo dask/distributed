@@ -671,7 +671,7 @@ def test_raises_with_cause():
         raise RuntimeError("foo") from ValueError("bar")
 
     # we're trying to stick to pytest semantics
-    # If the exception types don't match, raise the first exception that doesnt' match
+    # If the exception types don't match, raise the first exception that doesn't match
     # If the text doesn't match, raise an assert
 
     with pytest.raises(OSError):

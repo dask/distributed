@@ -323,7 +323,7 @@ async def test_publish_submit_ordering(c, s, a, b):
     # The current implementation does in fact not use the same channel due to
     # serialization issue (including Futures in BatchedSend appends them to the
     # "recent messages" log which screws with the refcounting) but ensure that
-    # all queued up messages are flushed and received by the schduler befure
+    # all queued up messages are flushed and received by the scheduler before
     # publishing
     future = c.submit(_retrieve_annotations, resources=RESOURCES, pure=False)
 

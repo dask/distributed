@@ -496,7 +496,7 @@ class LoopRunner:
     Parameters
     ----------
     loop: IOLoop (optional)
-        If given, this loop will be re-used, otherwise an appropriate one
+        If given, this loop will be reused, otherwise an appropriate one
         will be looked up or created.
     asynchronous: boolean (optional, default False)
         If false (the default), the loop is meant to run in a separate

@@ -203,7 +203,7 @@ def nodebug_setup_module(module):
 
 def nodebug_teardown_module(module):
     """
-    A teardown_module() that you can install in a test module to reenable
+    A teardown_module() that you can install in a test module to re-enable
     debug facilities.
     """
     if module._old_asyncio_debug is not None:

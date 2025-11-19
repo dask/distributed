@@ -2794,7 +2794,7 @@ class TaskGroupGraph(DashboardComponent):
             nodes_data["color"].append(color_of(tg.prefix.name))
             nodes_data["tot_tasks"].append(tot_tasks)
 
-            # memory alpha factor by 0.4 if not get's too dark
+            # memory alpha factor by 0.4 if not gets too dark
             nodes_data["mem_alpha"].append(
                 (tg.states["memory"] / sum(tg.states.values())) * 0.4
             )

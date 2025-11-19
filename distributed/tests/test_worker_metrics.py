@@ -65,7 +65,7 @@ async def test_task_lifecycle(c, s, a, b):
         )
 
     del x, y, z
-    await async_poll_for(lambda: not a.state.tasks, timeout=5)  # For hygene only
+    await async_poll_for(lambda: not a.state.tasks, timeout=5)  # For hygiene only
 
     # Note: use set instead of list to account for rare, but harmless, race conditions
     expect = {

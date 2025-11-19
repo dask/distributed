@@ -106,7 +106,7 @@ async def test_abort_execution_to_fetch(c, s, a, b):
     # another worker with a smaller delay. The key is still the same
     fut = c.submit(inc, 1, key="f1", workers=[b.worker_address])
     # then, a must switch the execute to fetch. Instead of doing so, it will
-    # simply re-use the currently computing result.
+    # simply reuse the currently computing result.
     fut = c.submit(inc, fut, workers=[a.worker_address], key="f2")
     await wait_for_state("f2", "waiting", a)
     await ev.set()

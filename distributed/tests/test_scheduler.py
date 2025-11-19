@@ -4724,7 +4724,7 @@ async def test_deadlock_resubmit_queued_tasks_fast(c, s, a, rootish):
     # can finish the task since otherwise the worker would recognize it as
     # cancelled and would forget about it. We emulate this behavior by blocking
     # the outgoing scheduler stream until that happens, i.e. this introduces
-    # artifical latency
+    # artificial latency
     with freeze_batched_send(s.stream_comms[a.address]):
         del f1
         while any(k in s.tasks for k in keys):

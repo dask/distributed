@@ -102,7 +102,7 @@ distributed:
     lifetime:
       duration: null        # Time after which to gracefully shutdown the worker
       stagger: 0 seconds    # Random amount by which to stagger lifetimes
-      restart: False        # Do we ressurrect the worker after the lifetime deadline?
+      restart: False        # Do we resurrect the worker after the lifetime deadline?
 
     profile:
       enabled: True         # Whether or not to enable profiling
