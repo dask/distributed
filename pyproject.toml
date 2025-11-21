@@ -113,7 +113,7 @@ add_imports = ["from __future__ import annotations"]
 
 [tool.setuptools_scm]
 version_file = "distributed/_version.py"
-version_scheme = "post-version"
+version_scheme = "post-release"
 
 [tool.pytest.ini_options]
 addopts = '''
