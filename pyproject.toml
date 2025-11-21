@@ -28,7 +28,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 3.0.0",
-    "dask == 2025.11.0",
+    "dask >=2025.11.0<2025.11.1",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.2",
@@ -113,6 +113,7 @@ add_imports = ["from __future__ import annotations"]
 
 [tool.setuptools_scm]
 version_file = "distributed/_version.py"
+version_scheme = "post-version"
 
 [tool.pytest.ini_options]
 addopts = '''
