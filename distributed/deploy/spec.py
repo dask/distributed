@@ -7,10 +7,10 @@ import copy
 import logging
 import math
 import weakref
-from collections.abc import Awaitable, Generator
+from collections.abc import Awaitable, Generator, Iterable
 from contextlib import suppress
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
 
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -137,16 +137,53 @@ class SpecCluster(Cluster):
     and tearing things down at the right times.  Hopefully it can form a base
     for other more user-centric classes.
 
+    Terminology
+    -----------
+    **Spec name**: The string key in the ``worker_spec`` dictionary (e.g., ``"0"``,
+    ``"my-worker"``). This identifies a worker specification entry.
+
+    **Worker name**: The actual name a worker reports to the scheduler (e.g., ``"0"``,
+    ``"0-0"``, ``"0-1"``). This is what appears in ``scheduler.workers``.
+
+    For **regular workers**: spec name == worker name (one-to-one mapping)
+    For **grouped workers**: one spec name → multiple worker names (one-to-many mapping)
+
+    **Important**: The ``self.workers`` dict is always keyed by **spec names** (not worker
+    names), mapping to Worker class instances. When accessing this dict with
+    a worker name from the scheduler, you must first map it to a spec name using
+    ``_worker_name_to_spec_name()``.
+
+    Grouped Workers
+    ---------------
+    A single spec entry can generate multiple Dask workers by including a ``"group"``
+    element with suffixes. This is useful for:
+    - HPC systems (e.g., SLURM) where multiple processes are allocated together
+    - Any worker class that manages multiple workers as a unit (e.g., MultiWorker)
+
+    >>> cluster.worker_spec = {
+    ...     "0": {"cls": MultiWorker, "options": {"processes": 3}, "group": ["-0", "-1", "-2"]},
+    ...     "1": {"cls": MultiWorker, "options": {"processes": 2}, "group": ["-0", "-1"]}
+    ... }
+
+    The scheduler sees individual workers with concatenated names:
+
+    >>> [ws.name for ws in cluster.scheduler.workers.values()]
+    ["0-0", "0-1", "0-2", "1-0", "1-1"]
+
+    When any worker in a group fails, the entire spec is removed so the group
+    can be recreated as a unit (important for HPC where the whole allocation fails).
+
     Parameters
     ----------
-    workers: dict
-        A dictionary mapping names to worker classes and their specifications
-        See example below
+    workers: dict[str, dict], optional
+        A dictionary mapping spec names (strings) to worker specifications.
+        Each worker spec is a dict with 'cls' and optionally 'options' and 'group'.
+        Spec names must be strings.
     scheduler: dict, optional
-        A similar mapping for a scheduler
-    worker: dict
-        A specification of a single worker.
-        This is used for any new workers that are created.
+        A specification for the scheduler with 'cls' and 'options' keys
+    worker: dict, optional
+        A worker specification template used when calling scale().
+        This template is used to auto-generate new worker specs.
     asynchronous: bool
         If this is intended to be used directly within an event loop with
         async/await
@@ -161,17 +198,17 @@ class SpecCluster(Cluster):
 
     Examples
     --------
-    To create a SpecCluster you specify how to set up a Scheduler and Workers
+    To create a SpecCluster you specify worker specifications and a scheduler spec
 
     >>> from dask.distributed import Scheduler, Worker, Nanny
     >>> scheduler = {'cls': Scheduler, 'options': {"dashboard_address": ':8787'}}
-    >>> workers = {
+    >>> worker_spec = {
     ...     'my-worker': {"cls": Worker, "options": {"nthreads": 1}},
     ...     'my-nanny': {"cls": Nanny, "options": {"nthreads": 2}},
     ... }
-    >>> cluster = SpecCluster(scheduler=scheduler, workers=workers)
+    >>> cluster = SpecCluster(scheduler=scheduler, workers=worker_spec)
 
-    The worker spec is stored as the ``.worker_spec`` attribute
+    The worker specs are stored in the ``.worker_spec`` attribute
 
     >>> cluster.worker_spec
     {
@@ -179,8 +216,8 @@ class SpecCluster(Cluster):
        'my-nanny': {"cls": Nanny, "options": {"nthreads": 2}},
     }
 
-    While the instantiation of this spec is stored in the ``.workers``
-    attribute
+    The actual Worker instances created from these specs are stored in the
+    ``.workers`` attribute
 
     >>> cluster.workers
     {
@@ -188,53 +225,36 @@ class SpecCluster(Cluster):
         'my-nanny': <Nanny ...>
     }
 
-    Should the spec change, we can await the cluster or call the
-    ``._correct_state`` method to align the actual state to the specified
-    state.
+    Should the worker_spec change, we can await the cluster or call the
+    ``._correct_state`` method to align the actual Worker instances to the
+    specified state.
 
-    We can also ``.scale(...)`` the cluster, which adds new workers of a given
-    form.
+    We can also ``.scale(...)`` the cluster, which adds new worker specs using
+    the template provided via the ``worker`` parameter.
 
-    >>> worker = {'cls': Worker, 'options': {}}
-    >>> cluster = SpecCluster(scheduler=scheduler, worker=worker)
+    >>> worker_template = {'cls': Worker, 'options': {}}
+    >>> cluster = SpecCluster(scheduler=scheduler, worker=worker_template)
     >>> cluster.worker_spec
     {}
 
     >>> cluster.scale(3)
     >>> cluster.worker_spec
     {
-        0: {'cls': Worker, 'options': {}},
-        1: {'cls': Worker, 'options': {}},
-        2: {'cls': Worker, 'options': {}},
+        "0": {'cls': Worker, 'options': {}},
+        "1": {'cls': Worker, 'options': {}},
+        "2": {'cls': Worker, 'options': {}},
     }
 
     Note that above we are using the standard ``Worker`` and ``Nanny`` classes,
     however in practice other classes could be used that handle resource
-    management like ``KubernetesPod`` or ``SLURMJob``.  The spec does not need
-    to conform to the expectations of the standard Dask Worker class.  It just
-    needs to be called with the provided options, support ``__await__`` and
-    ``close`` methods and the ``worker_address`` property..
+    management like ``KubernetesPod`` or ``SLURMJob``.  Worker specs do not need
+    to conform to the expectations of the standard Dask Worker class.  They just
+    need to be called with the provided options, support ``__await__`` and
+    ``close`` methods and the ``worker_address`` property.
 
-    Also note that uniformity of the specification is not required.  Other API
-    could be added externally (in subclasses) that adds workers of different
-    specifications into the same dictionary.
-
-    If a single entry in the spec will generate multiple dask workers then
-    please provide a `"group"` element to the spec, that includes the suffixes
-    that will be added to each name (this should be handled by your worker
-    class).
-
-    >>> cluster.worker_spec
-    {
-        0: {"cls": MultiWorker, "options": {"processes": 3}, "group": ["-0", "-1", -2"]}
-        1: {"cls": MultiWorker, "options": {"processes": 2}, "group": ["-0", "-1"]}
-    }
-
-    These suffixes should correspond to the names used by the workers when
-    they deploy.
-
-    >>> [ws.name for ws in cluster.scheduler.workers.values()]
-    ["0-0", "0-1", "0-2", "1-0", "1-1"]
+    Also note that uniformity of worker specs is not required.  Other API
+    could be added externally (in subclasses) that adds worker specs of different
+    types into the same worker_spec dictionary.
     """
 
     _instances: ClassVar[weakref.WeakSet[SpecCluster]] = weakref.WeakSet()
@@ -260,10 +280,10 @@ class SpecCluster(Cluster):
         self._created = weakref.WeakSet()
 
         self.scheduler_spec = copy.copy(scheduler)
-        self.worker_spec = copy.copy(workers) or {}
-        self.new_spec = copy.copy(worker)
+        self.worker_spec: dict[str, dict[str, Any]] = copy.copy(workers) or {}
+        self.new_spec: dict[str, Any] | None = copy.copy(worker)
         self.scheduler = None
-        self.workers = {}
+        self.workers: dict[str, Worker | Nanny] = {}
         self._i = 0
         self.security = security or Security()
         self._futures = set()
@@ -356,7 +376,21 @@ class SpecCluster(Cluster):
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:
-                    await self.scheduler_comm.retire_workers(workers=list(to_close))
+                    # Map spec names to worker names for retirement
+                    workers_to_retire: list[str] = []
+                    for spec_name in to_close:
+                        worker_names = self._spec_name_to_worker_names(spec_name)
+                        # Only retire workers that actually exist in the scheduler
+                        scheduler_worker_names = {
+                            w["name"] for w in self.scheduler_info["workers"].values()
+                        }
+                        workers_to_retire.extend(worker_names & scheduler_worker_names)
+
+                    if workers_to_retire:
+                        await self.scheduler_comm.retire_workers(
+                            workers=workers_to_retire
+                        )
+
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
                     for w in to_close
@@ -400,16 +434,34 @@ class SpecCluster(Cluster):
             name = self.scheduler_info["workers"][msg]["name"]
 
             def f():
-                if (
-                    name in self.workers
-                    and msg not in self.scheduler_info["workers"]
-                    and not any(
-                        d["name"] == name
-                        for d in self.scheduler_info["workers"].values()
-                    )
+                # Find the spec this worker belongs to
+                spec_name = self._worker_name_to_spec_name(name)
+
+                # Check if worker/spec is still missing (not re-registered)
+                if msg not in self.scheduler_info["workers"] and not any(
+                    d["name"] == name for d in self.scheduler_info["workers"].values()
                 ):
-                    self._futures.add(asyncio.ensure_future(self.workers[name].close()))
-                    del self.workers[name]
+                    # For regular workers: close and remove from self.workers
+                    if spec_name and spec_name == name and name in self.workers:
+                        self._futures.add(
+                            asyncio.ensure_future(self.workers[name].close())
+                        )
+                        del self.workers[name]
+
+                    # For grouped workers: remove the entire spec
+                    if spec_name and spec_name in self.worker_spec:
+                        spec = self.worker_spec[spec_name]
+                        if "group" in spec:
+                            # Close the MultiWorker instance
+                            if spec_name in self.workers:
+                                self._futures.add(
+                                    asyncio.ensure_future(
+                                        self.workers[spec_name].close()
+                                    )
+                                )
+                                del self.workers[spec_name]
+                            # Remove the spec so adaptive can recreate it
+                            del self.worker_spec[spec_name]
 
             delay = parse_timedelta(
                 dask.config.get("distributed.deploy.lost-worker-timeout")
@@ -486,17 +538,28 @@ class SpecCluster(Cluster):
             raise
 
     def _threads_per_worker(self) -> int:
-        """Return the number of threads per worker for new workers"""
+        """Return the number of threads per worker for new workers.
+
+        For grouped workers, this returns the threads per individual worker
+        (total spec threads divided by number of workers in the group).
+        """
         if not self.new_spec:  # pragma: no cover
             raise ValueError("To scale by cores= you must specify cores per worker")
 
         for name in ["nthreads", "ncores", "threads", "cores"]:
             with suppress(KeyError):
-                return self.new_spec["options"][name]
+                total_threads = self.new_spec["options"][name]
+                # For grouped workers, divide by number of workers in the group
+                workers_per_spec = self._workers_per_spec(self.new_spec)
+                return total_threads // workers_per_spec
         raise RuntimeError("unreachable")
 
     def _memory_per_worker(self) -> int:
-        """Return the memory limit per worker for new workers"""
+        """Return the memory limit per worker for new workers.
+
+        For grouped workers, this returns the memory per individual worker
+        (total spec memory divided by number of workers in the group).
+        """
         if not self.new_spec:  # pragma: no cover
             raise ValueError(
                 "to scale by memory= your worker definition must include a "
@@ -505,85 +568,349 @@ class SpecCluster(Cluster):
 
         for name in ["memory_limit", "memory"]:
             with suppress(KeyError):
-                return parse_bytes(self.new_spec["options"][name])
+                total_memory = parse_bytes(self.new_spec["options"][name])
+                # For grouped workers, divide by number of workers in the group
+                workers_per_spec = self._workers_per_spec(self.new_spec)
+                return total_memory // workers_per_spec
 
         raise ValueError(
             "to use scale(memory=...) your worker definition must include a "
             "memory_limit definition"
         )
 
+    def _count_workers_in_specs(self) -> int:
+        """Count total number of workers across all specs.
+
+        For regular workers, each spec = 1 worker.
+        For grouped workers, each spec = number of group members.
+
+        Returns
+        -------
+        int
+            Total number of workers that would be created by current worker_spec
+        """
+        total = 0
+        for _spec_name, spec in self.worker_spec.items():
+            if "group" in spec:
+                total += len(spec["group"])
+            else:
+                total += 1
+        return total
+
+    def _workers_per_spec(self, spec: dict[str, Any]) -> int:
+        """Get number of workers a single spec will create.
+
+        Parameters
+        ----------
+        spec : dict
+            Worker specification dict
+
+        Returns
+        -------
+        int
+            Number of workers this spec creates (1 for regular, len(group) for grouped)
+        """
+        if "group" in spec:
+            return len(spec["group"])
+        return 1
+
     def scale(self, n=0, memory=None, cores=None):
+        """Scale cluster to a target number of workers or resource level.
+
+        Parameters
+        ----------
+        n : int, optional
+            Target maximum number of workers. For grouped workers, rounds down to
+            complete specs. Default is 0.
+        memory : str, optional
+            Target total memory (e.g., "10 GB"). Scales conservatively - will NOT
+            exceed this limit. For grouped workers, rounds down to complete specs.
+        cores : int, optional
+            Target total cores/threads. Scales conservatively - will NOT exceed
+            this limit. For grouped workers, rounds down to complete specs.
+
+        Notes
+        -----
+        **All scaling is conservative (rounds down to number of complete specs):**
+            - Ensures limits are not exceeded (except special case below)
+            - Prevents resource overcommitment and surprises
+            - For grouped workers, may get fewer workers than requested
+
+        **Special case - minimum viability:**
+            - If target > 0 and current workers = 0, creates at least 1 spec
+            - Prevents deadlock where no workers can be created
+            - Example: `scale(1)` with 2-worker specs → 1 spec = 2 workers (exceeds target!)
+
+        **Examples:**
+            - `scale(5)` with 2-worker specs → 2 specs = 4 workers (not 5)
+            - `scale(1)` with 2-worker specs → 1 spec = 2 workers (special case!)
+            - `scale(memory="6GB")` with 4GB/spec → 1 spec = 4GB (not 8GB)
+            - `scale(cores=10)` with 4 cores/spec → 2 specs = 8 cores (not 12)
+
+        **Why conservative?**
+            - User expectation: "at most N" not "at least N"
+            - Safety: prevents OOM, CPU oversubscription
+            - Consistency: all parameters use same rounding
+
+        Examples
+        --------
+        Regular workers (1 worker per spec):
+        >>> cluster.scale(5)  # Creates 5 specs = 5 workers
+
+        Grouped workers (2 workers per spec):
+        >>> cluster.scale(5)  # Creates 2 specs = 4 workers (conservative)
+        >>> cluster.scale(6)  # Creates 3 specs = 6 workers (exact match)
+        >>> cluster.scale(memory="6GB")  # With 4GB/spec: creates 1 spec = 4GB
+        """
         if memory is not None:
-            n = max(n, int(math.ceil(parse_bytes(memory) / self._memory_per_worker())))
+            # For grouped workers, scale by complete specs to avoid exceeding limit
+            # Use floor division to be conservative (never exceed requested memory)
+            if self.new_spec and "group" in self.new_spec:
+                memory_per_spec = self._memory_per_worker() * self._workers_per_spec(
+                    self.new_spec
+                )
+                target_specs = int(parse_bytes(memory) // memory_per_spec)
+                n = max(n, target_specs * self._workers_per_spec(self.new_spec))
+            else:
+                # Regular workers: use ceiling (match old behavior)
+                n = max(
+                    n, int(math.ceil(parse_bytes(memory) / self._memory_per_worker()))
+                )
 
         if cores is not None:
-            n = max(n, int(math.ceil(cores / self._threads_per_worker())))
+            # For grouped workers, scale by complete specs to avoid exceeding limit
+            # Use floor division to be conservative (never exceed requested cores)
+            if self.new_spec and "group" in self.new_spec:
+                cores_per_spec = self._threads_per_worker() * self._workers_per_spec(
+                    self.new_spec
+                )
+                target_specs = int(cores // cores_per_spec)
+                n = max(n, target_specs * self._workers_per_spec(self.new_spec))
+            else:
+                # Regular workers: use ceiling (match old behavior)
+                n = max(n, int(math.ceil(cores / self._threads_per_worker())))
 
-        if len(self.worker_spec) > n:
-            not_yet_launched = set(self.worker_spec) - {
+        # n is the target number of workers (not specs)
+        # For grouped workers, we need to scale by specs, where each spec creates multiple workers
+
+        current_worker_count = self._count_workers_in_specs()
+
+        # Scale down if we have too many workers
+        if current_worker_count > n:
+            # Build set of launched spec names by mapping worker names back to spec names
+            scheduler_worker_names = {
                 v["name"] for v in self.scheduler_info["workers"].values()
             }
-            while len(self.worker_spec) > n and not_yet_launched:
-                del self.worker_spec[not_yet_launched.pop()]
+            launched_spec_names = set()
+            for worker_name in scheduler_worker_names:
+                spec_name = self._worker_name_to_spec_name(worker_name)
+                if spec_name:
+                    launched_spec_names.add(spec_name)
 
-        while len(self.worker_spec) > n:
-            self.worker_spec.popitem()
+            not_yet_launched = set(self.worker_spec) - launched_spec_names
 
+            # Remove unlaunched specs first
+            while current_worker_count > n and not_yet_launched:
+                spec_name = not_yet_launched.pop()
+                spec = self.worker_spec[spec_name]
+                workers_in_spec = self._workers_per_spec(spec)
+                del self.worker_spec[spec_name]
+                current_worker_count -= workers_in_spec
+
+            # Remove launched specs if still over target
+            while current_worker_count > n and self.worker_spec:
+                spec_name, spec = self.worker_spec.popitem()
+                workers_in_spec = self._workers_per_spec(spec)
+                current_worker_count -= workers_in_spec
+
+        # Scale up if we need more workers
         if self.status not in (Status.closing, Status.closed):
-            while len(self.worker_spec) < n:
-                self.worker_spec.update(self.new_worker_spec())
+            while current_worker_count < n:
+                # For grouped workers, check if adding next spec would exceed target
+                # This ensures we never exceed the requested worker count (conservative scaling)
+                workers_in_next_spec = (
+                    self._workers_per_spec(self.new_spec) if self.new_spec else 1
+                )
+                if current_worker_count + workers_in_next_spec > n:
+                    # Don't add spec if it would exceed target
+                    # Exception: if we have 0 workers and n > 0, add at least one spec
+                    # This ensures we can always create workers when requested (avoids deadlock)
+                    if current_worker_count == 0 and n > 0:
+                        pass  # Add the spec even if it exceeds target
+                    else:
+                        break
+
+                new_spec_dict = self.new_worker_spec()
+                self.worker_spec.update(new_spec_dict)
+                # Get the spec we just added to count its workers
+                spec_name = list(new_spec_dict.keys())[0]
+                spec = new_spec_dict[spec_name]
+                workers_in_spec = self._workers_per_spec(spec)
+                current_worker_count += workers_in_spec
 
         self.loop.add_callback(self._correct_state)
 
         if self.asynchronous:
             return NoOpAwaitable()
 
-    def _new_worker_name(self, worker_number):
-        """Returns new worker name.
+    def _new_spec_name(self, spec_number: int) -> str:
+        """Returns new spec name (key for worker_spec dict).
 
-        This can be overridden in SpecCluster derived classes to customise the
-        worker names.
-        """
-        return worker_number
+        This generates a spec name for auto-created worker specs. For regular
+        workers, the spec name will also be the worker name. For grouped workers,
+        the spec name is the prefix, and actual worker names will have suffixes
+        appended (e.g., spec name "0" with group ["-0", "-1"] creates workers
+        "0-0" and "0-1").
 
-    def new_worker_spec(self):
-        """Return name and spec for the next worker
+        This can be overridden in SpecCluster derived classes to customize spec
+        naming.
+
+        Parameters
+        ----------
+        spec_number : int
+            The numeric identifier for this spec (typically from self._i)
 
         Returns
         -------
-        d: dict mapping names to worker specs
+        str
+            The spec name to use as a key in worker_spec dict
+        """
+        return str(spec_number)
+
+    def _spec_name_to_worker_names(self, spec_name: str) -> set[str]:
+        """Convert a spec name to the set of worker names it generates.
+
+        For regular workers, the spec name equals the worker name (1:1 mapping).
+        For grouped workers, one spec name maps to multiple worker names (1:many).
+
+        Parameters
+        ----------
+        spec_name : str
+            The spec name (key in worker_spec dict)
+
+        Returns
+        -------
+        set[str]
+            Set of worker names the scheduler will see for this spec
+
+        Examples
+        --------
+        Regular worker (no "group" key):
+        >>> cluster.worker_spec = {"0": {"cls": Worker, "options": {}}}
+        >>> cluster._spec_name_to_worker_names("0")
+        {"0"}
+
+        Grouped worker (has "group" key):
+        >>> cluster.worker_spec = {
+        ...     "0": {"cls": MultiWorker, "options": {}, "group": ["-0", "-1", "-2"]}
+        ... }
+        >>> cluster._spec_name_to_worker_names("0")
+        {"0-0", "0-1", "0-2"}
+        """
+        if spec_name not in self.worker_spec:
+            return set()
+
+        spec = self.worker_spec[spec_name]
+        if "group" in spec:
+            # Grouped worker: concatenate spec_name with each suffix
+            return {spec_name + suffix for suffix in spec["group"]}
+        else:
+            # Regular worker: spec name == worker name
+            return {spec_name}
+
+    def _worker_name_to_spec_name(self, worker_name: str) -> str | None:
+        """Convert a worker name to its corresponding spec name.
+
+        For regular workers, the worker name equals the spec name.
+        For grouped workers, extract the spec name prefix from the worker name.
+
+        Parameters
+        ----------
+        worker_name : str
+            The worker name (as seen by the scheduler)
+
+        Returns
+        -------
+        str | None
+            The spec name (key in worker_spec dict), or None if not found
+
+        Examples
+        --------
+        Regular worker:
+        >>> cluster.worker_spec = {"0": {"cls": Worker, "options": {}}}
+        >>> cluster._worker_name_to_spec_name("0")
+        "0"
+
+        Grouped worker:
+        >>> cluster.worker_spec = {
+        ...     "0": {"cls": MultiWorker, "options": {}, "group": ["-0", "-1", "-2"]}
+        ... }
+        >>> cluster._worker_name_to_spec_name("0-1")
+        "0"
+
+        Not found:
+        >>> cluster._worker_name_to_spec_name("nonexistent")
+        None
+        """
+        # First check if worker_name is directly a spec name (regular worker)
+        if worker_name in self.worker_spec:
+            return worker_name
+
+        # For grouped workers, check each spec to see if this worker belongs to it
+        for spec_name in self.worker_spec:
+            worker_names = self._spec_name_to_worker_names(spec_name)
+            if worker_name in worker_names:
+                return spec_name
+
+        return None
+
+    def new_worker_spec(self) -> dict[str, dict[str, Any]]:
+        """Return name and spec for the next worker spec
+
+        Returns
+        -------
+        dict[str, dict]
+            A dictionary with a single entry mapping a spec name (string) to
+            a worker specification dict
 
         See Also
         --------
         scale
         """
-        new_worker_name = self._new_worker_name(self._i)
-        while new_worker_name in self.worker_spec:
+        spec_name = self._new_spec_name(self._i)
+        while spec_name in self.worker_spec:
             self._i += 1
-            new_worker_name = self._new_worker_name(self._i)
+            spec_name = self._new_spec_name(self._i)
 
-        return {new_worker_name: self.new_spec}
+        return {spec_name: cast(dict[str, Any], self.new_spec)}
 
     @property
     def _supports_scaling(self):
         return bool(self.new_spec)
 
-    async def scale_down(self, workers):
-        # We may have groups, if so, map worker addresses to job names
-        if not all(w in self.worker_spec for w in workers):
-            mapping = {}
-            for name, spec in self.worker_spec.items():
-                if "group" in spec:
-                    for suffix in spec["group"]:
-                        mapping[str(name) + suffix] = name
-                else:
-                    mapping[name] = name
+    async def scale_down(self, workers: Iterable[str]) -> None:
+        """Scale down by removing worker specs.
 
-            workers = {mapping.get(w, w) for w in workers}
+        Parameters
+        ----------
+        workers : Iterable[str]
+            Worker names (as seen by the scheduler) to scale down
+        """
+        # Map worker names to spec names (handles both regular and grouped workers)
+        spec_names_to_remove = set()
+        for worker_name in workers:
+            # First check if it's directly a spec name (for backward compatibility)
+            if worker_name in self.worker_spec:
+                spec_names_to_remove.add(worker_name)
+            else:
+                # Otherwise, map worker name to spec name
+                spec_name = self._worker_name_to_spec_name(worker_name)
+                if spec_name:
+                    spec_names_to_remove.add(spec_name)
 
-        for w in workers:
-            if w in self.worker_spec:
-                del self.worker_spec[w]
+        for spec_name in spec_names_to_remove:
+            if spec_name in self.worker_spec:
+                del self.worker_spec[spec_name]
         await self
 
     scale_up = scale  # backwards compatibility
