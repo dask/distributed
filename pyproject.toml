@@ -80,6 +80,7 @@ line-length = 120
 extend-select = [
     "B",
     "TID",
+    "I",
     "UP",
 ]
 ignore = [
@@ -101,15 +102,11 @@ ignore = [
 "distributed/shuffle/tests/test_shuffle.py" = ["F601"]
 "distributed/utils.py" = ["F821"]
 
-[tool.isort]
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "DISTRIBUTED", "FIRSTPARTY", "LOCALFOLDER"]
-profile = "black"
-skip_gitignore = true
-force_to_top = ["true"]
-default_section = "THIRDPARTY"
-known_first_party = ["distributed"]
-known_distributed = ["dask", "zict"]
-add_imports = ["from __future__ import annotations"]
+[tool.ruff.lint.isort]
+section-order = ["future", "standard-library", "third-party", "distributed", "first-party", "local-folder"]
+
+[tool.ruff.lint.isort.sections]
+"distributed" = ["dask", "zict"]
 
 [tool.setuptools_scm]
 version_file = "distributed/_version.py"
