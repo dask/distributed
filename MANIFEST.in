@@ -11,11 +11,9 @@ recursive-include distributed *.yaml
 recursive-include docs *.rst
 recursive-exclude distributed **/tests/*
 
-include setup.py
-include README.rst
-include MANIFEST.in
-include distributed/py.typed
 exclude distributed/pytest_resourceleaks.py
 
+prune .github
+prune continuous_integration
 prune docs/_build
 include distributed/_version.py
