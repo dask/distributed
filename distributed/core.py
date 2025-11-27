@@ -520,7 +520,7 @@ class Server:
             timeout = getattr(self, "death_timeout", None)
 
             async def _close_on_failure(exc: Exception) -> None:
-                await self.close(reason=f"failure-to-start-{str(type(exc))}")
+                await self.close(reason=f"failure-to-start-{type(exc)}")
                 self.status = Status.failed
                 self.__startup_exc = exc
 

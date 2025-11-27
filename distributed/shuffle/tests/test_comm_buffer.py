@@ -94,7 +94,7 @@ async def test_slow_send(tmp_path):
 
 
 def gen_bytes(percentage: float, memory_limit: int) -> bytes:
-    num_bytes = int(math.floor(percentage * memory_limit))
+    num_bytes = math.floor(percentage * memory_limit)
     return b"0" * num_bytes
 
 

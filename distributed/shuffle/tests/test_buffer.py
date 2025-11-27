@@ -15,7 +15,7 @@ from distributed.utils_test import captured_context_meter, gen_test
 
 
 def gen_bytes(percentage: float, limit: int) -> bytes:
-    num_bytes = int(math.floor(percentage * limit))
+    num_bytes = math.floor(percentage * limit)
     return b"0" * num_bytes
 
 

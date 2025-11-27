@@ -2297,8 +2297,8 @@ class Client(SyncMethodMixin):
                 keys = [list(element) for element in partition_all(batch_size, key)]
             else:
                 keys = [key for _ in range(len(batches))]
-            return sum(
-                (
+            return list(
+                flatten(
                     self.map(
                         func,
                         *batch,
@@ -2315,8 +2315,7 @@ class Client(SyncMethodMixin):
                         **kwargs,
                     )
                     for key, batch in zip(keys, batches)
-                ),
-                [],
+                )
             )
 
         key = key or funcname(func)

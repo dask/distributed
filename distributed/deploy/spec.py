@@ -514,10 +514,10 @@ class SpecCluster(Cluster):
 
     def scale(self, n=0, memory=None, cores=None):
         if memory is not None:
-            n = max(n, int(math.ceil(parse_bytes(memory) / self._memory_per_worker())))
+            n = max(n, math.ceil(parse_bytes(memory) / self._memory_per_worker()))
 
         if cores is not None:
-            n = max(n, int(math.ceil(cores / self._threads_per_worker())))
+            n = max(n, math.ceil(cores / self._threads_per_worker()))
 
         if len(self.worker_spec) > n:
             not_yet_launched = set(self.worker_spec) - {
