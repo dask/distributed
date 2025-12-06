@@ -6,8 +6,7 @@ import uuid
 from collections import defaultdict
 from contextlib import suppress
 
-from distributed.utils import log_errors, wait_for, TimeoutError
-from distributed.utils import SyncMethodMixin
+from distributed.utils import SyncMethodMixin, log_errors
 from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
