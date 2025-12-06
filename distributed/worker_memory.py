@@ -417,6 +417,7 @@ class NannyMemoryManager:
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return  # pragma: nocover
 
+        assert self.memory_limit
         if memory / self.memory_limit <= self.memory_terminate_fraction:
             return
 
