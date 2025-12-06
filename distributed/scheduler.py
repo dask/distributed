@@ -97,6 +97,7 @@ from distributed.comm import (
 )
 from distributed.comm.addressing import addresses_from_user_args
 from distributed.compatibility import PeriodicCallback
+from distributed.condition import ConditionExtension
 from distributed.core import (
     ErrorMessage,
     OKMessage,
@@ -195,6 +196,7 @@ DEFAULT_EXTENSIONS = {
     "semaphores": SemaphoreExtension,
     "events": EventExtension,
     "amm": ActiveMemoryManagerExtension,
+    "conditions": ConditionExtension,
     "memory_sampler": MemorySamplerExtension,
     "shuffle": ShuffleSchedulerPlugin,
     "spans": SpansSchedulerExtension,
