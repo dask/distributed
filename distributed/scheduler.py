@@ -97,6 +97,7 @@ from distributed.comm import (
 )
 from distributed.comm.addressing import addresses_from_user_args
 from distributed.compatibility import PeriodicCallback
+from distributed.condition import ConditionExtension
 from distributed.core import (
     ErrorMessage,
     OKMessage,
@@ -144,7 +145,6 @@ from distributed.utils_comm import (
     scatter_to_workers,
 )
 from distributed.variable import VariableExtension
-from distributed.condition import ConditionExtension
 
 if TYPE_CHECKING:
     from typing import TypeAlias, TypeVar
