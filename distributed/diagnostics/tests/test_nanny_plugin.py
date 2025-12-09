@@ -217,3 +217,154 @@ async def test_nanny_plugin_with_broken_teardown_logs_on_close(c, s):
     logs = caplog.getvalue()
     assert "TestPlugin1 failed to teardown" in logs
     assert "test error" in logs
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_has_nanny_plugin_by_name(c, s, a):
+    """Test checking if nanny plugin is registered using string name"""
+
+    class DuckPlugin(NannyPlugin):
+        name = "duck-plugin"
+
+        def setup(self, nanny):
+            nanny.foo = 123
+
+        def teardown(self, nanny):
+            pass
+
+    # Check non-existent plugin
+    assert not await c.has_plugin("duck-plugin")
+
+    # Register plugin
+    await c.register_plugin(DuckPlugin())
+    assert a.foo == 123
+
+    # Check using string name
+    assert await c.has_plugin("duck-plugin")
+
+    # Unregister and check again
+    await c.unregister_worker_plugin("duck-plugin", nanny=True)
+    assert not await c.has_plugin("duck-plugin")
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_has_nanny_plugin_by_object(c, s, a):
+    """Test checking if nanny plugin is registered using plugin object"""
+
+    class DuckPlugin(NannyPlugin):
+        name = "duck-plugin"
+
+        def setup(self, nanny):
+            nanny.bar = 456
+
+        def teardown(self, nanny):
+            pass
+
+    plugin = DuckPlugin()
+
+    # Check before registration
+    assert not await c.has_plugin(plugin)
+
+    # Register and check
+    await c.register_plugin(plugin)
+    assert a.bar == 456
+    assert await c.has_plugin(plugin)
+
+    # Unregister and check
+    await c.unregister_worker_plugin("duck-plugin", nanny=True)
+    assert not await c.has_plugin(plugin)
+
+
+@gen_cluster(client=True, nthreads=[("", 1), ("", 1)], Worker=Nanny)
+async def test_has_nanny_plugin_multiple_nannies(c, s, a, b):
+    """Test checking nanny plugin with multiple nannies"""
+
+    class DuckPlugin(NannyPlugin):
+        name = "duck-plugin"
+
+        def setup(self, nanny):
+            nanny.multi = "setup"
+
+        def teardown(self, nanny):
+            pass
+
+    # Check before registration
+    assert not await c.has_plugin("duck-plugin")
+
+    # Register plugin (should propagate to all nannies)
+    await c.register_plugin(DuckPlugin())
+
+    # Verify both nannies have the plugin
+    assert a.multi == "setup"
+    assert b.multi == "setup"
+
+    # Check plugin is registered
+    assert await c.has_plugin("duck-plugin")
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_has_nanny_plugin_custom_name_override(c, s, a):
+    """Test nanny plugin registered with custom name different from class name"""
+
+    class DuckPlugin(NannyPlugin):
+        name = "duck-plugin"
+
+        def setup(self, nanny):
+            nanny.custom = "test"
+
+        def teardown(self, nanny):
+            pass
+
+    plugin = DuckPlugin()
+
+    # Register with custom name (overriding the class name attribute)
+    await c.register_plugin(plugin, name="custom-override")
+
+    # Check with custom name works
+    assert await c.has_plugin("custom-override")
+
+    # Original name won't work since we overrode it
+    assert not await c.has_plugin("duck-plugin")
+
+
+@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+async def test_has_nanny_plugin_list_check(c, s, a):
+    """Test checking multiple nanny plugins at once"""
+
+    class IdempotentPlugin(NannyPlugin):
+        name = "idempotentplugin"
+
+        def setup(self, nanny):
+            pass
+
+        def teardown(self, nanny):
+            pass
+
+    class NonIdempotentPlugin(NannyPlugin):
+        name = "nonidempotentplugin"
+
+        def setup(self, nanny):
+            pass
+
+        def teardown(self, nanny):
+            pass
+
+    # Check multiple before registration
+    result = await c.has_plugin(
+        ["idempotentplugin", "nonidempotentplugin", "nonexistent"]
+    )
+    assert result == {
+        "idempotentplugin": False,
+        "nonidempotentplugin": False,
+        "nonexistent": False,
+    }
+
+    # Register first plugin
+    await c.register_plugin(IdempotentPlugin())
+    result = await c.has_plugin(["idempotentplugin", "nonidempotentplugin"])
+    assert result == {"idempotentplugin": True, "nonidempotentplugin": False}
+
+    # Register second plugin
+    await c.register_plugin(NonIdempotentPlugin())
+    result = await c.has_plugin(["idempotentplugin", "nonidempotentplugin"])
+    assert result == {"idempotentplugin": True, "nonidempotentplugin": True}
