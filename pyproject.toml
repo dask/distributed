@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "distributed"
 description = "Distributed scheduler for Dask"
-maintainers = [{name = "Matthew Rocklin", email = "mrocklin@gmail.com"}]
+maintainers = [{ name = "Matthew Rocklin", email = "mrocklin@gmail.com" }]
 license = "BSD-3-Clause"
 license-files = ["LICENSE.txt"]
 classifiers = [
@@ -28,7 +28,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 3.0.0",
-    "dask == 2025.11.0",
+    "dask >=2025.12.0,<2025.12.1",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.2",
@@ -64,26 +64,14 @@ exclude = ["*tests*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"*" = [
-    "templates/index.html",
-    "template.html",
-]
-distributed = [
-    "http/templates/*.html",
-    "py.typed",
-]
+"*" = ["templates/index.html", "template.html"]
+distributed = ["http/templates/*.html", "py.typed"]
 
 [tool.ruff]
 line-length = 120
 
 [tool.ruff.lint]
-extend-select = [
-    "B",
-    "TID",
-    "I",
-    "UP",
-    "RUF",
-]
+extend-select = ["B", "TID", "I", "UP", "RUF"]
 ignore = [
     "B011",   # Do not `assert False`, raise `AssertionError()`
     "B018",   # Found useless expression
@@ -116,13 +104,21 @@ ignore = [
 "distributed/utils.py" = ["F821"]
 
 [tool.ruff.lint.isort]
-section-order = ["future", "standard-library", "third-party", "distributed", "first-party", "local-folder"]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "distributed",
+    "first-party",
+    "local-folder",
+]
 
 [tool.ruff.lint.isort.sections]
 "distributed" = ["dask", "zict"]
 
 [tool.setuptools_scm]
 version_file = "distributed/_version.py"
+version_scheme = "post-release"
 
 [tool.pytest.ini_options]
 addopts = '''
@@ -190,11 +186,11 @@ minversion = "6"
 markers = [
     "ci1: marks tests as belonging to 1 out of 2 partitions to run on CI ('-m \"not ci1\"' for second partition)",
     "extra_packages: marks tests that require a special dependency to run.",
-    "slow: marks tests as slow (deselected by default", # select with '--runslow')
+    "slow: marks tests as slow (deselected by default",                                                                            # select with '--runslow')
     "avoid_ci: marks tests as flaky or broken on CI on all OSs",
     "ipython: marks tests as exercising IPython",
     "gpu: marks tests we want to run on GPUs",
-    "leaking: ignore leaked resources", # see pytest_resourceleaks.py for usage
+    "leaking: ignore leaked resources",                                                                                            # see pytest_resourceleaks.py for usage
     "workerstate: deterministic test for the worker state machine. Automatically applied to all tests that use the 'ws' fixture.",
 ]
 # pytest-timeout settings
@@ -277,7 +273,7 @@ exclude_lines = [
     "except ImportError",
     "@overload",
     "@abstractmethod",
-    "@abc.abstractmethod"
+    "@abc.abstractmethod",
 ]
 
 [tool.coverage.html]
