@@ -11,7 +11,6 @@ from distributed.utils_test import gen_cluster
 async def test_condition_acquire_release(c, s, a, b):
     """Test basic lock acquire/release"""
     condition = Condition("test-lock")
-
     assert not condition.locked()
     await condition.acquire()
     assert condition.locked()
@@ -23,7 +22,6 @@ async def test_condition_acquire_release(c, s, a, b):
 async def test_condition_context_manager(c, s, a, b):
     """Test context manager interface"""
     condition = Condition("test-context")
-
     assert not condition.locked()
     async with condition:
         assert condition.locked()
@@ -119,7 +117,6 @@ async def test_condition_wait_timeout_then_notify(c, s, a, b):
         async with condition:
             result = await condition.wait(timeout=0.2)
             results.append(f"timeout: {result}")
-
         async with condition:
             result = await condition.wait()
             results.append(f"notified: {result}")
@@ -142,10 +139,10 @@ async def test_condition_error_without_lock(c, s, a, b):
         await condition.wait()
 
     with pytest.raises(RuntimeError, match="Cannot notify"):
-        await condition.notify()
+        condition.notify()
 
     with pytest.raises(RuntimeError, match="Cannot notify"):
-        await condition.notify_all()
+        condition.notify_all()
 
 
 @gen_cluster(client=True)
@@ -184,7 +181,6 @@ async def test_condition_producer_consumer(c, s, a, b):
 
     await prod_task
     results = await cons_task
-
     assert results == [0, 1, 2, 3, 4]
 
 
@@ -211,7 +207,6 @@ async def test_condition_multiple_producers_consumers(c, s, a, b):
         return results
 
     results = await asyncio.gather(producer(0), producer(10), consumer(), consumer())
-
     # Last two results are from consumers
     consumed = results[2] + results[3]
     assert sorted(consumed) == [0, 1, 2, 10, 11, 12]
@@ -222,41 +217,27 @@ async def test_condition_from_worker(c, s, a, b):
     """Test condition accessed from worker tasks"""
 
     def wait_on_condition(name):
-
         from distributed import Condition
 
-        async def _wait():
-            condition = Condition(name)
-            async with condition:
-                await condition.wait()
-                return "worker_notified"
-
-        from distributed.worker import get_worker
-
-        worker = get_worker()
-        return worker.loop.run_until_complete(_wait())
+        condition = Condition(name)
+        with condition:
+            condition.wait()
+        return "worker_notified"
 
     def notify_condition(name):
-        import asyncio
+        import time
 
         from distributed import Condition
 
-        async def _notify():
-            await asyncio.sleep(0.2)
-            condition = Condition(name)
-            async with condition:
-                condition.notify()
-                return "notified"
-
-        from distributed.worker import get_worker
-
-        worker = get_worker()
-        return worker.loop.run_until_complete(_notify())
+        time.sleep(0.2)
+        condition = Condition(name)
+        with condition:
+            condition.notify()
+        return "notified"
 
     name = "worker-condition"
     f1 = c.submit(wait_on_condition, name, workers=[a.address])
     f2 = c.submit(notify_condition, name, workers=[b.address])
-
     results = await c.gather([f1, f2])
     assert results == ["worker_notified", "notified"]
 
@@ -267,7 +248,6 @@ async def test_condition_same_name_different_instances(c, s, a, b):
     name = "shared-condition"
     cond1 = Condition(name)
     cond2 = Condition(name)
-
     results = []
 
     async def waiter():
@@ -336,7 +316,6 @@ async def test_condition_barrier_pattern(c, s, a, b):
         return f"worker-{i}-done"
 
     results = await asyncio.gather(worker(0), worker(1), worker(2))
-
     assert sorted(results) == ["worker-0-done", "worker-1-done", "worker-2-done"]
     assert len(arrived) == 3
 
