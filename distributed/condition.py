@@ -4,7 +4,6 @@ import asyncio
 import logging
 import uuid
 from collections import defaultdict
-from contextlib import suppress
 
 from distributed.utils import SyncMethodMixin, log_errors
 from distributed.worker import get_client
