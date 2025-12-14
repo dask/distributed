@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections import defaultdict
 
-from distributed.utils import SyncMethodMixin, log_errors
+from dask.utils import parse_timedelta
+
+from distributed.utils import SyncMethodMixin, TimeoutError, log_errors, wait_for
 from distributed.worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -16,10 +17,9 @@ class ConditionExtension:
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        # {condition_name: asyncio.Condition}
-        self._conditions = {}
-        # {condition_name: set of waiter_ids}
-        self._waiters = defaultdict(set)
+        self._locks = {}  # {name: asyncio.Lock}
+        self._lock_holders = {}  # {name: client_id}
+        self._waiters = {}  # {name: {waiter_id: asyncio.Event}}
 
         self.scheduler.handlers.update(
             {
@@ -30,152 +30,171 @@ class ConditionExtension:
             }
         )
 
-    def _get_condition(self, name):
-        if name not in self._conditions:
-            self._conditions[name] = asyncio.Condition()
-        return self._conditions[name]
+    def _get_lock(self, name):
+        if name not in self._locks:
+            self._locks[name] = asyncio.Lock()
+        return self._locks[name]
 
     @log_errors
     async def acquire(self, name=None, id=None):
-        """Acquire the underlying lock"""
-        condition = self._get_condition(name)
-        await condition.acquire()
+        lock = self._get_lock(name)
+        await lock.acquire()
+        self._lock_holders[name] = id
         return True
 
     @log_errors
     async def release(self, name=None, id=None):
-        """Release the underlying lock"""
-        if name not in self._conditions:
+        if self._lock_holders.get(name) != id:
             return False
-        condition = self._conditions[name]
-        condition.release()
+
+        lock = self._locks[name]
+        lock.release()
+        del self._lock_holders[name]
+
+        # Cleanup if no waiters
+        if name not in self._waiters or not self._waiters[name]:
+            del self._locks[name]
+
         return True
 
     @log_errors
     async def wait(self, name=None, id=None, timeout=None):
-        """Wait on condition"""
-        condition = self._get_condition(name)
-        self._waiters[name].add(id)
+        # Verify lock is held by this client
+        if self._lock_holders.get(name) != id:
+            raise RuntimeError("wait() called without holding the lock")
+
+        lock = self._locks[name]
+
+        # Create event for this waiter
+        if name not in self._waiters:
+            self._waiters[name] = {}
+        event = asyncio.Event()
+        self._waiters[name][id] = event
+
+        # Release lock
+        lock.release()
+        del self._lock_holders[name]
+
+        # Wait on event
+        future = event.wait()
+        if timeout is not None:
+            future = wait_for(future, timeout)
 
         try:
-            if timeout:
-                await asyncio.wait_for(condition.wait(), timeout=timeout)
-            else:
-                await condition.wait()
-            return True
-        except asyncio.TimeoutError:
-            return False
-        except asyncio.CancelledError:
-            raise
+            await future
+            result = True
+        except TimeoutError:
+            result = False
         finally:
-            self._waiters[name].discard(id)
+            # Cleanup waiter
+            self._waiters[name].pop(id, None)
             if not self._waiters[name]:
                 del self._waiters[name]
 
+        # Reacquire lock
+        await lock.acquire()
+        self._lock_holders[name] = id
+
+        return result
+
     @log_errors
     def notify(self, name=None, n=1):
-        """Notify n waiters"""
-        if name not in self._conditions:
-            return 0
-        condition = self._conditions[name]
-        condition.notify(n=n)
-        return min(n, len(self._waiters.get(name, [])))
+        if self._lock_holders.get(name) is None:
+            raise RuntimeError("notify() called without holding the lock")
+
+        waiters = self._waiters.get(name, {})
+        count = 0
+        for event in list(waiters.values())[:n]:
+            event.set()
+            count += 1
+        return count
 
     @log_errors
     def notify_all(self, name=None):
-        """Notify all waiters"""
-        if name not in self._conditions:
-            return 0
-        condition = self._conditions[name]
-        count = len(self._waiters.get(name, []))
-        condition.notify_all()
-        return count
+        if self._lock_holders.get(name) is None:
+            raise RuntimeError("notify_all() called without holding the lock")
+
+        waiters = self._waiters.get(name, {})
+        for event in waiters.values():
+            event.set()
+        return len(waiters)
 
 
 class Condition(SyncMethodMixin):
     """Distributed Condition Variable
 
-    Mimics asyncio.Condition API. Allows coordination between
-    distributed workers using wait/notify pattern.
+    Parameters
+    ----------
+    name: str, optional
+        Name of the condition. Same name = shared state.
+    client: Client, optional
+        Client for scheduler communication.
 
     Examples
     --------
-    >>> from distributed import Condition
     >>> condition = Condition('my-condition')
     >>> async with condition:
-    ...     await condition.wait()  # Wait for notification
-
-    >>> # In another worker/client
-    >>> condition = Condition('my-condition')
-    >>> async with condition:
-    ...     condition.notify()  # Wake one waiter
+    ...     await condition.wait()
     """
 
-    def __init__(self, name=None, scheduler_rpc=None, loop=None):
-        self._scheduler = scheduler_rpc
-        self._loop = loop
+    def __init__(self, name=None, client=None):
+        self._client = client
         self.name = name or f"condition-{uuid.uuid4().hex}"
         self.id = uuid.uuid4().hex
         self._locked = False
 
-    def _get_scheduler_rpc(self):
-        if self._scheduler:
-            return self._scheduler
-        try:
-            client = get_client()
-            return client.scheduler
-        except ValueError:
-            from distributed.worker import get_worker
+    @property
+    def client(self):
+        if not self._client:
+            try:
+                self._client = get_client()
+            except ValueError:
+                pass
+        return self._client
 
-            worker = get_worker()
-            return worker.scheduler
+    def _verify_running(self):
+        if not self.client:
+            raise RuntimeError(f"{type(self)} object not properly initialized.")
 
     async def acquire(self):
-        """Acquire underlying lock"""
-        scheduler = self._get_scheduler_rpc()
-        result = await scheduler.condition_acquire(name=self.name, id=self.id)
+        self._verify_running()
+        result = await self.client.scheduler.condition_acquire(
+            name=self.name, id=self.id
+        )
         self._locked = result
         return result
 
     async def release(self):
-        """Release underlying lock"""
         if not self._locked:
             raise RuntimeError("Cannot release un-acquired lock")
-        scheduler = self._get_scheduler_rpc()
-        await scheduler.condition_release(name=self.name, id=self.id)
+        self._verify_running()
+        await self.client.scheduler.condition_release(name=self.name, id=self.id)
         self._locked = False
 
     async def wait(self, timeout=None):
-        """Wait until notified
-
-        Must be called while lock is held. Releases lock and waits
-        for notify(), then reacquires lock before returning.
-        """
         if not self._locked:
-            raise RuntimeError("Cannot wait on un-acquired condition")
+            raise RuntimeError("wait() called without holding the lock")
 
-        scheduler = self._get_scheduler_rpc()
-        result = await scheduler.condition_wait(
+        self._verify_running()
+        timeout = parse_timedelta(timeout)
+        result = await self.client.scheduler.condition_wait(
             name=self.name, id=self.id, timeout=timeout
         )
         return result
 
     async def notify(self, n=1):
-        """Wake up one or more waiters"""
         if not self._locked:
-            raise RuntimeError("Cannot notify on un-acquired condition")
-        scheduler = self._get_scheduler_rpc()
-        return await scheduler.condition_notify(name=self.name, n=n)
+            raise RuntimeError("Cannot notify without holding the lock")
+        self._verify_running()
+        return await self.client.scheduler.condition_notify(name=self.name, n=n)
 
     async def notify_all(self):
-        """Wake up all waiters"""
         if not self._locked:
-            raise RuntimeError("Cannot notify on un-acquired condition")
-        scheduler = self._get_scheduler_rpc()
-        return await scheduler.condition_notify_all(name=self.name)
+            raise RuntimeError("Cannot notify without holding the lock")
+        self._verify_running()
+        return await self.client.scheduler.condition_notify_all(name=self.name)
 
     def locked(self):
-        """Return True if lock is held"""
         return self._locked
 
     async def __aenter__(self):
@@ -193,3 +212,6 @@ class Condition(SyncMethodMixin):
 
     def __repr__(self):
         return f"<Condition: {self.name}>"
+
+    def __reduce__(self):
+        return (Condition, (self.name,))
