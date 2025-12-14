@@ -66,14 +66,12 @@ class ConditionExtension:
             return True
         except asyncio.TimeoutError:
             return False
+        except asyncio.CancelledError:
+            raise
         finally:
             self._waiters[name].discard(id)
-            # Cleanup if no waiters
             if not self._waiters[name]:
-                with suppress(KeyError):
-                    del self._waiters[name]
-                with suppress(KeyError):
-                    del self._conditions[name]
+                del self._waiters[name]
 
     @log_errors
     def notify(self, name=None, n=1):
@@ -158,9 +156,7 @@ class Condition(SyncMethodMixin):
             raise RuntimeError("Cannot wait on un-acquired condition")
 
         scheduler = self._get_scheduler_rpc()
-        result = await scheduler.condition_wait(
-            name=self.name, id=self.id, timeout=timeout
-        )
+        result = await scheduler.condition_wait(name=self.name, id=self.id, timeout=timeout)
         return result
 
     async def notify(self, n=1):
