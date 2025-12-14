@@ -156,7 +156,9 @@ class Condition(SyncMethodMixin):
             raise RuntimeError("Cannot wait on un-acquired condition")
 
         scheduler = self._get_scheduler_rpc()
-        result = await scheduler.condition_wait(name=self.name, id=self.id, timeout=timeout)
+        result = await scheduler.condition_wait(
+            name=self.name, id=self.id, timeout=timeout
+        )
         return result
 
     async def notify(self, n=1):
