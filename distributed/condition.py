@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections import defaultdict
 
 from dask.utils import parse_timedelta
 
+from distributed.semaphore import Semaphore
 from distributed.utils import SyncMethodMixin, TimeoutError, log_errors, wait_for
 from distributed.worker import get_client
 
@@ -13,71 +15,35 @@ logger = logging.getLogger(__name__)
 
 
 class ConditionExtension:
-    """Scheduler extension for managing distributed Conditions"""
+    """Scheduler extension for managing Condition variable notifications
+
+    This extension only handles wait/notify coordination.
+    The underlying lock is a Semaphore managed by SemaphoreExtension.
+    """
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self._locks = {}  # {name: asyncio.Lock}
-        self._lock_holders = {}  # {name: client_id}
-        self._waiters = {}  # {name: {waiter_id: asyncio.Event}}
+        # {condition_name: {waiter_id: asyncio.Event}}
+        self._waiters = defaultdict(dict)
 
         self.scheduler.handlers.update(
             {
                 "condition_wait": self.wait,
                 "condition_notify": self.notify,
-                "condition_acquire": self.acquire,
-                "condition_release": self.release,
                 "condition_notify_all": self.notify_all,
             }
         )
 
-    def _get_lock(self, name):
-        if name not in self._locks:
-            self._locks[name] = asyncio.Lock()
-        return self._locks[name]
-
-    @log_errors
-    async def acquire(self, name=None, id=None):
-        """Acquire the underlying lock"""
-        lock = self._get_lock(name)
-        await lock.acquire()
-        self._lock_holders[name] = id
-        return True
-
-    @log_errors
-    async def release(self, name=None, id=None):
-        """Release the underlying lock"""
-        if self._lock_holders.get(name) != id:
-            return False
-
-        lock = self._locks[name]
-        lock.release()
-        del self._lock_holders[name]
-
-        # Cleanup if no waiters
-        if name not in self._waiters or not self._waiters[name]:
-            del self._locks[name]
-
-        return True
-
     @log_errors
     async def wait(self, name=None, id=None, timeout=None):
-        """Wait on condition"""
-        # Verify lock is held by this client
-        if self._lock_holders.get(name) != id:
-            raise RuntimeError("wait() called without holding the lock")
+        """Wait to be notified
 
-        lock = self._locks[name]
-
+        Caller must already hold the lock (Semaphore lease).
+        This only manages the wait/notify Events.
+        """
         # Create event for this waiter
-        if name not in self._waiters:
-            self._waiters[name] = {}
         event = asyncio.Event()
         self._waiters[name][id] = event
-
-        # Release lock
-        lock.release()
-        del self._lock_holders[name]
 
         # Wait on event
         future = event.wait()
@@ -95,18 +61,11 @@ class ConditionExtension:
             if not self._waiters[name]:
                 del self._waiters[name]
 
-        # Reacquire lock
-        await lock.acquire()
-        self._lock_holders[name] = id
-
         return result
 
     @log_errors
     def notify(self, name=None, n=1):
         """Notify n waiters"""
-        if self._lock_holders.get(name) is None:
-            raise RuntimeError("notify() called without holding the lock")
-
         waiters = self._waiters.get(name, {})
         count = 0
         for event in list(waiters.values())[:n]:
@@ -117,9 +76,6 @@ class ConditionExtension:
     @log_errors
     def notify_all(self, name=None):
         """Notify all waiters"""
-        if self._lock_holders.get(name) is None:
-            raise RuntimeError("notify_all() called without holding the lock")
-
         waiters = self._waiters.get(name, {})
         for event in waiters.values():
             event.set()
@@ -129,8 +85,7 @@ class ConditionExtension:
 class Condition(SyncMethodMixin):
     """Distributed Condition Variable
 
-    Mimics asyncio.Condition API. Allows coordination between
-    distributed workers using wait/notify pattern.
+    Combines a Semaphore (lock) with wait/notify coordination.
 
     Parameters
     ----------
@@ -144,19 +99,20 @@ class Condition(SyncMethodMixin):
     >>> from distributed import Condition
     >>> condition = Condition('my-condition')
     >>> async with condition:
-    ...     await condition.wait()  # Wait for notification
+    ...     await condition.wait()
 
     >>> # In another worker/client
     >>> condition = Condition('my-condition')
     >>> async with condition:
-    ...     condition.notify()  # Wake one waiter
+    ...     condition.notify()
     """
 
     def __init__(self, name=None, client=None):
-        self._client = client
         self.name = name or f"condition-{uuid.uuid4().hex}"
         self.id = uuid.uuid4().hex
-        self._locked = False
+        # Use Semaphore(max_leases=1) as the underlying lock
+        self._lock = Semaphore(max_leases=1, name=f"{self.name}-lock")
+        self._client = client
 
     @property
     def client(self):
@@ -169,7 +125,7 @@ class Condition(SyncMethodMixin):
 
     @property
     def loop(self):
-        return self.client.loop if self.client else None
+        return self._lock.loop
 
     def _verify_running(self):
         if not self.client:
@@ -181,20 +137,12 @@ class Condition(SyncMethodMixin):
 
     async def acquire(self):
         """Acquire underlying lock"""
-        self._verify_running()
-        result = await self.client.scheduler.condition_acquire(
-            name=self.name, id=self.id
-        )
-        self._locked = result
+        result = await self._lock.acquire()
         return result
 
     async def release(self):
         """Release underlying lock"""
-        if not self._locked:
-            raise RuntimeError("Cannot release un-acquired lock")
-        self._verify_running()
-        await self.client.scheduler.condition_release(name=self.name, id=self.id)
-        self._locked = False
+        await self._lock.release()
 
     async def wait(self, timeout=None):
         """Wait until notified
@@ -212,30 +160,29 @@ class Condition(SyncMethodMixin):
         bool
             True if notified, False if timeout occurred
         """
-        if not self._locked:
+        if not self._lock.locked():
             raise RuntimeError("wait() called without holding the lock")
 
         self._verify_running()
         timeout = parse_timedelta(timeout)
-        result = await self.client.scheduler.condition_wait(
-            name=self.name, id=self.id, timeout=timeout
-        )
+
+        # Release lock
+        await self._lock.release()
+
+        # Wait for notification
+        try:
+            result = await self.client.scheduler.condition_wait(
+                name=self.name, id=self.id, timeout=timeout
+            )
+        finally:
+            # Reacquire lock
+            await self._lock.acquire()
+
         return result
 
     def notify(self, n=1):
-        """Wake up one or more waiters
-
-        Parameters
-        ----------
-        n : int, optional
-            Number of waiters to wake. Default is 1.
-
-        Returns
-        -------
-        int
-            Number of waiters notified
-        """
-        if not self._locked:
+        """Wake up one or more waiters"""
+        if not self._lock.locked():
             raise RuntimeError("Cannot notify without holding the lock")
         self._verify_running()
         return self.client.sync(
@@ -243,14 +190,8 @@ class Condition(SyncMethodMixin):
         )
 
     def notify_all(self):
-        """Wake up all waiters
-
-        Returns
-        -------
-        int
-            Number of waiters notified
-        """
-        if not self._locked:
+        """Wake up all waiters"""
+        if not self._lock.locked():
             raise RuntimeError("Cannot notify without holding the lock")
         self._verify_running()
         return self.client.sync(
@@ -259,7 +200,7 @@ class Condition(SyncMethodMixin):
 
     def locked(self):
         """Return True if lock is held"""
-        return self._locked
+        return self._lock.locked()
 
     async def __aenter__(self):
         await self.acquire()
