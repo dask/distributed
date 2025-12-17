@@ -145,7 +145,7 @@ jobs:
 
       - name: Cache Conda env
         if: steps.skip-caching.outputs.trigger-found != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CONDA }}/envs
           key: conda-${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
