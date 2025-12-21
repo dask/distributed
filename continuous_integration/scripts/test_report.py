@@ -489,7 +489,7 @@ def main(argv: list[str] | None = None) -> None:
         total.groupby([total.file, total.test])
         .filter(lambda g: (g.status == "x").sum() >= args.nfails)
         .reset_index()
-        .assign(test=lambda df: df.file + "." + df.test)  # type: ignore
+        .assign(test=lambda df: df.file + "." + df.test)
         .groupby("test")
     )
     overall = {name: grouped.get_group(name) for name in grouped.groups}
