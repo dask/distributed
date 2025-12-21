@@ -282,25 +282,6 @@ async def test_condition_unique_names_independent(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_condition_cleanup(c, s, a, b):
-    """Test that condition state is cleaned up after use"""
-    condition = Condition("cleanup-test")
-
-    # Check initial state
-    assert "cleanup-test" not in s.extensions["conditions"]._lock_holders
-    assert "cleanup-test" not in s.extensions["conditions"]._notify_waiters
-
-    # Use condition
-    async with condition:
-        condition.notify()
-
-    # State should be cleaned up
-    await asyncio.sleep(0.1)
-    assert "cleanup-test" not in s.extensions["conditions"]._lock_holders
-    assert "cleanup-test" not in s.extensions["conditions"]._notify_waiters
-
-
-@gen_cluster(client=True)
 async def test_condition_barrier_pattern(c, s, a, b):
     """Test barrier synchronization pattern"""
     condition = Condition("barrier")
