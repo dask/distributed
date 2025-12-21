@@ -150,7 +150,7 @@ async def test_condition_error_release_without_acquire(c, s, a, b):
     """Test error when releasing without acquiring"""
     condition = Condition("test-release-error")
 
-    with pytest.raises(RuntimeError, match="Cannot release"):
+    with pytest.raises(RuntimeError, match="Released too often"):
         await condition.release()
 
 
@@ -286,17 +286,16 @@ async def test_condition_cleanup(c, s, a, b):
     """Test that condition state is cleaned up after use"""
     condition = Condition("cleanup-test")
 
-    # Check initial state
-    assert "cleanup-test" not in s.extensions["conditions"]._lock_holders
+    # Check initial state - only check waiters since locks are managed by LockExtension
     assert "cleanup-test" not in s.extensions["conditions"]._waiters
 
     # Use condition
     async with condition:
         condition.notify()
 
-    # State should be cleaned up
+    # Waiter state should be cleaned up
     await asyncio.sleep(0.1)
-    assert "cleanup-test" not in s.extensions["conditions"]._lock_holders
+    assert "cleanup-test" not in s.extensions["conditions"]._waiters
 
 
 @gen_cluster(client=True)
