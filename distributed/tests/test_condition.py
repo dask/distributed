@@ -286,16 +286,18 @@ async def test_condition_cleanup(c, s, a, b):
     """Test that condition state is cleaned up after use"""
     condition = Condition("cleanup-test")
 
-    # Check initial state - only check waiters since locks are managed by LockExtension
-    assert "cleanup-test" not in s.extensions["conditions"]._waiters
+    # Check initial state
+    assert "cleanup-test" not in s.extensions["conditions"]._lock_holders
+    assert "cleanup-test" not in s.extensions["conditions"]._notify_waiters
 
     # Use condition
     async with condition:
         condition.notify()
 
-    # Waiter state should be cleaned up
+    # State should be cleaned up
     await asyncio.sleep(0.1)
-    assert "cleanup-test" not in s.extensions["conditions"]._waiters
+    assert "cleanup-test" not in s.extensions["conditions"]._lock_holders
+    assert "cleanup-test" not in s.extensions["conditions"]._notify_waiters
 
 
 @gen_cluster(client=True)
