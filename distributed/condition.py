@@ -267,7 +267,6 @@ class Condition(SyncMethodMixin):
     def __init__(self, name=None, client=None):
         self.name = name or f"condition-{uuid.uuid4().hex}"
         self._waiter_id = uuid.uuid4().hex
-        self._client_id = uuid.uuid4().hex
         self._client = client
         self._is_locked = False
 
@@ -279,6 +278,13 @@ class Condition(SyncMethodMixin):
             except ValueError:
                 pass
         return self._client
+
+    @property
+    def _client_id(self):
+        """Use actual Dask client ID - all Conditions in same client share identity"""
+        if self.client:
+            return self.client.id
+        raise RuntimeError(f"{type(self).__name__} requires a connected client")
 
     @property
     def loop(self):
