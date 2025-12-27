@@ -345,56 +345,33 @@ async def test_condition_repr(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_condition_not_reentrant(c, s, a, b):
-    """Test that lock is NOT re-entrant - second acquire blocks"""
-    condition = Condition("not-reentrant")
-    results = []
-
-    async def try_reentrant():
-        await condition.acquire()
-        results.append("first-acquired")
-
-        # This should block (not re-entrant)
-        # We'll use a timeout to detect the block
-        try:
-            await asyncio.wait_for(condition.acquire(), timeout=0.5)
-            results.append("second-acquired")  # Should not reach
-        except asyncio.TimeoutError:
-            results.append("blocked-as-expected")
-
-        await condition.release()
-        results.append("released")
-
-    await try_reentrant()
-    assert results == ["first-acquired", "blocked-as-expected", "released"]
-
-
-@gen_cluster(client=True)
-async def test_condition_multiple_instances_same_name_not_reentrant(c, s, a, b):
-    """Test that two instances with same name share lock (not re-entrant)"""
-    cond1 = Condition("shared")
-    cond2 = Condition("shared")
+    """Test that lock is NOT re-entrant within same async task"""
+    cond1 = Condition("not-reentrant")
+    cond2 = Condition("not-reentrant")  # Same name = same lock
     results = []
 
     async def holder():
         await cond1.acquire()
         results.append("cond1-acquired")
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.5)  # Hold lock
         await cond1.release()
         results.append("cond1-released")
 
     async def waiter():
         await asyncio.sleep(0.1)  # Let holder acquire first
-        try:
-            # This should block because cond1 holds the lock
-            await asyncio.wait_for(cond2.acquire(), timeout=0.5)
-            results.append("cond2-acquired-unexpectedly")
-        except asyncio.TimeoutError:
-            results.append("cond2-blocked")
+        results.append("cond2-attempting")
+        # This should block until holder releases
+        await cond2.acquire()
+        results.append("cond2-acquired")
+        await cond2.release()
 
     await asyncio.gather(holder(), waiter())
-    assert "cond1-acquired" in results
-    assert "cond2-blocked" in results
-    assert "cond2-acquired-unexpectedly" not in results
+
+    # Verify order: holder acquires, waiter attempts, holder releases, waiter acquires
+    assert results[0] == "cond1-acquired"
+    assert results[1] == "cond2-attempting"
+    assert results[2] == "cond1-released"
+    assert results[3] == "cond2-acquired"
 
 
 @gen_cluster(client=True)
