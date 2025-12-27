@@ -138,10 +138,10 @@ async def test_condition_error_without_lock(c, s, a, b):
     with pytest.raises(RuntimeError, match="without holding the lock"):
         await condition.wait()
 
-    with pytest.raises(RuntimeError, match="Cannot notify"):
+    with pytest.raises(RuntimeError, match="without holding the lock"):
         condition.notify()
 
-    with pytest.raises(RuntimeError, match="Cannot notify"):
+    with pytest.raises(RuntimeError, match="without holding the lock"):
         condition.notify_all()
 
 
@@ -150,7 +150,7 @@ async def test_condition_error_release_without_acquire(c, s, a, b):
     """Test error when releasing without acquiring"""
     condition = Condition("test-release-error")
 
-    with pytest.raises(RuntimeError, match="Released too often"):
+    with pytest.raises(RuntimeError, match="without holding the lock"):
         await condition.release()
 
 
@@ -344,19 +344,57 @@ async def test_condition_repr(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_condition_reentrant_acquire(c, s, a, b):
-    """Test that the same client can re-acquire the lock"""
-    condition = Condition("reentrant")
+async def test_condition_not_reentrant(c, s, a, b):
+    """Test that lock is NOT re-entrant - second acquire blocks"""
+    condition = Condition("not-reentrant")
+    results = []
 
-    await condition.acquire()
-    assert condition.locked()
+    async def try_reentrant():
+        await condition.acquire()
+        results.append("first-acquired")
 
-    # Should succeed without blocking (reentrant)
-    await condition.acquire()
-    assert condition.locked()
+        # This should block (not re-entrant)
+        # We'll use a timeout to detect the block
+        try:
+            await asyncio.wait_for(condition.acquire(), timeout=0.5)
+            results.append("second-acquired")  # Should not reach
+        except asyncio.TimeoutError:
+            results.append("blocked-as-expected")
 
-    await condition.release()
-    assert not condition.locked()
+        await condition.release()
+        results.append("released")
+
+    await try_reentrant()
+    assert results == ["first-acquired", "blocked-as-expected", "released"]
+
+
+@gen_cluster(client=True)
+async def test_condition_multiple_instances_same_name_not_reentrant(c, s, a, b):
+    """Test that two instances with same name share lock (not re-entrant)"""
+    cond1 = Condition("shared")
+    cond2 = Condition("shared")
+    results = []
+
+    async def holder():
+        await cond1.acquire()
+        results.append("cond1-acquired")
+        await asyncio.sleep(0.3)
+        await cond1.release()
+        results.append("cond1-released")
+
+    async def waiter():
+        await asyncio.sleep(0.1)  # Let holder acquire first
+        try:
+            # This should block because cond1 holds the lock
+            await asyncio.wait_for(cond2.acquire(), timeout=0.5)
+            results.append("cond2-acquired-unexpectedly")
+        except asyncio.TimeoutError:
+            results.append("cond2-blocked")
+
+    await asyncio.gather(holder(), waiter())
+    assert "cond1-acquired" in results
+    assert "cond2-blocked" in results
+    assert "cond2-acquired-unexpectedly" not in results
 
 
 @gen_cluster(client=True)
