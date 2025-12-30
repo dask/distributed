@@ -14,7 +14,7 @@ __all__ = ["logging_names", "PeriodicCallback", "to_thread", "randbytes"]
 
 logging_names: dict[str | int, int | str] = {}
 logging_names.update(logging._levelToName)  # type: ignore
-logging_names.update(logging._nameToLevel)  # type: ignore
+logging_names.update(logging._nameToLevel)
 
 LINUX = sys.platform == "linux"
 MACOS = sys.platform == "darwin"

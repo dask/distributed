@@ -3033,7 +3033,7 @@ class BarrierInputsDoneOSErrorPlugin(ShuffleWorkerPlugin):
                     # like a timeout while an exception that is being raised by
                     # the handler will be serialized and sent to the scheduler
                     comm.abort()
-                raise exc_type  # type: ignore
+                raise exc_type
         return await super().shuffle_inputs_done(*args, **kwargs)
 
 
