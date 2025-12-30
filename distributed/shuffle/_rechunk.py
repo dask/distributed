@@ -125,7 +125,7 @@ from dask._task_spec import Task, TaskRef, parse_input
 from dask.highlevelgraph import HighLevelGraph
 from dask.layers import Layer
 from dask.tokenize import tokenize
-from dask.typing import Key
+from dask.typing import DaskCollection, Key
 from dask.utils import parse_bytes
 
 from distributed.core import PooledRPCCall
@@ -248,7 +248,7 @@ def rechunk_p2p(
         disk=disk,
     )
     return new_da_object(
-        HighLevelGraph.from_collections(name, layer, [x]),
+        HighLevelGraph.from_collections(name, layer, [cast(DaskCollection, x)]),
         name,
         chunks,
         meta=x._meta,

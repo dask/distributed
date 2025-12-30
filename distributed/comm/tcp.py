@@ -178,7 +178,7 @@ class TCP(Comm):
         self._peer_addr = peer_addr
         self.stream = stream
         self._finalizer = weakref.finalize(self, self._get_finalizer())
-        self._finalizer.atexit = False
+        self._finalizer.atexit = False  # type: ignore[misc]
         self._extra: dict = {}
 
         ref = weakref.ref(self)

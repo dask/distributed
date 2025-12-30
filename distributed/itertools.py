@@ -35,7 +35,7 @@ def ffill(x: Iterable[X], xp: Iterable[X], fp: Iterable[Y], left: Y) -> Iterator
     xp_done = False
     xp1, fp1 = None, left
     for xi in x:
-        while not xp_done and (xp1 is None or xi >= xp1):  # type: ignore[unreachable]
+        while not xp_done and (xp1 is None or xi >= xp1):  # type: ignore[operator]
             fp0 = fp1
             try:
                 xp1, fp1 = next(it)
