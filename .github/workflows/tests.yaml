@@ -26,23 +26,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.10", "3.11", "3.12", "3.13"]
+        environment: [mindeps, "3.10", "3.11", "3.12", "3.13", "3.14"]
         label: [default]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
 
         exclude:
-          # MacOS CI does not have any hosts available; run it on 3.12 only
-          - os: macos-latest
-            environment: mindeps
-          - os: macos-latest
-            environment: "3.10"
-          - os: macos-latest
-            environment: "3.11"
-          - os: macos-latest
-            environment: "3.13"
-
           - os: windows-latest
             environment: mindeps
 

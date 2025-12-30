@@ -3250,8 +3250,20 @@ class Client(SyncMethodMixin):
                     "|".join([f"(?:{mod})" for mod in ignore_modules])
                 )
             if ignore_files:
+                # Given ignore-files = [foo], match:
+                #   /path/to/foo
+                #   /path/to/foo.py[c]
+                #   /path/to/foo/bar.py[c]
+                #   \path\to\foo
+                #   \path\to\foo.py[c]
+                #   \path\to\foo\bar.py[c]
+                #   <frozen foo>
+                # Do not match files that have 'foo' as a substring,
+                # unless the user explicitly states '.*foo.*'.
+                ignore_files_or = "|".join(mod for mod in ignore_files)
                 fname_pattern = re.compile(
-                    r".*[\\/](" + "|".join(mod for mod in ignore_files) + r")([\\/]|$)"
+                    rf".*[\\/]({ignore_files_or})([\\/]|\.pyc?$|$)"
+                    rf"|<frozen ({ignore_files_or})>$"
                 )
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful

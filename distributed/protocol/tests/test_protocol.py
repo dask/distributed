@@ -162,16 +162,15 @@ def test_sizeof_serialize(Wrapper, Wrapped):
 @pytest.mark.skipif(WINDOWS, reason="On windows this is triggering a stackoverflow")
 def test_deeply_nested_structures():
     # These kind of deeply nested structures are generated in our profiling code
-    def gen_deeply_nested(depth, msg=None):
-        d = msg or {}
-        while depth:
-            depth -= 1
+    def gen_deeply_nested(depth):
+        d = {}
+        for _ in range(depth):
             d = {"children": d}
         return d
 
-    msg = {}
-    for _ in range(10):
-        msg = gen_deeply_nested(sys.getrecursionlimit() // 2, msg=msg)
+    # Note: Python <=3.13 already fails with 2x the recursion limit;
+    # 3.14 keeps working until 14x for some reason
+    msg = gen_deeply_nested(sys.getrecursionlimit() * 14)
 
     with pytest.raises(RecursionError):
         copy.deepcopy(msg)
