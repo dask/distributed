@@ -10,6 +10,7 @@ dependencies:
   - locket=1.0.0
   - msgpack-python=1.0.2
   - packaging=20.0
+  - pyparsing<3.3  # Newer versions of pyparsing drop old versions of packaging
   - psutil=5.8.0
   - pyyaml=5.4.1
   - sortedcontainers=2.0.5
