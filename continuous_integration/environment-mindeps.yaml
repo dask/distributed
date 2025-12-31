@@ -10,7 +10,9 @@ dependencies:
   - locket=1.0.0
   - msgpack-python=1.0.2
   - packaging=20.0
-  - pyparsing<3.3  # Newer versions of pyparsing drop old versions of packaging
+  - pyparsing<3.3  # Newer versions of pyparsing break with old versions of packaging
+  - setuptools < 71  # Newer versions of setuptools break with packaging<24
+                     # https://github.com/pypa/setuptools/issues/4496
   - psutil=5.8.0
   - pyyaml=5.4.1
   - sortedcontainers=2.0.5
@@ -24,7 +26,7 @@ dependencies:
   - pip:
     - git+https://github.com/dask/dask
   # test dependencies
-  - pytest
+  - pytest<8.4  # Pin due to https://github.com/pytest-dev/pytest-cov/issues/693
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
