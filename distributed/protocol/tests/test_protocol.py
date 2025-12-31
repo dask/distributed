@@ -169,8 +169,8 @@ def test_deeply_nested_structures():
         return d
 
     # Note: Python <=3.13 already fails with 2x the recursion limit;
-    # 3.14 keeps working until 14x for some reason
-    msg = gen_deeply_nested(sys.getrecursionlimit() * 14)
+    # 3.14 keeps working until much later (and the exact limit changes by platform)
+    msg = gen_deeply_nested(sys.getrecursionlimit() * 20)
 
     with pytest.raises(RecursionError):
         copy.deepcopy(msg)
