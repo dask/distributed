@@ -11,8 +11,8 @@ dependencies:
   - msgpack-python=1.0.2
   - packaging=20.0
   - pyparsing<3.3  # Newer versions of pyparsing break with old versions of packaging
-  - setuptools < 71  # Newer versions of setuptools break with packaging<24
-                     # https://github.com/pypa/setuptools/issues/4496
+  - setuptools<71  # Newer versions of setuptools break with packaging<24
+                   # https://github.com/pypa/setuptools/issues/4496
   - psutil=5.8.0
   - pyyaml=5.4.1
   - sortedcontainers=2.0.5
