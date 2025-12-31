@@ -19,14 +19,12 @@ dependencies:
   - tornado=6.2.0
   - urllib3=1.26.5
   - zict=3.0.0
-  # Temporary fix for https://github.com/pypa/setuptools/issues/4496
-  - setuptools < 71
   # Distributed depends on the latest version of Dask
   - pip
   - pip:
     - git+https://github.com/dask/dask
   # test dependencies
-  - pytest<8.4  # Pin due to https://github.com/pytest-dev/pytest-cov/issues/693
+  - pytest
   - pytest-cov
   - pytest-faulthandler
   - pytest-repeat
