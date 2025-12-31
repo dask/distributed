@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import pytest
 
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
