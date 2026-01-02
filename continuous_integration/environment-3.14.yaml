@@ -12,7 +12,7 @@ dependencies:
   - coverage
   - dask  # overridden by git tip below
   - fsspec  # overridden by git tip below
-  # - gilknocker  # conda-forge package not yet available for Python 3.14
+  - gilknocker
   - h5py
   - ipykernel
   - ipywidgets
@@ -48,4 +48,3 @@ dependencies:
       - git+https://github.com/dask/zict
       - git+https://github.com/fsspec/filesystem_spec
       - keras
-      - gilknocker  # conda-forge package not yet available for Python 3.14 
