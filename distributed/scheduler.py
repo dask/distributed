@@ -9289,7 +9289,7 @@ def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
     # Special case: saturation_factor == 0 means no queuing
     # Only send tasks to workers that are completely idle
     if saturation_factor == 0:
-        return 0 - (len(ws.processing) - len(ws.long_running))
+        return 1 - (len(ws.processing) - len(ws.long_running))
 
     return max(math.ceil(saturation_factor * ws.nthreads), 1) - (
         len(ws.processing) - len(ws.long_running)
