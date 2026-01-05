@@ -143,7 +143,7 @@ class MemorySampler:
             if align:
                 # convert datetime to timedelta from the first sample
                 s.index -= s.index[0]
-            ss[label] = s[~s.index.duplicated()]  # type: ignore[attr-defined]
+            ss[label] = s[~s.index.duplicated()]
 
         df = pd.DataFrame(ss)
 

@@ -3094,6 +3094,7 @@ class Client(SyncMethodMixin):
             elif resp["status"] == "error":
                 # Exception raised by the remote function
                 _, exc, tb = clean_exception(**resp)
+                assert exc is not None
                 exc = exc.with_traceback(tb)
             else:
                 assert resp["status"] == "OK"

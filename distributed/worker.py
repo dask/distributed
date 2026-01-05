@@ -1370,7 +1370,7 @@ class Worker(BaseWorker, ServerNode):
             return {"status": "OK"}
 
     def get_monitor_info(self, recent: bool = False, start: int = 0) -> dict[str, Any]:
-        result = dict(
+        result: dict[str, Any] = dict(
             range_query=(
                 self.monitor.recent()
                 if recent

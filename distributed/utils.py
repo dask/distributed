@@ -1396,7 +1396,7 @@ def parse_ports(port: int | str | Collection[int] | None) -> list[int] | list[No
     if isinstance(port, Collection):
         if not all(isinstance(p, int) for p in port):
             raise TypeError(port)
-        return list(port)  # type: ignore
+        return list(port)
 
     raise TypeError(port)
 

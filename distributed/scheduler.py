@@ -1075,7 +1075,7 @@ class TaskPrefix(TaskCollection):
                 del self._types[typename]
 
     @property
-    @_deprecated(use_instead="groups")  # type: ignore[misc]
+    @_deprecated(use_instead="groups")  # type: ignore[untyped-decorator]
     def active(self) -> Set[TaskGroup]:
         return self.groups
 
@@ -1085,7 +1085,7 @@ class TaskPrefix(TaskCollection):
         return self._groups.keys()
 
     @property
-    @_deprecated(use_instead="states")  # type: ignore[misc]
+    @_deprecated(use_instead="states")  # type: ignore[untyped-decorator]
     def active_states(self) -> dict[TaskStateState, int]:
         return self.states
 
@@ -3823,7 +3823,7 @@ class Scheduler(SchedulerState, ServerNode):
             preload_argv = dask.config.get("distributed.scheduler.preload-argv")
         self.preloads = preloading.process_preloads(
             self,
-            preload,  # type: ignore
+            preload,
             preload_argv,
         )
 

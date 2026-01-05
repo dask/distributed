@@ -33,10 +33,10 @@ def get_digests(
     d = w.digests_total if isinstance(w, Worker) else w.cumulative_worker_metrics
     digests = {
         k: v
-        for k, v in d.items()  # type: ignore
+        for k, v in d.items()
         if k
         not in {"latency", "tick-duration", "transfer-bandwidth", "transfer-duration"}
-        and (any(a in k for a in allow) or not allow)
+        and (any(isinstance(k, tuple) and a in k for a in allow) or not allow)
     }
     assert all(v >= 0 for v in digests.values()), digests
     return digests
