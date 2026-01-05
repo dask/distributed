@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 
-from distributed import Condition, Lock, Client
-from distributed.utils_test import gen_cluster, inc
+from distributed import Condition, Lock
 from distributed.metrics import time
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True)
@@ -168,7 +169,7 @@ async def test_condition_wait_for(c, s, a, b):
     state = {"value": 0}
 
     async def incrementer():
-        for i in range(5):
+        for _i in range(5):
             await asyncio.sleep(0.05)
             async with condition:
                 state["value"] += 1
@@ -349,6 +350,7 @@ async def test_condition_across_workers(c, s, a):
 
     def worker_wait():
         import asyncio
+
         from distributed import Condition
 
         async def wait_task():

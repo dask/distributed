@@ -6,7 +6,6 @@ import uuid
 from collections import defaultdict
 from contextlib import suppress
 
-from distributed.client import Future
 from distributed.lock import Lock
 from distributed.utils import log_errors
 from distributed.worker import get_client
