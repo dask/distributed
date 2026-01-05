@@ -1,384 +1,436 @@
-import asyncio
+from __future__ import annotations
 
+import asyncio
 import pytest
 
-from distributed import Condition
+from distributed import Condition, Lock, Client
+from distributed.utils_test import gen_cluster, inc
 from distributed.metrics import time
-from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True)
-async def test_condition_acquire_release(c, s, a, b):
-    """Test basic lock acquire/release"""
-    condition = Condition("test-lock")
+async def test_condition_basic(c, s, a, b):
+    """Basic condition wait and notify"""
+    condition = Condition()
+
+    results = []
+
+    async def waiter():
+        async with condition:
+            results.append("waiting")
+            await condition.wait()
+            results.append("notified")
+
+    # Start waiter task
+    waiter_task = asyncio.create_task(waiter())
+    await asyncio.sleep(0.1)  # Let waiter acquire lock and start waiting
+
+    assert results == ["waiting"]
+
+    # Notify the waiter
+    async with condition:
+        await condition.notify()
+
+    await waiter_task
+    assert results == ["waiting", "notified"]
+
+
+@gen_cluster(client=True)
+async def test_condition_notify_one(c, s, a, b):
+    """notify() wakes only one waiter"""
+    condition = Condition()
+
+    results = []
+
+    async def waiter(n):
+        async with condition:
+            await condition.wait()
+            results.append(n)
+
+    # Start multiple waiters
+    tasks = [asyncio.create_task(waiter(i)) for i in range(3)]
+    await asyncio.sleep(0.1)
+
+    # Notify once - only one should wake
+    async with condition:
+        await condition.notify()
+
+    await asyncio.sleep(0.1)
+    assert len(results) == 1
+
+    # Notify again
+    async with condition:
+        await condition.notify()
+
+    await asyncio.sleep(0.1)
+    assert len(results) == 2
+
+    # Cleanup remaining
+    async with condition:
+        await condition.notify_all()
+
+    await asyncio.gather(*tasks)
+    assert len(results) == 3
+
+
+@gen_cluster(client=True)
+async def test_condition_notify_n(c, s, a, b):
+    """notify(n) wakes exactly n waiters"""
+    condition = Condition()
+
+    results = []
+
+    async def waiter(n):
+        async with condition:
+            await condition.wait()
+            results.append(n)
+
+    # Start 5 waiters
+    tasks = [asyncio.create_task(waiter(i)) for i in range(5)]
+    await asyncio.sleep(0.1)
+
+    # Notify 2
+    async with condition:
+        await condition.notify(2)
+
+    await asyncio.sleep(0.1)
+    assert len(results) == 2
+
+    # Notify 3 more
+    async with condition:
+        await condition.notify(3)
+
+    await asyncio.gather(*tasks)
+    assert len(results) == 5
+
+
+@gen_cluster(client=True)
+async def test_condition_notify_all(c, s, a, b):
+    """notify_all() wakes all waiters"""
+    condition = Condition()
+
+    results = []
+
+    async def waiter(n):
+        async with condition:
+            await condition.wait()
+            results.append(n)
+
+    # Start multiple waiters
+    tasks = [asyncio.create_task(waiter(i)) for i in range(10)]
+    await asyncio.sleep(0.1)
+
+    # Wake all at once
+    async with condition:
+        await condition.notify_all()
+
+    await asyncio.gather(*tasks)
+    assert len(results) == 10
+
+
+@gen_cluster(client=True)
+async def test_condition_wait_timeout(c, s, a, b):
+    """wait() with timeout returns False if not notified"""
+    condition = Condition()
+
+    async with condition:
+        start = time()
+        result = await condition.wait(timeout=0.2)
+        elapsed = time() - start
+
+    assert result is False
+    assert 0.15 < elapsed < 0.5
+
+
+@gen_cluster(client=True)
+async def test_condition_wait_timeout_then_notify(c, s, a, b):
+    """wait() with timeout returns True if notified before timeout"""
+    condition = Condition()
+
+    async def notifier():
+        await asyncio.sleep(0.1)
+        async with condition:
+            await condition.notify()
+
+    notifier_task = asyncio.create_task(notifier())
+
+    async with condition:
+        result = await condition.wait(timeout=1.0)
+
+    await notifier_task
+    assert result is True
+
+
+@gen_cluster(client=True)
+async def test_condition_wait_for(c, s, a, b):
+    """wait_for() waits until predicate is true"""
+    condition = Condition()
+    state = {"value": 0}
+
+    async def incrementer():
+        for i in range(5):
+            await asyncio.sleep(0.05)
+            async with condition:
+                state["value"] += 1
+                await condition.notify_all()
+
+    inc_task = asyncio.create_task(incrementer())
+
+    async with condition:
+        result = await condition.wait_for(lambda: state["value"] >= 3)
+
+    await inc_task
+    assert result is True
+    assert state["value"] >= 3
+
+
+@gen_cluster(client=True)
+async def test_condition_wait_for_timeout(c, s, a, b):
+    """wait_for() returns predicate result on timeout"""
+    condition = Condition()
+
+    async with condition:
+        result = await condition.wait_for(lambda: False, timeout=0.2)
+
+    assert result is False
+
+
+@gen_cluster(client=True)
+async def test_condition_context_manager(c, s, a, b):
+    """Condition works as async context manager"""
+    condition = Condition()
+
     assert not condition.locked()
+
+    async with condition:
+        assert condition.locked()
+
+    assert not condition.locked()
+
+
+@gen_cluster(client=True)
+async def test_condition_with_explicit_lock(c, s, a, b):
+    """Condition can use an explicit Lock"""
+    lock = Lock()
+    condition = Condition(lock=lock)
+
+    async with lock:
+        assert condition.locked()
+
+    assert not condition.locked()
+
+
+@gen_cluster(client=True)
+async def test_condition_multiple_notify_calls(c, s, a, b):
+    """Multiple notify calls work correctly"""
+    condition = Condition()
+    results = []
+
+    async def waiter(n):
+        async with condition:
+            await condition.wait()
+            results.append(n)
+
+    # Start 3 waiters
+    tasks = [asyncio.create_task(waiter(i)) for i in range(3)]
+    await asyncio.sleep(0.1)
+
+    # Notify one at a time
+    for _ in range(3):
+        async with condition:
+            await condition.notify()
+        await asyncio.sleep(0.05)
+
+    await asyncio.gather(*tasks)
+    assert set(results) == {0, 1, 2}
+
+
+@gen_cluster(client=True)
+async def test_condition_notify_without_waiters(c, s, a, b):
+    """notify() with no waiters is a no-op"""
+    condition = Condition()
+
+    async with condition:
+        await condition.notify()
+        await condition.notify_all()
+        await condition.notify(5)
+
+    # Should not raise or hang
+
+
+@gen_cluster(client=True)
+async def test_condition_producer_consumer(c, s, a, b):
+    """Producer-consumer pattern with Condition"""
+    condition = Condition()
+    queue = []
+
+    async def producer():
+        for i in range(5):
+            await asyncio.sleep(0.05)
+            async with condition:
+                queue.append(i)
+                await condition.notify()
+
+    async def consumer():
+        items = []
+        for _ in range(5):
+            async with condition:
+                await condition.wait_for(lambda: len(queue) > 0)
+                items.append(queue.pop(0))
+        return items
+
+    prod_task = asyncio.create_task(producer())
+    cons_task = asyncio.create_task(consumer())
+
+    result = await cons_task
+    await prod_task
+
+    assert result == [0, 1, 2, 3, 4]
+
+
+@gen_cluster(client=True)
+async def test_condition_same_name(c, s, a, b):
+    """Multiple Condition instances with same name share state"""
+    cond1 = Condition(name="shared")
+    cond2 = Condition(name="shared")
+
+    result = []
+
+    async def waiter():
+        async with cond1:
+            await cond1.wait()
+            result.append("done")
+
+    waiter_task = asyncio.create_task(waiter())
+    await asyncio.sleep(0.1)
+
+    # Notify via different instance
+    async with cond2:
+        await cond2.notify()
+
+    await waiter_task
+    assert result == ["done"]
+
+
+@gen_cluster(client=True)
+async def test_condition_repr(c, s, a, b):
+    """Condition has readable repr"""
+    condition = Condition(name="test-cond")
+    assert "test-cond" in repr(condition)
+
+
+@gen_cluster(client=True)
+async def test_condition_waiter_cancelled(c, s, a, b):
+    """Cancelled waiter properly cleans up"""
+    condition = Condition()
+
+    async def waiter():
+        async with condition:
+            await condition.wait()
+
+    task = asyncio.create_task(waiter())
+    await asyncio.sleep(0.1)
+
+    # Cancel the waiter
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Should not deadlock - lock should be released
+    async with condition:
+        await condition.notify()  # No-op since no waiters
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_condition_across_workers(c, s, a):
+    """Condition works across different worker tasks"""
+    condition = Condition(name="cross-worker")
+
+    def worker_wait():
+        import asyncio
+        from distributed import Condition
+
+        async def wait_task():
+            cond = Condition(name="cross-worker")
+            async with cond:
+                await cond.wait()
+                return "notified"
+
+        return asyncio.run(wait_task())
+
+    # Submit waiter to worker
+    future = c.submit(worker_wait, pure=False)
+    await asyncio.sleep(0.2)
+
+    # Notify from client
+    async with condition:
+        await condition.notify()
+
+    result = await future
+    assert result == "notified"
+
+
+@gen_cluster(client=True)
+async def test_condition_locked_status(c, s, a, b):
+    """locked() returns correct status"""
+    condition = Condition()
+
+    assert not condition.locked()
+
     await condition.acquire()
     assert condition.locked()
+
     await condition.release()
     assert not condition.locked()
 
 
 @gen_cluster(client=True)
-async def test_condition_context_manager(c, s, a, b):
-    """Test context manager interface"""
-    condition = Condition("test-context")
-    assert not condition.locked()
+async def test_condition_reacquire_after_wait(c, s, a, b):
+    """wait() reacquires lock after being notified"""
+    condition = Condition()
+    lock_states = []
+
+    async def waiter():
+        async with condition:
+            lock_states.append(("before_wait", condition.locked()))
+            await condition.wait()
+            lock_states.append(("after_wait", condition.locked()))
+
+    waiter_task = asyncio.create_task(waiter())
+    await asyncio.sleep(0.1)
+
     async with condition:
-        assert condition.locked()
-    assert not condition.locked()
+        lock_states.append(("notifier", condition.locked()))
+        await condition.notify()
+
+    await waiter_task
+
+    # Waiter should hold lock before and after wait
+    assert lock_states[0] == ("before_wait", True)
+    assert lock_states[1] == ("notifier", True)
+    assert lock_states[2] == ("after_wait", True)
 
 
 @gen_cluster(client=True)
-async def test_condition_wait_notify(c, s, a, b):
-    """Test basic wait/notify"""
-    condition = Condition("test-notify")
+async def test_condition_many_waiters(c, s, a, b):
+    """Handle many waiters efficiently"""
+    condition = Condition()
     results = []
 
-    async def waiter():
-        async with condition:
-            results.append("waiting")
-            await condition.wait()
-            results.append("notified")
-
-    async def notifier():
-        await asyncio.sleep(0.2)
-        async with condition:
-            results.append("notifying")
-            condition.notify()
-
-    await asyncio.gather(waiter(), notifier())
-    assert results == ["waiting", "notifying", "notified"]
-
-
-@gen_cluster(client=True)
-async def test_condition_notify_all(c, s, a, b):
-    """Test notify_all wakes all waiters"""
-    condition = Condition("test-notify-all")
-    results = []
-
-    async def waiter(i):
+    async def waiter(n):
         async with condition:
             await condition.wait()
-            results.append(i)
+            results.append(n)
 
-    async def notifier():
-        await asyncio.sleep(0.2)
-        async with condition:
-            condition.notify_all()
+    # Start many waiters
+    tasks = [asyncio.create_task(waiter(i)) for i in range(50)]
+    await asyncio.sleep(0.2)
 
-    await asyncio.gather(waiter(1), waiter(2), waiter(3), notifier())
-    assert sorted(results) == [1, 2, 3]
-
-
-@gen_cluster(client=True)
-async def test_condition_notify_n(c, s, a, b):
-    """Test notify with specific count"""
-    condition = Condition("test-notify-n")
-    results = []
-
-    async def waiter(i):
-        async with condition:
-            await condition.wait()
-            results.append(i)
-
-    async def notifier():
-        await asyncio.sleep(0.2)
-        async with condition:
-            condition.notify(n=2)  # Wake only 2 waiters
-        await asyncio.sleep(0.2)
-        async with condition:
-            condition.notify()  # Wake remaining waiter
-
-    await asyncio.gather(waiter(1), waiter(2), waiter(3), notifier())
-    assert sorted(results) == [1, 2, 3]
-
-
-@gen_cluster(client=True)
-async def test_condition_wait_timeout(c, s, a, b):
-    """Test wait with timeout"""
-    condition = Condition("test-timeout")
-
-    start = time()
+    # Wake them all
     async with condition:
-        result = await condition.wait(timeout=0.5)
-    elapsed = time() - start
+        await condition.notify_all()
 
-    assert result is False
-    assert 0.4 < elapsed < 0.7
-
-
-@gen_cluster(client=True)
-async def test_condition_wait_timeout_then_notify(c, s, a, b):
-    """Test that timeout doesn't prevent subsequent notifications"""
-    condition = Condition("test-timeout-notify")
-    results = []
-
-    async def waiter():
-        async with condition:
-            result = await condition.wait(timeout=0.2)
-            results.append(f"timeout: {result}")
-        async with condition:
-            result = await condition.wait()
-            results.append(f"notified: {result}")
-
-    async def notifier():
-        await asyncio.sleep(0.5)
-        async with condition:
-            condition.notify()
-
-    await asyncio.gather(waiter(), notifier())
-    assert results == ["timeout: False", "notified: True"]
-
-
-@gen_cluster(client=True)
-async def test_condition_error_without_lock(c, s, a, b):
-    """Test errors when calling wait/notify without holding lock"""
-    condition = Condition("test-error")
-
-    with pytest.raises(RuntimeError, match="without holding the lock"):
-        await condition.wait()
-
-    with pytest.raises(RuntimeError, match="without holding the lock"):
-        condition.notify()
-
-    with pytest.raises(RuntimeError, match="without holding the lock"):
-        condition.notify_all()
-
-
-@gen_cluster(client=True)
-async def test_condition_error_release_without_acquire(c, s, a, b):
-    """Test error when releasing without acquiring"""
-    condition = Condition("test-release-error")
-
-    with pytest.raises(RuntimeError, match="without holding the lock"):
-        await condition.release()
-
-
-@gen_cluster(client=True)
-async def test_condition_producer_consumer(c, s, a, b):
-    """Test classic producer-consumer pattern"""
-    condition = Condition("prod-cons")
-    queue = []
-
-    async def producer():
-        for i in range(5):
-            await asyncio.sleep(0.1)
-            async with condition:
-                queue.append(i)
-                condition.notify()
-
-    async def consumer():
-        results = []
-        for _ in range(5):
-            async with condition:
-                while not queue:
-                    await condition.wait()
-                results.append(queue.pop(0))
-        return results
-
-    prod_task = asyncio.create_task(producer())
-    cons_task = asyncio.create_task(consumer())
-
-    await prod_task
-    results = await cons_task
-    assert results == [0, 1, 2, 3, 4]
-
-
-@gen_cluster(client=True)
-async def test_condition_multiple_producers_consumers(c, s, a, b):
-    """Test multiple producers and consumers"""
-    condition = Condition("multi-prod-cons")
-    queue = []
-
-    async def producer(start):
-        for i in range(start, start + 3):
-            await asyncio.sleep(0.05)
-            async with condition:
-                queue.append(i)
-                condition.notify()
-
-    async def consumer():
-        results = []
-        for _ in range(3):
-            async with condition:
-                while not queue:
-                    await condition.wait()
-                results.append(queue.pop(0))
-        return results
-
-    results = await asyncio.gather(producer(0), producer(10), consumer(), consumer())
-    # Last two results are from consumers
-    consumed = results[2] + results[3]
-    assert sorted(consumed) == [0, 1, 2, 10, 11, 12]
-
-
-@gen_cluster(client=True)
-async def test_condition_same_name_different_instances(c, s, a, b):
-    """Test that multiple instances with same name share state"""
-    name = "shared-condition"
-    cond1 = Condition(name)
-    cond2 = Condition(name)
-    results = []
-
-    async def waiter():
-        async with cond1:
-            results.append("waiting")
-            await cond1.wait()
-            results.append("notified")
-
-    async def notifier():
-        await asyncio.sleep(0.2)
-        async with cond2:
-            results.append("notifying")
-            cond2.notify()
-
-    await asyncio.gather(waiter(), notifier())
-    assert results == ["waiting", "notifying", "notified"]
-
-
-@gen_cluster(client=True)
-async def test_condition_unique_names_independent(c, s, a, b):
-    """Test conditions with different names are independent"""
-    cond1 = Condition("cond-1")
-    cond2 = Condition("cond-2")
-
-    async with cond1:
-        assert cond1.locked()
-        assert not cond2.locked()
-
-    async with cond2:
-        assert not cond1.locked()
-        assert cond2.locked()
-
-
-@gen_cluster(client=True)
-async def test_condition_barrier_pattern(c, s, a, b):
-    """Test barrier synchronization pattern"""
-    condition = Condition("barrier")
-    arrived = []
-    n_workers = 3
-
-    async def worker(i):
-        async with condition:
-            arrived.append(i)
-            if len(arrived) < n_workers:
-                await condition.wait()
-            else:
-                condition.notify_all()
-        return f"worker-{i}-done"
-
-    results = await asyncio.gather(worker(0), worker(1), worker(2))
-    assert sorted(results) == ["worker-0-done", "worker-1-done", "worker-2-done"]
-    assert len(arrived) == 3
-
-
-def test_condition_sync_interface(client):
-    """Test synchronous interface via SyncMethodMixin"""
-    condition = Condition("sync-test")
-    results = []
-
-    def worker():
-        with condition:
-            results.append("locked")
-        results.append("released")
-
-    worker()
-    assert results == ["locked", "released"]
-
-
-@gen_cluster(client=True)
-async def test_condition_multiple_notify_calls(c, s, a, b):
-    """Test multiple notify calls in sequence"""
-    condition = Condition("multi-notify")
-    results = []
-
-    async def waiter(i):
-        async with condition:
-            await condition.wait()
-            results.append(i)
-
-    async def notifier():
-        await asyncio.sleep(0.2)
-        async with condition:
-            condition.notify()
-        await asyncio.sleep(0.1)
-        async with condition:
-            condition.notify()
-        await asyncio.sleep(0.1)
-        async with condition:
-            condition.notify()
-
-    await asyncio.gather(waiter(1), waiter(2), waiter(3), notifier())
-    assert sorted(results) == [1, 2, 3]
-
-
-@gen_cluster(client=True)
-async def test_condition_predicate_loop(c, s, a, b):
-    """Test typical predicate-based wait loop pattern"""
-    condition = Condition("predicate")
-    state = {"value": 0, "target": 5}
-
-    async def waiter():
-        async with condition:
-            while state["value"] < state["target"]:
-                await condition.wait()
-        return state["value"]
-
-    async def updater():
-        for i in range(1, 6):
-            await asyncio.sleep(0.1)
-            async with condition:
-                state["value"] = i
-                condition.notify_all()
-
-    result, _ = await asyncio.gather(waiter(), updater())
-    assert result == 5
-
-
-@gen_cluster(client=True)
-async def test_condition_repr(c, s, a, b):
-    """Test string representation"""
-    condition = Condition("test-repr")
-    assert "test-repr" in repr(condition)
-    assert "Condition" in repr(condition)
-
-
-@gen_cluster(client=True)
-async def test_condition_not_reentrant(c, s, a, b):
-    """Test that lock is NOT re-entrant within same async task"""
-    cond1 = Condition("not-reentrant")
-    cond2 = Condition("not-reentrant")  # Same name = same lock
-    results = []
-
-    async def holder():
-        await cond1.acquire()
-        results.append("cond1-acquired")
-        await asyncio.sleep(0.5)  # Hold lock
-        await cond1.release()
-        results.append("cond1-released")
-
-    async def waiter():
-        await asyncio.sleep(0.1)  # Let holder acquire first
-        results.append("cond2-attempting")
-        # This should block until holder releases
-        await cond2.acquire()
-        results.append("cond2-acquired")
-        await cond2.release()
-
-    await asyncio.gather(holder(), waiter())
-
-    # Verify order: holder acquires, waiter attempts, holder releases, waiter acquires
-    assert results[0] == "cond1-acquired"
-    assert results[1] == "cond2-attempting"
-    assert results[2] == "cond1-released"
-    assert results[3] == "cond2-acquired"
-
-
-@gen_cluster(client=True)
-async def test_condition_multiple_instances_share_client_id(c, s, a, b):
-    """Test that multiple Condition instances in same client share client_id"""
-    cond1 = Condition("test-1")
-    cond2 = Condition("test-2")
-
-    # Both should have same client ID (the client 'c')
-    assert cond1._client_id == cond2._client_id == c.id
+    await asyncio.gather(*tasks)
+    assert len(results) == 50
+    assert set(results) == set(range(50))
