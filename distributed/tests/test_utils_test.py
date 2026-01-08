@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import pathlib
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 from contextlib import contextmanager
@@ -1069,3 +1071,12 @@ def test_captured_context_meter():
         ("a", "o", "u"): 6,
     }
     assert isinstance(metrics["foo", "s"], int)
+
+
+def test_popen_file_not_found():
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="tmp-python")
+    os.close(tmp_fd)
+    os.remove(tmp_path)
+    with pytest.raises(FileNotFoundError, match=rf"Could not find '{tmp_path}'"):
+        with popen([tmp_path]):
+            pass
