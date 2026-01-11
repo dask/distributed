@@ -1077,6 +1077,9 @@ def test_popen_file_not_found():
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="tmp-python")
     os.close(tmp_fd)
     os.remove(tmp_path)
-    with pytest.raises(FileNotFoundError, match=rf"Could not find '{tmp_path}'"):
+    with pytest.raises(
+        FileNotFoundError,
+        match=r"provide an absolute path to an existing installation to popen",
+    ):
         with popen([tmp_path]):
             pass
