@@ -8,6 +8,7 @@ import os
 import re
 import shelve
 import sys
+import warnings
 import zipfile
 from collections.abc import Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
@@ -379,24 +380,27 @@ def download_and_parse_artifacts(
                     continue
                 df = dataframe_from_jxml(cast(Iterable, xml))
 
-                # Needed until *-*-mindeps-numpy shows up in TEST_ID
-                a["name"] = a["name"].replace("--", "-numpy-")
-
-                # TODO: Some artifacts created w/ wrong name in dask
-                # This can be removed after ~90 days.
-                # Between time https://github.com/dask/dask/pull/10769 was merged and
-                # then https://github.com/dask/dask/pull/10781 which changed the name
-                if a["name"].startswith("test-results") and repo.endswith("/dask"):
-                    continue
-
                 # Note: we assign a column with the workflow run timestamp rather
                 # than the artifact timestamp so that artifacts triggered under
                 # the same workflow run can be aligned according to the same trigger
                 # time.
-                html_url = jobs_df[jobs_df["suite_name"] == a["name"]].html_url.unique()
-                assert (
-                    len(html_url) == 1
-                ), f"Artifact suite name {a['name']} did not match any jobs dataframe:\n{jobs_df['suite_name'].unique()}"
+                a_match = jobs_df["suite_name"] == a["name"]
+                a_name_msg = a["name"]
+                if a["name"].endswith("-"):
+                    # dask/dask array expressions enabled
+                    a_match |= jobs_df["suite_name"] == f"{a['name']}false"
+                    a_name_msg += f" or {a['name']}false"
+                html_url = jobs_df[a_match].html_url.unique()
+                if len(html_url) != 1:
+                    warnings.warn(
+                        f"Artifact suite name {a_name_msg} "
+                        "did not match any jobs in the dataframe:\n"
+                        f"{jobs_df['suite_name'].unique()}; skipping...",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    continue
+
                 html_url = html_url[0]
                 assert html_url is not None
                 df2 = df.assign(
