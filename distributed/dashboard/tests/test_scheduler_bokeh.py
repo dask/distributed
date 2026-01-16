@@ -1099,6 +1099,17 @@ async def test_proxy_to_workers(c, s, a, b):
         assert response_direct.code == 200
         assert b"System" in response_direct.body
 
+    if proxy_exists:
+        dashboard_port = s.http_server.port
+        http_client = AsyncHTTPClient()
+        unsafe_host = "<><><>"  # Some unsafe characters that should be escaped
+        proxy_url = f"http://localhost:{dashboard_port}/proxy/1234/{unsafe_host}/status"
+        response = await http_client.fetch(proxy_url, raise_error=False)
+        assert response.code == 400
+        assert (
+            unsafe_host not in response.body.decode()
+        ), "Unsafe characters should be escaped"
+
 
 @gen_cluster(
     client=True,
