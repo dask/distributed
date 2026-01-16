@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 
 from tornado import web
@@ -46,7 +47,7 @@ try:
 
             worker = f"{self.host}:{port}"
             if not check_worker_dashboard_exits(self.scheduler, worker):
-                msg = "Worker <%s> does not exist" % worker
+                msg = f"Worker &lt;{html.escape(worker)}&gt; does not exist"
                 self.set_status(400)
                 self.finish(msg)
                 return
