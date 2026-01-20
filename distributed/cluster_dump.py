@@ -304,7 +304,8 @@ class DumpArtefact(Mapping):
         import yaml
 
         root_dir = Path(root_dir) if root_dir else Path.cwd()
-        dumper = yaml.CSafeDumper
+        # libyaml C bindings may be missing
+        dumper = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
         scheduler_expand_keys = set(scheduler_expand_keys)
         worker_expand_keys = set(worker_expand_keys)
 
