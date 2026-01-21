@@ -139,7 +139,7 @@ class Worker(Process):
         if result.exit_status == 0:
             set_env = f'env DASK_INTERNAL_INHERIT_CONFIG="{dask.config.serialize(dask.config.global_config)}"'
         else:
-            result = await self.connection.run("cmd /c ver")
+            result = await self.connection.run("cmd.exe /c ver")
             if result.exit_status == 0:
                 set_env = f"set DASK_INTERNAL_INHERIT_CONFIG={dask.config.serialize(dask.config.global_config)} &&"
             else:
@@ -235,7 +235,7 @@ class Scheduler(Process):
         if result.exit_status == 0:
             set_env = f'env DASK_INTERNAL_INHERIT_CONFIG="{dask.config.serialize(dask.config.global_config)}"'
         else:
-            result = await self.connection.run("cmd /c ver")
+            result = await self.connection.run("cmd.exe /c ver")
             if result.exit_status == 0:
                 set_env = f"set DASK_INTERNAL_INHERIT_CONFIG={dask.config.serialize(dask.config.global_config)} &&"
             else:
