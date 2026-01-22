@@ -116,6 +116,7 @@ from distributed.utils_test import (
     raises_with_cause,
     randominc,
     relative_frame_linenumber,
+    report_worker_authkey,
     save_sys_modules,
     slowadd,
     slowdec,
@@ -8435,3 +8436,22 @@ async def test_map_accepts_nested_futures(c, s, a, b, use_kwarg):
 
     result = await future.result()
     assert result == 30 if not offset else 31
+
+
+async def test_authkey(loop):
+    # To test that the authkey is propagated to workers by dask,
+    # we need to start a worker manually.
+    # (This is because multiprocessing already propagates the authkey.)
+    async with Scheduler(dashboard_address=":0") as s:
+
+        # Start worker using subprocess
+        with popen(
+            [sys.executable, "-m", "distributed.cli.dask_worker", s.address],
+        ) as proc:
+            async with Client(s.address, asynchronous=True) as c:
+                worker_authkey = await c.submit(report_worker_authkey)
+
+    import multiprocessing.process
+
+    # TODO: This currently fails!
+    assert worker_authkey == multiprocessing.process.current_process().authkey
