@@ -626,6 +626,7 @@ async def test_secede_opens_slot(c, s, a):
         (1.1, (3, 2)),
         (1.0, (2, 1)),
         (0.1, (1, 1)),
+        (0.0, (2, 1)),  # No queuing: only executing tasks, no queued tasks
         # This is necessary because there's no way to parse a float infinite from
         # a DASK_* environment variable
         ("inf", (6, 4)),
@@ -671,6 +672,12 @@ def test_saturation_factor(
 async def test_bad_saturation_factor():
     with pytest.raises(ValueError, match="foo"):
         with dask.config.set({"distributed.scheduler.worker-saturation": "foo"}):
+            async with Scheduler(dashboard_address=":0"):
+                pass
+
+    # Negative values should be rejected
+    with pytest.raises(ValueError, match=">= 0"):
+        with dask.config.set({"distributed.scheduler.worker-saturation": -1.0}):
             async with Scheduler(dashboard_address=":0"):
                 pass
 

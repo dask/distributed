@@ -1838,10 +1838,10 @@ class SchedulerState:
             self.WORKER_SATURATION = math.inf
         if (
             not isinstance(self.WORKER_SATURATION, (int, float))
-            or self.WORKER_SATURATION <= 0
+            or self.WORKER_SATURATION < 0
         ):
             raise ValueError(  # pragma: nocover
-                "`distributed.scheduler.worker-saturation` must be a float > 0; got "
+                "`distributed.scheduler.worker-saturation` must be a float >= 0; got "
                 + repr(self.WORKER_SATURATION)
             )
 
@@ -9278,8 +9278,19 @@ def heartbeat_interval(n: int) -> float:
 
 
 def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
-    """Number of tasks that can be sent to this worker without oversaturating it"""
+    """Number of tasks that can be sent to this worker without oversaturating it
+
+    When saturation_factor is 0, tasks are only sent to completely idle workers
+    (no queuing). This is useful for long-running tasks where you want to avoid
+    head-of-line blocking.
+    """
     assert not math.isinf(saturation_factor)
+
+    # Special case: saturation_factor == 0 means no queuing
+    # Only send tasks to fill idle threads (no tasks beyond thread count)
+    if saturation_factor == 0:
+        return ws.nthreads - (len(ws.processing) - len(ws.long_running))
+
     return max(math.ceil(saturation_factor * ws.nthreads), 1) - (
         len(ws.processing) - len(ws.long_running)
     )

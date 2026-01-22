@@ -116,7 +116,7 @@ properties:
           worker-saturation:
             oneOf:
               - type: number
-                exclusiveMinimum: 0
+                minimum: 0
               # String "inf", not to be confused with .inf which in YAML means float
               # infinity. This is necessary because there's no way to parse a float
               # infinity from a DASK_* environment variable.
@@ -125,7 +125,13 @@ properties:
               Controls how many root tasks are sent to workers (like a `readahead`).
 
               Up to worker-saturation * nthreads root tasks are sent to a
-              worker at a time. If `.inf`, all runnable tasks are immediately sent to workers.
+              worker at a time.
+
+              Special values:
+              - 0: Only send tasks to completely idle workers (no queuing). Useful for
+                   long-running tasks to avoid head-of-line blocking.
+              - .inf: All runnable tasks are immediately sent to workers.
+
               The target number is rounded up, so any `worker-saturation` value > 1.0 guarantees
               at least one extra task will be sent to workers.
 
