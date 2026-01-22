@@ -146,3 +146,4 @@ __all__ = [
     "widgets",
     "worker_client",
 ]
+from distributed.condition import Condition
