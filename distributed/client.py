@@ -302,13 +302,13 @@ class Future(TaskRef, Generic[_T]):
     # Make sure this stays unique even across multiple processes or hosts
     _uid = uuid.uuid4().hex
 
-    def __init__(self, key, client=None, state=None, _id=None):
+    def __init__(self, key: str | tuple, client=None, state=None, _id=None):
         self.key = key
         self._cleared = False
         self._client = client
         self._id = _id or (Future._uid, next(Future._counter))
         self._input_state = state
-        self._state = None
+        self._state: FutureState | None = None
         self._bind_late()
 
     @property
@@ -358,13 +358,17 @@ class Future(TaskRef, Generic[_T]):
         return self.client
 
     @property
-    def status(self):
-        """Returns the status
+    def status(
+        self,
+    ) -> Literal["cancelled", "error", "finished", "lost", "pending"] | None:
+        """The status of the future.
 
         Returns
         -------
-        str
-            The status
+        {"cancelled", "error", "finished", "lost", "pending"}
+            The current status. This may be None if the future has not been
+            bound to a client.
+
         """
         if self._state:
             return self._state.status
@@ -640,6 +644,8 @@ class FutureState:
     """
 
     __slots__ = ("_event", "key", "status", "type", "exception", "traceback")
+
+    status: Literal["cancelled", "error", "finished", "lost", "pending"]
 
     def __init__(self, key: str):
         self._event = None
