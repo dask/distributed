@@ -4329,12 +4329,8 @@ class Scheduler(SchedulerState, ServerNode):
         timeout: float | None = None,
         reason: str = "unknown",
     ) -> None:
-        """Send cleanup signal to all coroutines then wait until finished
-
-        See Also
-        --------
-        Scheduler.cleanup
-        """
+        """Send cleanup signal to all coroutines then wait until finished"""
+        
         if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
