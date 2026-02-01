@@ -358,22 +358,13 @@ class Future(TaskRef, Generic[_T]):
         return self.client
 
     @property
-    def status(
-        self,
-    ) -> Literal["pending", "cancelled", "finished", "lost", "error"] | None:
+    def status(self):
         """Returns the status
 
         Returns
         -------
         str
             The status
-            The status of the future. Possible values:
-            - "pending": The future is waiting to be computed
-            - "finished": The future has completed successfully
-            - "error": The future encountered an error during computation
-            - "cancelled": The future was cancelled
-            - "lost": The future's data was lost from memory
-            - None: The future is not yet bound to a client
         """
         if self._state:
             return self._state.status
@@ -654,9 +645,7 @@ class FutureState:
         self._event = None
         self.key = key
         self.exception = None
-        self.status: Literal["pending", "cancelled", "finished", "lost", "error"] = (
-            "pending"
-        )
+        self.status = "pending"
         self.traceback = None
         self.type = None
 
@@ -810,7 +799,8 @@ def _handle_warn(event):
             # TypeError makes sense here because it's analogous to calling a
             # function without a required positional argument
             raise TypeError(
-                '_handle_warn: client received a warn event missing the required "message" argument.'
+                "_handle_warn: client received a warn event missing the required "
+                '"message" argument.'
             )
         if "category" in msg:
             category = pickle.loads(msg["category"])
@@ -1530,7 +1520,8 @@ class Client(SyncMethodMixin):
             st.cancel(
                 reason="scheduler-connection-lost",
                 msg=(
-                    "Client lost the connection to the scheduler. Please check your connection and re-run your work."
+                    "Client lost the connection to the scheduler. "
+                    "Please check your connection and re-run your work."
                 ),
             )
         self.futures.clear()
@@ -1551,7 +1542,8 @@ class Client(SyncMethodMixin):
 
         else:
             logger.error(
-                "Failed to reconnect to scheduler after %.2f seconds, closing client",
+                "Failed to reconnect to scheduler after %.2f "
+                "seconds, closing client",
                 self._timeout,
             )
             await self._close()
@@ -1706,7 +1698,8 @@ class Client(SyncMethodMixin):
                 if not e.args[0].endswith(" was created in a different Context"):
                     raise  # pragma: nocover
                 warnings.warn(
-                    "It is deprecated to enter and exit the Client context manager from different tasks",
+                    "It is deprecated to enter and exit the Client context "
+                    "manager from different tasks",
                     DeprecationWarning,
                     stacklevel=2,
                 )
@@ -1724,7 +1717,8 @@ class Client(SyncMethodMixin):
                 if not e.args[0].endswith(" was created in a different Context"):
                     raise  # pragma: nocover
                 warnings.warn(
-                    "It is deprecated to enter and exit the Client context manager from different threads",
+                    "It is deprecated to enter and exit the Client context "
+                    "manager from different threads",
                     DeprecationWarning,
                     stacklevel=2,
                 )
@@ -2883,7 +2877,8 @@ class Client(SyncMethodMixin):
         if name:
             if len(args) == 0:
                 raise ValueError(
-                    "If name is provided, expecting call signature like publish_dataset(df, name='ds')"
+                    "If name is provided, expecting call signature like"
+                    " publish_dataset(df, name='ds')"
                 )
             # in case this is a singleton, collapse it
             elif len(args) == 1:
@@ -3099,7 +3094,6 @@ class Client(SyncMethodMixin):
             elif resp["status"] == "error":
                 # Exception raised by the remote function
                 _, exc, tb = clean_exception(**resp)
-                assert exc is not None
                 exc = exc.with_traceback(tb)
             else:
                 assert resp["status"] == "OK"
@@ -3112,7 +3106,8 @@ class Client(SyncMethodMixin):
                 results[key] = exc
             elif on_error != "ignore":
                 raise ValueError(
-                    f"on_error must be 'raise', 'return', or 'ignore'; got {on_error!r}"
+                    "on_error must be 'raise', 'return', or 'ignore'; "
+                    f"got {on_error!r}"
                 )
 
         if wait:
@@ -3234,14 +3229,16 @@ class Client(SyncMethodMixin):
         )
         if not isinstance(ignore_modules, list):
             raise TypeError(
-                f"Ignored modules must be a list. Instead got ({type(ignore_modules)}, {ignore_modules})"
+                "Ignored modules must be a list. Instead got "
+                f"({type(ignore_modules)}, {ignore_modules})"
             )
         ignore_files = dask.config.get(
             "distributed.diagnostics.computations.ignore-files"
         )
         if not isinstance(ignore_files, list):
             raise TypeError(
-                f"Ignored files must be a list. Instead got ({type(ignore_files)}, {ignore_files})"
+                "Ignored files must be a list. Instead got "
+                f"({type(ignore_files)}, {ignore_files})"
             )
 
         mod_pattern: re.Pattern | None = None
@@ -3252,20 +3249,8 @@ class Client(SyncMethodMixin):
                     "|".join([f"(?:{mod})" for mod in ignore_modules])
                 )
             if ignore_files:
-                # Given ignore-files = [foo], match:
-                #   /path/to/foo
-                #   /path/to/foo.py[c]
-                #   /path/to/foo/bar.py[c]
-                #   \path\to\foo
-                #   \path\to\foo.py[c]
-                #   \path\to\foo\bar.py[c]
-                #   <frozen foo>
-                # Do not match files that have 'foo' as a substring,
-                # unless the user explicitly states '.*foo.*'.
-                ignore_files_or = "|".join(mod for mod in ignore_files)
                 fname_pattern = re.compile(
-                    rf".*[\\/]({ignore_files_or})([\\/]|\.pyc?$|$)"
-                    rf"|<frozen ({ignore_files_or})>$"
+                    r".*[\\/](" + "|".join(mod for mod in ignore_files) + r")([\\/]|$)"
                 )
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
@@ -5193,7 +5178,8 @@ class Client(SyncMethodMixin):
             Do not re-register if a plugin of the given name already exists.
         """
         warnings.warn(
-            "`Client.register_scheduler_plugin` has been deprecated; please `Client.register_plugin` instead",
+            "`Client.register_scheduler_plugin` has been deprecated; "
+            "please `Client.register_plugin` instead",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -5362,7 +5348,8 @@ class Client(SyncMethodMixin):
         unregister_worker_plugin
         """
         warnings.warn(
-            "`Client.register_worker_plugin` has been deprecated; please use `Client.register_plugin` instead",
+            "`Client.register_worker_plugin` has been deprecated; "
+            "please use `Client.register_plugin` instead",
             DeprecationWarning,
             stacklevel=2,
         )
