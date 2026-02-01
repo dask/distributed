@@ -17,6 +17,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import warnings
@@ -1152,7 +1153,9 @@ def popen(
     Parameters
     ----------
     args: list[str]
-        Command line arguments
+        Command line arguments.
+        The first argument is expected to be an executable.
+        If it is not an absolute path, this function assumes it is in ``sysconfig.get_path("scripts")``.
     capture_output: bool, default False
         Set to True if you need to read output from the subprocess.
         Stdout and stderr will both be piped to ``proc.stdout``.
@@ -1194,10 +1197,30 @@ def popen(
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
     args = list(args)
-    if sys.platform.startswith("win"):
-        args[0] = os.path.join(sys.prefix, "Scripts", args[0])
+    # avoid searching for executables... only accept absolute paths or look in this Python interpreter's default location for scripts
+    executable_path = args[0]
+    if not os.path.isabs(executable_path):
+        executable_path = os.path.join(sysconfig.get_path("scripts"), executable_path)
+
+    # On Windows, it's valid to start a process using only '{program-name}' and Windows will
+    # automatically find and execute '{program-name}.exe'.
+    #
+    # That allows e.g. `popen(["dask-worker"])` to work despite the installed file being called 'dask-worker.exe'.
+    #
+    # docs: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw
+    #
+    if WINDOWS:
+        executable_exists = os.path.isfile(executable_path) or os.path.isfile(
+            f"{executable_path}.exe"
+        )
     else:
-        args[0] = os.path.join(sys.prefix, "bin", args[0])
+        executable_exists = os.path.isfile(executable_path)
+    if not executable_exists:
+        raise FileNotFoundError(
+            f"Could not find '{executable_path}'. To avoid this warning, provide an absolute path to an existing installation to popen()."
+        )
+
+    args[0] = executable_path
     with subprocess.Popen(args, **kwargs) as proc:
         try:
             yield proc

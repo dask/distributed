@@ -1084,7 +1084,6 @@ async def test_heartbeat(c, s, a, b):
 
 
 @pytest.mark.skipif("not pa", reason="Requires PyArrow")
-@pytest.mark.filterwarnings("ignore:DatetimeTZBlock")  # pandas >=2.2 vs. pyarrow <15
 @pytest.mark.parametrize("drop_column", [True, False])
 def test_processing_chain(tmp_path, drop_column):
     """
@@ -3033,7 +3032,7 @@ class BarrierInputsDoneOSErrorPlugin(ShuffleWorkerPlugin):
                     # like a timeout while an exception that is being raised by
                     # the handler will be serialized and sent to the scheduler
                     comm.abort()
-                raise exc_type  # type: ignore
+                raise exc_type
         return await super().shuffle_inputs_done(*args, **kwargs)
 
 

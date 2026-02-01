@@ -26,20 +26,22 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.10", "3.11", "3.12", "3.13"]
+        environment: [mindeps, "3.10", "3.11", "3.12", "3.13", "3.14"]
         label: [default]
         extra_packages: [null]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
 
         exclude:
-          # MacOS CI does not have any hosts available; run it on 3.12 only
+          # MacOS CI does not have many hosts available; run it on 3.14 only
           - os: macos-latest
             environment: mindeps
           - os: macos-latest
             environment: "3.10"
           - os: macos-latest
             environment: "3.11"
+          - os: macos-latest
+            environment: "3.12"
           - os: macos-latest
             environment: "3.13"
 
@@ -73,12 +75,12 @@ jobs:
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=16.0]
             partition: "ci1"
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
-            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=14.0.1]
+            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=16.0]
             partition: "not ci1"
 
           - os: ubuntu-latest
@@ -145,7 +147,7 @@ jobs:
 
       - name: Cache Conda env
         if: steps.skip-caching.outputs.trigger-found != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CONDA }}/envs
           key: conda-${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
@@ -281,7 +283,7 @@ jobs:
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.TEST_ID }}
           path: reports
@@ -291,7 +293,7 @@ jobs:
         if: >
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.TEST_ID }}_cluster_dumps
           path: test_cluster_dump
@@ -305,7 +307,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Upload
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: Event File
           path: ${{ github.event_path }}
