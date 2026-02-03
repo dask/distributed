@@ -367,6 +367,7 @@ class Future(TaskRef, Generic[_T]):
         -------
         str or None
             The status of the future. Possible values:
+
             - "pending": The future is waiting to be computed
             - "finished": The future has completed successfully
             - "error": The future encountered an error during computation
