@@ -358,13 +358,22 @@ class Future(TaskRef, Generic[_T]):
         return self.client
 
     @property
-    def status(self):
+    def status(
+        self,
+    ) -> Literal["pending", "cancelled", "finished", "lost", "error"] | None:
         """Returns the status
 
         Returns
         -------
-        str
-            The status
+        str or None
+            The status of the future. Possible values:
+
+            - "pending": The future is waiting to be computed
+            - "finished": The future has completed successfully
+            - "error": The future encountered an error during computation
+            - "cancelled": The future was cancelled
+            - "lost": The future's data was lost from memory
+            - None: The future is not yet bound to a client
         """
         if self._state:
             return self._state.status
@@ -645,7 +654,9 @@ class FutureState:
         self._event = None
         self.key = key
         self.exception = None
-        self.status = "pending"
+        self.status: Literal["pending", "cancelled", "finished", "lost", "error"] = (
+            "pending"
+        )
         self.traceback = None
         self.type = None
 
