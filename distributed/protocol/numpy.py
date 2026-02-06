@@ -216,4 +216,11 @@ def deserialize_numpy_maskedarray(header, frames):
     if pickled_fv:
         fill_value = pickle.loads(fill_value)
 
+    # Ensure fill_value is compatible with dtype
+    if fill_value is not None:
+        try:
+            fill_value = np.array(fill_value, dtype=data.dtype).item()
+        except (OverflowError, ValueError, TypeError):
+            fill_value = np.ma.default_fill_value(data.dtype)
+
     return np.ma.masked_array(data, mask=mask, fill_value=fill_value)
