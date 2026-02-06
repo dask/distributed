@@ -224,4 +224,3 @@ def deserialize_numpy_maskedarray(header, frames):
             fill_value = np.ma.default_fill_value(data.dtype)
 
     return np.ma.masked_array(data, mask=mask, fill_value=fill_value)
-
