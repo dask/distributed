@@ -216,7 +216,7 @@ def deserialize_numpy_maskedarray(header, frames):
     if pickled_fv:
         fill_value = pickle.loads(fill_value)
 
-       # Ensure fill_value is compatible with dtype
+    # Ensure fill_value is compatible with dtype
     if fill_value is not None:
         try:
             fill_value = np.array(fill_value, dtype=data.dtype).item()
