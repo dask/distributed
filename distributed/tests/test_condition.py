@@ -181,12 +181,12 @@ async def test_condition_wait_for_already_true(c, s, a, b):
 @gen_cluster(client=True)
 async def test_condition_context_manager(c, s, a, b):
     condition = Condition()
-    assert not condition.locked()
+    assert not await condition.locked()
 
     async with condition:
-        assert condition.locked()
+        assert await condition.locked()
 
-    assert not condition.locked()
+    assert not await condition.locked()
 
 
 @gen_cluster(client=True)
@@ -195,9 +195,9 @@ async def test_condition_with_explicit_lock(c, s, a, b):
     condition = Condition(lock=lock)
 
     async with lock:
-        assert condition.locked()
+        assert await condition.locked()
 
-    assert not condition.locked()
+    assert not await condition.locked()
 
 
 @gen_cluster(client=True)
@@ -310,13 +310,13 @@ async def test_condition_waiter_cancelled(c, s, a, b):
 @gen_cluster(client=True)
 async def test_condition_locked_status(c, s, a, b):
     condition = Condition()
-    assert not condition.locked()
+    assert not await condition.locked()
 
     await condition.acquire()
-    assert condition.locked()
+    assert await condition.locked()
 
     await condition.release()
-    assert not condition.locked()
+    assert not await condition.locked()
 
 
 @gen_cluster(client=True)
@@ -326,15 +326,15 @@ async def test_condition_reacquire_after_wait(c, s, a, b):
 
     async def waiter():
         async with condition:
-            lock_states.append(("before_wait", condition.locked()))
+            lock_states.append(("before_wait", await condition.locked()))
             await condition.wait()
-            lock_states.append(("after_wait", condition.locked()))
+            lock_states.append(("after_wait", await condition.locked()))
 
     task = asyncio.create_task(waiter())
     await asyncio.sleep(0.1)
 
     async with condition:
-        lock_states.append(("notifier", condition.locked()))
+        lock_states.append(("notifier", await condition.locked()))
         await condition.notify()
 
     await task

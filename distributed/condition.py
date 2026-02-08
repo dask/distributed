@@ -120,7 +120,7 @@ class Condition:
         self.name = name or "condition-" + uuid.uuid4().hex
 
         if lock is None:
-            lock = Lock(client=client)
+            lock = Lock()
         elif not isinstance(lock, Lock):
             raise TypeError(f"lock must be a Lock, not {type(lock)}")
 
@@ -138,7 +138,8 @@ class Condition:
     def _verify_running(self):
         if not self.client:
             raise RuntimeError(
-                f"{type(self)} object not properly initialized. Ensure it's created within a Client context."
+                f"{type(self)} object not properly initialized. "
+                "Ensure it's created within a Client context."
             )
 
     async def __aenter__(self):
@@ -159,8 +160,8 @@ class Condition:
         self._verify_running()
         return await self._lock.release()
 
-    def locked(self):
-        return self._lock.locked()
+    async def locked(self):
+        return await self._lock.locked()
 
     async def wait(self, timeout=None):
         """Wait until notified.
