@@ -14,15 +14,17 @@ logger = logging.getLogger(__name__)
 
 
 class ConditionExtension:
-    """Scheduler extension for managing distributed Conditions
+    """Scheduler extension for managing distributed Conditions.
 
-    Tracks waiters for each condition variable and implements notify logic.
+    Waiters are keyed by (name, waiter_id) so multiple waiters from the
+    same client can coexist without overwriting each other's events.
     """
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        # name -> {client_id -> asyncio.Event}
+        # name -> {waiter_id -> asyncio.Event}
         self.waiters = defaultdict(dict)
+        self._closed = False
 
         self.scheduler.handlers.update(
             {
@@ -31,41 +33,49 @@ class ConditionExtension:
                 "condition_notify_all": self.notify_all,
             }
         )
+        self.scheduler.extensions["conditions"] = self
+
+    async def close(self):
+        """Cancel all pending waiters so scheduler can shut down cleanly."""
+        self._closed = True
+        for name in list(self.waiters):
+            for event in self.waiters[name].values():
+                event.set()
+            del self.waiters[name]
 
     @log_errors
-    async def wait(self, name=None, client=None):
-        """Register a waiter and block until notified"""
-        # Create event for this specific waiter
+    async def wait(self, name=None, waiter_id=None, **kwargs):
+        """Register a waiter and block until notified or closed."""
+        if self._closed:
+            return
+
         event = asyncio.Event()
-        self.waiters[name][client] = event
+        self.waiters[name][waiter_id] = event
 
         try:
-            # Block until notified
             await event.wait()
         finally:
-            # Cleanup after waking or cancellation
             with suppress(KeyError):
-                del self.waiters[name][client]
+                del self.waiters[name][waiter_id]
                 if not self.waiters[name]:
                     del self.waiters[name]
 
-    async def notify(self, name=None, n=1):
-        """Wake up n waiters"""
+    async def notify(self, name=None, n=1, **kwargs):
+        """Wake up to n waiters."""
         if name not in self.waiters:
             return
 
-        # Wake up to n waiters
         notified = 0
-        for client_id in list(self.waiters[name].keys()):
+        for wid in list(self.waiters[name]):
             if notified >= n:
                 break
-            event = self.waiters[name].get(client_id)
+            event = self.waiters[name].get(wid)
             if event and not event.is_set():
                 event.set()
                 notified += 1
 
-    async def notify_all(self, name=None):
-        """Wake up all waiters"""
+    async def notify_all(self, name=None, **kwargs):
+        """Wake all waiters."""
         if name not in self.waiters:
             return
 
@@ -99,11 +109,9 @@ class Condition:
     >>> condition = Condition()  # doctest: +SKIP
 
     >>> async with condition:  # doctest: +SKIP
-    ...     # Wait for some condition
     ...     await condition.wait()
 
     >>> async with condition:  # doctest: +SKIP
-    ...     # Modify shared state
     ...     condition.notify()  # Wake one waiter
     """
 
@@ -130,7 +138,8 @@ class Condition:
     def _verify_running(self):
         if not self.client:
             raise RuntimeError(
-                f"{type(self)} object not properly initialized. Ensure it's created within a Client context."
+                f"{type(self)} object not properly initialized. "
+                "Ensure it's created within a Client context."
             )
 
     async def __aenter__(self):
@@ -144,126 +153,86 @@ class Condition:
         return f"<Condition: {self.name}>"
 
     async def acquire(self, timeout=None):
-        """Acquire the underlying lock"""
         self._verify_running()
         return await self._lock.acquire(timeout=timeout)
 
     async def release(self):
-        """Release the underlying lock"""
         self._verify_running()
         return await self._lock.release()
 
     def locked(self):
-        """Return True if lock is held"""
         return self._lock.locked()
 
     async def wait(self, timeout=None):
         """Wait until notified.
 
-        This method releases the underlying lock, waits until notified,
-        then reacquires the lock before returning.
+        Releases the underlying lock, waits until notified, then reacquires
+        the lock before returning. Must be called with the lock held.
 
-        Must be called with the lock held.
-
-        Parameters
-        ----------
-        timeout : float, optional
-            Maximum time to wait in seconds. If None, wait indefinitely.
-
-        Returns
-        -------
-        bool
-            True if woken by notify, False if timeout occurred
-
-        Raises
-        ------
-        RuntimeError
-            If called without holding the lock
+        Returns True if woken by notify, False on timeout.
         """
         self._verify_running()
-
-        # Release lock before waiting (will error if not held)
         await self.release()
 
-        # Track if we need to reacquire (for proper cleanup on cancellation)
-        reacquired = False
+        # Each wait() call gets a unique ID so the scheduler can track
+        # multiple waiters from the same client independently.
+        waiter_id = uuid.uuid4().hex
 
         try:
-            # Wait for notification from scheduler
+            coro = self.client.scheduler.condition_wait(
+                name=self.name, waiter_id=waiter_id
+            )
             if timeout is not None:
                 try:
-                    await asyncio.wait_for(
-                        self.client.scheduler.condition_wait(
-                            name=self.name, client=self.client.id
-                        ),
-                        timeout=timeout,
-                    )
+                    await asyncio.wait_for(coro, timeout=timeout)
                     return True
                 except asyncio.TimeoutError:
                     return False
             else:
-                await self.client.scheduler.condition_wait(
-                    name=self.name, client=self.client.id
-                )
+                await coro
                 return True
         finally:
-            # CRITICAL: Always reacquire lock, even on cancellation
-            # This maintains the invariant that wait() returns with lock held
+            # Always reacquire lock — mirrors asyncio.Condition semantics
             try:
                 await self.acquire()
-                reacquired = True
             except asyncio.CancelledError:
-                # If reacquisition is cancelled, we're in a bad state
-                # Try again without allowing cancellation
-                if not reacquired:
-                    with suppress(Exception):
-                        await asyncio.shield(self.acquire())
+                with suppress(Exception):
+                    await asyncio.shield(self.acquire())
                 raise
 
     async def wait_for(self, predicate, timeout=None):
-        """Wait until a predicate becomes true.
+        """Wait until predicate() returns True.
 
-        Parameters
-        ----------
-        predicate : callable
-            Function that returns True when the condition is met
-        timeout : float, optional
-            Maximum time to wait in seconds
-
-        Returns
-        -------
-        bool
-            The predicate result (should be True unless timeout)
+        Returns the predicate result (True unless timeout).
         """
         result = predicate()
-        while not result:
-            if timeout is not None:
-                # Consume timeout across multiple waits
-                import time
+        if result:
+            return result
 
-                start = time.time()
-                if not await self.wait(timeout=timeout):
+        if timeout is not None:
+            import time
+
+            deadline = time.monotonic() + timeout
+            while not result:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     return predicate()
-                timeout -= time.time() - start
-                if timeout <= 0:
+                if not await self.wait(timeout=remaining):
                     return predicate()
-            else:
+                result = predicate()
+        else:
+            while not result:
                 await self.wait()
-            result = predicate()
+                result = predicate()
+
         return result
 
     async def notify(self, n=1):
-        """Wake up n waiters (default: 1)
-
-        Parameters
-        ----------
-        n : int
-            Number of waiters to wake up
-        """
+        """Wake up n waiters (default: 1)."""
         self._verify_running()
         await self.client.scheduler.condition_notify(name=self.name, n=n)
 
     async def notify_all(self):
-        """Wake up all waiters"""
+        """Wake up all waiters."""
         self._verify_running()
         await self.client.scheduler.condition_notify_all(name=self.name)
