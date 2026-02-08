@@ -138,8 +138,7 @@ class Condition:
     def _verify_running(self):
         if not self.client:
             raise RuntimeError(
-                f"{type(self)} object not properly initialized. "
-                "Ensure it's created within a Client context."
+                f"{type(self)} object not properly initialized. Ensure it's created within a Client context."
             )
 
     async def __aenter__(self):
@@ -179,9 +178,7 @@ class Condition:
         waiter_id = uuid.uuid4().hex
 
         try:
-            coro = self.client.scheduler.condition_wait(
-                name=self.name, waiter_id=waiter_id
-            )
+            coro = self.client.scheduler.condition_wait(name=self.name, waiter_id=waiter_id)
             if timeout is not None:
                 try:
                     await asyncio.wait_for(coro, timeout=timeout)
