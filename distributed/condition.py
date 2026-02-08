@@ -178,7 +178,9 @@ class Condition:
         waiter_id = uuid.uuid4().hex
 
         try:
-            coro = self.client.scheduler.condition_wait(name=self.name, waiter_id=waiter_id)
+            coro = self.client.scheduler.condition_wait(
+                name=self.name, waiter_id=waiter_id
+            )
             if timeout is not None:
                 try:
                     await asyncio.wait_for(coro, timeout=timeout)
