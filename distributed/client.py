@@ -5484,6 +5484,86 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
 
+    def has_plugin(
+        self, plugin: str | WorkerPlugin | SchedulerPlugin | NannyPlugin | Sequence
+    ) -> bool | dict[str, bool]:
+        """Check if plugin(s) are registered
+
+        Parameters
+        ----------
+        plugin : str | plugin object | Sequence
+            Plugin to check. You can use the plugin object directly or the plugin name.
+            For plugin objects, they must have a 'name' attribute. You can also pass
+            a sequence of plugin objects or names.
+
+        Returns
+        -------
+        bool or dict[str, bool]
+            If name is str: True if plugin is registered, False otherwise
+            If name is Sequence: dict mapping names to registration status
+
+        Examples
+        --------
+        >>> logging_plugin = LoggingConfigPlugin()  # Has name = "logging-config"
+        >>> client.register_plugin(logging_plugin)
+        >>> client.has_plugin(logging_plugin)
+        True
+
+        >>> client.has_plugin('logging-config')
+        True
+
+        >>> client.has_plugin([logging_plugin, 'other-plugin'])
+        {'logging-config': True, 'other-plugin': False}
+        """
+        return self.sync(self._has_plugin_async, plugin=plugin)
+
+    async def _has_plugin_async(
+        self, plugin: str | WorkerPlugin | SchedulerPlugin | NannyPlugin | Sequence
+    ) -> bool | dict[str, bool]:
+        """Async implementation for checking plugin registration"""
+
+        # Convert plugin to list of names
+        if isinstance(plugin, str):
+            names_to_check = [plugin]
+            return_single = True
+        elif isinstance(plugin, (WorkerPlugin, SchedulerPlugin, NannyPlugin)):
+            plugin_name = getattr(plugin, "name", None)
+            if plugin_name is None:
+                raise ValueError(
+                    f"Plugin {funcname(type(plugin))} has no 'name' attribute. "
+                    "Please add a 'name' attribute to your plugin class."
+                )
+            names_to_check = [plugin_name]
+            return_single = True
+        elif isinstance(plugin, Sequence):
+            names_to_check = []
+            for p in plugin:
+                if isinstance(p, str):
+                    names_to_check.append(p)
+                else:
+                    plugin_name = getattr(p, "name", None)
+                    if plugin_name is None:
+                        raise ValueError(
+                            f"Plugin {funcname(type(p))} has no 'name' attribute"
+                        )
+                    names_to_check.append(plugin_name)
+            return_single = False
+        else:
+            raise TypeError(
+                f"plugin must be a plugin object, name string, or Sequence. Got {type(plugin)}"
+            )
+
+        # Get status from scheduler
+        result = await self.scheduler.get_plugin_registration_status(
+            names=names_to_check
+        )
+
+        # Return single bool or dict based on input
+        if return_single:
+            return result[names_to_check[0]]
+        else:
+            return result
+
     @property
     def amm(self):
         """Convenience accessors for the :doc:`active_memory_manager`"""
