@@ -1,4 +1,4 @@
-name: dask-distributed-313
+name: dask-distributed
 channels:
   - conda-forge
 dependencies:
@@ -10,7 +10,7 @@ dependencies:
   - click
   - cloudpickle
   - coverage
-  - dask  # overridden by git tip below
+  - dask  # overridden by git tip below; pulls in optional dependencies
   - fsspec  # overridden by git tip below
   - gilknocker
   - h5py
