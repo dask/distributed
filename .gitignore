@@ -11,7 +11,7 @@ docs/build
 .coverage
 .coverage.*
 coverage.xml
-*.lock
+pytest.xml
 .#*
 .eggs/
 .idea/
