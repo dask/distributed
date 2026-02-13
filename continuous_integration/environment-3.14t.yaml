@@ -1,0 +1,79 @@
+name: dask-distributed
+channels:
+  - conda-forge
+dependencies:
+  - python-freethreading=3.14
+  - packaging
+  - pip
+  - asyncssh
+  - bokeh>3
+  - click
+  - cloudpickle
+  - coverage
+  # conda variant of dask depends on cytoolz, which is not available
+  # on conda yet. Manually install dask dependencies from conda below.
+  # - dask  # overridden by git tip below; pulls in optional dependencies
+  - fsspec  # overridden by git tip below
+  # - gilknocker  # Makes no sense in free-threading
+  # - h5py  # Not available for 3.14t
+  # - ipykernel  # Not available for 3.14t
+  - ipywidgets
+  - jinja2
+  - jupyter_events
+  # - jupyter-server-proxy  # Not available for 3.14t
+  # - jupyterlab  # Not available for 3.14t
+  - locket
+  # FIXME https://github.com/msgpack/msgpack-python/issues/613
+  # Install placeholder to prevent distributed below from compiling the C extension from
+  # sources. tests.yml will replace this with a pure-python variant.
+  - msgpack-python
+  - netcdf4
+  - paramiko
+  - pre-commit
+  - prometheus_client
+  - psutil
+  - pyarrow
+  - pytest
+  - pytest-cov
+  - pytest-faulthandler
+  - pytest-repeat
+  - pytest-rerunfailures
+  - pytest-timeout
+  - requests
+  - scikit-learn
+  - scipy
+  - sortedcollections
+  - tblib
+  - toolz
+  - tornado
+  - zict  # overridden by git tip below
+  - zstandard
+
+  ##### 3.14t temporary hacks
+  # packages normally pulled in by the `dask` conda package
+  - dask-core
+  # - cytoolz  # conda package for 3.14t not yet available; installed via pip below
+  - lz4
+  - numpy
+  - pandas>=3  # Actually need >=3.0.1 due to severe race conditions in 3.0
+               # (https://github.com/pandas-dev/pandas/pull/63783)
+               # Until 3.0.1 is released, this is temporarily overridden
+               # by pandas git below.
+  - pyarrow
+  - bokeh
+  - jinja2
+  - pyyaml
+  - sortedcontainers
+  - urllib3
+  ##### end 3.14t hacks
+
+  - pip:
+      - git+https://github.com/dask/dask
+      - git+https://github.com/dask/zict
+      - git+https://github.com/fsspec/filesystem_spec
+      - keras
+
+      ##### 3.14t temporary hacks
+      - cytoolz  # conda package for 3.14t not yet available
+      - git+https://github.com/pandas-dev/pandas.git@3.0.x  # Need pandas 3.0.1
+      ##### end 3.14t hacks
