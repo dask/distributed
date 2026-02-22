@@ -4308,7 +4308,7 @@ class WorkerTable(DashboardComponent):
                     total_data = (
                         sum(ws.metrics["cpu"] for ws in self.scheduler.workers.values())
                         / 100
-                        / len(self.scheduler.workers.values())
+                        / sum(ws.nthreads for ws in self.scheduler.workers.values())
                     )
                 elif name == "cpu_fraction":
                     total_data = (

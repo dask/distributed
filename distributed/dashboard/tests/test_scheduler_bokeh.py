@@ -564,6 +564,14 @@ async def test_WorkerTable(c, s, a, b):
     assert all(nthreads)
     assert nthreads[0] == nthreads[1] + nthreads[2]
 
+    # Total CPU should be normalized by sum(nthreads), not len(workers)
+    cpu = wt.source.data["cpu"]
+    total_nthreads = sum(ws.nthreads for ws in s.workers.values())
+    expected_cpu_total = (
+        sum(ws.metrics["cpu"] for ws in s.workers.values()) / 100 / total_nthreads
+    )
+    assert cpu[0] == expected_cpu_total
+
 
 @gen_cluster(client=True)
 async def test_WorkerTable_custom_metrics(c, s, a, b):
