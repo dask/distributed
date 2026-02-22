@@ -384,7 +384,10 @@ async def retry(
         try:
             return await coro()
         except retry_on_exceptions as ex:
-            operation = operation or str(coro)
+            if not operation:
+                operation = str(coro)
+                if len(operation) > 200:
+                    operation = operation[:200] + "..."
             logger.info(
                 f"Retrying {operation} after exception in attempt {i_try}/{count}: {ex}"
             )

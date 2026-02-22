@@ -229,6 +229,50 @@ def test_retry_does_retry_and_sleep(cleanup):
     assert sleep_calls == [0.0, 1.0, 3.0, 6.0, 6.0]
 
 
+def test_retry_truncates_large_coro_repr(cleanup):
+    """Test that retry truncates excessively large string representations of coro."""
+
+    class MyEx(Exception):
+        pass
+
+    class LargeReprCallable:
+        def __repr__(self):
+            return "x" * 500
+
+        async def __call__(self):
+            raise MyEx("fail")
+
+    log_messages = []
+
+    async def f():
+        return await retry(
+            LargeReprCallable(),
+            retry_on_exceptions=(MyEx,),
+            count=1,
+            delay_min=0,
+            delay_max=0,
+            jitter_fraction=0,
+        )
+
+    import logging
+
+    handler = logging.Handler()
+    handler.emit = lambda record: log_messages.append(record.getMessage())
+
+    logger = logging.getLogger("distributed.utils_comm")
+    logger.addHandler(handler)
+    try:
+        with pytest.raises(MyEx):
+            asyncio_run(f(), loop_factory=get_loop_factory())
+    finally:
+        logger.removeHandler(handler)
+
+    assert len(log_messages) == 1
+    # The 500-char repr should be truncated to 200 + "..."
+    assert len(log_messages[0]) < 500
+    assert "..." in log_messages[0]
+
+
 def test_unpack_remotedata():
     def assert_eq(keys1: set[TaskRef], keys2: set[TaskRef]) -> None:
         if len(keys1) != len(keys2):
