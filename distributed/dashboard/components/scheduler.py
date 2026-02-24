@@ -4076,6 +4076,7 @@ class WorkerTable(DashboardComponent):
             "host_disk_io.read_bps",
             "host_disk_io.write_bps",
             "cpu_fraction",
+            "_is_total",
         ]
         workers = self.scheduler.workers.values()
         self.extra_names = sorted(
@@ -4128,7 +4129,10 @@ class WorkerTable(DashboardComponent):
         }
 
         formatters = {
-            "cpu": NumberFormatter(format="0 %"),
+            "cpu": HTMLTemplateFormatter(
+                template='<% if (_is_total) { %><%= (value).toFixed(1) %>'
+                '<% } else { %><%= Math.round(value * 100) %> %<% } %>'
+            ),
             "memory_percent": NumberFormatter(format="0.0 %"),
             "memory": NumberFormatter(format="0.0 b"),
             "memory_limit": NumberFormatter(format="0.0 b"),
@@ -4281,10 +4285,14 @@ class WorkerTable(DashboardComponent):
             data["cpu"][-1] = ws.metrics["cpu"] / 100.0
             data["cpu_fraction"][-1] = ws.metrics["cpu"] / 100.0 / ws.nthreads
             data["nthreads"][-1] = ws.nthreads
+            data["_is_total"][-1] = False
 
         for name in self.names + self.extra_names:
             if name == "name":
                 data[name].insert(0, f"Total ({len(data[name])})")
+                continue
+            if name == "_is_total":
+                data[name].insert(0, True)
                 continue
             try:
                 if len(self.scheduler.workers) == 0:
@@ -4308,7 +4316,6 @@ class WorkerTable(DashboardComponent):
                     total_data = (
                         sum(ws.metrics["cpu"] for ws in self.scheduler.workers.values())
                         / 100
-                        / sum(ws.nthreads for ws in self.scheduler.workers.values())
                     )
                 elif name == "cpu_fraction":
                     total_data = (
