@@ -4130,8 +4130,8 @@ class WorkerTable(DashboardComponent):
 
         formatters = {
             "cpu": HTMLTemplateFormatter(
-                template='<% if (_is_total) { %><%= (value).toFixed(1) %>'
-                '<% } else { %><%= Math.round(value * 100) %> %<% } %>'
+                template="<% if (_is_total) { %><%= (value).toFixed(1) %>"
+                "<% } else { %><%= Math.round(value * 100) %> %<% } %>"
             ),
             "memory_percent": NumberFormatter(format="0.0 %"),
             "memory": NumberFormatter(format="0.0 b"),
