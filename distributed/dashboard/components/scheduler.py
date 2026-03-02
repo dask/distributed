@@ -4129,6 +4129,10 @@ class WorkerTable(DashboardComponent):
         }
 
         formatters = {
+            # Use a pure number (0 to nthreads) on the total line and a %
+            # (e.g. 0 to 400% for 4 threads per worker ) on the individual workers.
+            # It would be very confusing to read e.g. 9000% on the total, whereas
+            # seeing that ~90 CPU equivalents are being fully used is more meaningful.
             "cpu": HTMLTemplateFormatter(
                 template="<% if (_is_total) { %><%= (value).toFixed(1) %>"
                 "<% } else { %><%= Math.round(value * 100) %> %<% } %>"
