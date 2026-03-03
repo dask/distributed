@@ -5095,7 +5095,7 @@ class Client(SyncMethodMixin):
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
         name: str,
         idempotent: bool,
-    ):
+    ) -> Any:
         if isinstance(plugin, type):
             raise TypeError("Please provide an instance of a plugin, not a type.")
         if any(
