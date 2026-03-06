@@ -37,6 +37,7 @@ dependencies:
   - requests
   - scikit-learn
   - scipy
+  - setproctitle
   - sortedcollections
   - tblib
   - toolz
