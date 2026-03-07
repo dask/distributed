@@ -268,9 +268,12 @@ def test_retry_truncates_large_coro_repr(cleanup):
         logger.removeHandler(handler)
 
     assert len(log_messages) == 1
-    # The 500-char repr should be truncated to 200 + "..."
+    # reprlib truncates the 500-char repr to maxother (200) chars
     assert len(log_messages[0]) < 500
+    # reprlib uses "..." to indicate truncation
     assert "..." in log_messages[0]
+    # Verify the full 500-char repr is NOT present
+    assert "x" * 500 not in log_messages[0]
 
 
 def test_unpack_remotedata():
