@@ -2331,7 +2331,7 @@ class TaskGraph(DashboardComponent):
     @log_errors
     def update(self):
         # If there are too many tasks in the scheduler we'll disable this
-        # compoonents to not overload scheduler or client. Once we drop
+        # components to not overload scheduler or client. Once we drop
         # below the threshold, the data is filled up again as usual
         if len(self.scheduler.tasks) > self.max_items:
             self.subtitle.text = "Scheduler has too many tasks to display."
@@ -2863,7 +2863,7 @@ class TaskGroupGraph(DashboardComponent):
             # Add some status to hover
             tasks_processing = tg.states["processing"]
             tasks_memory = tg.states["memory"]
-            tasks_relased = tg.states["released"]
+            tasks_released = tg.states["released"]
             tasks_erred = tg.states["erred"]
 
             nodes_data["comp_tasks"].append(
@@ -2876,7 +2876,7 @@ class TaskGroupGraph(DashboardComponent):
                 f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
+                f"{tasks_released} ({tasks_released / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
                 f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
@@ -2963,7 +2963,7 @@ class TaskGroupProgress(DashboardComponent):
     def _should_update(self) -> bool:
         """
         Whether to update the ColumnDataSource. This is cheaper than redrawing,
-        but still not free, so we check whether we need it and whether the scheudler
+        but still not free, so we check whether we need it and whether the scheduler
         is busy.
         """
         return (

@@ -1321,7 +1321,7 @@ async def check_addresses(a, b):
 
 
 @gen_test()
-async def test_tcp_adresses(tcp):
+async def test_tcp_addresses(tcp):
     a, b = await get_tcp_comm_pair()
     await check_addresses(a, b)
 
@@ -1336,13 +1336,13 @@ async def test_get_stream_address_raises_if_closed():
 
 
 @gen_test()
-async def test_tls_adresses(tcp):
+async def test_tls_addresses(tcp):
     a, b = await get_tls_comm_pair()
     await check_addresses(a, b)
 
 
 @gen_test()
-async def test_inproc_adresses():
+async def test_inproc_addresses():
     a, b = await get_inproc_comm_pair()
     await check_addresses(a, b)
 

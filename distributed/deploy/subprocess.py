@@ -193,7 +193,7 @@ def SubprocessCluster(
     host:
         Host address on which the scheduler will listen, defaults to localhost
     scheduler_port:
-        Port fo the scheduler, defaults to 0 to choose a random port
+        Port for the scheduler, defaults to 0 to choose a random port
     scheduler_kwargs:
             Keywords to pass on to scheduler
     dashboard_address:

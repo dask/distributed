@@ -233,7 +233,7 @@ async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
         out = df.shuffle("x", npartitions=npartitions, force=True).values
 
     # See distributed#7816. TaskSpec is currently blocking linear fusion. If
-    # that was implemented, this may raise a P2PConsistencyErrro
+    # that was implemented, this may raise a P2PConsistencyError
 
     await c.compute(out)
 

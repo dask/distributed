@@ -2520,7 +2520,7 @@ async def test_traceback_clean(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_map_differnet_lengths(c, s, a, b):
+async def test_map_different_lengths(c, s, a, b):
     assert len(c.map(add, [1, 2], [1, 2, 3])) == 2
 
 

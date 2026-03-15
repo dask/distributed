@@ -36,17 +36,17 @@ def test_unpack_frames_partial():
     frames = [b"123", b"asdf"]
     frames.insert(0, pack_frames_prelude(frames))
 
-    frames2, missing_lenghts = unpack_frames(b"".join(frames), partial=True)
+    frames2, missing_lengths = unpack_frames(b"".join(frames), partial=True)
     assert frames2 == frames[1:]
-    assert missing_lenghts == []
+    assert missing_lengths == []
 
-    frames2, missing_lenghts = unpack_frames(b"".join(frames[:-1]), partial=True)
+    frames2, missing_lengths = unpack_frames(b"".join(frames[:-1]), partial=True)
     assert frames2 == frames[1:-1]
-    assert missing_lenghts == [4]
+    assert missing_lengths == [4]
 
-    frames2, missing_lenghts = unpack_frames(frames[0], partial=True)
+    frames2, missing_lengths = unpack_frames(frames[0], partial=True)
     assert frames2 == []
-    assert missing_lenghts == [3, 4]
+    assert missing_lengths == [3, 4]
 
     with pytest.raises(AssertionError):
         unpack_frames(b"".join(frames[:-1]))
