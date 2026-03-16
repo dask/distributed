@@ -1,4 +1,4 @@
-name: dask-distributed-313
+name: dask-distributed-314
 channels:
   - conda-forge
 dependencies:
@@ -6,7 +6,7 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  - bokeh>3
+  - bokeh>=3.9.0
   - click
   - cloudpickle
   - coverage
