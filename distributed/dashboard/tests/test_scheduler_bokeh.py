@@ -1373,7 +1373,7 @@ async def test_bokeh_relative(s, a, b):
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(f"http://localhost:{s.http_server.port}/status")
     assert response.code == 200
-    assert '<script type="text/javascript" src="static/' in response.body.decode()
+    assert '<script src="static/' in response.body.decode()
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
