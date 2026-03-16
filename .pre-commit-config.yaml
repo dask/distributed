@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.2
+    rev: v0.15.12
     hooks:
       - id: ruff-check
         # args: [--fix]
@@ -43,5 +43,5 @@ repos:
           - git+https://github.com/dask/zict
 
 # Increase this value to clear the cache on GitHub actions if nothing else in this file
-# has changed. See also same variable in .github/workflows/test.yaml
+# has changed. See also same variable in .github/workflows/tests.yaml
 # CACHE_NUMBER: 1
