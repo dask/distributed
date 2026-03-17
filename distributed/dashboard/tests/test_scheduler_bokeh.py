@@ -1341,10 +1341,7 @@ async def test_prefix_bokeh(s, a, b):
         f"http://localhost:{s.http_server.port}/{prefix}/status"
     )
     assert response.code == 200
-    assert (
-        f'<script type="text/javascript" src="/{prefix}/static/'
-        in response.body.decode()
-    )
+    assert f'src="/{prefix}/static/' in response.body.decode()
 
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
@@ -1373,7 +1370,7 @@ async def test_bokeh_relative(s, a, b):
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(f"http://localhost:{s.http_server.port}/status")
     assert response.code == 200
-    assert '<script src="static/' in response.body.decode()
+    assert 'src="static/' in response.body.decode()
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})

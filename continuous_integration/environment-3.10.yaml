@@ -1,4 +1,4 @@
-name: dask-distributed-310
+name: dask-distributed
 channels:
   - conda-forge
   - defaults
@@ -7,7 +7,7 @@ dependencies:
   - packaging
   - pip
   - asyncssh
-  - bokeh>=3.9.0
+  - bokeh
   - crick  # Only tested here; also a dependency of dask
   - click
   - cloudpickle
