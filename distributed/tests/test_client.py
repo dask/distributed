@@ -6615,6 +6615,31 @@ async def test_performance_report(c, s, a, b, local):
     assert "cdn.bokeh.org" in data
 
 
+def test_performance_report_template_uses_bokeh_base_template():
+    pytest.importorskip("bokeh")
+
+    from bokeh.core.templates import get_env
+    from bokeh.models import Div
+    from bokeh.plotting import output_file, save
+
+    template_directory = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "dashboard"
+        / "templates"
+    )
+    template_environment = get_env()
+    template_environment.loader.searchpath.append(str(template_directory))
+    template = template_environment.get_template("performance_report.html")
+
+    with tmpfile(extension=".html") as fn:
+        output_file(filename=fn, title="Dask Performance Report")
+        save(Div(text="template smoke test"), filename=fn, template=template)
+        data = pathlib.Path(fn).read_text()
+
+    assert "template smoke test" in data
+    assert "Dask Performance Report" in data
+
+
 @gen_cluster(client=True)
 async def test_as_completed_condition_loop(c, s, a, b):
     seq = c.map(inc, range(5))
