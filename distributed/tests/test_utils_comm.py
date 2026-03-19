@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from unittest import mock
 
@@ -229,7 +230,7 @@ def test_retry_does_retry_and_sleep(cleanup):
     assert sleep_calls == [0.0, 1.0, 3.0, 6.0, 6.0]
 
 
-def test_retry_truncates_large_coro_repr(cleanup):
+def test_retry_truncates_large_coro_repr(cleanup, caplog):
     """Test that retry truncates excessively large string representations of coro."""
 
     class MyEx(Exception):
@@ -242,8 +243,6 @@ def test_retry_truncates_large_coro_repr(cleanup):
         async def __call__(self):
             raise MyEx("fail")
 
-    log_messages = []
-
     async def f():
         return await retry(
             LargeReprCallable(),
@@ -254,26 +253,18 @@ def test_retry_truncates_large_coro_repr(cleanup):
             jitter_fraction=0,
         )
 
-    import logging
-
-    handler = logging.Handler()
-    handler.emit = lambda record: log_messages.append(record.getMessage())
-
-    logger = logging.getLogger("distributed.utils_comm")
-    logger.addHandler(handler)
-    try:
+    with caplog.at_level(logging.INFO, logger="distributed.utils_comm"):
         with pytest.raises(MyEx):
             asyncio_run(f(), loop_factory=get_loop_factory())
-    finally:
-        logger.removeHandler(handler)
 
-    assert len(log_messages) == 1
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].getMessage()
     # reprlib truncates the 500-char repr to maxother (200) chars
-    assert len(log_messages[0]) < 500
+    assert len(msg) < 500
     # reprlib uses "..." to indicate truncation
-    assert "..." in log_messages[0]
+    assert "..." in msg
     # Verify the full 500-char repr is NOT present
-    assert "x" * 500 not in log_messages[0]
+    assert "x" * 500 not in msg
 
 
 def test_unpack_remotedata():
