@@ -79,8 +79,14 @@ than workers with just a few excess tasks.
 Restrictions
 ~~~~~~~~~~~~
 
-If a task has been specifically restricted to run on particular workers (such
-as is the case when special hardware is required) then we do not steal.
+If a task has been specifically restricted to run on a subset of workers 
+(for example, using ``workers=...`` and ``allow_other_workers=False``, or by 
+requiring specific ``resources``, such as for specific hardware requirements 
+or constrained environments), the scheduler will still actively attempt to
+steal the task to balance the load.  
+However, the scheduler will strictly enforce those restrictions during the steal. 
+The task will only ever be stolen by an idle worker that is explicitly part of 
+the allowed worker subset and possesses the necessary available resources.
 
 Choosing tasks to steal
 -----------------------
