@@ -2890,17 +2890,17 @@ class Client(SyncMethodMixin):
             names.extend(args[0])
             data.extend(args[0].values())
 
+        # Prevent race condition where the client persists the collection immediately
+        # before publish_dataset, but the persist command hasn't landed on the scheduler
+        # yet when the publish_put RPC call arrives asynchronously.
         uid = uuid.uuid4().hex
-        self._send_to_scheduler(
-            {"op": "publish_flush_batched_send", "client": self.id, "uid": uid}
-        )
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
 
         await self.scheduler.publish_put(
             names=names,
             keys=[[f.key for f in futures_of(data_i)] for data_i in data],
             data=[to_serialize(data_i) for data_i in data],
             override=override,
-            client=self.id,
             uid=uid,
         )
 
@@ -2984,10 +2984,8 @@ class Client(SyncMethodMixin):
         # This method can't be made into just a batched send command as it would
         # create another race condition, where unpublish_dataset() followed by
         # get_dataset() would return the just-deleted data.
-        self._send_to_scheduler(
-            {"op": "publish_flush_batched_send", "client": self.id, "uid": uid}
-        )
-        await self.scheduler.publish_delete(names=names, client=self.id, uid=uid)
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
+        await self.scheduler.publish_delete(names=names, uid=uid)
 
     def unpublish_dataset(self, name: Key | list[Key], **kwargs):
         """
