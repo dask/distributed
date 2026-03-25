@@ -1457,16 +1457,6 @@ class Client(SyncMethodMixin):
                 f"Client is {self.status}. Can't send {msg['op']} message."
             )
 
-    async def flush_batched_send(self):
-        """Block until the batched send queue has been processed by the scheduler.
-        This prevents race conditions in any subsequent RPC calls.
-        """
-        uid = uuid.uuid4().bytes
-        self._send_to_scheduler(
-            {"op": "flush_batched_send", "client": self.id, "uid": uid}
-        )
-        await self.scheduler.wait_flush_batched_send(client=self.id, uid=uid)
-
     async def _start(self, timeout=no_default, **kwargs):
         self.status = "connecting"
 
@@ -2900,18 +2890,18 @@ class Client(SyncMethodMixin):
             names.extend(args[0])
             data.extend(args[0].values())
 
-        # Prevent race condition where the client persists the collection immediately
-        # before publish_dataset, but the persist command hasn't landed on the scheduler
-        # yet when the publish_put RPC call arrives asynchronously. This also guarantees
-        # that, by the time publish_dataset returns, it is safe to shut the client down
-        # or to have a remote task that called publish_dataset return.
-        await self.flush_batched_send()
+        uid = uuid.uuid4().hex
+        self._send_to_scheduler(
+            {"op": "publish_flush_batched_send", "client": self.id, "uid": uid}
+        )
 
         await self.scheduler.publish_put(
             names=names,
             keys=[[f.key for f in futures_of(data_i)] for data_i in data],
             data=[to_serialize(data_i) for data_i in data],
             override=override,
+            client=self.id,
+            uid=uid,
         )
 
     @overload
@@ -2985,6 +2975,8 @@ class Client(SyncMethodMixin):
         )
 
     async def _unpublish_dataset(self, name: Key | list[Key]) -> None:
+        names = name if isinstance(name, list) else [name]
+        uid = uuid.uuid4().hex
         # Prevent race condition where the user calls get_dataset() and immediately
         # afterwards unpublish_dataset(), thinking that they are holding a reference
         # to the futures locally, but the futures haven't been registered on the
@@ -2992,10 +2984,10 @@ class Client(SyncMethodMixin):
         # This method can't be made into just a batched send command as it would
         # create another race condition, where unpublish_dataset() followed by
         # get_dataset() would return the just-deleted data.
-        await self.flush_batched_send()
-
-        names = name if isinstance(name, list) else [name]
-        await self.scheduler.publish_delete(names=names)
+        self._send_to_scheduler(
+            {"op": "publish_flush_batched_send", "client": self.id, "uid": uid}
+        )
+        await self.scheduler.publish_delete(names=names, client=self.id, uid=uid)
 
     def unpublish_dataset(self, name: Key | list[Key], **kwargs):
         """
