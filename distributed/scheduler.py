@@ -83,7 +83,7 @@ from distributed import versions as version_module
 from distributed._asyncio import RLock
 from distributed._stories import scheduler_story
 from distributed.active_memory_manager import ActiveMemoryManagerExtension, RetireWorker
-from distributed.batched import BatchedSend
+from distributed.batched import BatchedSend, FlushBatchedSendExtension
 from distributed.broker import Broker
 from distributed.client import SourceCode
 from distributed.collections import HeapSet
@@ -187,6 +187,7 @@ DEFAULT_DATA_SIZE = parse_bytes(
 STIMULUS_ID_UNSET = "<stimulus_id unset>"
 
 DEFAULT_EXTENSIONS = {
+    "flush_batched_send": FlushBatchedSendExtension,
     "multi_locks": MultiLockExtension,
     "publish": PublishExtension,
     "replay-tasks": ReplayTaskScheduler,
@@ -5660,7 +5661,9 @@ class Scheduler(SchedulerState, ServerNode):
         for k in keys:
             ts = self.tasks.get(k)
             if ts is None:
-                warnings.warn(f"Client desires key {k!r} but key is unknown.")
+                warnings.warn(
+                    f"Client {client!r} desires key {k!r} but key is unknown."
+                )
                 continue
             if ts.who_wants is None:
                 ts.who_wants = set()

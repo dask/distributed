@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict
 from collections.abc import MutableMapping
+from typing import TYPE_CHECKING, TypedDict
 
+from dask.typing import Key
 from dask.utils import stringify
 
+from distributed.protocol.serialize import Serialized
 from distributed.utils import log_errors
+
+if TYPE_CHECKING:
+    from distributed.scheduler import Scheduler
+
+
+class PublishedDataset(TypedDict):
+    data: Serialized
+    keys: tuple[Key, ...]
 
 
 class PublishExtension:
@@ -18,51 +27,54 @@ class PublishExtension:
     *  publish_delete
     """
 
+    scheduler: Scheduler
+    datasets: dict[Key, PublishedDataset]
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.datasets = dict()
+        self.datasets = {}
 
         handlers = {
             "publish_list": self.list,
             "publish_put": self.put,
             "publish_get": self.get,
             "publish_delete": self.delete,
-            "publish_wait_flush": self.flush_wait,
         }
-        stream_handlers = {
-            "publish_flush_batched_send": self.flush_receive,
-        }
-
         self.scheduler.handlers.update(handlers)
-        self.scheduler.stream_handlers.update(stream_handlers)
-        self._flush_received = defaultdict(asyncio.Event)
-
-    def flush_receive(self, uid, **kwargs):
-        self._flush_received[uid].set()
-
-    async def flush_wait(self, uid):
-        await self._flush_received[uid].wait()
 
     @log_errors
-    def put(self, keys=None, data=None, name=None, override=False, client=None):
-        if not override and name in self.datasets:
-            raise KeyError("Dataset %s already exists" % name)
-        self.scheduler.client_desires_keys(keys, f"published-{stringify(name)}")
-        self.datasets[name] = {"data": data, "keys": keys}
-        return {"status": "OK", "name": name}
+    async def put(
+        self,
+        names: tuple[Key, ...],
+        keys: tuple[tuple[Key, ...], ...],
+        data: tuple[Serialized, ...],
+        override: bool,
+        client: str | None = None,
+    ) -> None:
+        if override:
+            self.delete(names)
+        for name, keys_i, data_i in zip(names, keys, data, strict=True):
+            if not override and name in self.datasets:
+                raise KeyError("Dataset %s already exists" % name)
+            self.scheduler.client_desires_keys(keys_i, f"published-{stringify(name)}")
+            self.datasets[name] = {"data": data_i, "keys": keys_i}
 
     @log_errors
-    def delete(self, name=None):
-        out = self.datasets.pop(name, {"keys": []})
-        self.scheduler.client_releases_keys(out["keys"], f"published-{stringify(name)}")
+    def delete(self, names: tuple[Key, ...]) -> None:
+        for name in names:
+            out = self.datasets.pop(name, None)
+            if out is not None:
+                self.scheduler.client_releases_keys(
+                    out["keys"], f"published-{stringify(name)}"
+                )
 
     @log_errors
-    def list(self, *args):
-        return list(sorted(self.datasets.keys(), key=str))
+    def list(self) -> list[Key]:
+        return list(sorted(self.datasets, key=str))
 
     @log_errors
-    def get(self, name=None, client=None):
-        return self.datasets.get(name, None)
+    def get(self, names: tuple[Key, ...]) -> list[PublishedDataset | None]:  # type: ignore[valid-type]
+        return [self.datasets.get(name, None) for name in names]
 
 
 class Datasets(MutableMapping):

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
-from collections import deque
-from typing import Any
+from collections import defaultdict, deque
+from typing import TYPE_CHECKING, Any
 
 from tornado import gen, locks
 from tornado.ioloop import IOLoop
@@ -13,6 +14,10 @@ from dask.utils import parse_timedelta
 
 from distributed.core import CommClosedError
 from distributed.metrics import time
+from distributed.utils import log_errors
+
+if TYPE_CHECKING:
+    from distributed.scheduler import Scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -195,3 +200,57 @@ class BatchedSend:
         self.waker.set()
         if not self.comm.closed():
             self.comm.abort()
+
+
+class FlushBatchedSendExtension:
+    """A scheduler extension to allow clients to synchronize their batched send stream
+    with subsequent RPC calls.
+
+    See matching client method :func:`Client.flush_batched_send`.
+    """
+
+    scheduler: Scheduler
+    _flush_received: defaultdict[bytes, asyncio.Event]
+
+    def __init__(self, scheduler: Scheduler):
+        self.scheduler = scheduler
+        scheduler.stream_handlers["flush_batched_send"] = self.flush_batched_send
+        scheduler.handlers["wait_flush_batched_send"] = self.wait_flush_batched_send
+        self._flush_received = defaultdict(asyncio.Event)
+
+    @log_errors
+    def flush_batched_send(self, client: str, uid: bytes) -> None:
+        """Batched send op: inform RPC call wait_flush_batched_send that the batched
+        send stream has been flushed.
+
+        This function may be executed before or after wait_flush_batched_send.
+        """
+        self._flush_received[uid].set()
+        self._client_disconnected_cleanup(client, uid)
+
+    @log_errors
+    async def wait_flush_batched_send(self, client: str, uid: bytes) -> None:
+        """Client RPC call: block until batched op flush_batched_send
+        has been executed.
+
+        This function may start before or after flush_batched_send.
+        """
+        ev_flush = self._flush_received[uid]
+        self._client_disconnected_cleanup(client, uid)
+        try:
+            await ev_flush.wait()
+        finally:
+            self._flush_received.pop(uid, None)
+
+    def _client_disconnected_cleanup(self, client: str, uid: bytes) -> None:
+        """Clean up event if client disconnects between flush_batched_send
+        and wait_flush_batched_send.
+        """
+        if uid not in self._flush_received:
+            return
+        if client in self.scheduler.clients:
+            loop = asyncio.get_event_loop()
+            loop.call_later(1, self._client_disconnected_cleanup, client, uid)
+        else:
+            self._flush_received[uid].set()
+            del self._flush_received[uid]

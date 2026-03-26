@@ -86,7 +86,7 @@ async def test_unpublish(c, s, a, b):
     key = data[0].key
     del data
 
-    await c.scheduler.publish_delete(name="data")
+    await c.unpublish_dataset(name="data")
 
     assert "data" not in s.extensions["publish"].datasets
 
