@@ -288,6 +288,30 @@ async def test_TaskProgress_empty(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_TaskProgress_no_worker(c, s, a, b):
+    """The no-worker state has special treatment as dashes cause issues in Bokeh"""
+    tp = TaskProgress(s)
+
+    future = c.submit(slowinc, 0, resources={"foo": 1})
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+
+    tp.update()
+    assert tp.source.data["all"] == [1]
+    assert tp.source.data["no_worker"] == [1]
+    assert tp.source.data["name"] == ["slowinc"]
+
+    del future
+    while s.tasks:
+        await asyncio.sleep(0.01)
+
+    tp.update()
+    assert tp.source.data["all"] == []
+    assert tp.source.data["no_worker"] == []
+    assert tp.source.data["name"] == []
+
+
+@gen_cluster(client=True)
 async def test_CurrentLoad(c, s, a, b):
     cl = CurrentLoad(s)
 
