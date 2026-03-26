@@ -3343,7 +3343,7 @@ class TaskProgress(DashboardComponent):
 
         for tp in self.scheduler.task_prefixes.values():
             states = tp.states
-            if any(states.get(s) for s in state.keys()):
+            if any(v for k, v in states.items() if k != "forgotten"):
                 state["memory"][tp.name] = states["memory"]
                 state["erred"][tp.name] = states["erred"]
                 state["released"][tp.name] = states["released"]
