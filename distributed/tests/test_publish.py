@@ -41,6 +41,8 @@ async def test_publish_non_string_names(c, s, a, b, name):
     await c.publish_dataset(future, name=name)
     datasets = await c.scheduler.publish_list()
     assert datasets == (name,)
+    # Note: name=("a", "b") tests that get_dataset and unpublish_dataset don't
+    # treat a single tuple name as a sequence of names.
     future = await c.get_dataset(name)
     await c.unpublish_dataset(name)
     assert await c.scheduler.publish_list() == ()

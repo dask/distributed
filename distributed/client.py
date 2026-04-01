@@ -2918,7 +2918,7 @@ class Client(SyncMethodMixin):
         self, *args: Any, name: Key | None = None, override: bool = False, **kwargs
     ):
         """
-        Publish named persisted datasets to scheduler
+        Publish named datasets to scheduler
 
         This stores a named reference to one or more dask collections or futures
         on the scheduler.  These references are available to other Clients
