@@ -4,7 +4,7 @@ import asyncio
 from collections import defaultdict
 from collections.abc import MutableMapping
 from typing import TYPE_CHECKING, TypedDict
-from contextlib import suppress
+
 from dask.typing import Key
 from dask.utils import stringify
 

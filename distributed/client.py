@@ -2924,8 +2924,9 @@ class Client(SyncMethodMixin):
         on the scheduler.  These references are available to other Clients
         which can download the collections or futures with ``get_dataset``.
 
-        Datasets are not immediately computed. You must call ``persist`` prior to
-        publishing a dataset.
+        Datasets are not immediately computed. You should call ``persist`` prior to
+        publishing a dataset. Any unpersisted keys will be stored on the scheduler
+        uncomputed and returned as-is to the user when calling ``get_dataset``.
 
         Parameters
         ----------
