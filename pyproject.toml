@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
     "Topic :: System :: Distributed Computing",
 ]
@@ -28,7 +29,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 3.0.0",
-    "dask >=2025.12.0,<2025.12.1",
+    "dask >=2026.3.0,<2026.3.1",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.2",
@@ -177,8 +178,6 @@ filterwarnings = [
     '''ignore:datetime\.datetime\.utc(fromtimestamp|now)\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:tornado''',
     # https://github.com/dateutil/dateutil/issues/1284
     '''ignore:datetime\.datetime\.utc(fromtimestamp|now)\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:dateutil''',
-    # https://github.com/dask/dask/pull/10622
-    '''ignore:Minimal version of pyarrow will soon be increased to 14.0.1''',
     '''ignore:the matrix subclass is not the recommended way''',
     '''ignore:The current Dask DataFrame implementation is deprecated.*:DeprecationWarning''',
 ]

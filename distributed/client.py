@@ -358,13 +358,22 @@ class Future(TaskRef, Generic[_T]):
         return self.client
 
     @property
-    def status(self):
+    def status(
+        self,
+    ) -> Literal["pending", "cancelled", "finished", "lost", "error"] | None:
         """Returns the status
 
         Returns
         -------
-        str
-            The status
+        str or None
+            The status of the future. Possible values:
+
+            - "pending": The future is waiting to be computed
+            - "finished": The future has completed successfully
+            - "error": The future encountered an error during computation
+            - "cancelled": The future was cancelled
+            - "lost": The future's data was lost from memory
+            - None: The future is not yet bound to a client
         """
         if self._state:
             return self._state.status
@@ -645,7 +654,9 @@ class FutureState:
         self._event = None
         self.key = key
         self.exception = None
-        self.status = "pending"
+        self.status: Literal["pending", "cancelled", "finished", "lost", "error"] = (
+            "pending"
+        )
         self.traceback = None
         self.type = None
 
@@ -3250,8 +3261,20 @@ class Client(SyncMethodMixin):
                     "|".join([f"(?:{mod})" for mod in ignore_modules])
                 )
             if ignore_files:
+                # Given ignore-files = [foo], match:
+                #   /path/to/foo
+                #   /path/to/foo.py[c]
+                #   /path/to/foo/bar.py[c]
+                #   \path\to\foo
+                #   \path\to\foo.py[c]
+                #   \path\to\foo\bar.py[c]
+                #   <frozen foo>
+                # Do not match files that have 'foo' as a substring,
+                # unless the user explicitly states '.*foo.*'.
+                ignore_files_or = "|".join(mod for mod in ignore_files)
                 fname_pattern = re.compile(
-                    r".*[\\/](" + "|".join(mod for mod in ignore_files) + r")([\\/]|$)"
+                    rf".*[\\/]({ignore_files_or})([\\/]|\.pyc?$|$)"
+                    rf"|<frozen ({ignore_files_or})>$"
                 )
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
@@ -5100,7 +5123,7 @@ class Client(SyncMethodMixin):
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
         name: str,
         idempotent: bool,
-    ):
+    ) -> Any:
         if isinstance(plugin, type):
             raise TypeError("Please provide an instance of a plugin, not a type.")
         if any(

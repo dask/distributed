@@ -30,6 +30,7 @@ np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 
 import dask.dataframe as dd
+from dask.dataframe._compat import PANDAS_GE_300
 from dask.typing import Key
 
 from distributed import (
@@ -232,7 +233,7 @@ async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
         out = df.shuffle("x", npartitions=npartitions, force=True).values
 
     # See distributed#7816. TaskSpec is currently blocking linear fusion. If
-    # that was implemented, this may raise a P2PConsistencyErrro
+    # that was implemented, this may raise a P2PConsistencyError
 
     await c.compute(out)
 
@@ -1084,7 +1085,6 @@ async def test_heartbeat(c, s, a, b):
 
 
 @pytest.mark.skipif("not pa", reason="Requires PyArrow")
-@pytest.mark.filterwarnings("ignore:DatetimeTZBlock")  # pandas >=2.2 vs. pyarrow <15
 @pytest.mark.parametrize("drop_column", [True, False])
 def test_processing_chain(tmp_path, drop_column):
     """
@@ -2436,6 +2436,7 @@ async def test_handle_null_partitions(c, s, a, b):
     await assert_scheduler_cleanup(s)
 
 
+@pytest.mark.xfail(PANDAS_GE_300, reason="dask/distributed#9184", strict=True)
 @gen_cluster(client=True)
 async def test_handle_null_partitions_2(c, s, a, b):
     def make_partition(i):
@@ -2448,7 +2449,7 @@ async def test_handle_null_partitions_2(c, s, a, b):
         ddf = dd.from_map(make_partition, range(5), meta={"a": float, "b": float})
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True, force=True)
-    result, expected = c.compute([ddf, out])
+    expected, result = c.compute([ddf, out])
     del out
     result = await result
     expected = await expected

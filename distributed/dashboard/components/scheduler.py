@@ -2331,7 +2331,7 @@ class TaskGraph(DashboardComponent):
     @log_errors
     def update(self):
         # If there are too many tasks in the scheduler we'll disable this
-        # compoonents to not overload scheduler or client. Once we drop
+        # components to not overload scheduler or client. Once we drop
         # below the threshold, the data is filled up again as usual
         if len(self.scheduler.tasks) > self.max_items:
             self.subtitle.text = "Scheduler has too many tasks to display."
@@ -2863,7 +2863,7 @@ class TaskGroupGraph(DashboardComponent):
             # Add some status to hover
             tasks_processing = tg.states["processing"]
             tasks_memory = tg.states["memory"]
-            tasks_relased = tg.states["released"]
+            tasks_released = tg.states["released"]
             tasks_erred = tg.states["erred"]
 
             nodes_data["comp_tasks"].append(
@@ -2876,7 +2876,7 @@ class TaskGroupGraph(DashboardComponent):
                 f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
+                f"{tasks_released} ({tasks_released / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
                 f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
@@ -2963,7 +2963,7 @@ class TaskGroupProgress(DashboardComponent):
     def _should_update(self) -> bool:
         """
         Whether to update the ColumnDataSource. This is cheaper than redrawing,
-        but still not free, so we check whether we need it and whether the scheudler
+        but still not free, so we check whether we need it and whether the scheduler
         is busy.
         """
         return (
@@ -3343,7 +3343,7 @@ class TaskProgress(DashboardComponent):
 
         for tp in self.scheduler.task_prefixes.values():
             states = tp.states
-            if any(states.get(s) for s in state.keys()):
+            if any(v for k, v in states.items() if k != "forgotten"):
                 state["memory"][tp.name] = states["memory"]
                 state["erred"][tp.name] = states["erred"]
                 state["released"][tp.name] = states["released"]
@@ -4076,6 +4076,7 @@ class WorkerTable(DashboardComponent):
             "host_disk_io.read_bps",
             "host_disk_io.write_bps",
             "cpu_fraction",
+            "_is_total",
         ]
         workers = self.scheduler.workers.values()
         self.extra_names = sorted(
@@ -4128,7 +4129,14 @@ class WorkerTable(DashboardComponent):
         }
 
         formatters = {
-            "cpu": NumberFormatter(format="0 %"),
+            # Use a pure number (0 to nthreads) on the total line and a %
+            # (e.g. 0 to 400% for 4 threads per worker ) on the individual workers.
+            # It would be very confusing to read e.g. 9000% on the total, whereas
+            # seeing that ~90 CPU equivalents are being fully used is more meaningful.
+            "cpu": HTMLTemplateFormatter(
+                template="<% if (_is_total) { %><%= (value).toFixed(1) %>"
+                "<% } else { %><%= Math.round(value * 100) %> %<% } %>"
+            ),
             "memory_percent": NumberFormatter(format="0.0 %"),
             "memory": NumberFormatter(format="0.0 b"),
             "memory_limit": NumberFormatter(format="0.0 b"),
@@ -4281,10 +4289,14 @@ class WorkerTable(DashboardComponent):
             data["cpu"][-1] = ws.metrics["cpu"] / 100.0
             data["cpu_fraction"][-1] = ws.metrics["cpu"] / 100.0 / ws.nthreads
             data["nthreads"][-1] = ws.nthreads
+            data["_is_total"][-1] = False
 
         for name in self.names + self.extra_names:
             if name == "name":
                 data[name].insert(0, f"Total ({len(data[name])})")
+                continue
+            if name == "_is_total":
+                data[name].insert(0, True)
                 continue
             try:
                 if len(self.scheduler.workers) == 0:
@@ -4308,7 +4320,6 @@ class WorkerTable(DashboardComponent):
                     total_data = (
                         sum(ws.metrics["cpu"] for ws in self.scheduler.workers.values())
                         / 100
-                        / len(self.scheduler.workers.values())
                     )
                 elif name == "cpu_fraction":
                     total_data = (

@@ -77,11 +77,11 @@ async def test_jupyter_idle_timeout():
         # time, which is used to determine idleness. Instead of a full e2e test
         # launching a kernel and running commands on it, we'll just hook into this:
         # https://github.com/jupyter-server/jupyter_server/blob/e582e555/jupyter_server/serverapp.py#L385-L387
-        extension_last_activty = web_app.settings["last_activity_times"]
+        extension_last_activity = web_app.settings["last_activity_times"]
 
         for _ in range(10):
             last = perf_counter()
-            extension_last_activty["test"] = datetime.now(timezone.utc)
+            extension_last_activity["test"] = datetime.now(timezone.utc)
 
             await asyncio.sleep(s.idle_timeout / 2)
             if (d := perf_counter() - last) >= s.idle_timeout:
@@ -99,12 +99,12 @@ async def test_jupyter_idle_timeout_returned():
     "`check_idle` should return the last Jupyter idle time. Used in dask-kubernetes."
     async with Scheduler(jupyter=True, dashboard_address=":0") as s:
         web_app = s._jupyter_server_application.web_app
-        extension_last_activty = web_app.settings["last_activity_times"]
+        extension_last_activity = web_app.settings["last_activity_times"]
 
-        extension_last_activty["test"] = datetime.now(timezone.utc)
+        extension_last_activity["test"] = datetime.now(timezone.utc)
         last_idle = s.check_idle()
         assert last_idle is not None
-        extension_last_activty["test"] = datetime.now(timezone.utc) + timedelta(
+        extension_last_activity["test"] = datetime.now(timezone.utc) + timedelta(
             seconds=1
         )
         next_idle = s.check_idle()

@@ -288,6 +288,30 @@ async def test_TaskProgress_empty(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_TaskProgress_no_worker(c, s, a, b):
+    """The no-worker state has special treatment as dashes cause issues in Bokeh"""
+    tp = TaskProgress(s)
+
+    future = c.submit(slowinc, 0, resources={"foo": 1})
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+
+    tp.update()
+    assert tp.source.data["all"] == [1]
+    assert tp.source.data["no_worker"] == [1]
+    assert tp.source.data["name"] == ["slowinc"]
+
+    del future
+    while s.tasks:
+        await asyncio.sleep(0.01)
+
+    tp.update()
+    assert tp.source.data["all"] == []
+    assert tp.source.data["no_worker"] == []
+    assert tp.source.data["name"] == []
+
+
+@gen_cluster(client=True)
 async def test_CurrentLoad(c, s, a, b):
     cl = CurrentLoad(s)
 
@@ -563,6 +587,17 @@ async def test_WorkerTable(c, s, a, b):
     nthreads = wt.source.data["nthreads"]
     assert all(nthreads)
     assert nthreads[0] == nthreads[1] + nthreads[2]
+
+    # Total CPU should show raw core count (sum of all worker CPU / 100)
+    cpu = wt.source.data["cpu"]
+    expected_cpu_total = sum(ws.metrics["cpu"] for ws in s.workers.values()) / 100
+    assert cpu[0] == expected_cpu_total
+
+    # _is_total flag should be set correctly
+    is_total = wt.source.data["_is_total"]
+    assert is_total[0] is True
+    assert is_total[1] is False
+    assert is_total[2] is False
 
 
 @gen_cluster(client=True)
@@ -1099,6 +1134,17 @@ async def test_proxy_to_workers(c, s, a, b):
         assert response_direct.code == 200
         assert b"System" in response_direct.body
 
+    if proxy_exists:
+        dashboard_port = s.http_server.port
+        http_client = AsyncHTTPClient()
+        unsafe_host = "<><><>"  # Some unsafe characters that should be escaped
+        proxy_url = f"http://localhost:{dashboard_port}/proxy/1234/{unsafe_host}/status"
+        response = await http_client.fetch(proxy_url, raise_error=False)
+        assert response.code == 400
+        assert (
+            unsafe_host not in response.body.decode()
+        ), "Unsafe characters should be escaped"
+
 
 @gen_cluster(
     client=True,
@@ -1319,10 +1365,7 @@ async def test_prefix_bokeh(s, a, b):
         f"http://localhost:{s.http_server.port}/{prefix}/status"
     )
     assert response.code == 200
-    assert (
-        f'<script type="text/javascript" src="/{prefix}/static/'
-        in response.body.decode()
-    )
+    assert f'src="/{prefix}/static/' in response.body.decode()
 
     bokeh_app = s.http_application.applications[0]
     assert isinstance(bokeh_app, BokehTornado)
@@ -1351,7 +1394,7 @@ async def test_bokeh_relative(s, a, b):
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(f"http://localhost:{s.http_server.port}/status")
     assert response.code == 200
-    assert '<script type="text/javascript" src="static/' in response.body.decode()
+    assert 'src="static/' in response.body.decode()
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})

@@ -27,11 +27,11 @@ requirements:
     - {{ pin_compatible('distributed', exact=True) }}
     - cytoolz >=0.11.2
     - lz4 >=4.3.2
-    - numpy >=1.21
+    - numpy >=1.24
     - pandas >=2
     - bokeh >=3.1.0
     - jinja2 >=2.10.3
-    - pyarrow >=7.0
+    - pyarrow >=16
 
   run_constrained:
     - openssl !=1.1.1e
