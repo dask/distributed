@@ -9275,14 +9275,14 @@ def heartbeat_interval(n: int) -> float:
 def _task_slots_available(ws: WorkerState, saturation_factor: float) -> int:
     """Number of tasks that can be sent to this worker without oversaturating it
 
-    When saturation_factor is 0, tasks are only sent to completely idle workers
-    (no queuing). This is useful for long-running tasks where you want to avoid
-    head-of-line blocking.
+    When saturation_factor is 0, tasks are only sent up to the worker's current
+    execution capacity (no scheduler-side queuing). This is useful for
+    long-running tasks where you want to avoid head-of-line blocking.
     """
     assert not math.isinf(saturation_factor)
 
     # Special case: saturation_factor == 0 means no queuing
-    # Only send tasks to fill idle threads (no tasks beyond thread count)
+    # Only send tasks to workers that still have an open execution slot.
     if saturation_factor == 0:
         return ws.nthreads - (len(ws.processing) - len(ws.long_running))
 

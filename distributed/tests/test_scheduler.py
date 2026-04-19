@@ -618,6 +618,44 @@ async def test_secede_opens_slot(c, s, a):
     await c.gather(fs)
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("", 2)],
+    config={"distributed.scheduler.worker-saturation": 0.0},
+)
+async def test_secede_opens_all_slots_when_queuing_disabled(c, s, a):
+    started = Event()
+    release_long_running = Event()
+    release_ordinary = Event()
+
+    def long_running(started, release):
+        started.set()
+        secede()
+        release.wait()
+
+    def ordinary(release):
+        release.wait()
+
+    long_future = c.submit(long_running, started, release_long_running, key="long")
+    await started.wait()
+    await async_poll_for(lambda: len(a.state.long_running) == 1, timeout=5)
+
+    ordinary_futures = c.map(
+        ordinary,
+        [release_ordinary, release_ordinary],
+        key=["ordinary-1", "ordinary-2"],
+    )
+    await async_poll_for(lambda: a.state.executing_count == a.state.nthreads, timeout=5)
+
+    ws = s.workers[a.address]
+    assert len(ws.long_running) == 1
+    assert len(ws.processing) == 1 + a.state.nthreads
+
+    await release_ordinary.set()
+    await release_long_running.set()
+    await c.gather([long_future, *ordinary_futures])
+
+
 @pytest.mark.parametrize(
     "saturation_config, expected_task_counts",
     [
