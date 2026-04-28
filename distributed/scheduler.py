@@ -2510,6 +2510,9 @@ class SchedulerState:
         typename: str,
         worker: str,
         startstops: list[StartStop],
+        # Other fields such as thread. They are unused here but are passed to
+        # SchedulerPlugin.transition and might be consumed by third-party plugins.
+        **kwargs: Any,
     ) -> RecsMsgs:
         ts = self.tasks[key]
 
@@ -2761,6 +2764,10 @@ class SchedulerState:
         traceback: Serialized | None = None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
+        # Other fields such as startstops and thread. They are unused here but are
+        # passed to SchedulerPlugin.transition and might be consumed by third-party
+        # plugins.
+        **kwargs: Any,
     ) -> RecsMsgs:
         """Processed a recommended transition processing -> erred.
 
@@ -5433,7 +5440,9 @@ class Scheduler(SchedulerState, ServerNode):
         key: Key,
         run_id: int,
         metadata: dict,
-        **kwargs: Any,  # nbytes, type, typename, worker, startstops
+        # nbytes, type, etc. Passed as-is to the transitions as well as
+        # to SchedulerPlugin.transition().
+        **kwargs: Any,
     ) -> RecsMsgs:
         """Mark that a task has finished execution on a particular worker"""
         logger.debug("Stimulus task finished %s[%d] %s", key, run_id, worker)
@@ -5497,7 +5506,9 @@ class Scheduler(SchedulerState, ServerNode):
                 if ts.metadata is None:
                     ts.metadata = {}
                 ts.metadata.update(metadata)
-            return self._transition(key, "memory", stimulus_id, worker=worker, **kwargs)
+            return self._transition(
+                key, "memory", stimulus_id, worker=worker, metadata=metadata, **kwargs
+            )
 
         return recommendations, client_msgs, worker_msgs
 
@@ -5508,10 +5519,9 @@ class Scheduler(SchedulerState, ServerNode):
         # Fields of worker_state_machine.TaskErredMsg
         key: Key,
         run_id: int,
-        exception: Any,
-        traceback: Any,
-        exception_text: str,
-        traceback_text: str,
+        # exception, traceback, etc. Passed as-is to the transitions as well as to
+        # SchedulerPlugin.transition().
+        **kwargs: Any,
     ) -> RecsMsgs:
         """Mark that a task has erred on a particular worker"""
         logger.debug("Stimulus task erred %s, %s", key, worker)
@@ -5534,11 +5544,8 @@ class Scheduler(SchedulerState, ServerNode):
                 "erred",
                 stimulus_id,
                 cause=key,
-                exception=exception,
-                traceback=traceback,
-                exception_text=exception_text,
-                traceback_text=traceback_text,
                 worker=worker,
+                **kwargs,
             )
 
     def stimulus_retry(

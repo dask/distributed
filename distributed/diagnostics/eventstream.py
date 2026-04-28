@@ -10,7 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 class EventStream(SchedulerPlugin):
-    """Maintain a copy of worker events"""
+    """Maintain a copy of processing->memory and processing->erred
+    task transition events
+    """
 
     def __init__(self, scheduler=None):
         self.name = "EventStream"
@@ -19,10 +21,9 @@ class EventStream(SchedulerPlugin):
             scheduler.add_plugin(self)
 
     def transition(self, key, start, finish, *args, **kwargs):
-        if start == "processing":
+        if start == "processing" and finish in ("memory", "erred"):
             kwargs["key"] = key
-            if finish == "memory" or finish == "erred":
-                self.buffer.append(kwargs)
+            self.buffer.append(kwargs)
 
 
 def swap_buffer(scheduler, es):

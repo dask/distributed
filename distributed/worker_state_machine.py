@@ -440,8 +440,14 @@ class TaskFinishedMsg(SendMessageToScheduler):
     type: bytes  # serialized class
     typename: str
     metadata: dict
+    thread: int | None
     startstops: list[StartStop]
     __slots__ = tuple(__annotations__)
+
+    def to_dict(self) -> dict[str, Any]:
+        d = super().to_dict()
+        d["status"] = "OK"
+        return d
 
 
 @dataclass
@@ -454,10 +460,19 @@ class TaskErredMsg(SendMessageToScheduler):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
+    thread: int | None
+    startstops: list[StartStop]
     __slots__ = tuple(__annotations__)
 
+    def to_dict(self) -> dict[str, Any]:
+        d = super().to_dict()
+        d["status"] = "error"
+        return d
+
     @staticmethod
-    def from_task(ts: TaskState, run_id: int, stimulus_id: str) -> TaskErredMsg:
+    def from_task(
+        ts: TaskState, run_id: int, stimulus_id: str, thread: int | None = None
+    ) -> TaskErredMsg:
         assert ts.exception
         return TaskErredMsg(
             key=ts.key,
@@ -466,6 +481,8 @@ class TaskErredMsg(SendMessageToScheduler):
             traceback=ts.traceback,
             exception_text=ts.exception_text,
             traceback_text=ts.traceback_text,
+            thread=thread,
+            startstops=ts.startstops,
             stimulus_id=stimulus_id,
         )
 
@@ -1764,6 +1781,7 @@ class WorkerState:
             type=type_serialized,
             typename=typename(ts.type),
             metadata=ts.metadata,
+            thread=self.threads.get(ts.key),
             startstops=ts.startstops,
             stimulus_id=stimulus_id,
         )
@@ -1987,7 +2005,12 @@ class WorkerState:
         ts.exception_text = exception_text
         ts.traceback_text = traceback_text
         ts.state = "error"
-        smsg = TaskErredMsg.from_task(ts, run_id=run_id, stimulus_id=stimulus_id)
+        smsg = TaskErredMsg.from_task(
+            ts,
+            run_id=run_id,
+            stimulus_id=stimulus_id,
+            thread=self.threads.get(ts.key),
+        )
 
         return {}, [smsg]
 
