@@ -2760,7 +2760,6 @@ class SchedulerState:
         traceback: Serialized | None = None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
-        **kwargs: Any,
     ) -> RecsMsgs:
         """Processed a recommended transition processing -> erred.
 
@@ -5427,9 +5426,10 @@ class Scheduler(SchedulerState, ServerNode):
 
     def stimulus_task_finished(
         self,
-        key: Key,
         worker: str,
         stimulus_id: str,
+        # Fields of worker_state_machine.TaskFinishedMsg
+        key: Key,
         run_id: int,
         metadata: dict,
         **kwargs: Any,  # nbytes, type, typename, worker, startstops
@@ -5502,13 +5502,15 @@ class Scheduler(SchedulerState, ServerNode):
 
     def stimulus_task_erred(
         self,
-        key: Key,
         worker: str,
-        exception: Any,
         stimulus_id: str,
-        traceback: Any,
+        # Fields of worker_state_machine.TaskErredMsg
+        key: Key,
         run_id: int,
-        **kwargs: Any,
+        exception: Any,
+        traceback: Any,
+        exception_text: str,
+        traceback_text: str,
     ) -> RecsMsgs:
         """Mark that a task has erred on a particular worker"""
         logger.debug("Stimulus task erred %s, %s", key, worker)
@@ -5533,8 +5535,9 @@ class Scheduler(SchedulerState, ServerNode):
                 cause=key,
                 exception=exception,
                 traceback=traceback,
+                exception_text=exception_text,
+                traceback_text=traceback_text,
                 worker=worker,
-                **kwargs,
             )
 
     def stimulus_retry(
