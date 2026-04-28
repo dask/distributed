@@ -2480,7 +2480,7 @@ class SchedulerState:
         self,
         key: Key,
         stimulus_id: str,
-        **kwargs: Any,
+        **kwargs: Any,  # Fields of worker_state_machine.TaskFinishedMsg
     ) -> RecsMsgs:
         """This transition exclusively happens in a race condition where the scheduler
         believes that the only copy of a dependency task has just been lost, so it
@@ -2504,6 +2504,7 @@ class SchedulerState:
         key: Key,
         stimulus_id: str,
         *,
+        # Fields of worker_state_machine.TaskFinishedMsg
         nbytes: int,
         type: bytes,
         typename: str,
