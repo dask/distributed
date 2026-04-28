@@ -5493,9 +5493,10 @@ class Scheduler(SchedulerState, ServerNode):
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
-            if ts.metadata is None:
-                ts.metadata = {}
-            ts.metadata.update(metadata)
+            if metadata:
+                if ts.metadata is None:
+                    ts.metadata = {}
+                ts.metadata.update(metadata)
             return self._transition(
                 key, "memory", stimulus_id, worker=worker, metadata=metadata, **kwargs
             )
