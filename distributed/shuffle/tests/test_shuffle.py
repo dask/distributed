@@ -77,7 +77,7 @@ from distributed.worker_state_machine import TaskState as WorkerTaskState
 try:
     import pyarrow as pa
 except ImportError:
-    pa = None
+    pa = None  # type: ignore[assignment]
 
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])

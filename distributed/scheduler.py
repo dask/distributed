@@ -167,7 +167,7 @@ TaskStateState: TypeAlias = Literal[
     "forgotten",
 ]
 
-ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore
+ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore[attr-defined]
 
 # {task key -> finish state}
 # Not to be confused with distributed.worker_state_machine.Recs
@@ -248,7 +248,7 @@ class ClientState:
     def __str__(self) -> str:
         return self.client_key
 
-    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Iterable[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -259,9 +259,7 @@ class ClientState:
         TaskState._to_dict
         """
         return recursive_to_dict(
-            self,
-            exclude=set(exclude) | {"versions"},  # type: ignore
-            members=True,
+            self, exclude=set(exclude) | {"versions"}, members=True
         )
 
 
@@ -677,7 +675,7 @@ class WorkerState:
         )
         ws._occupancy_cache = self.occupancy
 
-        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}  # type: ignore
+        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}  # type: ignore[misc]
         return ws
 
     def __repr__(self) -> str:
@@ -716,7 +714,7 @@ class WorkerState:
             **self.extra,
         }
 
-    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
+    def _to_dict_no_nest(self, *, exclude: Iterable[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -727,9 +725,7 @@ class WorkerState:
         TaskState._to_dict
         """
         return recursive_to_dict(
-            self,
-            exclude=set(exclude) | {"versions"},  # type: ignore
-            members=True,
+            self, exclude=set(exclude) | {"versions"}, members=True
         )
 
     @property
@@ -805,7 +801,7 @@ class WorkerState:
 
         self.nbytes -= ts.get_nbytes()
         del self._has_what[ts]
-        ts.who_has.remove(self)  # type: ignore
+        ts.who_has.remove(self)  # type: ignore[union-attr]
         if not ts.who_has:
             ts.who_has = None
 
@@ -1431,7 +1427,7 @@ class TaskState:
     __slots__ = tuple(__annotations__)
 
     #: Global iterator used to create unique task run IDs
-    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
+    _run_id_iterator: ClassVar[itertools.count[int]] = itertools.count()
 
     # Instances not part of slots since class variable
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
@@ -1829,21 +1825,17 @@ class SchedulerState:
             / 2.0
         )
 
-        self.WORKER_SATURATION = dask.config.get(
-            "distributed.scheduler.worker-saturation"
-        )
-        if self.WORKER_SATURATION == "inf":
+        worker_saturation = dask.config.get("distributed.scheduler.worker-saturation")
+        if worker_saturation == "inf":
             # Special case necessary because there's no way to parse a float infinity
             # from a DASK_* environment variable
-            self.WORKER_SATURATION = math.inf
-        if (
-            not isinstance(self.WORKER_SATURATION, (int, float))
-            or self.WORKER_SATURATION <= 0
-        ):
+            worker_saturation = math.inf
+        if not isinstance(worker_saturation, (int, float)) or worker_saturation <= 0:
             raise ValueError(  # pragma: nocover
                 "`distributed.scheduler.worker-saturation` must be a float > 0; got "
-                + repr(self.WORKER_SATURATION)
+                + repr(worker_saturation)
             )
+        self.WORKER_SATURATION = worker_saturation
 
         self.rootish_tg_threshold = dask.config.get(
             "distributed.scheduler.rootish-taskgroup"
@@ -2865,7 +2857,8 @@ class SchedulerState:
             failing_ts = self.tasks[cause]
             ts.exception_blame = failing_ts
         else:
-            failing_ts = ts.exception_blame  # type: ignore
+            assert ts.exception_blame is not None
+            failing_ts = ts.exception_blame
 
         self.erred_tasks.appendleft(
             ErredTask(
@@ -3889,7 +3882,7 @@ class Scheduler(SchedulerState, ServerNode):
                 auth_resource = "server"
 
                 @tornado.web.authenticated
-                @authorized  # type: ignore
+                @authorized  # type: ignore[untyped-decorator]
                 async def post(self) -> None:
                     """Shut down the server."""
                     self.log.info("Shutting down on /api/shutdown request.")
@@ -4080,7 +4073,8 @@ class Scheduler(SchedulerState, ServerNode):
             pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl * 1000)
             self.periodic_callbacks["worker-ttl"] = pc
 
-        pc = PeriodicCallback(self.check_idle, 250)  # type: ignore
+        # Ignore float return type
+        pc = PeriodicCallback(self.check_idle, 250)  # type: ignore[arg-type]
         self.periodic_callbacks["idle-timeout"] = pc
 
         pc = PeriodicCallback(self._check_no_workers, 250)
@@ -4556,7 +4550,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.workers[address] = ws = WorkerState(
             address=address,
-            status=Status.lookup[status],  # type: ignore
+            status=Status.lookup[status],  # type: ignore[attr-defined]
             pid=pid,
             nthreads=nthreads,
             memory_limit=memory_limit or 0,
@@ -5326,7 +5320,7 @@ class Scheduler(SchedulerState, ServerNode):
         exception: Any,
         stimulus_id: str,
         traceback: Any,
-        run_id: str,
+        run_id: int,
         **kwargs: Any,
     ) -> RecsMsgs:
         """Mark that a task has erred on a particular worker"""
@@ -7862,9 +7856,9 @@ class Scheduler(SchedulerState, ServerNode):
             function = pickle.loads(function)
         if setup:
             setup = pickle.loads(setup)
-
         if teardown:
             teardown = pickle.loads(teardown)
+
         state = setup(self) if setup else None  # type: ignore
         if inspect.isawaitable(state):
             state = await state

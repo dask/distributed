@@ -16,7 +16,7 @@ repos:
           types_or: [rst, markdown]
           files: docs
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
+    rev: v1.20.2
     hooks:
       - id: mypy
         # Override default --ignore-missing-imports
@@ -32,7 +32,7 @@ repos:
           - types-psutil
           - types-setuptools
           # Typed libraries
-          - click!=8.1.4  # https://github.com/pallets/click/issues/2558
+          - click
           - numpy
           - pytest
           - tornado
