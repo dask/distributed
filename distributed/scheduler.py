@@ -5045,8 +5045,7 @@ class Scheduler(SchedulerState, ServerNode):
                             "releasing all the data before resubmitting another "
                             "computation. More details and help can be found at "
                             "https://github.com/dask/dask/issues/9888. "
-                            + textwrap.dedent(
-                                f"""
+                            + textwrap.dedent(f"""
                                 Debugging information
                                 ---------------------
                                 old task state: {ts.state}
@@ -5054,8 +5053,7 @@ class Scheduler(SchedulerState, ServerNode):
                                 new run_spec: {dsk[k]!r}
                                 old dependencies: {deps_lhs}
                                 new dependencies: {deps_rhs}
-                                """
-                            )
+                                """)
                         )
                     else:
                         logger.debug(
