@@ -20,7 +20,7 @@ if ssl.OPENSSL_VERSION_INFO >= (1, 1, 0, 7):
     # https://docs.python.org/3.10/library/ssl.html#ssl.SSLContext.minimum_version
     # https://docs.python.org/3.7/library/ssl.html#ssl.SSLContext.minimum_version
 
-    # these _set_mimimun_version and _set_maximum_version depend on the validation
+    # these _set_minimum_version and _set_maximum_version depend on the validation
     # already performed in `Security._set_tls_version_field`,
     # and that they only apply to freshly created ssl.SSLContext instances in
     # _get_tls_context

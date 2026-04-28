@@ -2396,7 +2396,7 @@ async def test_gh2187(c, s, a, b):
 @gen_cluster(client=True)
 async def test_collect_versions(c, s, a, b):
     cs = s.clients[c.id]
-    (w1, w2) = s.workers.values()
+    w1, w2 = s.workers.values()
     assert cs.versions
     assert w1.versions
     assert w2.versions
@@ -3462,18 +3462,13 @@ def test_memorystate():
     with pytest.warns(FutureWarning):
         assert m.managed_in_memory == m.managed
 
-    assert (
-        repr(m)
-        == dedent(
-            """
+    assert repr(m) == dedent("""
             Process memory (RSS)  : 100 B
               - managed by Dask   : 68 B
               - unmanaged (old)   : 15 B
               - unmanaged (recent): 17 B
             Spilled to disk       : 12 B
-            """
-        ).lstrip()
-    )
+            """).lstrip()
 
 
 def test_memorystate_sum():
@@ -3879,14 +3874,12 @@ async def test_rebalance_raises_missing_data3(c, s, a, b, explicit):
     futures = await c.scatter(range(100), workers=[a.address])
 
     if explicit:
-        pytest.xfail(
-            reason="""Freeing keys and gathering data is using different
+        pytest.xfail(reason="""Freeing keys and gathering data is using different
                    channels (stream vs explicit RPC). Therefore, the
                    partial-fail is very timing sensitive and subject to a race
                    condition. This test assumes that the data is freed before
                    the rebalance get_data requests come in but merely deleting
-                   the futures is not sufficient to guarantee this"""
-        )
+                   the futures is not sufficient to guarantee this""")
         keys = [f.key for f in futures]
         del futures
         out = await s.rebalance(keys=keys)

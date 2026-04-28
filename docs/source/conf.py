@@ -468,7 +468,7 @@ class AutoAutoSummary(Autosummary):
 
     def run(self):
         clazz = str(self.arguments[0])
-        (module_name, class_name) = clazz.rsplit(".", 1)
+        module_name, class_name = clazz.rsplit(".", 1)
         m = __import__(module_name, globals(), locals(), [class_name])
         c = getattr(m, class_name)
         app = self.state.document.settings.env.app

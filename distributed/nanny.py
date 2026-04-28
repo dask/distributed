@@ -594,7 +594,7 @@ class Nanny(ServerNode):
             "Closing Nanny gracefully at %r. Reason: %s", self.address_safe, reason
         )
 
-    async def close(  # type:ignore[override]
+    async def close(  # type: ignore[override]
         self, timeout: float = 5, reason: str = "nanny-close"
     ) -> Literal["OK"]:
         """
