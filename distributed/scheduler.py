@@ -2509,7 +2509,6 @@ class SchedulerState:
         typename: str,
         worker: str,
         startstops: list[StartStop],
-        metadata: dict,
     ) -> RecsMsgs:
         ts = self.tasks[key]
 
@@ -5497,9 +5496,7 @@ class Scheduler(SchedulerState, ServerNode):
                 if ts.metadata is None:
                     ts.metadata = {}
                 ts.metadata.update(metadata)
-            return self._transition(
-                key, "memory", stimulus_id, worker=worker, metadata=metadata, **kwargs
-            )
+            return self._transition(key, "memory", stimulus_id, worker=worker, **kwargs)
 
         return recommendations, client_msgs, worker_msgs
 
