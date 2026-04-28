@@ -1748,7 +1748,7 @@ class WorkerState:
             assert ts.state == "memory"
             assert ts.key in self.data or ts.key in self.actors
             assert ts.type is not None
-            assert ts.nbytes is not None
+        assert ts.nbytes is not None
 
         try:
             type_serialized = pickle.dumps(ts.type)
@@ -1760,7 +1760,7 @@ class WorkerState:
         return TaskFinishedMsg(
             key=ts.key,
             run_id=run_id,
-            nbytes=ts.nbytes,  # type: ignore[arg-type]
+            nbytes=ts.nbytes,
             type=type_serialized,
             typename=typename(ts.type),
             metadata=ts.metadata,
