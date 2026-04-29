@@ -63,12 +63,19 @@ class PublishExtension:
         #   which unblocks `_sync_batched_send`.
         self._flush_received[uid].set()
 
-    async def _sync_batched_send(self, uid: bytes) -> None:
+    async def _sync_batched_send(self, client: str, uid: bytes) -> None:
         """Wait for the client's batched-send to catch up with the same client's RPC
         calls. Return True if the client is still connected; False otherwise.
         """
+        ev = self._flush_received[uid]
         try:
-            await self._flush_received[uid].wait()
+            while True:
+                try:
+                    await asyncio.wait_for(ev.wait(), timeout=30)
+                    return
+                except asyncio.TimeoutError:
+                    if client not in self.scheduler.clients:
+                        raise
         finally:
             del self._flush_received[uid]
 
@@ -79,9 +86,10 @@ class PublishExtension:
         keys: tuple[tuple[Key, ...], ...],
         data: tuple[Serialized, ...],
         override: bool,
+        client: str,
         uid: bytes,
     ) -> None:
-        await self._sync_batched_send(uid)
+        await self._sync_batched_send(client, uid)
 
         for name, keys_i, data_i in zip(names, keys, data, strict=True):
             if name in self.datasets:
@@ -97,8 +105,8 @@ class PublishExtension:
             self.datasets[name] = {"data": data_i, "keys": keys_i}
 
     @log_errors
-    async def delete(self, names: tuple[Key, ...], uid: bytes) -> None:
-        await self._sync_batched_send(uid)
+    async def delete(self, names: tuple[Key, ...], client: str, uid: bytes) -> None:
+        await self._sync_batched_send(client, uid)
 
         for name in names:
             out = self.datasets.pop(name, None)

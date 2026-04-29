@@ -2901,6 +2901,7 @@ class Client(SyncMethodMixin):
             keys=[[f.key for f in futures_of(data_i)] for data_i in data],
             data=[to_serialize(data_i) for data_i in data],
             override=override,
+            client=self.id,
             uid=uid,
         )
 
@@ -2986,7 +2987,7 @@ class Client(SyncMethodMixin):
         # create another race condition, where unpublish_dataset() followed by
         # get_dataset() would return the just-deleted data.
         self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
-        await self.scheduler.publish_delete(names=names, uid=uid)
+        await self.scheduler.publish_delete(names=names, client=self.id, uid=uid)
 
     def unpublish_dataset(self, name: Key | list[Key], **kwargs):
         """
