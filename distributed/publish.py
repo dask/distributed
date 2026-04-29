@@ -52,6 +52,15 @@ class PublishExtension:
         self._flush_received = defaultdict(asyncio.Event)
 
     def flush_batched_send(self, client: str, uid: bytes) -> None:
+        # Note that `self._flush_received` is a defaultdict.
+        # Either:
+        # - `flush_batched_send` runs first. The line below creates the event and
+        #   immediately sets it. When `_sync_batched_send` runs later on, it won't
+        #   block.
+        # Or:
+        # - `_sync_batched_send` runs first; it creates the event and leaves it unset,
+        #   then blocks. Later on, `flush_batched_send` retrieves the event and sets it,
+        #   which unblocks `_sync_batched_send`.
         self._flush_received[uid].set()
 
     async def _sync_batched_send(self, uid: bytes) -> None:
