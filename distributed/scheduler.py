@@ -144,6 +144,7 @@ from distributed.utils_comm import (
     scatter_to_workers,
 )
 from distributed.variable import VariableExtension
+from distributed.worker_state_machine import StartStop
 
 if TYPE_CHECKING:
     from typing import TypeAlias, TypeVar
@@ -1335,7 +1336,7 @@ class TaskState:
 
     #: The type of the object as a string. Only present for tasks that have been
     #: computed.
-    type: str
+    type: str | None
 
     #: If this task failed executing, the exception object is stored here.
     exception: Serialized | None
@@ -1471,7 +1472,7 @@ class TaskState:
         self.resource_restrictions = None
         self.loose_restrictions = False
         self.actor = False
-        self.type = None  # type: ignore
+        self.type = None
         self.metadata = None
         self.annotations = None
         self.erred_on = None
@@ -2479,12 +2480,7 @@ class SchedulerState:
         self,
         key: Key,
         stimulus_id: str,
-        *,
-        nbytes: int | None = None,
-        type: bytes | None = None,
-        typename: str | None = None,
-        worker: str,
-        **kwargs: Any,
+        **kwargs: Any,  # Fields of worker_state_machine.TaskFinishedMsg
     ) -> RecsMsgs:
         """This transition exclusively happens in a race condition where the scheduler
         believes that the only copy of a dependency task has just been lost, so it
@@ -2508,11 +2504,14 @@ class SchedulerState:
         key: Key,
         stimulus_id: str,
         *,
-        nbytes: int | None = None,
-        type: bytes | None = None,
-        typename: str | None = None,
+        # Fields of worker_state_machine.TaskFinishedMsg
+        nbytes: int,
+        type: bytes,
+        typename: str,
         worker: str,
-        startstops: list[dict] | None = None,
+        startstops: list[StartStop],
+        # Other fields such as thread. They are unused here but are passed to
+        # SchedulerPlugin.transition and might be consumed by third-party plugins.
         **kwargs: Any,
     ) -> RecsMsgs:
         ts = self.tasks[key]
@@ -2546,19 +2545,17 @@ class SchedulerState:
         #############################
         # Update Timing Information #
         #############################
-        if startstops:
-            for startstop in startstops:
-                ts.group.add_duration(
-                    stop=startstop["stop"],
-                    start=startstop["start"],
-                    action=startstop["action"],
-                )
+        for startstop in startstops:
+            ts.group.add_duration(
+                stop=startstop["stop"],
+                start=startstop["start"],
+                action=startstop["action"],
+            )
 
         ############################
         # Update State Information #
         ############################
-        if nbytes is not None:
-            ts.set_nbytes(nbytes)
+        ts.set_nbytes(nbytes)
 
         self._exit_processing_common(ts)
 
@@ -2767,6 +2764,9 @@ class SchedulerState:
         traceback: Serialized | None = None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
+        # Other fields such as startstops and thread. They are unused here but are
+        # passed to SchedulerPlugin.transition and might be consumed by third-party
+        # plugins.
         **kwargs: Any,
     ) -> RecsMsgs:
         """Processed a recommended transition processing -> erred.
@@ -3469,8 +3469,8 @@ class SchedulerState:
         ws: WorkerState,
         recommendations: Recs,
         client_msgs: Msgs,
-        type: bytes | None = None,
-        typename: str | None = None,
+        type: bytes,
+        typename: str,
     ) -> None:
         """Add ts to the set of in-memory tasks"""
         if self.validate:
@@ -3500,14 +3500,13 @@ class SchedulerState:
             recommendations[ts.key] = "released"
         else:
             report_msg: dict[str, Any] = {"op": "key-in-memory", "key": ts.key}
-            if type is not None:
-                report_msg["type"] = type
+            report_msg["type"] = type
             for cs in ts.who_wants or ():
                 client_msgs[cs.client_key] = [report_msg]
 
         ts.state = "memory"
-        ts.type = typename  # type: ignore
-        ts.group.add_type(typename)  # type: ignore
+        ts.type = typename
+        ts.group.add_type(typename)
 
         cs = self.clients["fire-and-forget"]
         if ts in cs.wants_what:
@@ -5434,7 +5433,16 @@ class Scheduler(SchedulerState, ServerNode):
                 assert not self.queued or self.queued.peek() != qts
 
     def stimulus_task_finished(
-        self, key: Key, worker: str, stimulus_id: str, run_id: int, **kwargs: Any
+        self,
+        worker: str,
+        stimulus_id: str,
+        # Fields of worker_state_machine.TaskFinishedMsg
+        key: Key,
+        run_id: int,
+        metadata: dict,
+        # nbytes, type, etc. Passed as-is to the transitions as well as
+        # to SchedulerPlugin.transition().
+        **kwargs: Any,
     ) -> RecsMsgs:
         """Mark that a task has finished execution on a particular worker"""
         logger.debug("Stimulus task finished %s[%d] %s", key, run_id, worker)
@@ -5494,22 +5502,25 @@ class Scheduler(SchedulerState, ServerNode):
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
-            if kwargs["metadata"]:
+            if metadata:
                 if ts.metadata is None:
-                    ts.metadata = dict()
-                ts.metadata.update(kwargs["metadata"])
-            return self._transition(key, "memory", stimulus_id, worker=worker, **kwargs)
+                    ts.metadata = {}
+                ts.metadata.update(metadata)
+            return self._transition(
+                key, "memory", stimulus_id, worker=worker, metadata=metadata, **kwargs
+            )
 
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
         self,
-        key: Key,
         worker: str,
-        exception: Any,
         stimulus_id: str,
-        traceback: Any,
+        # Fields of worker_state_machine.TaskErredMsg
+        key: Key,
         run_id: int,
+        # exception, traceback, etc. Passed as-is to the transitions as well as to
+        # SchedulerPlugin.transition().
         **kwargs: Any,
     ) -> RecsMsgs:
         """Mark that a task has erred on a particular worker"""
@@ -5533,8 +5544,6 @@ class Scheduler(SchedulerState, ServerNode):
                 "erred",
                 stimulus_id,
                 cause=key,
-                exception=exception,
-                traceback=traceback,
                 worker=worker,
                 **kwargs,
             )

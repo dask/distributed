@@ -436,7 +436,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
 
     key: Key
     run_id: int
-    nbytes: int | None
+    nbytes: int
     type: bytes  # serialized class
     typename: str
     metadata: dict
@@ -1765,7 +1765,7 @@ class WorkerState:
             assert ts.state == "memory"
             assert ts.key in self.data or ts.key in self.actors
             assert ts.type is not None
-            assert ts.nbytes is not None
+        assert ts.nbytes is not None
 
         try:
             type_serialized = pickle.dumps(ts.type)
