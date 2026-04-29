@@ -10,14 +10,12 @@ from distributed.comm.registry import Backend, backends
 
 
 def _raise_deprecated():
-    message = textwrap.dedent(
-        """\
+    message = textwrap.dedent("""\
         The 'ucx' protocol was removed from Distributed because UCX-Py has been deprecated.
         To continue using protocol='ucx', please install 'distributed-ucxx' (conda-forge)
         or 'distributed-ucxx-cu[12,13]' (PyPI, selecting 12 for CUDA version 12.*, and 13
         for CUDA version 13.*).
-        """
-    )
+        """)
     warnings.warn(message, FutureWarning)
     raise FutureWarning(message)
 

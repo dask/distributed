@@ -200,14 +200,12 @@ def test_logging_extended():
 
 
 def test_default_logging_does_not_override_basic_config():
-    code = textwrap.dedent(
-        """\
+    code = textwrap.dedent("""\
         import logging
         logging.basicConfig()
         import distributed
         logging.getLogger("distributed").warning("hello")
-        """
-    )
+        """)
     proc = subprocess.run(
         [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
     )
@@ -216,15 +214,13 @@ def test_default_logging_does_not_override_basic_config():
 
 
 def test_basic_config_does_not_override_default_logging():
-    code = textwrap.dedent(
-        """\
+    code = textwrap.dedent("""\
         import logging
         import distributed
 
         logging.basicConfig()
         logging.getLogger("distributed").warning("hello")
-        """
-    )
+        """)
     proc = subprocess.run(
         [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
     )

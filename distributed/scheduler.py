@@ -144,6 +144,7 @@ from distributed.utils_comm import (
     scatter_to_workers,
 )
 from distributed.variable import VariableExtension
+from distributed.worker_state_machine import StartStop
 
 if TYPE_CHECKING:
     from typing import TypeAlias, TypeVar
@@ -167,7 +168,7 @@ TaskStateState: TypeAlias = Literal[
     "forgotten",
 ]
 
-ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore
+ALL_TASK_STATES: Set[TaskStateState] = set(TaskStateState.__args__)  # type: ignore[attr-defined]
 
 # {task key -> finish state}
 # Not to be confused with distributed.worker_state_machine.Recs
@@ -248,7 +249,7 @@ class ClientState:
     def __str__(self) -> str:
         return self.client_key
 
-    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict:
+    def _to_dict_no_nest(self, *, exclude: Iterable[str] = ()) -> dict:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -259,9 +260,7 @@ class ClientState:
         TaskState._to_dict
         """
         return recursive_to_dict(
-            self,
-            exclude=set(exclude) | {"versions"},  # type: ignore
-            members=True,
+            self, exclude=set(exclude) | {"versions"}, members=True
         )
 
 
@@ -677,7 +676,7 @@ class WorkerState:
         )
         ws._occupancy_cache = self.occupancy
 
-        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}  # type: ignore
+        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}  # type: ignore[misc]
         return ws
 
     def __repr__(self) -> str:
@@ -716,7 +715,7 @@ class WorkerState:
             **self.extra,
         }
 
-    def _to_dict_no_nest(self, *, exclude: Container[str] = ()) -> dict[str, Any]:
+    def _to_dict_no_nest(self, *, exclude: Iterable[str] = ()) -> dict[str, Any]:
         """Dictionary representation for debugging purposes.
         Not type stable and not intended for roundtrips.
 
@@ -727,9 +726,7 @@ class WorkerState:
         TaskState._to_dict
         """
         return recursive_to_dict(
-            self,
-            exclude=set(exclude) | {"versions"},  # type: ignore
-            members=True,
+            self, exclude=set(exclude) | {"versions"}, members=True
         )
 
     @property
@@ -805,7 +802,7 @@ class WorkerState:
 
         self.nbytes -= ts.get_nbytes()
         del self._has_what[ts]
-        ts.who_has.remove(self)  # type: ignore
+        ts.who_has.remove(self)  # type: ignore[union-attr]
         if not ts.who_has:
             ts.who_has = None
 
@@ -1339,7 +1336,7 @@ class TaskState:
 
     #: The type of the object as a string. Only present for tasks that have been
     #: computed.
-    type: str
+    type: str | None
 
     #: If this task failed executing, the exception object is stored here.
     exception: Serialized | None
@@ -1431,7 +1428,7 @@ class TaskState:
     __slots__ = tuple(__annotations__)
 
     #: Global iterator used to create unique task run IDs
-    _run_id_iterator: ClassVar[itertools.count] = itertools.count()
+    _run_id_iterator: ClassVar[itertools.count[int]] = itertools.count()
 
     # Instances not part of slots since class variable
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
@@ -1475,7 +1472,7 @@ class TaskState:
         self.resource_restrictions = None
         self.loose_restrictions = False
         self.actor = False
-        self.type = None  # type: ignore
+        self.type = None
         self.metadata = None
         self.annotations = None
         self.erred_on = None
@@ -1829,21 +1826,17 @@ class SchedulerState:
             / 2.0
         )
 
-        self.WORKER_SATURATION = dask.config.get(
-            "distributed.scheduler.worker-saturation"
-        )
-        if self.WORKER_SATURATION == "inf":
+        worker_saturation = dask.config.get("distributed.scheduler.worker-saturation")
+        if worker_saturation == "inf":
             # Special case necessary because there's no way to parse a float infinity
             # from a DASK_* environment variable
-            self.WORKER_SATURATION = math.inf
-        if (
-            not isinstance(self.WORKER_SATURATION, (int, float))
-            or self.WORKER_SATURATION <= 0
-        ):
+            worker_saturation = math.inf
+        if not isinstance(worker_saturation, (int, float)) or worker_saturation <= 0:
             raise ValueError(  # pragma: nocover
                 "`distributed.scheduler.worker-saturation` must be a float > 0; got "
-                + repr(self.WORKER_SATURATION)
+                + repr(worker_saturation)
             )
+        self.WORKER_SATURATION = worker_saturation
 
         self.rootish_tg_threshold = dask.config.get(
             "distributed.scheduler.rootish-taskgroup"
@@ -2158,10 +2151,8 @@ class SchedulerState:
                 worker_msgs.setdefault(w, []).extend(new_msgs)
 
         if self.validate:
-            # FIXME downcast antipattern
-            scheduler = cast(Scheduler, self)
             for key in keys:
-                scheduler.validate_key(key)
+                self.validate_key(key)
 
     def _transition_released_waiting(self, key: Key, stimulus_id: str) -> RecsMsgs:
         ts = self.tasks[key]
@@ -2489,12 +2480,7 @@ class SchedulerState:
         self,
         key: Key,
         stimulus_id: str,
-        *,
-        nbytes: int | None = None,
-        type: bytes | None = None,
-        typename: str | None = None,
-        worker: str,
-        **kwargs: Any,
+        **kwargs: Any,  # Fields of worker_state_machine.TaskFinishedMsg
     ) -> RecsMsgs:
         """This transition exclusively happens in a race condition where the scheduler
         believes that the only copy of a dependency task has just been lost, so it
@@ -2518,11 +2504,14 @@ class SchedulerState:
         key: Key,
         stimulus_id: str,
         *,
-        nbytes: int | None = None,
-        type: bytes | None = None,
-        typename: str | None = None,
+        # Fields of worker_state_machine.TaskFinishedMsg
+        nbytes: int,
+        type: bytes,
+        typename: str,
         worker: str,
-        startstops: list[dict] | None = None,
+        startstops: list[StartStop],
+        # Other fields such as thread. They are unused here but are passed to
+        # SchedulerPlugin.transition and might be consumed by third-party plugins.
         **kwargs: Any,
     ) -> RecsMsgs:
         ts = self.tasks[key]
@@ -2556,19 +2545,17 @@ class SchedulerState:
         #############################
         # Update Timing Information #
         #############################
-        if startstops:
-            for startstop in startstops:
-                ts.group.add_duration(
-                    stop=startstop["stop"],
-                    start=startstop["start"],
-                    action=startstop["action"],
-                )
+        for startstop in startstops:
+            ts.group.add_duration(
+                stop=startstop["stop"],
+                start=startstop["start"],
+                action=startstop["action"],
+            )
 
         ############################
         # Update State Information #
         ############################
-        if nbytes is not None:
-            ts.set_nbytes(nbytes)
+        ts.set_nbytes(nbytes)
 
         self._exit_processing_common(ts)
 
@@ -2777,6 +2764,9 @@ class SchedulerState:
         traceback: Serialized | None = None,
         exception_text: str | None = None,
         traceback_text: str | None = None,
+        # Other fields such as startstops and thread. They are unused here but are
+        # passed to SchedulerPlugin.transition and might be consumed by third-party
+        # plugins.
         **kwargs: Any,
     ) -> RecsMsgs:
         """Processed a recommended transition processing -> erred.
@@ -2865,7 +2855,8 @@ class SchedulerState:
             failing_ts = self.tasks[cause]
             ts.exception_blame = failing_ts
         else:
-            failing_ts = ts.exception_blame  # type: ignore
+            assert ts.exception_blame is not None
+            failing_ts = ts.exception_blame
 
         self.erred_tasks.appendleft(
             ErredTask(
@@ -3478,8 +3469,8 @@ class SchedulerState:
         ws: WorkerState,
         recommendations: Recs,
         client_msgs: Msgs,
-        type: bytes | None = None,
-        typename: str | None = None,
+        type: bytes,
+        typename: str,
     ) -> None:
         """Add ts to the set of in-memory tasks"""
         if self.validate:
@@ -3509,14 +3500,13 @@ class SchedulerState:
             recommendations[ts.key] = "released"
         else:
             report_msg: dict[str, Any] = {"op": "key-in-memory", "key": ts.key}
-            if type is not None:
-                report_msg["type"] = type
+            report_msg["type"] = type
             for cs in ts.who_wants or ():
                 client_msgs[cs.client_key] = [report_msg]
 
         ts.state = "memory"
-        ts.type = typename  # type: ignore
-        ts.group.add_type(typename)  # type: ignore
+        ts.type = typename
+        ts.group.add_type(typename)
 
         cs = self.clients["fire-and-forget"]
         if ts in cs.wants_what:
@@ -3635,6 +3625,199 @@ class SchedulerState:
             assert all(msg["who_has"].values())
 
         return msg
+
+    ###################
+    # Task Validation #
+    ###################
+
+    def validate_released(self, key: Key) -> None:
+        ts = self.tasks[key]
+        assert ts.state == "released"
+        assert not ts.waiters
+        assert not ts.waiting_on
+        assert not ts.who_has
+        assert not ts.processing_on
+        assert not any([ts in (dts.waiters or ()) for dts in ts.dependencies])
+        assert ts not in self.unrunnable
+        assert ts not in self.queued
+
+    def validate_waiting(self, key: Key) -> None:
+        ts = self.tasks[key]
+        assert ts.waiting_on
+        assert not ts.who_has
+        assert not ts.processing_on
+        assert ts not in self.unrunnable
+        assert ts not in self.queued
+        for dts in ts.dependencies:
+            # We are waiting on a dependency iff it's not stored
+            assert bool(dts.who_has) != (dts in (ts.waiting_on or ()))
+            assert ts in (dts.waiters or ())  # XXX even if dts._who_has?
+
+    def validate_queued(self, key: Key) -> None:
+        ts = self.tasks[key]
+        assert ts in self.queued
+        assert not ts.waiting_on
+        assert not ts.who_has
+        assert not ts.processing_on
+        assert not (
+            ts.worker_restrictions or ts.host_restrictions or ts.resource_restrictions
+        )
+        for dts in ts.dependencies:
+            assert dts.who_has
+            assert ts in (dts.waiters or ())
+
+    def validate_processing(self, key: Key) -> None:
+        ts = self.tasks[key]
+        assert not ts.waiting_on
+        ws = ts.processing_on
+        assert ws
+        assert ts in ws.processing
+        assert not ts.who_has
+        assert ts not in self.queued
+        for dts in ts.dependencies:
+            assert dts.who_has or ()
+            assert ts in (dts.waiters or ())
+
+    def validate_memory(self, key: Key) -> None:
+        ts = self.tasks[key]
+        assert ts.who_has
+        assert bool(ts in self.replicated_tasks) == (len(ts.who_has) > 1)
+        assert not ts.processing_on
+        assert not ts.waiting_on
+        assert ts not in self.unrunnable
+        assert ts not in self.queued
+        for dts in ts.dependents:
+            assert (dts in (ts.waiters or ())) == (
+                dts.state in ("waiting", "queued", "processing", "no-worker")
+            )
+            assert ts not in (dts.waiting_on or ())
+
+    def validate_no_worker(self, key: Key) -> None:
+        ts = self.tasks[key]
+        assert ts in self.unrunnable
+        assert not ts.waiting_on
+        assert ts in self.unrunnable
+        assert not ts.processing_on
+        assert not ts.who_has
+        assert ts not in self.queued
+        for dts in ts.dependencies:
+            assert dts.who_has
+
+    def validate_erred(self, key: Key) -> None:
+        ts = self.tasks[key]
+        assert ts.exception_blame
+        assert not ts.who_has
+        assert ts not in self.queued
+
+    def validate_key(self, key: Key, ts: TaskState | None = None) -> None:
+        try:
+            if ts is None:
+                ts = self.tasks.get(key)
+            if ts is None:
+                logger.debug("Key lost: %s", key)
+            else:
+                ts.validate()
+                try:
+                    func = getattr(self, "validate_" + ts.state.replace("-", "_"))
+                except AttributeError:
+                    logger.error(
+                        "self.validate_%s not found", ts.state.replace("-", "_")
+                    )
+                else:
+                    func(key)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def validate_state(self, allow_overlap: bool = False) -> None:
+        validate_state(self.tasks, self.workers, self.clients)
+        validate_unrunnable(self.unrunnable)
+
+        assert self.running.issuperset(self.idle.values()), (
+            self.running.copy(),
+            set(self.idle.values()),
+        )
+        assert self.running.issuperset(self.idle_task_count), (
+            self.running.copy(),
+            self.idle_task_count.copy(),
+        )
+        assert self.running.issuperset(self.saturated), (
+            self.running.copy(),
+            self.saturated.copy(),
+        )
+        assert self.saturated.isdisjoint(self.idle.values()), (
+            self.saturated.copy(),
+            set(self.idle.values()),
+        )
+
+        task_prefix_counts: defaultdict[str, int] = defaultdict(int)
+        for w, ws in self.workers.items():
+            assert isinstance(w, str), (type(w), w)
+            assert isinstance(ws, WorkerState), (type(ws), ws)
+            assert ws.address == w
+
+            if ws.status == Status.running:
+                assert ws in self.running
+            else:
+                assert ws not in self.running
+                assert ws.address not in self.idle
+                assert ws not in self.saturated
+
+            assert ws.long_running.issubset(ws.processing)
+            if not ws.processing:
+                assert not ws.occupancy
+                if ws.status == Status.running:
+                    assert ws.address in self.idle
+            assert not ws.needs_what.keys() & ws.has_what
+            actual_needs_what: defaultdict[TaskState, int] = defaultdict(int)
+            for ts in ws.processing:
+                for tss in ts.dependencies:
+                    if tss not in ws.has_what:
+                        actual_needs_what[tss] += 1
+            assert actual_needs_what == ws.needs_what
+            assert (ws.status == Status.running) == (ws in self.running)
+            for name, count in ws.task_prefix_count.items():
+                task_prefix_counts[name] += count
+
+        assert task_prefix_counts.keys() == self._task_prefix_count_global.keys()
+        for name, global_count in self._task_prefix_count_global.items():
+            assert (
+                task_prefix_counts[name] == global_count
+            ), f"{name}: {task_prefix_counts[name]} (wss), {global_count} (global)"
+
+        for ws in self.running:
+            assert ws.status == Status.running
+            assert ws.address in self.workers
+
+        for k, ts in self.tasks.items():
+            assert isinstance(ts, TaskState), (type(ts), ts)
+            assert ts.key == k
+            assert bool(ts in self.replicated_tasks) == (len(ts.who_has or ()) > 1)
+            self.validate_key(k, ts)
+
+        for ts in self.replicated_tasks:
+            assert ts.state == "memory"
+            assert ts.key in self.tasks
+
+        for c, cs in self.clients.items():
+            # client=None is often used in tests...
+            assert c is None or type(c) == str, (type(c), c)
+            assert type(cs) == ClientState, (type(cs), cs)
+            assert cs.client_key == c
+
+        a = {w: ws.nbytes for w, ws in self.workers.items()}
+        b = {
+            w: sum(ts.get_nbytes() for ts in ws.has_what)
+            for w, ws in self.workers.items()
+        }
+        assert a == b, (a, b)
+
+        if self.transition_counter_max:
+            assert self.transition_counter < self.transition_counter_max
 
 
 class Scheduler(SchedulerState, ServerNode):
@@ -3889,7 +4072,7 @@ class Scheduler(SchedulerState, ServerNode):
                 auth_resource = "server"
 
                 @tornado.web.authenticated
-                @authorized  # type: ignore
+                @authorized  # type: ignore[untyped-decorator]
                 async def post(self) -> None:
                     """Shut down the server."""
                     self.log.info("Shutting down on /api/shutdown request.")
@@ -4080,7 +4263,8 @@ class Scheduler(SchedulerState, ServerNode):
             pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl * 1000)
             self.periodic_callbacks["worker-ttl"] = pc
 
-        pc = PeriodicCallback(self.check_idle, 250)  # type: ignore
+        # Ignore float return type
+        pc = PeriodicCallback(self.check_idle, 250)  # type: ignore[arg-type]
         self.periodic_callbacks["idle-timeout"] = pc
 
         pc = PeriodicCallback(self._check_no_workers, 250)
@@ -4556,7 +4740,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.workers[address] = ws = WorkerState(
             address=address,
-            status=Status.lookup[status],  # type: ignore
+            status=Status.lookup[status],  # type: ignore[attr-defined]
             pid=pid,
             nthreads=nthreads,
             memory_limit=memory_limit or 0,
@@ -5045,8 +5229,7 @@ class Scheduler(SchedulerState, ServerNode):
                             "releasing all the data before resubmitting another "
                             "computation. More details and help can be found at "
                             "https://github.com/dask/dask/issues/9888. "
-                            + textwrap.dedent(
-                                f"""
+                            + textwrap.dedent(f"""
                                 Debugging information
                                 ---------------------
                                 old task state: {ts.state}
@@ -5054,8 +5237,7 @@ class Scheduler(SchedulerState, ServerNode):
                                 new run_spec: {dsk[k]!r}
                                 old dependencies: {deps_lhs}
                                 new dependencies: {deps_rhs}
-                                """
-                            )
+                                """)
                         )
                     else:
                         logger.debug(
@@ -5251,7 +5433,16 @@ class Scheduler(SchedulerState, ServerNode):
                 assert not self.queued or self.queued.peek() != qts
 
     def stimulus_task_finished(
-        self, key: Key, worker: str, stimulus_id: str, run_id: int, **kwargs: Any
+        self,
+        worker: str,
+        stimulus_id: str,
+        # Fields of worker_state_machine.TaskFinishedMsg
+        key: Key,
+        run_id: int,
+        metadata: dict,
+        # nbytes, type, etc. Passed as-is to the transitions as well as
+        # to SchedulerPlugin.transition().
+        **kwargs: Any,
     ) -> RecsMsgs:
         """Mark that a task has finished execution on a particular worker"""
         logger.debug("Stimulus task finished %s[%d] %s", key, run_id, worker)
@@ -5311,22 +5502,25 @@ class Scheduler(SchedulerState, ServerNode):
         elif ts.state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
-            if kwargs["metadata"]:
+            if metadata:
                 if ts.metadata is None:
-                    ts.metadata = dict()
-                ts.metadata.update(kwargs["metadata"])
-            return self._transition(key, "memory", stimulus_id, worker=worker, **kwargs)
+                    ts.metadata = {}
+                ts.metadata.update(metadata)
+            return self._transition(
+                key, "memory", stimulus_id, worker=worker, metadata=metadata, **kwargs
+            )
 
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
         self,
-        key: Key,
         worker: str,
-        exception: Any,
         stimulus_id: str,
-        traceback: Any,
-        run_id: str,
+        # Fields of worker_state_machine.TaskErredMsg
+        key: Key,
+        run_id: int,
+        # exception, traceback, etc. Passed as-is to the transitions as well as to
+        # SchedulerPlugin.transition().
         **kwargs: Any,
     ) -> RecsMsgs:
         """Mark that a task has erred on a particular worker"""
@@ -5350,8 +5544,6 @@ class Scheduler(SchedulerState, ServerNode):
                 "erred",
                 stimulus_id,
                 cause=key,
-                exception=exception,
-                traceback=traceback,
                 worker=worker,
                 **kwargs,
             )
@@ -5698,201 +5890,10 @@ class Scheduler(SchedulerState, ServerNode):
             }
         )
 
-    ###################
-    # Task Validation #
-    ###################
-
-    def validate_released(self, key: Key) -> None:
-        ts = self.tasks[key]
-        assert ts.state == "released"
-        assert not ts.waiters
-        assert not ts.waiting_on
-        assert not ts.who_has
-        assert not ts.processing_on
-        assert not any([ts in (dts.waiters or ()) for dts in ts.dependencies])
-        assert ts not in self.unrunnable
-        assert ts not in self.queued
-
-    def validate_waiting(self, key: Key) -> None:
-        ts = self.tasks[key]
-        assert ts.waiting_on
-        assert not ts.who_has
-        assert not ts.processing_on
-        assert ts not in self.unrunnable
-        assert ts not in self.queued
-        for dts in ts.dependencies:
-            # We are waiting on a dependency iff it's not stored
-            assert bool(dts.who_has) != (dts in (ts.waiting_on or ()))
-            assert ts in (dts.waiters or ())  # XXX even if dts._who_has?
-
-    def validate_queued(self, key: Key) -> None:
-        ts = self.tasks[key]
-        assert ts in self.queued
-        assert not ts.waiting_on
-        assert not ts.who_has
-        assert not ts.processing_on
-        assert not (
-            ts.worker_restrictions or ts.host_restrictions or ts.resource_restrictions
-        )
-        for dts in ts.dependencies:
-            assert dts.who_has
-            assert ts in (dts.waiters or ())
-
-    def validate_processing(self, key: Key) -> None:
-        ts = self.tasks[key]
-        assert not ts.waiting_on
-        ws = ts.processing_on
-        assert ws
-        assert ts in ws.processing
-        assert not ts.who_has
-        assert ts not in self.queued
-        for dts in ts.dependencies:
-            assert dts.who_has or ()
-            assert ts in (dts.waiters or ())
-
-    def validate_memory(self, key: Key) -> None:
-        ts = self.tasks[key]
-        assert ts.who_has
-        assert bool(ts in self.replicated_tasks) == (len(ts.who_has) > 1)
-        assert not ts.processing_on
-        assert not ts.waiting_on
-        assert ts not in self.unrunnable
-        assert ts not in self.queued
-        for dts in ts.dependents:
-            assert (dts in (ts.waiters or ())) == (
-                dts.state in ("waiting", "queued", "processing", "no-worker")
-            )
-            assert ts not in (dts.waiting_on or ())
-
-    def validate_no_worker(self, key: Key) -> None:
-        ts = self.tasks[key]
-        assert ts in self.unrunnable
-        assert not ts.waiting_on
-        assert ts in self.unrunnable
-        assert not ts.processing_on
-        assert not ts.who_has
-        assert ts not in self.queued
-        for dts in ts.dependencies:
-            assert dts.who_has
-
-    def validate_erred(self, key: Key) -> None:
-        ts = self.tasks[key]
-        assert ts.exception_blame
-        assert not ts.who_has
-        assert ts not in self.queued
-
-    def validate_key(self, key: Key, ts: TaskState | None = None) -> None:
-        try:
-            if ts is None:
-                ts = self.tasks.get(key)
-            if ts is None:
-                logger.debug("Key lost: %s", key)
-            else:
-                ts.validate()
-                try:
-                    func = getattr(self, "validate_" + ts.state.replace("-", "_"))
-                except AttributeError:
-                    logger.error(
-                        "self.validate_%s not found", ts.state.replace("-", "_")
-                    )
-                else:
-                    func(key)
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
     def validate_state(self, allow_overlap: bool = False) -> None:
-        validate_state(self.tasks, self.workers, self.clients)
-        validate_unrunnable(self.unrunnable)
-
+        super().validate_state(allow_overlap=allow_overlap)
         if not (set(self.workers) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
-
-        assert self.running.issuperset(self.idle.values()), (
-            self.running.copy(),
-            set(self.idle.values()),
-        )
-        assert self.running.issuperset(self.idle_task_count), (
-            self.running.copy(),
-            self.idle_task_count.copy(),
-        )
-        assert self.running.issuperset(self.saturated), (
-            self.running.copy(),
-            self.saturated.copy(),
-        )
-        assert self.saturated.isdisjoint(self.idle.values()), (
-            self.saturated.copy(),
-            set(self.idle.values()),
-        )
-
-        task_prefix_counts: defaultdict[str, int] = defaultdict(int)
-        for w, ws in self.workers.items():
-            assert isinstance(w, str), (type(w), w)
-            assert isinstance(ws, WorkerState), (type(ws), ws)
-            assert ws.address == w
-
-            if ws.status == Status.running:
-                assert ws in self.running
-            else:
-                assert ws not in self.running
-                assert ws.address not in self.idle
-                assert ws not in self.saturated
-
-            assert ws.long_running.issubset(ws.processing)
-            if not ws.processing:
-                assert not ws.occupancy
-                if ws.status == Status.running:
-                    assert ws.address in self.idle
-            assert not ws.needs_what.keys() & ws.has_what
-            actual_needs_what: defaultdict[TaskState, int] = defaultdict(int)
-            for ts in ws.processing:
-                for tss in ts.dependencies:
-                    if tss not in ws.has_what:
-                        actual_needs_what[tss] += 1
-            assert actual_needs_what == ws.needs_what
-            assert (ws.status == Status.running) == (ws in self.running)
-            for name, count in ws.task_prefix_count.items():
-                task_prefix_counts[name] += count
-
-        assert task_prefix_counts.keys() == self._task_prefix_count_global.keys()
-        for name, global_count in self._task_prefix_count_global.items():
-            assert (
-                task_prefix_counts[name] == global_count
-            ), f"{name}: {task_prefix_counts[name]} (wss), {global_count} (global)"
-
-        for ws in self.running:
-            assert ws.status == Status.running
-            assert ws.address in self.workers
-
-        for k, ts in self.tasks.items():
-            assert isinstance(ts, TaskState), (type(ts), ts)
-            assert ts.key == k
-            assert bool(ts in self.replicated_tasks) == (len(ts.who_has or ()) > 1)
-            self.validate_key(k, ts)
-
-        for ts in self.replicated_tasks:
-            assert ts.state == "memory"
-            assert ts.key in self.tasks
-
-        for c, cs in self.clients.items():
-            # client=None is often used in tests...
-            assert c is None or type(c) == str, (type(c), c)
-            assert type(cs) == ClientState, (type(cs), cs)
-            assert cs.client_key == c
-
-        a = {w: ws.nbytes for w, ws in self.workers.items()}
-        b = {
-            w: sum(ts.get_nbytes() for ts in ws.has_what)
-            for w, ws in self.workers.items()
-        }
-        assert a == b, (a, b)
-
-        if self.transition_counter_max:
-            assert self.transition_counter < self.transition_counter_max
 
     ###################
     # Manage Messages #
@@ -7862,9 +7863,9 @@ class Scheduler(SchedulerState, ServerNode):
             function = pickle.loads(function)
         if setup:
             setup = pickle.loads(setup)
-
         if teardown:
             teardown = pickle.loads(teardown)
+
         state = setup(self) if setup else None  # type: ignore
         if inspect.isawaitable(state):
             state = await state

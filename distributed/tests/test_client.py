@@ -2520,7 +2520,7 @@ async def test_traceback_clean(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_map_differnet_lengths(c, s, a, b):
+async def test_map_different_lengths(c, s, a, b):
     assert len(c.map(add, [1, 2], [1, 2, 3])) == 2
 
 
@@ -6035,8 +6035,12 @@ async def test_mixing_clients_same_scheduler(s, a, b):
         Client(s.address, asynchronous=True) as c2,
     ):
         future = c1.submit(inc, 1)
+
+        # Prevent race condition where c2.submit reaches the scheduler
+        # before c1.submit and future.key is not yet known to the scheduler.
+        await c1.publish_dataset(x=future)
+
         assert await c2.submit(inc, future) == 3
-    assert not s.tasks
 
 
 @gen_cluster()

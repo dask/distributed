@@ -836,6 +836,7 @@ async def test_collections_metadata(c, s, a, b):
 
     ext = s.extensions["spans"]
     span_ = ext.spans[span_id]
+    assert span_
     collections_meta = span_.metadata["collections"]
     assert isinstance(collections_meta, list)
     assert len(collections_meta) == 1

@@ -23,7 +23,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Generator, Hashable, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Hashable, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
@@ -1144,7 +1144,7 @@ def popen(
     terminate_timeout: float = 10,
     kill_timeout: float = 5,
     **kwargs: Any,
-) -> Iterator[subprocess.Popen[bytes]]:
+) -> Generator[subprocess.Popen[bytes]]:
     """Start a shell command in a subprocess.
     Yields a subprocess.Popen object.
 
@@ -1478,7 +1478,7 @@ def new_config(new_config):
 
 
 @contextmanager
-def new_config_file(c: dict[str, Any]) -> Iterator[None]:
+def new_config_file(c: dict[str, Any]) -> Generator[None]:
     """
     Temporarily change configuration file to match dictionary *c*.
     """
@@ -1694,7 +1694,7 @@ def term_or_kill_active_children(timeout: float) -> None:
 @contextmanager
 def check_process_leak(
     check: bool = True, check_timeout: float = 40, term_timeout: float = 3
-) -> Iterator[None]:
+) -> Generator[None]:
     """Terminate any currently-running subprocesses at both the beginning and end of this context
 
     Parameters
@@ -2271,7 +2271,7 @@ class BarrierGetData(Worker):
 
 
 @contextmanager
-def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[None]:
+def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Generator[None]:
     """Prevent any task from transitioning from fetch to flight on the worker while
     inside the context, simulating a situation where the worker's network comms are
     saturated.
@@ -2302,7 +2302,7 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[Non
 
 
 @contextmanager
-def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
+def freeze_batched_send(bcomm: BatchedSend) -> Generator[LockedComm]:
     """
     Contextmanager blocking writes to a `BatchedSend` from sending over the network.
 
