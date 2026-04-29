@@ -29,7 +29,6 @@ from collections.abc import (
     Collection,
     Container,
     Generator,
-    Iterator,
     KeysView,
     ValuesView,
 )
@@ -1311,7 +1310,7 @@ def iscoroutinefunction(f):
 
 
 @contextlib.contextmanager
-def warn_on_duration(duration: str | float | timedelta, msg: str) -> Iterator[None]:
+def warn_on_duration(duration: str | float | timedelta, msg: str) -> Generator[None]:
     """Generate a UserWarning if the operation in this context takes longer than
     *duration* and print *msg*
 
