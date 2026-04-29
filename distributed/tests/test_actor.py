@@ -283,16 +283,42 @@ def test_timeout(client):
     assert future.result() is True
 
 
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "1s"})
+@gen_cluster(client=True)
 async def test_failed_worker(c, s, a, b):
-    future = c.submit(Counter, actor=True, workers=[a.address])
-    await wait(future)
-    counter = await future
-
+    counter = await c.submit(Counter, actor=True, workers=[a.address])
+    assert counter._future.status == "finished"
     await a.close()
+
+    # Avoid race condition tested below in test_failed_worker_before_future_update
+    while counter._future.status == "finished":
+        await asyncio.sleep(0.01)
 
     with pytest.raises(RuntimeError, match="Worker holding Actor was lost"):
         await counter.increment()
+
+
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "1s"})
+async def test_failed_worker_before_future_update(c, s, a, b):
+    """Test race condition where the worker failed but the information
+    has not yet reached the Client
+    """
+    counter = await c.submit(Counter, actor=True, workers=[a.address])
+    assert counter._future.status == "finished"
+    close_fut = asyncio.Task(a.close())
+
+    # Wait until the worker has already shut down its RPC channels, but
+    # the client has definitely not been notified yet.
+    while a.address in s.workers:
+        await asyncio.sleep(0)
+    assert counter._future.status == "finished"
+
+    with pytest.raises(OSError, match="Unable to contact Actor's worker"):
+        await counter.increment()
+
+    # Wait for the scheduler to send back handshakes to the worker.
+    # In parallel, the scheduler sends the notification to the client, which
+    # may or may not have arrived by the time Worker.close() finishes.
+    await close_fut
 
 
 @gen_cluster(client=True)
