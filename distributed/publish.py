@@ -9,7 +9,7 @@ from dask.typing import Key
 from dask.utils import stringify
 
 from distributed.protocol.serialize import Serialized
-from distributed.utils import log_errors
+from distributed.utils import log_errors, wait_for
 
 if TYPE_CHECKING:
     from distributed.scheduler import Scheduler
@@ -71,7 +71,7 @@ class PublishExtension:
         try:
             while True:
                 try:
-                    await asyncio.wait_for(ev.wait(), timeout=30)
+                    await wait_for(ev.wait(), timeout=30)
                     return
                 except asyncio.TimeoutError:
                     if client not in self.scheduler.clients:
