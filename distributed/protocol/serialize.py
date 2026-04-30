@@ -3,7 +3,6 @@ from __future__ import annotations
 import codecs
 import importlib
 import traceback
-import warnings
 from array import array
 from enum import Enum
 from functools import partial
@@ -624,21 +623,13 @@ class Pickled:
         return not (self == other)
 
 
-def nested_deserialize(x):
-    warnings.warn(
-        "nested_deserialize is deprecated and will be removed in a future release.",
-        DeprecationWarning,
-    )
-    return _nested_deserialize(x, emulate_deserialize=True)
-
-
 def _nested_deserialize(x, emulate_deserialize=True):
     """
     Replace all Serialize and Serialized values nested in *x*
     with the original values.  Returns a copy of *x*.
 
     >>> msg = {'op': 'update', 'data': to_serialize(123)}
-    >>> nested_deserialize(msg)
+    >>> _nested_deserialize(msg)
     {'op': 'update', 'data': 123}
     """
 
