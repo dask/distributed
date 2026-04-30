@@ -209,9 +209,8 @@ def get_loop_factory() -> Callable[[], asyncio.AbstractEventLoop] | None:
             return asyncio.SelectorEventLoop
         return None
     raise ValueError(
-        "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got {}".format(
-            dask.config.get("distributed.admin.event-loop")
-        )
+        "Expected distributed.admin.event-loop to be in "
+        f"('asyncio', 'tornado', 'uvloop'), got {event_loop}"
     )
 
 
