@@ -329,7 +329,7 @@ class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
                 break
             count = stat.count_diff or stat.count
             lines += [f"  - leaked {size_diff / 2**20:.1f} MiB in {count} calls at:"]
-            lines += ["    " + line for line in stat.traceback.format()]
+            lines += [f"    {line}" for line in stat.traceback.format()]
 
         return "\n".join(lines)
 

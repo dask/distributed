@@ -333,7 +333,7 @@ class Semaphore(SyncMethodMixin):
         self._scheduler = scheduler_rpc
         self._loop = loop
 
-        self.name = name or "semaphore-" + uuid.uuid4().hex
+        self.name = name or f"semaphore-{uuid.uuid4().hex}"
         self.max_leases = max_leases
         self.id = uuid.uuid4().hex
         self._leases = deque()

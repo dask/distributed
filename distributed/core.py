@@ -297,7 +297,7 @@ class Server:
         self.stream_handlers = {}
         self.stream_handlers.update(stream_handlers or {})
 
-        self.id = type(self).__name__ + "-" + str(uuid.uuid4())
+        self.id = f"{type(self).__name__}-{uuid.uuid4()}"
         self._address = None
         self._listen_address = None
         self._port = None
@@ -781,15 +781,13 @@ class Server:
                         await comm.write(error_message(e, status="uncaught-error"))
                         continue
                 if not isinstance(msg, dict):
-                    raise TypeError(
-                        "Bad message type.  Expected dict, got\n  " + str(msg)
-                    )
+                    raise TypeError(f"Bad message type.  Expected dict, got\n  {msg}")
 
                 try:
                     op = msg.pop("op")
                 except KeyError as e:
                     raise ValueError(
-                        "Received unexpected message without 'op' key: " + str(msg)
+                        f"Received unexpected message without 'op' key: {msg}"
                     ) from e
                 if self.counters is not None:
                     self.counters["op"].add(op)
@@ -1174,7 +1172,7 @@ class rpc:
             comm = None
             try:
                 comm = await self.live_comm()
-                comm.name = "rpc." + key
+                comm.name = f"rpc.{key}"
                 result = await send_recv(comm=comm, op=key, **kwargs)
             except (RPCClosed, CommClosedError) as e:
                 if comm:
@@ -1254,7 +1252,7 @@ class PooledRPCCall:
             if self.deserializers is not None and kwargs.get("deserializers") is None:
                 kwargs["deserializers"] = self.deserializers
             comm = await self.pool.connect(self.addr)
-            prev_name, comm.name = comm.name, "ConnectionPool." + key
+            prev_name, comm.name = comm.name, f"ConnectionPool.{key}"
             try:
                 return await send_recv(comm=comm, op=key, **kwargs)
             finally:

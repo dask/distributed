@@ -570,7 +570,7 @@ class Cluster(SyncMethodMixin):
 
         memory = [w["memory_limit"] for w in self.scheduler_info["workers"].values()]
         if all(memory):
-            text += ", memory=" + format_bytes(sum(memory))
+            text += f", memory={format_bytes(sum(memory))}"
 
         text += ")"
         return text

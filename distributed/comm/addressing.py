@@ -290,7 +290,7 @@ def address_from_user_args(  # type: ignore[no-untyped-def]
             host = get_ip_interface(interface)
 
     if protocol and host and "://" not in host:
-        host = protocol + "://" + host
+        host = f"{protocol}://{host}"
 
     if host or port:
         addr = uri_from_host_port(host, port, default_port)
@@ -298,6 +298,7 @@ def address_from_user_args(  # type: ignore[no-untyped-def]
         addr = ""
 
     if protocol:
-        addr = protocol + "://" + addr.split("://")[-1]
+        host = addr.split("://")[-1]
+        addr = f"{protocol}://{host}"
 
     return addr

@@ -898,7 +898,7 @@ class _MapExpr(Expr):
                 if self.pure:
                     tok = tokenize(self.func, self.kwargs)
                     keys = [
-                        self.key + "-" + tokenize(tok, args)  # type: ignore
+                        f"{self.key}-{tokenize(tok, args)}"
                         for args in zip(*self.iterables)
                     ]
                 else:
@@ -1086,7 +1086,7 @@ class Client(SyncMethodMixin):
             name = dask.config.get("client-name", None)
         self.id = (
             type(self).__name__
-            + ("-" + name + "-" if name else "-")
+            + (f"-{name}-" if name else "-")
             + str(uuid.uuid1(clock_seq=os.getpid()))
         )
         self.generation = 0
@@ -2143,9 +2143,9 @@ class Client(SyncMethodMixin):
 
         if key is None:
             if pure:
-                key = funcname(func) + "-" + tokenize(func, kwargs, *args)
+                key = f"{funcname(func)}-{tokenize(func, kwargs, *args)}"
             else:
-                key = funcname(func) + "-" + str(uuid.uuid4())
+                key = f"{funcname(func)}-{uuid.uuid4()}"
 
         with self._refcount_lock:
             if key in self.futures:
@@ -2598,9 +2598,9 @@ class Client(SyncMethodMixin):
             data = [data]
         if isinstance(data, (list, tuple)):
             if hash:
-                names = [type(x).__name__ + "-" + tokenize(x) for x in data]
+                names = [f"{type(x).__name__}-{tokenize(x)}" for x in data]
             else:
-                names = [type(x).__name__ + "-" + uuid.uuid4().hex for x in data]
+                names = [f"{type(x).__name__}-{uuid.uuid4().hex}" for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)

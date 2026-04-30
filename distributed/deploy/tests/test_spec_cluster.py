@@ -280,7 +280,7 @@ async def test_get_logs():
         logs = await cluster.get_logs()
         assert isinstance(logs, dict)
         assert all(isinstance(log, str) for log in logs)
-        assert is_valid_xml("<div>" + logs._repr_html_() + "</div>")
+        assert is_valid_xml(f"<div>{logs._repr_html_()}</div>")
         assert "Scheduler" in logs
         for worker in cluster.scheduler.workers:
             assert worker in logs
@@ -395,9 +395,7 @@ async def test_ProcessInterfaceValid():
 class MultiWorker(Worker, ProcessInterface):
     def __init__(self, *args, n=1, name=None, nthreads=None, **kwargs):
         self.workers = [
-            Worker(
-                *args, name=str(name) + "-" + str(i), nthreads=nthreads // n, **kwargs
-            )
+            Worker(*args, name=f"{name}-{i}", nthreads=nthreads // n, **kwargs)
             for i in range(n)
         ]
         self._startup_lock = asyncio.Lock()
@@ -411,7 +409,7 @@ class MultiWorker(Worker, ProcessInterface):
         raise NotImplementedError()
 
     def __str__(self):
-        return "<MultiWorker n=%d>" % len(self.workers)
+        return f"<MultiWorker n={len(self.workers)}>"
 
     __repr__ = __str__
 

@@ -612,7 +612,7 @@ def test_logs():
     d = Logs({"123": log, "456": Log("World!")})
     assert isinstance(d, dict)
     text = d._repr_html_()
-    assert is_valid_xml("<div>" + text + "</div>")
+    assert is_valid_xml(f"<div>{text}</div>")
     assert "Hello" in text
     assert "456" in text
 

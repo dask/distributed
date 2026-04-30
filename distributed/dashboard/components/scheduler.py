@@ -957,7 +957,7 @@ class BandwidthTypes(DashboardComponent):
             "type": list(bw.keys()),
             "bandwidth_text": [format_bytes(x) for x in bw.values()],
         }
-        self.root.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
+        self.root.title.text = f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
         update(self.source, result)
 
 
@@ -980,7 +980,7 @@ class BandwidthWorkers(DashboardComponent):
         values = [hex(x)[2:] for x in range(64, 256)][::-1]
         mapper = linear_cmap(
             field_name="bandwidth",
-            palette=["#" + x + x + "FF" for x in values],
+            palette=[f"#{x}{x}FF" for x in values],
             low=0,
             high=1,
         )
@@ -1057,7 +1057,7 @@ class BandwidthWorkers(DashboardComponent):
             "bandwidth": value,
             "bandwidth_text": list(map(format_bytes, value)),
         }
-        self.root.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
+        self.root.title.text = f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
         update(self.source, result)
 
 
@@ -1727,7 +1727,7 @@ class MemoryByKey(DashboardComponent):
             "nbytes_text": [format_bytes(nbytes[name]) for name in names],
             "color": [color_of(name) for name in names],
         }
-        self.root.title.text = "Total Use: " + format_bytes(sum(nbytes.values()))
+        self.root.title.text = f"Total Use: {format_bytes(sum(nbytes.values()))}"
 
         update(self.source, result)
 
@@ -4796,7 +4796,7 @@ def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwar
     add_periodic_callback(doc, fig, interval)
     doc.add_root(getattr(fig, fig_attr))
     doc.theme = BOKEH_THEME
-    doc.title = "Dask: " + funcname(cls)
+    doc.title = f"Dask: {funcname(cls)}"
 
 
 @log_errors

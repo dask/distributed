@@ -2190,7 +2190,7 @@ class Worker(BaseWorker, ServerNode):
         key = actor
         actor = self.state.actors[key]
         func = getattr(actor, function)
-        name = key_split(key) + "." + function
+        name = f"{key_split(key)}.{function}"
 
         try:
             if iscoroutinefunction(func):
@@ -3152,7 +3152,7 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
             sarg = repr(arg)
         except Exception:
             sarg = "< could not convert arg to str >"
-        skwarg = repr(argname) + ": " + sarg
+        skwarg = f"{argname!r}: {sarg}"
         strs[i] = skwarg
         length += len(skwarg) + 2
         if max_len is not None and length > max_len:

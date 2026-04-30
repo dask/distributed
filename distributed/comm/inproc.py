@@ -83,7 +83,7 @@ def new_address():
     """
     Generate a new address.
     """
-    return "inproc://" + global_manager.new_address()
+    return f"inproc://{global_manager.new_address()}"
 
 
 class QueueEmpty(Exception):
@@ -289,8 +289,8 @@ class InProcListener(BaseListener):
             if conn_req is None:
                 break
             comm = InProc(
-                local_addr="inproc://" + self.address,
-                peer_addr="inproc://" + conn_req.c_addr,
+                local_addr=f"inproc://{self.address}",
+                peer_addr=f"inproc://{conn_req.c_addr}",
                 read_q=conn_req.c2s_q,
                 write_q=conn_req.s2c_q,
                 write_loop=conn_req.c_loop,
@@ -314,11 +314,11 @@ class InProcListener(BaseListener):
 
     @property
     def listen_address(self):
-        return "inproc://" + self.address
+        return f"inproc://{self.address}"
 
     @property
     def contact_address(self):
-        return "inproc://" + self.address
+        return f"inproc://{self.address}"
 
 
 class InProcConnector(Connector):
@@ -344,8 +344,8 @@ class InProcConnector(Connector):
         await conn_req.conn_event.wait()
 
         comm = InProc(
-            local_addr="inproc://" + conn_req.c_addr,
-            peer_addr="inproc://" + address,
+            local_addr=f"inproc://{conn_req.c_addr}",
+            peer_addr=f"inproc://{address}",
             read_q=conn_req.s2c_q,
             write_q=conn_req.c2s_q,
             write_loop=listener.loop,

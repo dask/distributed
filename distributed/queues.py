@@ -175,7 +175,7 @@ class Queue:
 
     def __init__(self, name=None, client=None, maxsize=0):
         self._client = client
-        self.name = name or "queue-" + uuid.uuid4().hex
+        self.name = name or f"queue-{uuid.uuid4().hex}"
         self.maxsize = maxsize
         self._maybe_start()
 

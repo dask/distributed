@@ -64,7 +64,7 @@ class Lock(Semaphore):
                 stacklevel=2,
             )
 
-        self.name = name or "lock-" + uuid.uuid4().hex
+        self.name = name or f"lock-{uuid.uuid4().hex}"
         super().__init__(
             max_leases=1,
             name=name,
