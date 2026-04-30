@@ -161,12 +161,7 @@ class Worker(Process):
                 "'{}'".format(
                     dumps(
                         {
-                            i: {
-                                "cls": self.worker_class,
-                                "opts": {
-                                    **self.kwargs,
-                                },
-                            }
+                            i: {"cls": self.worker_class, "opts": {**self.kwargs}}
                             for i in range(self.n_workers)
                         }
                     )
