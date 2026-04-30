@@ -4,7 +4,7 @@ import asyncio
 import logging
 import random
 import warnings
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Literal
 
@@ -37,7 +37,7 @@ from distributed.worker_state_machine import AcquireReplicasEvent
 
 
 @contextmanager
-def assert_amm_log(expect: list[str]) -> Iterator[None]:
+def assert_amm_log(expect: list[str]) -> Generator[None]:
     with captured_logger(
         "distributed.active_memory_manager", level=logging.DEBUG
     ) as logger:

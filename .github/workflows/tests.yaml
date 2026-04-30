@@ -117,7 +117,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v3.2.0
+        uses: conda-incubator/setup-miniconda@v4.0.1
         with:
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
@@ -272,7 +272,7 @@ jobs:
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure') &&
           github.event_name != 'schedule'
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v6
         with:
           name: ${{ env.TEST_ID }}
           # See https://community.codecov.com/t/upload-issues-unable-to-locate-build-via-github-actions-api/3954

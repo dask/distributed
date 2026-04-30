@@ -9,7 +9,7 @@ import re
 import shelve
 import sys
 import zipfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any, cast
 
@@ -32,7 +32,7 @@ COLORS = {
 
 
 @contextlib.contextmanager
-def get_session() -> Iterator[requests.Session]:
+def get_session() -> Generator[requests.Session]:
     retry_strategy = Retry(
         status_forcelist=[429, 500, 502, 503, 504],
         backoff_factor=0.2,

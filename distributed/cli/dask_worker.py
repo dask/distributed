@@ -338,7 +338,7 @@ def main(  # type: ignore[no-untyped-def]
 
         if contact_address:
             # we only need this to verify it is getting parsed
-            (_, _) = get_address_host_port(contact_address, strict=True)
+            _, _ = get_address_host_port(contact_address, strict=True)
         else:
             # if contact address is not present we use the listen_address for contact
             contact_address = listen_address

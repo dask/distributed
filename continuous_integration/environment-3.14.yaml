@@ -1,4 +1,4 @@
-name: dask-distributed-313
+name: dask-distributed
 channels:
   - conda-forge
 dependencies:

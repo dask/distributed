@@ -12,7 +12,6 @@ from collections.abc import (
     Generator,
     Hashable,
     Iterable,
-    Iterator,
     Sequence,
 )
 from concurrent.futures import ThreadPoolExecutor
@@ -174,7 +173,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         return self.run_id
 
     @contextlib.contextmanager
-    def _capture_metrics(self, where: str) -> Iterator[None]:
+    def _capture_metrics(self, where: str) -> Generator[None]:
         """Capture context_meter metrics as
 
             {('p2p', <span id>, 'foreground|background...', label, unit): value}
@@ -519,7 +518,7 @@ class SchedulerShuffleState(Generic[_T_partition_id]):
 
 
 @contextlib.contextmanager
-def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
+def handle_transfer_errors(id: ShuffleId) -> Generator[None]:
     try:
         yield
     except ShuffleClosedError:
@@ -533,7 +532,7 @@ def handle_transfer_errors(id: ShuffleId) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def handle_unpack_errors(id: ShuffleId) -> Iterator[None]:
+def handle_unpack_errors(id: ShuffleId) -> Generator[None]:
     try:
         yield
     except Reschedule as e:

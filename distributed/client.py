@@ -23,6 +23,7 @@ from collections.abc import (
     Coroutine,
     Iterable,
     Iterator,
+    Mapping,
     Sequence,
 )
 from concurrent.futures import ThreadPoolExecutor
@@ -43,6 +44,7 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
+    overload,
 )
 
 from packaging.version import parse as parse_version
@@ -2855,57 +2857,78 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
-    @log_errors
-    async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
-        coroutines = []
-        uid = uuid.uuid4().hex
-        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
-
-        def add_coro(name, data):
-            keys = [f.key for f in futures_of(data)]
-
-            async def _():
-                await self.scheduler.publish_wait_flush(uid=uid)
-                await self.scheduler.publish_put(
-                    keys=keys,
-                    name=name,
-                    data=to_serialize(data),
-                    override=override,
-                    client=self.id,
-                )
-
-            coroutines.append(_())
+    async def _publish_dataset(
+        self, *args: Any, name: Key | None = None, override: bool = False, **kwargs: Any
+    ):
+        names: list[Key] = list(kwargs)
+        data = list(kwargs.values())
 
         if name:
-            if len(args) == 0:
+            if not args:
                 raise ValueError(
                     "If name is provided, expecting call signature like"
                     " publish_dataset(df, name='ds')"
                 )
             # in case this is a singleton, collapse it
-            elif len(args) == 1:
-                args = args[0]
-            add_coro(name, args)
+            names.append(name)
+            data.append(args[0] if len(args) == 1 else args)
+        elif args:
+            if len(args) != 1 or not isinstance(args[0], Mapping):
+                raise ValueError(
+                    "If name is omitted, positional argument must be "
+                    "a {name: value} dict"
+                )
+            names.extend(args[0])
+            data.extend(args[0].values())
 
-        for name, data in kwargs.items():
-            add_coro(name, data)
+        # Prevent race condition where the client persists the collection immediately
+        # before publish_dataset, but the persist command hasn't landed on the scheduler
+        # yet when the publish_put RPC call arrives asynchronously.
+        uid = uuid.uuid4().hex
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
 
-        await asyncio.gather(*coroutines)
+        await self.scheduler.publish_put(
+            names=names,
+            keys=[[f.key for f in futures_of(data_i)] for data_i in data],
+            data=[to_serialize(data_i) for data_i in data],
+            override=override,
+            client=self.id,
+            uid=uid,
+        )
 
-    def publish_dataset(self, *args, **kwargs):
+    @overload
+    def publish_dataset(
+        self, *args: Any, name: Key, override: bool = False, **kwargs
+    ): ...
+
+    @overload
+    def publish_dataset(
+        self, *args: Mapping[Key, Any], override: bool = False, **kwargs
+    ): ...
+
+    def publish_dataset(
+        self, *args: Any, name: Key | None = None, override: bool = False, **kwargs
+    ):
         """
         Publish named datasets to scheduler
 
-        This stores a named reference to a dask collection or list of futures
+        This stores a named reference to one or more dask collections or futures
         on the scheduler.  These references are available to other Clients
-        which can download the collection or futures with ``get_dataset``.
+        which can download the collections or futures with ``get_dataset``.
 
-        Datasets are not immediately computed.  You may wish to call
-        ``Client.persist`` prior to publishing a dataset.
+        Datasets are not immediately computed. You should call ``persist`` prior to
+        publishing a dataset. Any unpersisted keys will be stored on the scheduler
+        uncomputed and returned as-is to the user when calling ``get_dataset``.
 
         Parameters
         ----------
-        args : list of objects to publish as name
+        args : One or more objects to publish as `name`.
+            Alternatively, a single dict of {name: object} pairs.
+        name : Dask key (str, int, float, or tuple thereof)
+            Name to publish `args` under
+        override: bool
+            False (default) to raise KeyError if a dataset with the same name already
+            exists on the scheduler; True to overwrite it.
         kwargs : dict
             named collections to publish on the scheduler
 
@@ -2915,7 +2938,10 @@ class Client(SyncMethodMixin):
 
         >>> df = dd.read_csv('s3://...')  # doctest: +SKIP
         >>> df = c.persist(df) # doctest: +SKIP
-        >>> c.publish_dataset(my_dataset=df)  # doctest: +SKIP
+        >>> c.publish_dataset({"my_dataset": df})  # doctest: +SKIP
+
+        Alternative invocation
+        >>> c.publish_dataset(my_dataset=df)
 
         Alternative invocation
         >>> c.publish_dataset(df, name='my_dataset')
@@ -2937,30 +2963,50 @@ class Client(SyncMethodMixin):
         Client.unpublish_dataset
         Client.persist
         """
-        return self.sync(self._publish_dataset, *args, **kwargs)
+        return self.sync(
+            self._publish_dataset, *args, name=name, override=override, **kwargs
+        )
 
-    def unpublish_dataset(self, name, **kwargs):
+    async def _unpublish_dataset(self, name: Key | list[Key]) -> None:
+        names = name if isinstance(name, list) else [name]
+        uid = uuid.uuid4().hex
+        # Prevent race condition where the user calls get_dataset() and immediately
+        # afterwards unpublish_dataset(), thinking that they are holding a reference
+        # to the futures locally, but the futures haven't been registered on the
+        # scheduler yet by the time unpublish_dataset lands on the scheduler.
+        # This method can't be made into just a batched send command as it would
+        # create another race condition, where unpublish_dataset() followed by
+        # get_dataset() would return the just-deleted data.
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
+        await self.scheduler.publish_delete(names=names, client=self.id, uid=uid)
+
+    def unpublish_dataset(self, name: Key | list[Key], **kwargs):
         """
         Remove named datasets from scheduler
 
         Parameters
         ----------
-        name : str
-            The name of the dataset to unpublish
+        name : Dask key (str, int, float, or tuple thereof), or list of keys
+            Name(s) of the dataset(s) to unpublish.
 
         Examples
         --------
         >>> c.list_datasets()  # doctest: +SKIP
-        ['my_dataset']
-        >>> c.unpublish_dataset('my_dataset')  # doctest: +SKIP
+        ['foo', 'bar', 'baz']
+        >>> c.unpublish_dataset('foo')  # doctest: +SKIP
+        >>> c.list_datasets()  # doctest: +SKIP
+        ['bar', 'baz']
+        >>> c.unpublish_dataset(['bar', 'baz'])  # doctest: +SKIP
         >>> c.list_datasets()  # doctest: +SKIP
         []
 
         See Also
         --------
         Client.publish_dataset
+        Client.list_datasets
+        Client.get_dataset
         """
-        return self.sync(self.scheduler.publish_delete, name=name, **kwargs)
+        return self.sync(self._unpublish_dataset, name=name, **kwargs)
 
     def list_datasets(self, **kwargs):
         """
@@ -2969,46 +3015,52 @@ class Client(SyncMethodMixin):
         See Also
         --------
         Client.publish_dataset
+        Client.unpublish_dataset
         Client.get_dataset
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
-    async def _get_dataset(self, name, default=no_default):
-        with self.as_current():
-            out = await self.scheduler.publish_get(name=name, client=self.id)
-        if out is None:
-            if default is no_default:
-                raise KeyError(f"Dataset '{name}' not found")
-            else:
-                return default
-        for fut in futures_of(out["data"]):
-            fut.bind_client(self)
-        self._inform_scheduler_of_futures()
-        return out["data"]
+    async def _get_dataset(self, name: Key | list[Key], default=no_default):
+        names = name if isinstance(name, list) else [name]
+        raw_outs = await self.scheduler.publish_get(names=names)
 
-    def get_dataset(self, name, default=no_default, **kwargs):
+        outs = []
+        for out in raw_outs:
+            if out is None:
+                if default is no_default:
+                    raise KeyError(f"Dataset '{name}' not found")
+                outs.append(default)
+            else:
+                for fut in futures_of(out["data"]):
+                    fut.bind_client(self)
+                outs.append(out["data"])
+
+        self._inform_scheduler_of_futures()
+        return outs if isinstance(name, list) else outs[0]
+
+    def get_dataset(self, name: Key | list[Key], default=no_default, **kwargs):
         """
         Get named dataset from the scheduler if present.
         Return the default or raise a KeyError if not present.
 
         Parameters
         ----------
-        name : str
-            name of the dataset to retrieve
-        default : str
+        name : Dask key (str, int, float, or tuple thereof), or list of keys
+            name(s) of the dataset(s) to retrieve
+        default : Any
             optional, not set by default
             If set, do not raise a KeyError if the name is not present but
             return this default
-        kwargs : dict
-            additional keyword arguments to _get_dataset
 
         Returns
         -------
-        The dataset from the scheduler, if present
+        The dataset from the scheduler, if present.
+        If name is a list of keys, return a list of datasets in the same order.
 
         See Also
         --------
         Client.publish_dataset
+        Client.unpublish_dataset
         Client.list_datasets
         """
         return self.sync(self._get_dataset, name, default=default, **kwargs)

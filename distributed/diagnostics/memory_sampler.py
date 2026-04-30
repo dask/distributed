@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -96,7 +96,7 @@ class MemorySampler:
     @contextmanager
     def _sample_sync(
         self, label: str | None, client: Client, measure: str, interval: float
-    ) -> Iterator[None]:
+    ) -> Generator[None]:
         key = client.sync(
             client.scheduler.memory_sampler_start,
             client=client.id,
