@@ -238,7 +238,6 @@ class MultiProgressBar:
         keys,
         scheduler=None,
         *,
-        func=None,
         group_by="prefix",
         interval="100ms",
         complete=False,
@@ -252,13 +251,7 @@ class MultiProgressBar:
                 self.client = weakref.ref(key.client)
                 break
 
-        if func is not None:
-            warnings.warn(
-                "`func` is deprecated, use `group_by` instead",
-                category=DeprecationWarning,
-            )
-            group_by = func
-        elif group_by in (None, "prefix"):
+        if group_by in (None, "prefix"):
             group_by = key_split
 
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
@@ -477,11 +470,6 @@ def progress(
         futures = [futures]
     if notebook is None:
         notebook = is_kernel()  # often but not always correct assumption
-    if kwargs.get("func", None) is not None:
-        warnings.warn(
-            "`func` is deprecated, use `group_by` instead", category=DeprecationWarning
-        )
-        group_by = kwargs.pop("func")
     if group_by not in ("spans", "prefix") and not isinstance(group_by, Callable):
         raise ValueError("`group_by` should be 'spans', 'prefix', or a Callable")
     if notebook:
