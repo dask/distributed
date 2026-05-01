@@ -1093,13 +1093,8 @@ async def test_root_redirect(c, s, a, b):
     assert "/status" in response.effective_url
 
 
-@gen_cluster(
-    client=True,
-    scheduler_kwargs={"dashboard": True},
-    worker_kwargs={"dashboard": True},
-    timeout=180,
-)
-async def test_proxy_to_workers(c, s, a, b):
+@gen_cluster(scheduler_kwargs={"dashboard": True}, worker_kwargs={"dashboard": True})
+async def test_proxy_to_workers(s, a, b):
     try:
         import jupyter_server_proxy  # noqa: F401
 
@@ -1419,6 +1414,7 @@ async def test_shuffling(c, s, a, b):
         assert time() < start + 10
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True}, timeout=60)
 async def test_hardware(c, s, *workers):
     plot = Hardware(s)

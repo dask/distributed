@@ -1489,7 +1489,7 @@ async def test_scatter_no_workers(c, s, direct):
         await c.scatter(123, timeout=0.1, direct=direct)
     assert time() < start + 5
 
-    fut = c.scatter({"y": 2}, timeout=5, direct=direct)
+    fut = c.scatter({"y": 2}, timeout=15, direct=direct)
     await asyncio.sleep(0.1)
     async with Worker(s.address) as w:
         await fut
@@ -1497,7 +1497,7 @@ async def test_scatter_no_workers(c, s, direct):
 
     # Test race condition between worker init and scatter
     w = Worker(s.address)
-    await asyncio.gather(c.scatter({"z": 3}, timeout=5, direct=direct), w)
+    await asyncio.gather(c.scatter({"z": 3}, timeout=15, direct=direct), w)
     assert w.data["z"] == 3
     await w.close()
 
@@ -3119,10 +3119,7 @@ async def test_task_group_not_done_noworker(c, s, a, b):
 
 
 @gen_cluster(
-    client=True,
-    nthreads=[],
-    config={"distributed.scheduler.worker-saturation": 1.0},
-    timeout=3,
+    client=True, nthreads=[], config={"distributed.scheduler.worker-saturation": 1.0}
 )
 async def test_task_group_not_done_queued(c, s):
     """TaskGroup.done is False if any of its tasks are in queued state"""

@@ -191,7 +191,7 @@ async def test_unexpected_closed_worker():
             assert len(cluster.workers) == 2
 
 
-@gen_test(timeout=60)
+@gen_test()
 async def test_restart():
     """Regression test for https://github.com/dask/distributed/issues/3062"""
     worker = {"cls": Nanny, "options": {"nthreads": 1}}

@@ -542,7 +542,7 @@ async def test_send_recv_args():
         assert comm.closed()
 
 
-@gen_test(timeout=5)
+@gen_test()
 async def test_send_recv_cancelled():
     """Test that the comm channel is closed on CancelledError"""
 

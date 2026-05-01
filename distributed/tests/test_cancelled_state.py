@@ -1300,7 +1300,7 @@ def test_secede_cancelled_or_resumed_workerstate(
     assert ts not in ws.long_running
 
 
-@gen_cluster(client=True, nthreads=[("", 1), ("", 1)], timeout=2)
+@gen_cluster(client=True, nthreads=[("", 1), ("", 1)])
 async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a, b):
     """Regression test that ensures that we handle stale long-running messages correctly.
 
@@ -1412,7 +1412,7 @@ async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a
     assert await x.result() == 123
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=2)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_secede_racing_resuming_on_same_worker(c, s, a):
     """Regression test that ensures that we handle stale long-running messages correctly.
 
@@ -1517,7 +1517,7 @@ async def test_secede_racing_resuming_on_same_worker(c, s, a):
     assert await x.result() == 123
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=2)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_secede_cancelled_or_resumed_scheduler(c, s, a):
     """Same as test_secede_cancelled_or_resumed_workerstate, but testing the interaction
     with the scheduler

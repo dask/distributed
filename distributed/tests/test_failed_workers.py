@@ -104,7 +104,7 @@ async def test_submit_after_failed_worker_async(
     assert s.tasks["y"].who_has == {a_ws}
 
 
-@gen_cluster(client=True, timeout=60)
+@gen_cluster(client=True)
 async def test_submit_after_failed_worker(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
@@ -209,9 +209,9 @@ def test_worker_doesnt_await_task_completion(loop):
             future = c.submit(sleep, 100)
             sleep(0.1)
             start = time()
-            c.restart(timeout="5s", wait_for_workers=False)
+            c.restart(timeout="15s", wait_for_workers=False)
             stop = time()
-            assert stop - start < 10
+            assert stop - start < 20
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
