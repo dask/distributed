@@ -61,15 +61,14 @@ async def test_nanny_process_failure(c, s):
             await c.run(os._exit, 0, workers=[n.worker_address])
 
         # Wait while process dies
-        await async_poll_for(lambda: n.pid != pid, timeout=5)
+        await async_poll_for(lambda: n.pid != pid)
         # Wait while process comes back
-        await async_poll_for(lambda: n.is_alive(), timeout=5)
+        await async_poll_for(lambda: n.is_alive())
 
         # assert n.worker_address != original_address  # most likely
 
         await async_poll_for(
-            lambda: n.worker_address in s.workers and n.worker_dir is not None,
-            timeout=5,
+            lambda: n.worker_address in s.workers and n.worker_dir is not None
         )
 
         second_dir = n.worker_dir
@@ -802,7 +801,7 @@ async def test_malloc_trim_threshold(c, s, a):
     arr = c.persist(arr)
     await wait(arr)
     # Wait for heartbeat
-    await async_poll_for(lambda: s.memory.process > 2**29, timeout=5)
+    await async_poll_for(lambda: s.memory.process > 2**29)
     del arr
 
     # This is the delicate bit, as it relies on
@@ -815,7 +814,7 @@ async def test_malloc_trim_threshold(c, s, a):
     # - 156~210[1] MiB at the end of this test, with MALLOC_TRIM_THRESHOLD_=65536
     # - 620~670[1] MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
     # [1] depends on distributed.scheduler.worker-saturation
-    await async_poll_for(lambda: s.memory.process < 300 * 2**20, timeout=5)
+    await async_poll_for(lambda: s.memory.process < 300 * 2**20)
 
 
 @gen_cluster(client=True, nthreads=[])

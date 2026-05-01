@@ -449,7 +449,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
             range(rootish_threshold),
             key=[f"first-{i}" for i in range(rootish_threshold)],
         )
-        await async_poll_for(lambda: s.queued, 5)
+        await async_poll_for(lambda: s.queued)
 
         second_batch = c2.map(
             lambda i: event.wait(),
@@ -457,7 +457,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
             key=[f"second-{i}" for i in range(rootish_threshold)],
             fifo_timeout=0,
         )
-        await async_poll_for(lambda: second_batch[0].key in s.tasks, 5)
+        await async_poll_for(lambda: second_batch[0].key in s.tasks)
 
         # All of the second batch should be queued after the first batch
         assert [ts.key for ts in s.queued.sorted()] == [
@@ -472,7 +472,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
         await c.close()
         del c, first_batch
 
-        await async_poll_for(lambda: len(s.tasks) == len(second_batch), 5)
+        await async_poll_for(lambda: len(s.tasks) == len(second_batch))
 
         # Second batch should move up the queue and start processing
         assert len(s.queued) == len(second_batch) - s.total_nthreads, list(
@@ -586,13 +586,13 @@ async def test_queued_remove_add_worker(c, s, a, b):
     event = Event()
     fs = c.map(lambda i: event.wait(), range(10))
 
-    await async_poll_for(lambda: len(s.queued) == 6, timeout=5)
+    await async_poll_for(lambda: len(s.queued) == 6)
     await s.remove_worker(a.address, stimulus_id="fake")
     assert len(s.queued) == 8
 
     # Add a new worker
     async with Worker(s.address, nthreads=2) as w:
-        await async_poll_for(lambda: len(s.queued) == 6, timeout=5)
+        await async_poll_for(lambda: len(s.queued) == 6)
 
         await event.set()
         await wait(fs)
@@ -609,10 +609,10 @@ async def test_secede_opens_slot(c, s, a):
         second.wait()
 
     fs = c.map(func, [first] * 5, [second] * 5, key=[f"x{i}" for i in range(5)])
-    await async_poll_for(lambda: a.state.executing, timeout=5)
+    await async_poll_for(lambda: a.state.executing)
 
     await first.set()
-    await async_poll_for(lambda: len(a.state.long_running) == len(fs), timeout=5)
+    await async_poll_for(lambda: len(a.state.long_running) == len(fs))
 
     await second.set()
     await c.gather(fs)
@@ -2358,7 +2358,7 @@ async def test_resources_reset_after_cancelled_task(c, s, a):
     assert a.state.available_resources == {"A": 0}
 
     await lock.release()
-    await async_poll_for(lambda: not a.state.tasks, timeout=5)
+    await async_poll_for(lambda: not a.state.tasks)
     assert s.workers[a.address].used_resources == {"A": 0}
     assert a.state.available_resources == {"A": 1}
 
@@ -2587,7 +2587,7 @@ async def test_no_workers_timeout_queued(c, s, a):
     """Don't trip no-workers-timeout when there are queued tasks AND processing tasks"""
     ev = Event()
     futures = [c.submit(lambda ev: ev.wait(), ev, pure=False) for _ in range(3)]
-    await async_poll_for(lambda: len(s.tasks) == 3 and a.state.tasks, timeout=5)
+    await async_poll_for(lambda: len(s.tasks) == 3 and a.state.tasks)
     assert s.queued or math.isinf(s.WORKER_SATURATION)
 
     s._check_no_workers()
@@ -2766,14 +2766,14 @@ async def test_adaptive_target_empty_cluster(c, s, queue):
     assert s.adaptive_target() == 0
 
     f = c.submit(inc, -1)
-    await async_poll_for(lambda: s.tasks, timeout=5)
+    await async_poll_for(lambda: s.tasks)
     assert s.adaptive_target() == 1
     del f
 
     if queue:
         # only queuing supports fast scale-up for empty clusters https://github.com/dask/distributed/issues/6962
         fs = c.map(inc, range(100))
-        await async_poll_for(lambda: len(s.tasks) == len(fs), timeout=5)
+        await async_poll_for(lambda: len(s.tasks) == len(fs))
         assert s.adaptive_target() > 1
 
 
@@ -3075,7 +3075,7 @@ async def test_task_group_done(c, s, a, b):
 
     await wait([x0, x1, x2, y])
     del x2  # forgotten
-    await async_poll_for(lambda: ("x", 2) not in s.tasks, timeout=5)
+    await async_poll_for(lambda: ("x", 2) not in s.tasks)
 
     tg = s.task_groups["x"]
     assert tg.states == {
@@ -4052,7 +4052,7 @@ async def test_gather_on_worker_bad_recipient(c, s, a, b):
     """The recipient is missing"""
     x = await c.scatter("x")
     await b.close()
-    await async_poll_for(lambda: s.workers.keys() == {a.address}, timeout=5)
+    await async_poll_for(lambda: s.workers.keys() == {a.address})
     out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == {x.key}
 
@@ -4250,7 +4250,7 @@ async def test_transition_counter_max_worker(c, s, a):
     a.state.transition_counter_max = 1
     fut = c.submit(inc, 2)
     with captured_logger("distributed.worker") as logger:
-        await async_poll_for(lambda: a.state.transition_counter > 0, timeout=5)
+        await async_poll_for(lambda: a.state.transition_counter > 0)
 
     assert "TransitionCounterMaxExceeded" in logger.getvalue()
     # Worker state is corrupted. Avoid test failure on gen_cluster teardown.
@@ -4639,7 +4639,7 @@ async def test_transition_waiting_memory(c, s, a, b):
             assert s.tasks["y"].state == "waiting"
             await wait_for_state("y", "memory", b)
 
-    await async_poll_for(lambda: not b.state.tasks, timeout=5)
+    await async_poll_for(lambda: not b.state.tasks)
 
     assert s.tasks["x"].state == "no-worker"
     assert s.tasks["y"].state == "waiting"
@@ -4769,8 +4769,7 @@ async def test_transition_failure_triggers_log_event():
                 event["action"] == "scheduler-transition-failed"
                 for _, event in s.get_events("transitions")
             )
-            == 1,
-            timeout=5,
+            == 1
         )
 
 
@@ -4852,8 +4851,7 @@ async def test_deadlock_dependency_of_queued_released_when_worker_removed(
     with freeze_batched_send(b.batched_stream):
         await async_poll_for(
             lambda: b.state.tasks.get(dep.key) is not None
-            and b.state.tasks.get(dep.key).state == "memory",
-            timeout=5,
+            and b.state.tasks.get(dep.key).state == "memory"
         )
         assert s.queued
         await s.remove_worker(address=a.address, stimulus_id="test")
@@ -5050,7 +5048,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await in_f.clear()
 
             # Make sure that the scheduler knows that both workers hold 'g' in memory
-            await async_poll_for(lambda: len(s.tasks["g"].who_has) == 2, timeout=5)
+            await async_poll_for(lambda: len(s.tasks["g"].who_has) == 2)
             # Remove worker 'b' while it's processing h1
             await s.remove_worker(b.address, stimulus_id="remove_b1")
             await block_hb.set()
@@ -5073,7 +5071,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
 
         del ha, hb
         # Make sure that h2 gets forgotten on worker 'a'
-        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+        await async_poll_for(lambda: not a.state.tasks)
     # Ensure that no other errors including transition failures were logged
     assert (
         logger.getvalue()
@@ -5133,12 +5131,12 @@ async def test_stimulus_from_erred_task(c, s, a):
         ) as wrapped_stimulus:
             frozen_stream_from_a_ctx.__exit__(None, None, None)
             # Make sure the `stimulus_task_finished` gets processed
-            await async_poll_for(lambda: wrapped_stimulus.call_count == 1, timeout=5)
+            await async_poll_for(lambda: wrapped_stimulus.call_count == 1)
 
         # Allow the scheduler to talk to the worker again
         frozen_stream_to_a_ctx.__exit__(None, None, None)
         # Make sure all data gets forgotten on worker 'a'
-        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+        await async_poll_for(lambda: not a.state.tasks)
 
     # Ensure that no other errors including transition failures were logged
     assert (
@@ -5216,7 +5214,7 @@ async def test_data_producers(c, s, a):
 
     arr = MyArray()
     x = c.compute(arr)
-    await async_poll_for(lambda: s.tasks, 5)
+    await async_poll_for(lambda: s.tasks)
     assert (
         sum([s.is_rootish(v) and v.run_spec.data_producer for v in s.tasks.values()])
         == 2

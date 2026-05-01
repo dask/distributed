@@ -463,18 +463,18 @@ def test_Future_release_sync(c):
     x = c.submit(div, 1, 1)
     x.result()
     x.release()
-    poll_for(lambda: not c.futures, timeout=5)
+    poll_for(lambda: not c.futures)
 
     ev = Event()
     x = c.submit(lambda ev: ev.wait(), ev)
     x.release()
-    poll_for(lambda: not c.futures, timeout=5)
+    poll_for(lambda: not c.futures)
     ev.set()
 
     x = c.submit(div, 1, 0)
     x.exception()
     x.release()
-    poll_for(lambda: not c.futures, timeout=5)
+    poll_for(lambda: not c.futures)
 
 
 @pytest.mark.parametrize("method", ["result", "gather"])
@@ -566,9 +566,7 @@ async def test_gc(s, a, b):
         await x
         assert s.tasks[x.key].who_has
         x.__del__()
-        await async_poll_for(
-            lambda: x.key not in s.tasks or not s.tasks[x.key].who_has, timeout=0.3
-        )
+        await async_poll_for(lambda: x.key not in s.tasks or not s.tasks[x.key].who_has)
 
 
 def test_thread(c):
@@ -3624,9 +3622,9 @@ def test_get_returns_early(c):
         result = c.get({"x": (throws, 1), "y": (block, event)}, ["x", "y"])
 
     # Futures should be released and forgotten
-    poll_for(lambda: not c.futures, timeout=1)
+    poll_for(lambda: not c.futures)
     event.set()
-    poll_for(lambda: not any(c.processing().values()), timeout=3)
+    poll_for(lambda: not any(c.processing().values()))
 
     x = c.submit(inc, 1)
     x.result()
@@ -3767,11 +3765,7 @@ async def test_reconnect():
         assert (await x) == 2
         stack.close()
 
-        start = time()
-        while c.status != "connecting":
-            assert time() < start + 10
-            await asyncio.sleep(0.01)
-
+        await async_poll_for(lambda: c.status == "connecting")
         assert x.status == "cancelled"
         with pytest.raises(CancelledError):
             await x
@@ -3786,12 +3780,9 @@ async def test_reconnect():
                 f"--port={port}",
             ]
         ):
-            start = time()
-            while c.status != "running":
-                await asyncio.sleep(0.1)
-                assert time() < start + 10
-
+            await async_poll_for(lambda: c.status == "running")
             await w.finished()
+
             async with Worker(f"127.0.0.1:{port}"):
                 start = time()
                 while len(await c.nthreads()) != 1:
@@ -3906,13 +3897,8 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 if not running:
                     break
 
-            start = time()
-            while c.nthreads():
-                sleep(0.2)
-                assert time() < start + 10
-
-            while len(workers) < count * repeat:
-                sleep(0.2)
+            poll_for(lambda: not c.nthreads(), period=0.2)
+            poll_for(len(workers) == count * repeat, timeout=300)
 
             status = False
 
@@ -8172,9 +8158,9 @@ async def test_gather_race_vs_AMM(c, s, a, direct):
         # Can't use s.request_acquire_replicas as it would get stuck on b.block_get_data
         a.update_data({"x": 3})
         a.batched_send({"op": "add-keys", "keys": ["x"]})
-        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2, timeout=5)
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2)
         s.request_remove_replicas(b.address, ["x"], stimulus_id="remove")
-        await async_poll_for(lambda: "x" not in b.data, timeout=5)
+        await async_poll_for(lambda: "x" not in b.data)
 
         b.block_get_data.set()
 
