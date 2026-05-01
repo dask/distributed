@@ -129,7 +129,7 @@ def progress_quads(msg, nrows=8, ncols=3):
         pl = width * (p + r + m + e) / a + l
         ql = width * (p + r + m + e + q) / a + l
         nwl = width * (p + r + m + e + q + nw) / a + l
-        done = "%d / %d" % (r + m + e, a)
+        done = f"{r + m + e} / {a}"
         d["released-loc"].append(rl)
         d["memory-loc"].append(ml)
         d["erred-loc"].append(el)
@@ -194,7 +194,7 @@ def task_stream_append(lists, msg, workers):
         lists["alpha"].append(alphas[startstop["action"]])
         lists["worker"].append(msg["worker"])
 
-        worker_thread = "%s-%d" % (msg["worker"], msg["thread"])
+        worker_thread = f"{msg['worker']}-{msg['thread']}"
         lists["worker_thread"].append(worker_thread)
         if worker_thread not in workers:
             workers[worker_thread] = len(workers) / 2

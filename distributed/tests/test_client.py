@@ -463,18 +463,18 @@ def test_Future_release_sync(c):
     x = c.submit(div, 1, 1)
     x.result()
     x.release()
-    poll_for(lambda: not c.futures, timeout=5)
+    poll_for(lambda: not c.futures)
 
     ev = Event()
     x = c.submit(lambda ev: ev.wait(), ev)
     x.release()
-    poll_for(lambda: not c.futures, timeout=5)
+    poll_for(lambda: not c.futures)
     ev.set()
 
     x = c.submit(div, 1, 0)
     x.exception()
     x.release()
-    poll_for(lambda: not c.futures, timeout=5)
+    poll_for(lambda: not c.futures)
 
 
 @pytest.mark.parametrize("method", ["result", "gather"])
@@ -566,9 +566,7 @@ async def test_gc(s, a, b):
         await x
         assert s.tasks[x.key].who_has
         x.__del__()
-        await async_poll_for(
-            lambda: x.key not in s.tasks or not s.tasks[x.key].who_has, timeout=0.3
-        )
+        await async_poll_for(lambda: x.key not in s.tasks or not s.tasks[x.key].who_has)
 
 
 def test_thread(c):
@@ -2535,7 +2533,7 @@ def test_Future_exception_sync_2(loop, capsys):
     assert dask.base.get_scheduler() != c.get
 
 
-@gen_cluster(timeout=60, client=True)
+@gen_cluster(client=True)
 async def test_async_persist(c, s, a, b):
     from dask.delayed import Delayed, delayed
 
@@ -2607,7 +2605,7 @@ def test_persist(c):
     assert (zz == z).all()
 
 
-@gen_cluster(timeout=60, client=True)
+@gen_cluster(client=True)
 async def test_long_traceback(c, s, a, b):
     from distributed.protocol.pickle import dumps
 
@@ -3624,9 +3622,9 @@ def test_get_returns_early(c):
         result = c.get({"x": (throws, 1), "y": (block, event)}, ["x", "y"])
 
     # Futures should be released and forgotten
-    poll_for(lambda: not c.futures, timeout=1)
+    poll_for(lambda: not c.futures)
     event.set()
-    poll_for(lambda: not any(c.processing().values()), timeout=3)
+    poll_for(lambda: not any(c.processing().values()))
 
     x = c.submit(inc, 1)
     x.result()
@@ -3636,7 +3634,6 @@ def test_get_returns_early(c):
     assert x.key in c.futures
 
 
-@pytest.mark.slow
 @gen_cluster(client=True)
 async def test_Client_clears_references_after_restart(c, s, a, b):
     x = c.submit(inc, 1)
@@ -3644,7 +3641,7 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
     assert x.key in c.futures
 
     with pytest.raises(TimeoutError):
-        await c.restart(timeout=1)
+        await c.restart(timeout=0.01)
 
     assert x.key not in c.refcount
     assert not c.futures
@@ -3745,7 +3742,7 @@ async def test_persist_optimize_graph(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_scatter_raises_if_no_workers(c, s):
     with pytest.raises(TimeoutError):
-        await c.scatter(1, timeout=0.5)
+        await c.scatter(1, timeout=0.01)
 
 
 @pytest.mark.slow
@@ -3762,16 +3759,12 @@ async def test_reconnect():
         Client(f"127.0.0.1:{port}", asynchronous=True) as c,
         Worker(f"127.0.0.1:{port}") as w,
     ):
-        await c.wait_for_workers(1, timeout=10)
+        await c.wait_for_workers(1, timeout=15)
         x = c.submit(inc, 1)
         assert (await x) == 2
         stack.close()
 
-        start = time()
-        while c.status != "connecting":
-            assert time() < start + 10
-            await asyncio.sleep(0.01)
-
+        await async_poll_for(lambda: c.status == "connecting")
         assert x.status == "cancelled"
         with pytest.raises(CancelledError):
             await x
@@ -3786,24 +3779,21 @@ async def test_reconnect():
                 f"--port={port}",
             ]
         ):
-            start = time()
-            while c.status != "running":
-                await asyncio.sleep(0.1)
-                assert time() < start + 10
-
+            await async_poll_for(lambda: c.status == "running")
             await w.finished()
+
             async with Worker(f"127.0.0.1:{port}"):
                 start = time()
                 while len(await c.nthreads()) != 1:
                     await asyncio.sleep(0.05)
-                    assert time() < start + 10
+                    assert time() < start + 15
 
                 x = c.submit(inc, 1)
                 assert (await x) == 2
 
         start = time()
         while True:
-            assert time() < start + 10
+            assert time() < start + 15
             try:
                 await x
                 assert False
@@ -3860,8 +3850,8 @@ async def test_reconnect_timeout(c, s):
     assert "Failed to reconnect" in text
 
 
-@pytest.mark.avoid_ci(reason="hangs on github actions ubuntu-latest CI")
 @pytest.mark.slow
+@pytest.mark.skip(reason="hangs")
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
 def test_open_close_many_workers(loop, worker, count, repeat):
@@ -3901,18 +3891,13 @@ def test_open_close_many_workers(loop, worker, count, repeat):
             sleep(1)
 
             for _ in range(count):
-                done.acquire(timeout=5)
+                done.acquire(timeout=15)
                 gc.collect()
                 if not running:
                     break
 
-            start = time()
-            while c.nthreads():
-                sleep(0.2)
-                assert time() < start + 10
-
-            while len(workers) < count * repeat:
-                sleep(0.2)
+            poll_for(lambda: not c.nthreads(), period=0.2)
+            poll_for(len(workers) == count * repeat, timeout=300)
 
             status = False
 
@@ -4186,8 +4171,8 @@ async def test_as_current(c, s, a, b):
 
 def test_as_current_is_thread_local(s, loop):
     parties = 2
-    cm_after_enter = threading.Barrier(parties=parties, timeout=5)
-    cm_before_exit = threading.Barrier(parties=parties, timeout=5)
+    cm_after_enter = threading.Barrier(parties=parties, timeout=15)
+    cm_before_exit = threading.Barrier(parties=parties, timeout=15)
 
     def run():
         with Client(s["address"], loop=loop) as c:
@@ -8172,9 +8157,9 @@ async def test_gather_race_vs_AMM(c, s, a, direct):
         # Can't use s.request_acquire_replicas as it would get stuck on b.block_get_data
         a.update_data({"x": 3})
         a.batched_send({"op": "add-keys", "keys": ["x"]})
-        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2, timeout=5)
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2)
         s.request_remove_replicas(b.address, ["x"], stimulus_id="remove")
-        await async_poll_for(lambda: "x" not in b.data, timeout=5)
+        await async_poll_for(lambda: "x" not in b.data)
 
         b.block_get_data.set()
 

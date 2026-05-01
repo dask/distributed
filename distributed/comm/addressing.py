@@ -18,13 +18,13 @@ def parse_address(addr: str, strict: bool = False) -> tuple[str, str]:
     If strict is set to true the address must have a scheme.
     """
     if not isinstance(addr, str):
-        raise TypeError("expected str, got %r" % addr.__class__.__name__)
+        raise TypeError(f"expected str, got {addr.__class__.__name__!r}")
     scheme, sep, loc = addr.rpartition("://")
     if strict and not sep:
         msg = (
             "Invalid url scheme. "
             "Must include protocol like tcp://localhost:8000. "
-            "Got %s" % addr
+            f"Got {addr}"
         )
         raise ValueError(msg)
     if not sep:
@@ -290,7 +290,7 @@ def address_from_user_args(  # type: ignore[no-untyped-def]
             host = get_ip_interface(interface)
 
     if protocol and host and "://" not in host:
-        host = protocol + "://" + host
+        host = f"{protocol}://{host}"
 
     if host or port:
         addr = uri_from_host_port(host, port, default_port)
@@ -298,6 +298,7 @@ def address_from_user_args(  # type: ignore[no-untyped-def]
         addr = ""
 
     if protocol:
-        addr = protocol + "://" + addr.split("://")[-1]
+        host = addr.split("://")[-1]
+        addr = f"{protocol}://{host}"
 
     return addr

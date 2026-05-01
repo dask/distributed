@@ -377,7 +377,7 @@ def _get_plugin_name(plugin: SchedulerPlugin | WorkerPlugin | NannyPlugin) -> st
     if hasattr(plugin, "name"):
         return plugin.name
     else:
-        return funcname(type(plugin)) + "-" + str(uuid.uuid4())
+        return f"{funcname(type(plugin))}-{uuid.uuid4()}"
 
 
 class SchedulerUploadFile(SchedulerPlugin):

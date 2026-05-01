@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from distributed.compatibility import PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 if TYPE_CHECKING:
     # Optional runtime dependencies
@@ -214,7 +214,7 @@ class MemorySamplerExtension:
                 self.stop(key)
 
         pc = PeriodicCallback(sample, interval * 1000)
-        self.scheduler.periodic_callbacks["MemorySampler-" + key] = pc
+        self.scheduler.periodic_callbacks[f"MemorySampler-{key}"] = pc
         pc.start()
 
         # Immediately collect the first sample; this also ensures there's always at
@@ -225,7 +225,7 @@ class MemorySamplerExtension:
 
     def stop(self, key: str) -> list[tuple[float, int]]:
         """Stop sampling and return the samples"""
-        pc = self.scheduler.periodic_callbacks.pop("MemorySampler-" + key, None)
+        pc = self.scheduler.periodic_callbacks.pop(f"MemorySampler-{key}", None)
         if pc is not None:  # Race condition with scheduler shutdown
             pc.stop()
         return self.samples.pop(key)

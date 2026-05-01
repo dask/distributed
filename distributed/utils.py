@@ -67,7 +67,6 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.core import flatten
 from dask.utils import _deprecated, key_split
-from dask.utils import ensure_bytes as _ensure_bytes
 from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
@@ -200,7 +199,7 @@ def _get_ip(host, port, family):
     except OSError as e:
         warnings.warn(
             "Couldn't detect a suitable IP address for "
-            "reaching %r, defaulting to hostname: %s" % (host, e),
+            f"reaching {host!r}, defaulting to hostname: {e}",
             RuntimeWarning,
         )
         return hostname_fallback()
@@ -854,28 +853,6 @@ class _LogErrors:
             pdb.set_trace()  # pragma: nocover
 
 
-def silence_logging(level, root="distributed"):
-    """
-    Change all StreamHandlers for the given logger to the given level
-    """
-    warnings.warn(
-        "silence_logging is deprecated, call silence_logging_cmgr",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if isinstance(level, str):
-        level = getattr(logging, level.upper())
-
-    old = None
-    logger = logging.getLogger(root)
-    for handler in logger.handlers:
-        if isinstance(handler, logging.StreamHandler):
-            old = handler.level
-            handler.setLevel(level)
-
-    return old
-
-
 @contextlib.contextmanager
 def silence_logging_cmgr(
     level: str | int, root: str = "distributed"
@@ -1043,44 +1020,6 @@ def read_block(f, offset, length, delimiter=None):
     return bytes
 
 
-def ensure_bytes(s):
-    """Attempt to turn `s` into bytes.
-
-    Parameters
-    ----------
-    s : Any
-        The object to be converted. Will correctly handled
-
-        * str
-        * bytes
-        * objects implementing the buffer protocol (memoryview, ndarray, etc.)
-
-    Returns
-    -------
-    b : bytes
-
-    Raises
-    ------
-    TypeError
-        When `s` cannot be converted
-
-    Examples
-    --------
-    >>> ensure_bytes('123')
-    b'123'
-    >>> ensure_bytes(b'123')
-    b'123'
-    """
-    warnings.warn(
-        "`distributed.utils.ensure_bytes` is deprecated. "
-        "Please switch to `dask.utils.ensure_bytes`. "
-        "This will be removed in `2022.6.0`.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return _ensure_bytes(s)
-
-
 def ensure_memoryview(obj: bytes | bytearray | memoryview | PickleBuffer) -> memoryview:
     """Ensure `obj` is a 1-D contiguous `uint8` `memoryview`"""
     if not isinstance(obj, memoryview):
@@ -1170,7 +1109,7 @@ def asciitable(columns, rows):
     widths = tuple(max(max(map(len, x)), len(c)) for x, c in zip(zip(*rows), columns))
     row_template = ("|" + (" %%-%ds |" * len(columns))) % widths
     header = row_template % tuple(columns)
-    bar = "+%s+" % "+".join("-" * (w + 2) for w in widths)
+    bar = "+{}+".format("+".join("-" * (w + 2) for w in widths))
     data = "\n".join(row_template % r for r in rows)
     return "\n".join([bar, header, bar, data, bar])
 
@@ -1259,7 +1198,7 @@ def command_has_keyword(cmd, k):
 
                 cmd = import_module(cmd)
             except ImportError:
-                raise ImportError("Module for command %s is not available" % cmd)
+                raise ImportError(f"Module for command {cmd} is not available")
 
         if isinstance(cmd.main, click.core.Command):
             cmd = cmd.main
@@ -1455,8 +1394,7 @@ def cli_keywords(
             if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
                 if cls and cmd:
                     raise ValueError(
-                        "Neither class %s or module %s support keyword %s"
-                        % (typename(cls), typename(cmd), k)
+                        f"Neither class {typename(cls)} or module {typename(cmd)} support keyword {k}"
                     )
                 elif cls:
                     raise ValueError(
@@ -1614,26 +1552,6 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
 
         addresses.append({"address": host, "port": port})
     return addresses
-
-
-_deprecations = {
-    "no_default": "dask.typing.no_default",
-}
-
-
-def __getattr__(name):
-    if name in _deprecations:
-        use_instead = _deprecations[name]
-
-        warnings.warn(
-            f"{name} is deprecated and will be removed in a future release. "
-            f"Please use {use_instead} instead.",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-        return import_term(use_instead)
-    else:
-        raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
 # Used internally by recursive_to_dict to stop infinite recursion. If an object has

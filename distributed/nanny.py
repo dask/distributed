@@ -292,7 +292,7 @@ class Nanny(ServerNode):
     memory_monitor = DeprecatedMemoryMonitor()
 
     def __repr__(self):
-        return "<Nanny: %s, threads: %d>" % (self.worker_address, self.nthreads)
+        return f"<Nanny: {self.worker_address}, threads: {self.nthreads}>"
 
     async def _unregister(self, timeout=10):
         if self.process is None:
@@ -782,11 +782,11 @@ class WorkerProcess:
     def _death_message(self, pid, exitcode):
         assert exitcode is not None
         if exitcode == 255:
-            return "Worker process %d was killed by unknown signal" % (pid,)
+            return f"Worker process {pid} was killed by unknown signal"
         elif exitcode >= 0:
-            return "Worker process %d exited with status %d" % (pid, exitcode)
+            return f"Worker process {pid} exited with status {exitcode}"
         else:
-            return "Worker process %d was killed by signal %d" % (pid, -exitcode)
+            return f"Worker process {pid} was killed by signal {-exitcode}"
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()

@@ -119,7 +119,7 @@ class Security:
             )
         extra = set(kwargs).difference(self.__slots__)
         if extra:
-            raise TypeError("Unknown parameters: %r" % sorted(extra))
+            raise TypeError(f"Unknown parameters: {sorted(extra)!r}")
         self.extra_conn_args = kwargs.pop("extra_conn_args", {})
         if require_encryption is None:
             require_encryption = dask.config.get("distributed.comm.require-encryption")
@@ -282,8 +282,8 @@ class Security:
         return {
             "ca_file": self.tls_ca_file,
             "ciphers": self.tls_ciphers,
-            "cert": getattr(self, "tls_%s_cert" % role),
-            "key": getattr(self, "tls_%s_key" % role),
+            "cert": getattr(self, f"tls_{role}_cert"),
+            "key": getattr(self, f"tls_{role}_key"),
         }
 
     def _get_tls_context(self, tls, purpose):

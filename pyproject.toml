@@ -84,7 +84,6 @@ ignore = [
     "E714",   # Test for object identity should be `is not`
     "E721",   # Use `is` and `is not` for type comparisons, or `isinstance()` for isinstance checks
     "E741",   # Ambiguous variable name: `l`
-    "UP031",  # TODO: apply this rule
     "RUF001", # String contains ambiguous letter
     "RUF002", # Docstring contains ambiguous letter
     "RUF005", # Consider unpacking operator instead of concatenation
@@ -103,6 +102,7 @@ ignore = [
 "**__init__.py" = ["F401", "F811"]
 "distributed/shuffle/tests/test_shuffle.py" = ["F601"]
 "distributed/utils.py" = ["F821"]
+"test_*.py" = ["UP031"]
 
 [tool.ruff.lint.isort]
 section-order = [

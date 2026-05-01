@@ -241,7 +241,7 @@ async def test_tcp_specific(tcp):
     """
 
     async def handle_comm(comm):
-        assert comm.peer_address.startswith("tcp://" + host)
+        assert comm.peer_address.startswith(f"tcp://{host}")
         assert comm.extra_info == {}
         msg = await comm.read()
         msg["op"] = "pong"
@@ -258,7 +258,7 @@ async def test_tcp_specific(tcp):
     async def client_communicate(key, delay=0):
         addr = "%s:%d" % (host, port)
         comm = await connect(listener.contact_address)
-        assert comm.peer_address == "tcp://" + addr
+        assert comm.peer_address == f"tcp://{addr}"
         assert comm.extra_info == {}
         await comm.write({"op": "ping", "data": key})
         if delay:
@@ -286,7 +286,7 @@ async def test_tls_specific(tcp, sni):
 
     async def handle_comm(comm):
         try:
-            assert comm.peer_address.startswith("tls://" + host)
+            assert comm.peer_address.startswith(f"tls://{host}")
             check_tls_extra(comm.extra_info)
             msg = await comm.read()
             msg["op"] = "pong"
@@ -310,7 +310,7 @@ async def test_tls_specific(tcp, sni):
             listener.contact_address, ssl_context=client_ctx, server_hostname=sni
         )
         try:
-            assert comm.peer_address == "tls://" + addr
+            assert comm.peer_address == f"tls://{addr}"
             check_tls_extra(comm.extra_info)
             await comm.write({"op": "ping", "data": key})
             if delay:
@@ -382,7 +382,7 @@ async def check_inproc_specific(run_client):
 
     async def handle_comm(comm):
         try:
-            assert comm.peer_address.startswith("inproc://" + addr_head)
+            assert comm.peer_address.startswith(f"inproc://{addr_head}")
             client_addresses.add(comm.peer_address)
             for _ in range(N_MSGS):
                 msg = await comm.read()
@@ -395,7 +395,7 @@ async def check_inproc_specific(run_client):
         assert (
             listener.listen_address
             == listener.contact_address
-            == "inproc://" + listener_addr
+            == f"inproc://{listener_addr}"
         )
 
         l = []
@@ -403,7 +403,7 @@ async def check_inproc_specific(run_client):
         async def client_communicate(key, delay=0):
             comm = await connect(listener.contact_address)
             try:
-                assert comm.peer_address == "inproc://" + listener_addr
+                assert comm.peer_address == f"inproc://{listener_addr}"
                 for _ in range(N_MSGS):
                     await comm.write({"op": "ping", "data": key})
                     if delay:
@@ -700,9 +700,7 @@ async def test_tls_reject_certificate(tcp):
     listener = await listen("tls://", handle_comm, ssl_context=serv_ctx)
 
     with pytest.raises(EnvironmentError) as excinfo:
-        comm = await connect(
-            listener.contact_address, timeout=0.5, ssl_context=bad_cli_ctx
-        )
+        comm = await connect(listener.contact_address, ssl_context=bad_cli_ctx)
         await comm.write({"x": "foo"})  # TODO: why is this necessary in Tornado 6 ?
 
     if os.name != "nt":
@@ -719,14 +717,14 @@ async def test_tls_reject_certificate(tcp):
                 raise
 
     # Sanity check
-    comm = await connect(listener.contact_address, timeout=2, ssl_context=cli_ctx)
+    comm = await connect(listener.contact_address, ssl_context=cli_ctx)
     await comm.close()
 
     # Connector refuses a listener not signed by the CA
     listener = await listen("tls://", handle_comm, ssl_context=bad_serv_ctx)
 
     with pytest.raises(EnvironmentError) as excinfo:
-        await connect(listener.contact_address, timeout=2, ssl_context=cli_ctx)
+        await connect(listener.contact_address, ssl_context=cli_ctx)
 
     # XXX: For asyncio this is just a timeout error
     # assert "certificate verify failed" in str(excinfo.value.__cause__)

@@ -440,7 +440,7 @@ class SSHCluster:
 
     @property
     def scheduler_address(self):
-        return "%s:%d" % (self.scheduler_addr, self.scheduler_port)
+        return f"{self.scheduler_addr}:{self.scheduler_port}"
 
     def monitor_remote_processes(self):
         # Form a list containing all processes, since we treat them equally from here on out.

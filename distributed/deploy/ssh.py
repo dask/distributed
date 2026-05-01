@@ -158,17 +158,13 @@ class Worker(Process):
                 "distributed.cli.dask_spec",
                 self.scheduler,
                 "--spec",
-                "'%s'"
-                % dumps(
-                    {
-                        i: {
-                            "cls": self.worker_class,
-                            "opts": {
-                                **self.kwargs,
-                            },
+                "'{}'".format(
+                    dumps(
+                        {
+                            i: {"cls": self.worker_class, "opts": {**self.kwargs}}
+                            for i in range(self.n_workers)
                         }
-                        for i in range(self.n_workers)
-                    }
+                    )
                 ),
             ]
         )
@@ -250,7 +246,9 @@ class Scheduler(Process):
                 "-m",
                 "distributed.cli.dask_spec",
                 "--spec",
-                "'%s'" % dumps({"cls": "distributed.Scheduler", "opts": self.kwargs}),
+                "'{}'".format(
+                    dumps({"cls": "distributed.Scheduler", "opts": self.kwargs})
+                ),
             ]
         )
         self.proc = await self.connection.create_process(cmd)

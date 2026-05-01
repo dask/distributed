@@ -179,7 +179,7 @@ class Event:
 
     def __init__(self, name=None, client=None):
         self._client = client
-        self.name = name or "event-" + uuid.uuid4().hex
+        self.name = name or f"event-{uuid.uuid4().hex}"
 
     @property
     def client(self):

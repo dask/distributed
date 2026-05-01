@@ -117,7 +117,7 @@ class ThreadPoolExecutor(_base.Executor):
         self._shutdown = False
         self._shutdown_lock = threading.Lock()
         self._thread_name_prefix = thread_name_prefix or (
-            "ThreadPoolExecutor-%d" % next(self._counter)
+            f"ThreadPoolExecutor-{next(self._counter)}"
         )
 
     def submit(self, fn, *args, **kwargs):
@@ -144,9 +144,8 @@ class ThreadPoolExecutor(_base.Executor):
         # idle threads than items in the work queue.
         num_threads = len(self._threads)
         if num_threads < self._max_workers:
-            thread_name = "%s_%d" % (self._thread_name_prefix or self, num_threads)
             t = threading.Thread(
-                name=thread_name,
+                name=f"{self._thread_name_prefix or self}_{num_threads}",
                 target=_worker,
                 args=(weakref.ref(self, weakref_cb), self._work_queue),
             )

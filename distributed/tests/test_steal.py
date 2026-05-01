@@ -1971,7 +1971,7 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
 
         async with Worker(s.address, nthreads=1) as b:
             try:
-                await async_poll_for(lambda: s.idle, timeout=5)
+                await async_poll_for(lambda: s.idle)
                 wsA = s.workers[a.address]
                 wsB = s.workers[b.address]
                 ts = next(iter(wsA.processing))
@@ -1995,7 +1995,7 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
                     ts, wsB, occupancies=occupancies
                 ) > s.worker_objective(ts, wsB)
 
-                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                await async_poll_for(lambda: not extension.in_flight)
                 occupancies = {ws: ws.occupancy for ws in s.workers.values()}
                 # No in-flight requests, so both match
                 assert extension.stealing_objective(
@@ -2042,13 +2042,13 @@ async def test_do_not_ping_pong(c, s, a):
 
         async with Worker(s.address, nthreads=1) as b:
             try:
-                await async_poll_for(lambda: s.idle, timeout=5)
+                await async_poll_for(lambda: s.idle)
 
                 wsB = s.workers[b.address]
 
                 extension.balance()
                 assert 10 >= len(extension.in_flight) >= 5
-                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                await async_poll_for(lambda: not extension.in_flight)
                 # On first try, we may try to balance the task executing on a
                 assert 10 >= len(wsB.processing) >= 5 - 1
 
@@ -2056,7 +2056,7 @@ async def test_do_not_ping_pong(c, s, a):
                 # On second try we may want to rebalance a single task if we failed to
                 # rebalance the task executing on a
                 assert len(extension.in_flight) <= 1
-                await async_poll_for(lambda: not extension.in_flight, timeout=5)
+                await async_poll_for(lambda: not extension.in_flight)
                 assert 10 >= len(wsB.processing) >= 5
 
                 # On third try, the balancing should be stable

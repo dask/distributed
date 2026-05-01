@@ -50,7 +50,7 @@ from typing import (
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._expr import Expr, HLGExpr, LLGExpr
@@ -76,7 +76,6 @@ from distributed import cluster_dump, preloading
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
@@ -898,7 +897,7 @@ class _MapExpr(Expr):
                 if self.pure:
                     tok = tokenize(self.func, self.kwargs)
                     keys = [
-                        self.key + "-" + tokenize(tok, args)  # type: ignore
+                        f"{self.key}-{tokenize(tok, args)}"
                         for args in zip(*self.iterables)
                     ]
                 else:
@@ -1086,7 +1085,7 @@ class Client(SyncMethodMixin):
             name = dask.config.get("client-name", None)
         self.id = (
             type(self).__name__
-            + ("-" + name + "-" if name else "-")
+            + (f"-{name}-" if name else "-")
             + str(uuid.uuid1(clock_seq=os.getpid()))
         )
         self.generation = 0
@@ -1380,17 +1379,8 @@ class Client(SyncMethodMixin):
         if addr:
             nworkers = info.get("n_workers", 0)
             nthreads = info.get("total_threads", 0)
-            text = "<%s: %r processes=%d threads=%d" % (
-                self.__class__.__name__,
-                addr,
-                nworkers,
-                nthreads,
-            )
             memory = info.get("total_memory", 0)
-            text += ", memory=" + format_bytes(memory)
-            text += ">"
-            return text
-
+            return f"<{self.__class__.__name__}: {addr!r} processes={nworkers} threads={nthreads}, memory={format_bytes(memory)}>"
         elif self.scheduler is not None:
             return f"<{self.__class__.__name__}: scheduler={self.scheduler.address!r}>"
         else:
@@ -2152,9 +2142,9 @@ class Client(SyncMethodMixin):
 
         if key is None:
             if pure:
-                key = funcname(func) + "-" + tokenize(func, kwargs, *args)
+                key = f"{funcname(func)}-{tokenize(func, kwargs, *args)}"
             else:
-                key = funcname(func) + "-" + str(uuid.uuid4())
+                key = f"{funcname(func)}-{uuid.uuid4()}"
 
         with self._refcount_lock:
             if key in self.futures:
@@ -2435,7 +2425,7 @@ class Client(SyncMethodMixin):
                         bad_keys.add(key)
                         bad_data[key] = None
                     else:  # pragma: no cover
-                        raise ValueError("Bad value, `errors=%s`" % errors)
+                        raise ValueError(f"Bad value, `errors={errors}`")
 
             keys = [k for k in keys if k not in bad_keys and k not in data]
 
@@ -2607,9 +2597,9 @@ class Client(SyncMethodMixin):
             data = [data]
         if isinstance(data, (list, tuple)):
             if hash:
-                names = [type(x).__name__ + "-" + tokenize(x) for x in data]
+                names = [f"{type(x).__name__}-{tokenize(x)}" for x in data]
             else:
-                names = [type(x).__name__ + "-" + uuid.uuid4().hex for x in data]
+                names = [f"{type(x).__name__}-{uuid.uuid4().hex}" for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)
@@ -5938,7 +5928,7 @@ class as_completed:
         with self.lock:
             for f in futures:
                 if not isinstance(f, (Future, BaseActorFuture)):
-                    raise TypeError("Input must be a future, got %s" % f)
+                    raise TypeError(f"Input must be a future, got {f}")
                 self.futures[f] += 1
                 self.loop.add_callback(self._track_future, f)
 

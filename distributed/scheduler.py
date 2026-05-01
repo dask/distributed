@@ -59,7 +59,7 @@ from tlz import (
     take,
     valmap,
 )
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._expr import LLGExpr
@@ -96,7 +96,6 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ErrorMessage,
     OKMessage,
@@ -918,9 +917,7 @@ class Computation:
         return (
             f"<Computation {self.id}: "
             + "Tasks: "
-            + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-            )
+            + ", ".join(f"{k}: {v}" for (k, v) in sorted(self.states.items()) if v)
             + ">"
         )
 
@@ -1089,9 +1086,7 @@ class TaskPrefix(TaskCollection):
             "<"
             + self.name
             + ": "
-            + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-            )
+            + ", ".join(f"{k}: {v}" for (k, v) in sorted(self.states.items()) if v)
             + ">"
         )
 
@@ -1182,9 +1177,7 @@ class TaskGroup(TaskCollection):
             "<"
             + (self.name or "no-group")
             + ": "
-            + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-            )
+            + ", ".join(f"{k}: {v}" for (k, v) in sorted(self.states.items()) if v)
             + ">"
         )
 
@@ -4426,11 +4419,11 @@ class Scheduler(SchedulerState, ServerNode):
         if port is None:
             return None
         elif protocol:
-            return "%(protocol)s://%(host)s:%(port)d" % {
-                "protocol": ws.address.split("://")[0],
-                "host": ws.host,
-                "port": port,
-            }
+            return "{}://{}:{}".format(
+                ws.address.split("://")[0],
+                ws.host,
+                port,
+            )
         else:
             return ws.host, port
 
@@ -4723,13 +4716,13 @@ class Scheduler(SchedulerState, ServerNode):
         host = get_address_host(address)
 
         if address in self.workers:
-            raise ValueError("Worker already exists %s" % address)
+            raise ValueError(f"Worker already exists {address}")
 
         if name in self.aliases:
             logger.warning("Worker tried to connect with a duplicate name: %s", name)
             msg = {
                 "status": "error",
-                "message": "name taken, %s" % name,
+                "message": f"name taken, {name}",
                 "time": time(),
             }
             await comm.write(msg)

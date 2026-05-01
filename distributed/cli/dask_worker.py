@@ -343,7 +343,7 @@ def main(  # type: ignore[no-untyped-def]
             # if contact address is not present we use the listen_address for contact
             contact_address = listen_address
     except ValueError as e:  # pragma: no cover
-        logger.error("Failed to launch worker. " + str(e))
+        logger.error(f"Failed to launch worker. {e}")
         sys.exit(1)
 
     if not nthreads:
@@ -409,7 +409,7 @@ def main(  # type: ignore[no-untyped-def]
                 name=(
                     name
                     if n_workers == 1 or name is None or name == ""
-                    else str(name) + "-" + str(i)
+                    else f"{name}-{i}"
                 ),
                 **kwargs,
                 **port_kwargs_i,

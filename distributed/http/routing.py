@@ -22,7 +22,7 @@ def _descend_routes(router, routers=None, out=None):
                 path = rule.target_kwargs["path"]
                 for d, _, files in os.walk(path):
                     for fn in files:
-                        fullpath = d + "/" + fn
+                        fullpath = f"{d}/{fn}"
                         ourpath = fullpath.replace(path, prefix).replace("\\", "/")
                         out.add(ourpath)
             else:
