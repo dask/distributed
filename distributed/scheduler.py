@@ -59,7 +59,7 @@ from tlz import (
     take,
     valmap,
 )
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._expr import LLGExpr
@@ -96,7 +96,6 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ErrorMessage,
     OKMessage,

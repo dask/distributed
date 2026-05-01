@@ -32,6 +32,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import psutil
+from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.system import CPU_COUNT
@@ -39,7 +40,7 @@ from dask.typing import Key
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
-from distributed.compatibility import WINDOWS, PeriodicCallback
+from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.gc import ThrottledGC
 from distributed.metrics import context_meter, monotonic

@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, TypeVar, fi
 
 import tblib
 from tlz import merge
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.utils import parse_timedelta
@@ -46,7 +46,6 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.core import Listener
-from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.metrics import context_meter, time

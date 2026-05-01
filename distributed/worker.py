@@ -42,7 +42,7 @@ from typing import (
 )
 
 from tlz import keymap, pluck
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._task_spec import GraphNode
@@ -64,7 +64,6 @@ from distributed.collections import LRU
 from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
     ErrorMessage,

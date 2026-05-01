@@ -50,7 +50,7 @@ from typing import (
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._expr import Expr, HLGExpr, LLGExpr
@@ -76,7 +76,6 @@ from distributed import cluster_dump, preloading
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     CommClosedError,
     ConnectionPool,

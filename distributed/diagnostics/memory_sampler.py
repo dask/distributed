@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from distributed.compatibility import PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 if TYPE_CHECKING:
     # Optional runtime dependencies
