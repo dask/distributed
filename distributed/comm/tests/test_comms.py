@@ -700,9 +700,7 @@ async def test_tls_reject_certificate(tcp):
     listener = await listen("tls://", handle_comm, ssl_context=serv_ctx)
 
     with pytest.raises(EnvironmentError) as excinfo:
-        comm = await connect(
-            listener.contact_address, timeout=0.5, ssl_context=bad_cli_ctx
-        )
+        comm = await connect(listener.contact_address, ssl_context=bad_cli_ctx)
         await comm.write({"x": "foo"})  # TODO: why is this necessary in Tornado 6 ?
 
     if os.name != "nt":
@@ -719,14 +717,14 @@ async def test_tls_reject_certificate(tcp):
                 raise
 
     # Sanity check
-    comm = await connect(listener.contact_address, timeout=2, ssl_context=cli_ctx)
+    comm = await connect(listener.contact_address, ssl_context=cli_ctx)
     await comm.close()
 
     # Connector refuses a listener not signed by the CA
     listener = await listen("tls://", handle_comm, ssl_context=bad_serv_ctx)
 
     with pytest.raises(EnvironmentError) as excinfo:
-        await connect(listener.contact_address, timeout=2, ssl_context=cli_ctx)
+        await connect(listener.contact_address, ssl_context=cli_ctx)
 
     # XXX: For asyncio this is just a timeout error
     # assert "certificate verify failed" in str(excinfo.value.__cause__)

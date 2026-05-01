@@ -450,11 +450,7 @@ async def test_prometheus_collect_worker_totals(c, s):
     }
 
 
-@gen_cluster(
-    client=True,
-    config={"distributed.worker.memory.monitor-interval": "10ms"},
-    timeout=3,
-)
+@gen_cluster(client=True, config={"distributed.worker.memory.monitor-interval": "10ms"})
 async def test_prometheus_collect_worker_states(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families

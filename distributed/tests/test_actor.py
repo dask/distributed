@@ -775,7 +775,7 @@ def test_as_completed(client):
     assert max == 10
 
 
-@gen_cluster(client=True, timeout=3)
+@gen_cluster(client=True)
 async def test_actor_future_awaitable(client, s, a, b):
     ac = await client.submit(Counter, actor=True)
     futures = [ac.increment() for _ in range(10)]

@@ -1182,7 +1182,6 @@ async def test_statistical_profiling(c, s, a, b):
 @nodebug
 @gen_cluster(
     client=True,
-    timeout=30,
     config={
         "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
@@ -1618,7 +1617,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=10)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_lifetime(c, s, a):
     # Note: test was occasionally failing with lifetime="1 seconds"
     async with Worker(s.address, lifetime="2 seconds") as b:
@@ -3274,7 +3273,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=5)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_get_data_cancelled_error(c, s, a):
     """Something somewhere in the networking stack raises CancelledError while
     get_data is running
