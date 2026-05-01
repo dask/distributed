@@ -1,13 +1,7 @@
 from __future__ import annotations
 
-import re
-
-import psutil
-import pytest
-
-pytest.importorskip("requests")
-
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -15,7 +9,8 @@ import sys
 import tempfile
 from time import sleep
 
-import requests
+import psutil
+import pytest
 from click.testing import CliRunner
 
 from dask.utils import tmpfile
@@ -75,6 +70,8 @@ def test_hostport(loop):
 
 
 def test_no_dashboard(loop, requires_default_ports):
+    requests = pytest.importorskip("requests")
+
     with popen([sys.executable, "-m", "dask", "scheduler", "--no-dashboard"]):
         with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/status/")
@@ -83,6 +80,8 @@ def test_no_dashboard(loop, requires_default_ports):
 
 def test_dashboard(loop):
     pytest.importorskip("bokeh")
+    requests = pytest.importorskip("requests")
+
     port = open_port()
 
     with popen(
@@ -115,6 +114,8 @@ def test_dashboard(loop):
 
 def test_dashboard_non_standard_ports(loop):
     pytest.importorskip("bokeh")
+    requests = pytest.importorskip("requests")
+
     port1 = open_port()
     port2 = open_port()
     with popen(
@@ -166,6 +167,8 @@ def test_multiple_protocols(loop):
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_dashboard_allowlist(loop):
     pytest.importorskip("bokeh")
+    requests = pytest.importorskip("requests")
+
     with pytest.raises(requests.ConnectionError):
         requests.get("http://localhost:8787/status/").ok
 

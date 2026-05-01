@@ -16,9 +16,6 @@ from distributed.core import Status
 from distributed.utils import open_port
 from distributed.utils_test import gen_test, popen
 
-pytest.importorskip("requests")
-import requests
-
 pytest.importorskip("jupyter_server")
 
 pytestmark = pytest.mark.filterwarnings("ignore:Jupyter is migrating its paths")
@@ -47,6 +44,8 @@ async def test_jupyter_server():
 
 @pytest.mark.slow
 def test_jupyter_cli(loop, requires_default_ports):
+    requests = pytest.importorskip("requests")
+
     port = open_port()
     with popen(
         [
@@ -118,6 +117,8 @@ async def test_jupyter_idle_timeout_returned():
 @pytest.mark.xfail(WINDOWS, reason="Subprocess launching scheduler TimeoutError")
 @pytest.mark.xfail(MACOS, reason="Client fails to connect on OSX")
 def test_shutsdown_cleanly(requires_default_ports):
+    requests = pytest.importorskip("requests")
+
     port = open_port()
     with concurrent.futures.ThreadPoolExecutor() as tpe:
         subprocess_fut = tpe.submit(

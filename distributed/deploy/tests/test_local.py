@@ -470,6 +470,7 @@ def test_repeated(loop_in_thread):
 def test_bokeh(loop, processes):
     pytest.importorskip("bokeh")
     requests = pytest.importorskip("requests")
+
     with LocalCluster(
         n_workers=0,
         silence_logs=False,
