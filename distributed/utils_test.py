@@ -9,7 +9,6 @@ import functools
 import inspect
 import io
 import logging
-import logging.config
 import multiprocessing
 import os
 import signal
@@ -20,14 +19,13 @@ import sys
 import sysconfig
 import tempfile
 import threading
-import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Hashable, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import IO, Any, Literal
+from typing import IO, Any
 
 import pytest
 import yaml
@@ -443,37 +441,6 @@ def run_nanny(q, scheduler_q, config, **kwargs):
             _run_and_close_tornado(_)
 
 
-@contextmanager
-def check_active_rpc(loop, active_rpc_timeout=1):
-    warnings.warn(
-        "check_active_rpc is deprecated - use gen_test()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    active_before = set(rpc.active)
-    yield
-    # Some streams can take a bit of time to notice their peer
-    # has closed, and keep a coroutine (*) waiting for a CommClosedError
-    # before calling close_rpc() after a CommClosedError.
-    # This would happen especially if a non-localhost address is used,
-    # as Nanny does.
-    # (*) (example: gather_from_workers())
-
-    def fail():
-        pytest.fail(
-            "some RPCs left active by test: %s" % (set(rpc.active) - active_before)
-        )
-
-    async def wait():
-        await async_poll_for(
-            lambda: len(set(rpc.active) - active_before) == 0,
-            timeout=active_rpc_timeout,
-            fail_func=fail,
-        )
-
-    loop.run_sync(wait)
-
-
 @contextlib.asynccontextmanager
 async def _acheck_active_rpc(active_rpc_timeout=1):
     active_before = set(rpc.active)
@@ -884,7 +851,6 @@ def gen_cluster(
     clean_kwargs: dict[str, Any] | None = None,
     # FIXME: distributed#8054
     allow_unclosed: bool = True,
-    cluster_dump_directory: str | Literal[False] = False,
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
 
@@ -907,11 +873,6 @@ def gen_cluster(
         start
         end
     """
-    if cluster_dump_directory:
-        warnings.warn(
-            "The `cluster_dump_directory` argument is being ignored and will be removed in a future version.",
-            DeprecationWarning,
-        )
     if nthreads is None:
         nthreads = [
             ("127.0.0.1", 1),
@@ -1265,22 +1226,6 @@ async def async_poll_for(
             if fail_func is not None:
                 fail_func()
             pytest.fail(f"condition not reached after {timeout} seconds")
-
-
-def wait_for(*args, **kwargs):
-    warnings.warn(
-        "wait_for has been renamed to poll_for to avoid confusion with "
-        "asyncio.wait_for and utils.wait_for"
-    )
-    return poll_for(*args, **kwargs)
-
-
-async def async_wait_for(*args, **kwargs):
-    warnings.warn(
-        "async_wait_for has been renamed to async_poll_for to avoid confusion "
-        "with asyncio.wait_for and utils.wait_for"
-    )
-    return await async_poll_for(*args, **kwargs)
 
 
 @memoize
