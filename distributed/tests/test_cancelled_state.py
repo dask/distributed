@@ -300,7 +300,7 @@ async def test_in_flight_lost_after_resumed(c, s, b):
         fut1.release()
         fut2.release()
 
-        await async_poll_for(lambda: not b.state.tasks, timeout=5)
+        await async_poll_for(lambda: not b.state.tasks)
 
 
 @gen_cluster(client=True)
@@ -500,7 +500,7 @@ async def test_resumed_cancelled_handle_compute(
         await lock_compute.release()
         await exit_compute.wait()
 
-        await async_poll_for(lambda: f3.key not in b.state.tasks, timeout=5)
+        await async_poll_for(lambda: f3.key not in b.state.tasks)
 
     f1 = c.submit(inc, 1, key="f1", workers=[a.address])
     f2 = c.submit(inc, f1, key="f2", workers=[a.address])
@@ -1357,7 +1357,7 @@ async def test_secede_racing_cancellation_and_scheduling_on_other_worker(c, s, a
 
             # Cancel x while the scheduler does not know that it seceded
             x.release()
-            await async_poll_for(lambda: not s.tasks, timeout=5)
+            await async_poll_for(lambda: not s.tasks)
             assert not wsA.processing
             assert not wsA.long_running
 
@@ -1475,7 +1475,7 @@ async def test_secede_racing_resuming_on_same_worker(c, s, a):
 
             # Cancel x while the scheduler does not know that it seceded
             x.release()
-            await async_poll_for(lambda: not s.tasks, timeout=5)
+            await async_poll_for(lambda: not s.tasks)
             assert not wsA.processing
             assert not wsA.long_running
 

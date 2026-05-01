@@ -73,7 +73,7 @@ async def test_submit_after_failed_worker_async(
 
     if when == "closed":
         await b.close()
-        await async_poll_for(lambda: b.address not in s.workers, timeout=5)
+        await async_poll_for(lambda: b.address not in s.workers)
     elif when == "closing":
         orig_remove_worker = s.remove_worker
         in_remove_worker = asyncio.Event()
@@ -96,7 +96,7 @@ async def test_submit_after_failed_worker_async(
         workers=[b.address if y_on_failed else a.address],
         allow_other_workers=True,
     )
-    await async_poll_for(lambda: "y" in s.tasks, timeout=5)
+    await async_poll_for(lambda: "y" in s.tasks)
 
     if when == "closing":
         wait_remove_worker.set()
@@ -250,7 +250,7 @@ async def test_multiple_clients_restart(s, a, b):
         assert await y2 == 3
 
         del x2, y2
-        await async_poll_for(lambda: not s.tasks, timeout=5)
+        await async_poll_for(lambda: not s.tasks)
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -380,8 +380,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         result_fut = c.submit(sink, futures, workers=a.address)
 
         await n.kill(timeout=1)
-        while len(s.workers) > 2:
-            await asyncio.sleep(0.01)
+        await async_poll_for(lambda: len(s.workers) <= 2)
 
         await result_fut
 

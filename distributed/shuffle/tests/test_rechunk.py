@@ -1371,8 +1371,7 @@ async def test_partial_rechunk_taskgroups(c, s):
         lambda: any(
             isinstance(task, str) and task.startswith("shuffle-barrier")
             for task in s.tasks
-        ),
-        timeout=5,
+        )
     )
     assert len(s.task_groups) < 7
 

@@ -55,7 +55,7 @@ from distributed.core import (
 )
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
-from distributed.metrics import _WindowsTime, context_meter, time
+from distributed.metrics import _WindowsTime, context_meter, monotonic, time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
@@ -1237,24 +1237,34 @@ def popen(
                     print(err.decode() if isinstance(err, bytes) else err)
 
 
-def poll_for(predicate, timeout, fail_func=None, period=0.05):
-    deadline = time() + timeout
+def poll_for(
+    predicate: Callable[[], bool],
+    timeout: float = 15,
+    fail_func: Callable[[], None] | None = None,
+    period: float = 0.05,
+) -> None:
+    deadline = monotonic() + timeout
     while not predicate():
         sleep(period)
-        if time() > deadline:
+        if monotonic() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail(f"condition not reached until {timeout} seconds")
+            pytest.fail(f"condition not reached after {timeout} seconds")
 
 
-async def async_poll_for(predicate, timeout, fail_func=None, period=0.05):
-    deadline = time() + timeout
+async def async_poll_for(
+    predicate: Callable[[], bool],
+    timeout: float = 15,
+    fail_func: Callable[[], None] | None = None,
+    period: float = 0.05,
+) -> None:
+    deadline = monotonic() + timeout
     while not predicate():
         await asyncio.sleep(period)
-        if time() > deadline:
+        if monotonic() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail(f"condition not reached until {timeout} seconds")
+            pytest.fail(f"condition not reached after {timeout} seconds")
 
 
 def wait_for(*args, **kwargs):

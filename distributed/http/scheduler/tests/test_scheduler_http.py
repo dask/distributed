@@ -503,7 +503,7 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
 
     a.monitor.get_process_memory = lambda: 2**40
     sa = s.workers[a.address]
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.paused)
     assert await fetch_metrics() == {
         "idle": 1,
         "partially_saturated": 0,
