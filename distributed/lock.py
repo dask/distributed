@@ -47,6 +47,12 @@ class Lock(Semaphore):
 
     def __init__(self, name=None, scheduler_rpc=None, loop=None):
         self.name = name or f"lock-{uuid.uuid4().hex}"
+        super().__init__(
+            max_leases=1,
+            name=name,
+            scheduler_rpc=scheduler_rpc,
+            loop=loop,
+        )
 
     def acquire(self, blocking=True, timeout=None):
         """Acquire the lock
