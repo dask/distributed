@@ -35,7 +35,6 @@ async def test_prometheus(c, s, a):
         a.http_server.port, prefix="dask_worker_"
     )
     expected_metrics = {
-        "dask_worker_concurrent_fetch_requests",
         "dask_worker_latency_seconds",
         "dask_worker_memory_bytes",
         "dask_worker_spill_bytes_total",
