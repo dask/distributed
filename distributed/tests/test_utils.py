@@ -612,7 +612,7 @@ def test_logs():
     d = Logs({"123": log, "456": Log("World!")})
     assert isinstance(d, dict)
     text = d._repr_html_()
-    assert is_valid_xml("<div>" + text + "</div>")
+    assert is_valid_xml(f"<div>{text}</div>")
     assert "Hello" in text
     assert "456" in text
 
@@ -707,12 +707,6 @@ async def test_offload_preserves_contextvars():
         assert r == v
 
     await asyncio.gather(set_var("foo"), set_var("bar"))
-
-
-def test_no_default_deprecated():
-    with pytest.warns(FutureWarning, match="no_default is deprecated"):
-        from distributed.utils import no_default
-    assert no_default is dask.typing.no_default
 
 
 def test_iscoroutinefunction_unhashable_input():

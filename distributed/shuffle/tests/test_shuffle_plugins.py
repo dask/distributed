@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from asyncio import iscoroutinefunction
-
 import pytest
 
 from distributed.shuffle._scheduler_plugin import ShuffleSchedulerPlugin
 from distributed.shuffle._worker_plugin import ShuffleWorkerPlugin
+from distributed.utils import iscoroutinefunction
 from distributed.utils_test import gen_cluster
 
 pd = pytest.importorskip("pandas")

@@ -470,6 +470,7 @@ def test_repeated(loop_in_thread):
 def test_bokeh(loop, processes):
     pytest.importorskip("bokeh")
     requests = pytest.importorskip("requests")
+
     with LocalCluster(
         n_workers=0,
         silence_logs=False,
@@ -770,8 +771,7 @@ async def test_adapt_then_manual():
         def wait_workers(n):
             return async_poll_for(
                 lambda: len(cluster.scheduler.workers) == n
-                and len(cluster.workers) == n,
-                timeout=5,
+                and len(cluster.workers) == n
             )
 
         await wait_workers(8)

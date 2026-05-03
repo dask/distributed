@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, TypeVar, fi
 
 import tblib
 from tlz import merge
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.utils import parse_timedelta
@@ -46,7 +46,6 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.core import Listener
-from distributed.compatibility import PeriodicCallback
 from distributed.counter import Counter
 from distributed.diskutils import WorkDir, WorkSpace
 from distributed.metrics import context_meter, time
@@ -291,13 +290,13 @@ class Server:
         self.handlers.update(handlers)
         if blocked_handlers is None:
             blocked_handlers = dask.config.get(
-                "distributed.%s.blocked-handlers" % type(self).__name__.lower(), []
+                f"distributed.{type(self).__name__.lower()}.blocked-handlers", []
             )
         self.blocked_handlers = blocked_handlers
         self.stream_handlers = {}
         self.stream_handlers.update(stream_handlers or {})
 
-        self.id = type(self).__name__ + "-" + str(uuid.uuid4())
+        self.id = f"{type(self).__name__}-{uuid.uuid4()}"
         self._address = None
         self._listen_address = None
         self._port = None
@@ -781,15 +780,13 @@ class Server:
                         await comm.write(error_message(e, status="uncaught-error"))
                         continue
                 if not isinstance(msg, dict):
-                    raise TypeError(
-                        "Bad message type.  Expected dict, got\n  " + str(msg)
-                    )
+                    raise TypeError(f"Bad message type.  Expected dict, got\n  {msg}")
 
                 try:
                     op = msg.pop("op")
                 except KeyError as e:
                     raise ValueError(
-                        "Received unexpected message without 'op' key: " + str(msg)
+                        f"Received unexpected message without 'op' key: {msg}"
                     ) from e
                 if self.counters is not None:
                     self.counters["op"].add(op)
@@ -1174,7 +1171,7 @@ class rpc:
             comm = None
             try:
                 comm = await self.live_comm()
-                comm.name = "rpc." + key
+                comm.name = f"rpc.{key}"
                 result = await send_recv(comm=comm, op=key, **kwargs)
             except (RPCClosed, CommClosedError) as e:
                 if comm:
@@ -1227,7 +1224,7 @@ class rpc:
                     comm.abort()
 
     def __repr__(self):
-        return "<rpc to %r, %d comms>" % (self.address, len(self.comms))
+        return f"<rpc to {self.address!r}, {len(self.comms)} comms>"
 
 
 class PooledRPCCall:
@@ -1254,7 +1251,7 @@ class PooledRPCCall:
             if self.deserializers is not None and kwargs.get("deserializers") is None:
                 kwargs["deserializers"] = self.deserializers
             comm = await self.pool.connect(self.addr)
-            prev_name, comm.name = comm.name, "ConnectionPool." + key
+            prev_name, comm.name = comm.name, f"ConnectionPool.{key}"
             try:
                 return await send_recv(comm=comm, op=key, **kwargs)
             finally:
@@ -1378,11 +1375,7 @@ class ConnectionPool:
         return self.active + sum(map(len, self.available.values()))
 
     def __repr__(self) -> str:
-        return "<ConnectionPool: open=%d, active=%d, connecting=%d>" % (
-            self.open,
-            self.active,
-            len(self._connecting),
-        )
+        return f"<ConnectionPool: open={self.open}, active={self.active}, connecting={len(self._connecting)}>"
 
     def __call__(
         self,

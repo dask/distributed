@@ -43,12 +43,12 @@ async def test_connect(c, s, a, b):
         http_client = AsyncHTTPClient()
         for suffix in [
             "info/main/workers.html",
-            "info/worker/" + url_escape(a.address) + ".html",
-            "info/task/" + url_escape(future.key) + ".html",
+            f"info/worker/{url_escape(a.address)}.html",
+            f"info/task/{url_escape(future.key)}.html",
             "info/main/logs.html",
-            "info/logs/" + url_escape(a.address) + ".html",
-            "info/call-stack/" + url_escape(x.key) + ".html",
-            "info/call-stacks/" + url_escape(a.address) + ".html",
+            f"info/logs/{url_escape(a.address)}.html",
+            f"info/call-stack/{url_escape(x.key)}.html",
+            f"info/call-stacks/{url_escape(a.address)}.html",
             "json/counts.json",
             "json/identity.json",
             "json/index.html",
@@ -450,11 +450,7 @@ async def test_prometheus_collect_worker_totals(c, s):
     }
 
 
-@gen_cluster(
-    client=True,
-    config={"distributed.worker.memory.monitor-interval": "10ms"},
-    timeout=3,
-)
+@gen_cluster(client=True, config={"distributed.worker.memory.monitor-interval": "10ms"})
 async def test_prometheus_collect_worker_states(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
@@ -507,7 +503,7 @@ async def test_prometheus_collect_worker_states(c, s, a, b):
 
     a.monitor.get_process_memory = lambda: 2**40
     sa = s.workers[a.address]
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=2)
+    await async_poll_for(lambda: sa.status == Status.paused)
     assert await fetch_metrics() == {
         "idle": 1,
         "partially_saturated": 0,

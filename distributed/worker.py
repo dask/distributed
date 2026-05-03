@@ -42,7 +42,7 @@ from typing import (
 )
 
 from tlz import keymap, pluck
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._task_spec import GraphNode
@@ -64,7 +64,6 @@ from distributed.collections import LRU
 from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
     ErrorMessage,
@@ -1370,7 +1369,7 @@ class Worker(BaseWorker, ServerNode):
             return {"status": "OK"}
 
     def get_monitor_info(self, recent: bool = False, start: int = 0) -> dict[str, Any]:
-        result = dict(
+        result: dict[str, Any] = dict(
             range_query=(
                 self.monitor.recent()
                 if recent
@@ -1456,7 +1455,7 @@ class Worker(BaseWorker, ServerNode):
         self.start_services(self.ip)
 
         try:
-            listening_address = "%s%s:%d" % (self.listener.prefix, self.ip, self.port)
+            listening_address = f"{self.listener.prefix}{self.ip}:{self.port}"
         except Exception:
             listening_address = f"{self.listener.prefix}{self.ip}"
 
@@ -1466,7 +1465,7 @@ class Worker(BaseWorker, ServerNode):
             # only if name was not None
             logger.info("          Worker name: %26s", self.name)
         for k, v in self.service_ports.items():
-            logger.info("  {:>16} at: {:>26}".format(k, self.ip + ":" + str(v)))
+            logger.info("  {:>16} at: {:>26}".format(k, f"{self.ip}:{v}"))
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
         logger.info("-" * 49)
         logger.info("              Threads: %26d", self.state.nthreads)
@@ -1477,7 +1476,7 @@ class Worker(BaseWorker, ServerNode):
             )
         logger.info("      Local Directory: %26s", self.local_directory)
 
-        setproctitle("dask worker [%s]" % self.address)
+        setproctitle(f"dask worker [{self.address}]")
 
         plugins_msgs = await asyncio.gather(
             *(
@@ -2190,7 +2189,7 @@ class Worker(BaseWorker, ServerNode):
         key = actor
         actor = self.state.actors[key]
         func = getattr(actor, function)
-        name = key_split(key) + "." + function
+        name = f"{key_split(key)}.{function}"
 
         try:
             if iscoroutinefunction(func):
@@ -3152,7 +3151,7 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
             sarg = repr(arg)
         except Exception:
             sarg = "< could not convert arg to str >"
-        skwarg = repr(argname) + ": " + sarg
+        skwarg = f"{argname!r}: {sarg}"
         strs[i] = skwarg
         length += len(skwarg) + 2
         if max_len is not None and length > max_len:

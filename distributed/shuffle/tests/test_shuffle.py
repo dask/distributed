@@ -30,6 +30,7 @@ np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 
 import dask.dataframe as dd
+from dask.dataframe._compat import PANDAS_GE_300
 from dask.typing import Key
 
 from distributed import (
@@ -76,7 +77,7 @@ from distributed.worker_state_machine import TaskState as WorkerTaskState
 try:
     import pyarrow as pa
 except ImportError:
-    pa = None
+    pa = None  # type: ignore[assignment]
 
 
 @pytest.fixture(params=[0, 0.3, 1], ids=["none", "some", "all"])
@@ -232,7 +233,7 @@ async def test_shuffle_with_array_conversion(c, s, a, b, npartitions):
         out = df.shuffle("x", npartitions=npartitions, force=True).values
 
     # See distributed#7816. TaskSpec is currently blocking linear fusion. If
-    # that was implemented, this may raise a P2PConsistencyErrro
+    # that was implemented, this may raise a P2PConsistencyError
 
     await c.compute(out)
 
@@ -467,7 +468,7 @@ async def test_erred_task_before_p2p_does_not_log_event(c, s, a, b):
         out = df.shuffle("x", force=True)
         shuffle_ext = s.plugins["shuffle"]
     out = c.compute(out)
-    await async_poll_for(lambda: shuffle_ext.active_shuffles, timeout=5)
+    await async_poll_for(lambda: shuffle_ext.active_shuffles)
     await event.set()
     with pytest.raises(RuntimeError, match="test error"):
         await out
@@ -538,17 +539,15 @@ async def test_get_or_create_from_dangling_transfer(c, s, a, b):
 
     await shuffle_extA.shuffle_runs.in_get_or_create.wait()
     await assert_worker_cleanup(b, close=True)
-    await async_poll_for(
-        lambda: not any(ws.processing for ws in s.workers.values()), timeout=5
-    )
+    await async_poll_for(lambda: not any(ws.processing for ws in s.workers.values()))
 
     with pytest.raises(KilledWorker):
         await out
 
-    await async_poll_for(lambda: not s.plugins["shuffle"].active_shuffles, timeout=5)
+    await async_poll_for(lambda: not s.plugins["shuffle"].active_shuffles)
     assert a.state.tasks
     shuffle_extA.shuffle_runs.block_get_or_create.set()
-    await async_poll_for(lambda: not a.state.tasks, timeout=10)
+    await async_poll_for(lambda: not a.state.tasks)
 
     assert not s.plugins["shuffle"].active_shuffles
     await assert_worker_cleanup(a)
@@ -612,13 +611,13 @@ async def test_restarting_does_not_deadlock(c, s):
             while not s.extensions["shuffle"].active_shuffles:
                 await asyncio.sleep(0)
             a.status = Status.paused
-            await async_poll_for(lambda: len(s.running) == 1, timeout=5)
+            await async_poll_for(lambda: len(s.running) == 1)
             b.batched_stream.close()
-            await async_poll_for(lambda: not s.running, timeout=5)
+            await async_poll_for(lambda: not s.running)
 
             a.status = Status.running
 
-            await async_poll_for(lambda: s.running, timeout=5)
+            await async_poll_for(lambda: s.running)
             result = await result
             assert dd.assert_eq(result, expected)
 
@@ -805,10 +804,7 @@ async def test_closed_worker_during_barrier(c, s, a, b):
         except KeyError:
             return False
 
-    await async_poll_for(
-        shuffle_restarted,
-        timeout=5,
-    )
+    await async_poll_for(shuffle_restarted)
     restarted_shuffle = alive_shuffles[shuffle_id]
     restarted_shuffle.block_inputs_done.set()
 
@@ -914,10 +910,7 @@ async def test_closed_other_worker_during_barrier(c, s, a, b):
         except KeyError:
             return False
 
-    await async_poll_for(
-        shuffle_restarted,
-        timeout=5,
-    )
+    await async_poll_for(shuffle_restarted)
     restarted_shuffle = alive_shuffles[shuffle_id]
     restarted_shuffle.block_inputs_done.set()
 
@@ -963,10 +956,7 @@ async def test_crashed_other_worker_during_barrier(c, s, a):
             except KeyError:
                 return False
 
-        await async_poll_for(
-            shuffle_restarted,
-            timeout=5,
-        )
+        await async_poll_for(shuffle_restarted)
         restarted_shuffle = get_active_shuffle_run(shuffle_id, a)
         restarted_shuffle.block_inputs_done.set()
 
@@ -1084,7 +1074,6 @@ async def test_heartbeat(c, s, a, b):
 
 
 @pytest.mark.skipif("not pa", reason="Requires PyArrow")
-@pytest.mark.filterwarnings("ignore:DatetimeTZBlock")  # pandas >=2.2 vs. pyarrow <15
 @pytest.mark.parametrize("drop_column", [True, False])
 def test_processing_chain(tmp_path, drop_column):
     """
@@ -2436,6 +2425,7 @@ async def test_handle_null_partitions(c, s, a, b):
     await assert_scheduler_cleanup(s)
 
 
+@pytest.mark.xfail(PANDAS_GE_300, reason="dask/distributed#9184", strict=True)
 @gen_cluster(client=True)
 async def test_handle_null_partitions_2(c, s, a, b):
     def make_partition(i):
@@ -2448,7 +2438,7 @@ async def test_handle_null_partitions_2(c, s, a, b):
         ddf = dd.from_map(make_partition, range(5), meta={"a": float, "b": float})
     with dask.config.set({"dataframe.shuffle.method": "p2p"}):
         out = ddf.shuffle(on="a", ignore_index=True, force=True)
-    result, expected = c.compute([ddf, out])
+    expected, result = c.compute([ddf, out])
     del out
     result = await result
     expected = await expected
@@ -3033,7 +3023,7 @@ class BarrierInputsDoneOSErrorPlugin(ShuffleWorkerPlugin):
                     # like a timeout while an exception that is being raised by
                     # the handler will be serialized and sent to the scheduler
                     comm.abort()
-                raise exc_type  # type: ignore
+                raise exc_type
         return await super().shuffle_inputs_done(*args, **kwargs)
 
 

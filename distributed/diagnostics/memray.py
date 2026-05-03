@@ -6,7 +6,7 @@ import pathlib
 import subprocess
 import time
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -78,7 +78,7 @@ def memray_workers(
     ),
     fetch_reports_parallel: bool | int = True,
     **memray_kwargs: Any,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Generate a Memray profile on the workers and download the generated report.
 
     Example::
@@ -192,7 +192,7 @@ def memray_scheduler(
         "--leaks",
     ),
     **memray_kwargs: Any,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Generate a Memray profile on the Scheduler and download the generated report.
 
     Example::

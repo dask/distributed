@@ -5,7 +5,7 @@ import collections
 import sys
 import threading
 import time as timemod
-from collections.abc import Callable, Hashable, Iterator
+from collections.abc import Callable, Generator, Hashable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -125,7 +125,7 @@ class MeterOutput:
 def meter(
     func: Callable[[], float] = timemod.perf_counter,
     floor: float | Literal[False] = 0.0,
-) -> Iterator[MeterOutput]:
+) -> Generator[MeterOutput]:
     """Convenience context manager which calls func() before and after the wrapped
     code and calculates the delta.
 
@@ -214,7 +214,7 @@ class ContextMeter:
         *,
         key: Hashable | None = None,
         allow_offload: bool = False,
-    ) -> Iterator[None]:
+    ) -> Generator[None]:
         """Add a callback when entering the context and remove it when exiting it.
         The callback must accept the same parameters as :meth:`digest_metric`.
 
@@ -256,7 +256,7 @@ class ContextMeter:
             tok.var.reset(tok)
 
     @contextmanager
-    def clear_callbacks(self) -> Iterator[None]:
+    def clear_callbacks(self) -> Generator[None]:
         """Do not trigger any callbacks set outside of this context"""
         tok = self._callbacks.set({})
         try:
@@ -279,7 +279,7 @@ class ContextMeter:
         unit: str = "seconds",
         func: Callable[[], float] = timemod.perf_counter,
         floor: float | Literal[False] = 0.0,
-    ) -> Iterator[MeterOutput]:
+    ) -> Generator[MeterOutput]:
         """Convenience context manager or decorator which calls func() before and after
         the wrapped code, calculates the delta, and finally calls :meth:`digest_metric`.
 
@@ -378,7 +378,7 @@ class DelayedMetricsLedger:
         self.metrics.append((label, value, unit))
 
     @contextmanager
-    def record(self, *, key: Hashable | None = None) -> Iterator[None]:
+    def record(self, *, key: Hashable | None = None) -> Generator[None]:
         """Ingest metrics logged with :meth:`ContextMeter.digest_metric` or
         :meth:`ContextMeter.meter` and temporarily store them in :ivar:`metrics`.
 

@@ -9,7 +9,6 @@ import functools
 import inspect
 import io
 import logging
-import logging.config
 import multiprocessing
 import os
 import signal
@@ -17,16 +16,16 @@ import socket
 import ssl
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
-import warnings
 import weakref
 from collections import defaultdict
-from collections.abc import Callable, Collection, Generator, Hashable, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Hashable, Mapping
 from contextlib import contextmanager, nullcontext, suppress
 from itertools import count
 from time import sleep
-from typing import IO, Any, Literal
+from typing import IO, Any
 
 import pytest
 import yaml
@@ -54,7 +53,7 @@ from distributed.core import (
 )
 from distributed.deploy import SpecCluster
 from distributed.diagnostics.plugin import WorkerPlugin
-from distributed.metrics import _WindowsTime, context_meter, time
+from distributed.metrics import _WindowsTime, context_meter, monotonic, time
 from distributed.nanny import Nanny
 from distributed.node import ServerNode
 from distributed.proctitle import enable_proctitle_on_children
@@ -440,37 +439,6 @@ def run_nanny(q, scheduler_q, config, **kwargs):
         # Scheduler might've failed
         if isinstance(scheduler_addr, str):
             _run_and_close_tornado(_)
-
-
-@contextmanager
-def check_active_rpc(loop, active_rpc_timeout=1):
-    warnings.warn(
-        "check_active_rpc is deprecated - use gen_test()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    active_before = set(rpc.active)
-    yield
-    # Some streams can take a bit of time to notice their peer
-    # has closed, and keep a coroutine (*) waiting for a CommClosedError
-    # before calling close_rpc() after a CommClosedError.
-    # This would happen especially if a non-localhost address is used,
-    # as Nanny does.
-    # (*) (example: gather_from_workers())
-
-    def fail():
-        pytest.fail(
-            "some RPCs left active by test: %s" % (set(rpc.active) - active_before)
-        )
-
-    async def wait():
-        await async_poll_for(
-            lambda: len(set(rpc.active) - active_before) == 0,
-            timeout=active_rpc_timeout,
-            fail_func=fail,
-        )
-
-    loop.run_sync(wait)
 
 
 @contextlib.asynccontextmanager
@@ -883,7 +851,6 @@ def gen_cluster(
     clean_kwargs: dict[str, Any] | None = None,
     # FIXME: distributed#8054
     allow_unclosed: bool = True,
-    cluster_dump_directory: str | Literal[False] = False,
 ) -> Callable[[Callable], Callable]:
     from distributed import Client
 
@@ -906,11 +873,6 @@ def gen_cluster(
         start
         end
     """
-    if cluster_dump_directory:
-        warnings.warn(
-            "The `cluster_dump_directory` argument is being ignored and will be removed in a future version.",
-            DeprecationWarning,
-        )
     if nthreads is None:
         nthreads = [
             ("127.0.0.1", 1),
@@ -1143,7 +1105,7 @@ def popen(
     terminate_timeout: float = 10,
     kill_timeout: float = 5,
     **kwargs: Any,
-) -> Iterator[subprocess.Popen[bytes]]:
+) -> Generator[subprocess.Popen[bytes]]:
     """Start a shell command in a subprocess.
     Yields a subprocess.Popen object.
 
@@ -1152,7 +1114,9 @@ def popen(
     Parameters
     ----------
     args: list[str]
-        Command line arguments
+        Command line arguments.
+        The first argument is expected to be an executable.
+        If it is not an absolute path, this function assumes it is in ``sysconfig.get_path("scripts")``.
     capture_output: bool, default False
         Set to True if you need to read output from the subprocess.
         Stdout and stderr will both be piped to ``proc.stdout``.
@@ -1194,10 +1158,30 @@ def popen(
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
     args = list(args)
-    if sys.platform.startswith("win"):
-        args[0] = os.path.join(sys.prefix, "Scripts", args[0])
+    # avoid searching for executables... only accept absolute paths or look in this Python interpreter's default location for scripts
+    executable_path = args[0]
+    if not os.path.isabs(executable_path):
+        executable_path = os.path.join(sysconfig.get_path("scripts"), executable_path)
+
+    # On Windows, it's valid to start a process using only '{program-name}' and Windows will
+    # automatically find and execute '{program-name}.exe'.
+    #
+    # That allows e.g. `popen(["dask-worker"])` to work despite the installed file being called 'dask-worker.exe'.
+    #
+    # docs: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw
+    #
+    if WINDOWS:
+        executable_exists = os.path.isfile(executable_path) or os.path.isfile(
+            f"{executable_path}.exe"
+        )
     else:
-        args[0] = os.path.join(sys.prefix, "bin", args[0])
+        executable_exists = os.path.isfile(executable_path)
+    if not executable_exists:
+        raise FileNotFoundError(
+            f"Could not find '{executable_path}'. To avoid this warning, provide an absolute path to an existing installation to popen()."
+        )
+
+    args[0] = executable_path
     with subprocess.Popen(args, **kwargs) as proc:
         try:
             yield proc
@@ -1214,40 +1198,34 @@ def popen(
                     print(err.decode() if isinstance(err, bytes) else err)
 
 
-def poll_for(predicate, timeout, fail_func=None, period=0.05):
-    deadline = time() + timeout
+def poll_for(
+    predicate: Callable[[], bool],
+    timeout: float = 15,
+    fail_func: Callable[[], None] | None = None,
+    period: float = 0.05,
+) -> None:
+    deadline = monotonic() + timeout
     while not predicate():
         sleep(period)
-        if time() > deadline:
+        if monotonic() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail(f"condition not reached until {timeout} seconds")
+            pytest.fail(f"condition not reached after {timeout} seconds")
 
 
-async def async_poll_for(predicate, timeout, fail_func=None, period=0.05):
-    deadline = time() + timeout
+async def async_poll_for(
+    predicate: Callable[[], bool],
+    timeout: float = 15,
+    fail_func: Callable[[], None] | None = None,
+    period: float = 0.05,
+) -> None:
+    deadline = monotonic() + timeout
     while not predicate():
         await asyncio.sleep(period)
-        if time() > deadline:
+        if monotonic() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail(f"condition not reached until {timeout} seconds")
-
-
-def wait_for(*args, **kwargs):
-    warnings.warn(
-        "wait_for has been renamed to poll_for to avoid confusion with "
-        "asyncio.wait_for and utils.wait_for"
-    )
-    return poll_for(*args, **kwargs)
-
-
-async def async_wait_for(*args, **kwargs):
-    warnings.warn(
-        "async_wait_for has been renamed to async_poll_for to avoid confusion "
-        "with asyncio.wait_for and utils.wait_for"
-    )
-    return await async_poll_for(*args, **kwargs)
+            pytest.fail(f"condition not reached after {timeout} seconds")
 
 
 @memoize
@@ -1310,13 +1288,13 @@ async def assert_can_connect_from_everywhere_4_6(port, protocol="tcp", **kwargs)
     Check that the local *port* is reachable from all IPv4 and IPv6 addresses.
     """
     futures = [
-        assert_can_connect("%s://127.0.0.1:%d" % (protocol, port), **kwargs),
-        assert_can_connect("%s://%s:%d" % (protocol, get_ip(), port), **kwargs),
+        assert_can_connect(f"{protocol}://127.0.0.1:{port}", **kwargs),
+        assert_can_connect(f"{protocol}://{get_ip()}:{port}", **kwargs),
     ]
     if has_ipv6():
         futures += [
-            assert_can_connect("%s://[::1]:%d" % (protocol, port), **kwargs),
-            assert_can_connect("%s://[%s]:%d" % (protocol, get_ipv6(), port), **kwargs),
+            assert_can_connect(f"{protocol}://[::1]:{port}", **kwargs),
+            assert_can_connect(f"{protocol}://[{get_ipv6()}]:{port}", **kwargs),
         ]
     await asyncio.gather(*futures)
 
@@ -1326,16 +1304,14 @@ async def assert_can_connect_from_everywhere_4(port, protocol="tcp", **kwargs):
     Check that the local *port* is reachable from all IPv4 addresses.
     """
     futures = [
-        assert_can_connect("%s://127.0.0.1:%d" % (protocol, port), **kwargs),
-        assert_can_connect("%s://%s:%d" % (protocol, get_ip(), port), **kwargs),
+        assert_can_connect(f"{protocol}://127.0.0.1:{port}", **kwargs),
+        assert_can_connect(f"{protocol}://{get_ip()}:{port}", **kwargs),
     ]
     if has_ipv6():
-        futures += [
-            assert_cannot_connect("%s://[::1]:%d" % (protocol, port), **kwargs),
-            assert_cannot_connect(
-                "%s://[%s]:%d" % (protocol, get_ipv6(), port), **kwargs
-            ),
-        ]
+        futures.extend(
+            assert_cannot_connect(f"{protocol}://[::1]:{port}", **kwargs),
+            assert_cannot_connect(f"{protocol}://[{get_ipv6()}]:{port}", **kwargs),
+        )
     await asyncio.gather(*futures)
 
 
@@ -1343,13 +1319,13 @@ async def assert_can_connect_locally_4(port, **kwargs):
     """
     Check that the local *port* is only reachable from local IPv4 addresses.
     """
-    futures = [assert_can_connect("tcp://127.0.0.1:%d" % port, **kwargs)]
+    futures = [assert_can_connect(f"tcp://127.0.0.1:{port}", **kwargs)]
     if get_ip() != "127.0.0.1":  # No outside IPv4 connectivity?
-        futures += [assert_cannot_connect("tcp://%s:%d" % (get_ip(), port), **kwargs)]
+        futures += [assert_cannot_connect(f"tcp://{get_ip()}:{port}", **kwargs)]
     if has_ipv6():
         futures += [
-            assert_cannot_connect("tcp://[::1]:%d" % port, **kwargs),
-            assert_cannot_connect("tcp://[%s]:%d" % (get_ipv6(), port), **kwargs),
+            assert_cannot_connect(f"tcp://[::1]:{port}", **kwargs),
+            assert_cannot_connect(f"tcp://[{get_ipv6()}]:{port}", **kwargs),
         ]
     await asyncio.gather(*futures)
 
@@ -1360,10 +1336,10 @@ async def assert_can_connect_from_everywhere_6(port, **kwargs):
     """
     assert has_ipv6()
     futures = [
-        assert_cannot_connect("tcp://127.0.0.1:%d" % port, **kwargs),
-        assert_cannot_connect("tcp://%s:%d" % (get_ip(), port), **kwargs),
-        assert_can_connect("tcp://[::1]:%d" % port, **kwargs),
-        assert_can_connect("tcp://[%s]:%d" % (get_ipv6(), port), **kwargs),
+        assert_cannot_connect(f"tcp://127.0.0.1:{port}", **kwargs),
+        assert_cannot_connect(f"tcp://{get_ip()}:{port}", **kwargs),
+        assert_can_connect(f"tcp://[::1]:{port}", **kwargs),
+        assert_can_connect(f"tcp://[{get_ipv6()}]:{port}", **kwargs),
     ]
     await asyncio.gather(*futures)
 
@@ -1374,14 +1350,12 @@ async def assert_can_connect_locally_6(port, **kwargs):
     """
     assert has_ipv6()
     futures = [
-        assert_cannot_connect("tcp://127.0.0.1:%d" % port, **kwargs),
-        assert_cannot_connect("tcp://%s:%d" % (get_ip(), port), **kwargs),
-        assert_can_connect("tcp://[::1]:%d" % port, **kwargs),
+        assert_cannot_connect(f"tcp://127.0.0.1:{port}", **kwargs),
+        assert_cannot_connect(f"tcp://{get_ip()}:{port}", **kwargs),
+        assert_can_connect(f"tcp://[::1]:{port}", **kwargs),
     ]
     if get_ipv6() != "::1":  # No outside IPv6 connectivity?
-        futures += [
-            assert_cannot_connect("tcp://[%s]:%d" % (get_ipv6(), port), **kwargs)
-        ]
+        futures.append(assert_cannot_connect(f"tcp://[{get_ipv6()}]:{port}", **kwargs))
     await asyncio.gather(*futures)
 
 
@@ -1455,7 +1429,7 @@ def new_config(new_config):
 
 
 @contextmanager
-def new_config_file(c: dict[str, Any]) -> Iterator[None]:
+def new_config_file(c: dict[str, Any]) -> Generator[None]:
     """
     Temporarily change configuration file to match dictionary *c*.
     """
@@ -1671,7 +1645,7 @@ def term_or_kill_active_children(timeout: float) -> None:
 @contextmanager
 def check_process_leak(
     check: bool = True, check_timeout: float = 40, term_timeout: float = 3
-) -> Iterator[None]:
+) -> Generator[None]:
     """Terminate any currently-running subprocesses at both the beginning and end of this context
 
     Parameters
@@ -2248,7 +2222,7 @@ class BarrierGetData(Worker):
 
 
 @contextmanager
-def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[None]:
+def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Generator[None]:
     """Prevent any task from transitioning from fetch to flight on the worker while
     inside the context, simulating a situation where the worker's network comms are
     saturated.
@@ -2279,7 +2253,7 @@ def freeze_data_fetching(w: Worker, *, jump_start: bool = False) -> Iterator[Non
 
 
 @contextmanager
-def freeze_batched_send(bcomm: BatchedSend) -> Iterator[LockedComm]:
+def freeze_batched_send(bcomm: BatchedSend) -> Generator[LockedComm]:
     """
     Contextmanager blocking writes to a `BatchedSend` from sending over the network.
 

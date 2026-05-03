@@ -10,6 +10,9 @@ dependencies:
   - locket=1.0.0
   - msgpack-python=1.0.2
   - packaging=20.0
+  - pyparsing<3.3  # Newer versions of pyparsing break with old versions of packaging
+  - setuptools<71  # Newer versions of setuptools break with packaging<24
+                   # https://github.com/pypa/setuptools/issues/4496
   - psutil=5.8.0
   - pyyaml=5.4.1
   - sortedcontainers=2.0.5
@@ -18,8 +21,6 @@ dependencies:
   - tornado=6.2.0
   - urllib3=1.26.5
   - zict=3.0.0
-  # Temporary fix for https://github.com/pypa/setuptools/issues/4496
-  - setuptools < 71
   # Distributed depends on the latest version of Dask
   - pip
   - pip:

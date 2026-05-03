@@ -4,7 +4,7 @@ import asyncio
 import logging
 import random
 import warnings
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Literal
 
@@ -37,7 +37,7 @@ from distributed.worker_state_machine import AcquireReplicasEvent
 
 
 @contextmanager
-def assert_amm_log(expect: list[str]) -> Iterator[None]:
+def assert_amm_log(expect: list[str]) -> Generator[None]:
     with captured_logger(
         "distributed.active_memory_manager", level=logging.DEBUG
     ) as logger:
@@ -741,7 +741,7 @@ async def test_ReduceReplicas(c, s, *workers):
         ],
     ):
         s.extensions["amm"].run_once()
-    await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1, timeout=5)
+    await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1)
 
 
 @pytest.mark.parametrize(
@@ -795,7 +795,7 @@ async def test_ReduceReplicas_with_waiters(
         for i in range(nwaiters_nonproc)
     ]
     nwaiters = nwaiters_w1 + nwaiters_w2 + nwaiters_nonproc
-    await async_poll_for(lambda: len(s.tasks) == nwaiters + 2, timeout=5)
+    await async_poll_for(lambda: len(s.tasks) == nwaiters + 2)
     for fut in waiters_w1:
         assert s.tasks[fut.key].processing_on == s.workers[w1.address]
     for fut in waiters_w2:
@@ -805,7 +805,7 @@ async def test_ReduceReplicas_with_waiters(
 
     s.extensions["amm"].run_once()
     await asyncio.sleep(0.2)  # Test no excessive drops
-    await async_poll_for(lambda: len(s.tasks["x"].who_has) == nreplicas, timeout=5)
+    await async_poll_for(lambda: len(s.tasks["x"].who_has) == nreplicas)
     await ev.set()
 
 
@@ -1297,7 +1297,7 @@ async def tensordot_stress(c, s):
     else:
         raise RuntimeError("Expected 'update_graph' event not found")
     # Test that we didn't recompute any tasks during the stress test
-    await async_poll_for(lambda: not s.tasks, timeout=5)
+    await async_poll_for(lambda: not s.tasks)
     assert sum(t.start == "memory" for t in s.transition_log) == expected_tasks
 
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from distributed.compatibility import PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 if TYPE_CHECKING:
     # Optional runtime dependencies
@@ -96,7 +96,7 @@ class MemorySampler:
     @contextmanager
     def _sample_sync(
         self, label: str | None, client: Client, measure: str, interval: float
-    ) -> Iterator[None]:
+    ) -> Generator[None]:
         key = client.sync(
             client.scheduler.memory_sampler_start,
             client=client.id,
@@ -143,7 +143,7 @@ class MemorySampler:
             if align:
                 # convert datetime to timedelta from the first sample
                 s.index -= s.index[0]
-            ss[label] = s[~s.index.duplicated()]  # type: ignore[attr-defined]
+            ss[label] = s[~s.index.duplicated()]
 
         df = pd.DataFrame(ss)
 
@@ -214,7 +214,7 @@ class MemorySamplerExtension:
                 self.stop(key)
 
         pc = PeriodicCallback(sample, interval * 1000)
-        self.scheduler.periodic_callbacks["MemorySampler-" + key] = pc
+        self.scheduler.periodic_callbacks[f"MemorySampler-{key}"] = pc
         pc.start()
 
         # Immediately collect the first sample; this also ensures there's always at
@@ -225,7 +225,7 @@ class MemorySamplerExtension:
 
     def stop(self, key: str) -> list[tuple[float, int]]:
         """Stop sampling and return the samples"""
-        pc = self.scheduler.periodic_callbacks.pop("MemorySampler-" + key, None)
+        pc = self.scheduler.periodic_callbacks.pop(f"MemorySampler-{key}", None)
         if pc is not None:  # Race condition with scheduler shutdown
             pc.stop()
         return self.samples.pop(key)

@@ -3,7 +3,7 @@ tornado
 toolz
 cloudpickle
 git+https://github.com/dask/dask
-sphinx>=8.0.0
+sphinx>=8,<9  # FIXME https://github.com/dask/distributed/issues/9189
 dask-sphinx-theme>=4.0.0
 sphinx-click
 memray

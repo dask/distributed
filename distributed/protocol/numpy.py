@@ -102,13 +102,13 @@ def serialize_numpy_ndarray(x, context=None):
         data = x.ravel()
 
     if data.dtype.fields or data.dtype.itemsize > 8:
-        data = data.view("u%d" % math.gcd(x.dtype.itemsize, 8))
+        data = data.view(f"u{math.gcd(x.dtype.itemsize, 8)}")
 
     try:
         data = data.data
     except ValueError:
         # "ValueError: cannot include dtype 'M' in a buffer"
-        data = data.view("u%d" % math.gcd(x.dtype.itemsize, 8)).data
+        data = data.view(f"u{math.gcd(x.dtype.itemsize, 8)}").data
 
     header = {
         "dtype": dt,

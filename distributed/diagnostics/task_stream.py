@@ -118,7 +118,7 @@ def rectangles(msgs, workers=None, start_boundary=0):
         name = key_split(key)
         startstops = msg.get("startstops", [])
         try:
-            worker_thread = "%s-%d" % (msg["worker"], msg["thread"])
+            worker_thread = f"{msg['worker']}-{msg['thread']}"
         except Exception:
             continue
             logger.warning("Message contained bad information: %s", msg, exc_info=True)

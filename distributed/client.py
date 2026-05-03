@@ -23,6 +23,7 @@ from collections.abc import (
     Coroutine,
     Iterable,
     Iterator,
+    Mapping,
     Sequence,
 )
 from concurrent.futures import ThreadPoolExecutor
@@ -43,12 +44,13 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
+    overload,
 )
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._expr import Expr, HLGExpr, LLGExpr
@@ -74,7 +76,6 @@ from distributed import cluster_dump, preloading
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
@@ -360,15 +361,20 @@ class Future(TaskRef, Generic[_T]):
     @property
     def status(
         self,
-    ) -> Literal["cancelled", "error", "finished", "lost", "pending"] | None:
-        """The status of the future.
+    ) -> Literal["pending", "cancelled", "finished", "lost", "error"] | None:
+        """Returns the status
 
         Returns
         -------
-        {"cancelled", "error", "finished", "lost", "pending"}
-            The current status. This may be None if the future has not been
-            bound to a client.
+        str or None
+            The status of the future. Possible values:
 
+            - "pending": The future is waiting to be computed
+            - "finished": The future has completed successfully
+            - "error": The future encountered an error during computation
+            - "cancelled": The future was cancelled
+            - "lost": The future's data was lost from memory
+            - None: The future is not yet bound to a client
         """
         if self._state:
             return self._state.status
@@ -651,7 +657,9 @@ class FutureState:
         self._event = None
         self.key = key
         self.exception = None
-        self.status = "pending"
+        self.status: Literal["pending", "cancelled", "finished", "lost", "error"] = (
+            "pending"
+        )
         self.traceback = None
         self.type = None
 
@@ -891,7 +899,7 @@ class _MapExpr(Expr):
                 if self.pure:
                     tok = tokenize(self.func, self.kwargs)
                     keys = [
-                        self.key + "-" + tokenize(tok, args)  # type: ignore
+                        f"{self.key}-{tokenize(tok, args)}"
                         for args in zip(*self.iterables)
                     ]
                 else:
@@ -1079,7 +1087,7 @@ class Client(SyncMethodMixin):
             name = dask.config.get("client-name", None)
         self.id = (
             type(self).__name__
-            + ("-" + name + "-" if name else "-")
+            + (f"-{name}-" if name else "-")
             + str(uuid.uuid1(clock_seq=os.getpid()))
         )
         self.generation = 0
@@ -1373,17 +1381,8 @@ class Client(SyncMethodMixin):
         if addr:
             nworkers = info.get("n_workers", 0)
             nthreads = info.get("total_threads", 0)
-            text = "<%s: %r processes=%d threads=%d" % (
-                self.__class__.__name__,
-                addr,
-                nworkers,
-                nthreads,
-            )
             memory = info.get("total_memory", 0)
-            text += ", memory=" + format_bytes(memory)
-            text += ">"
-            return text
-
+            return f"<{self.__class__.__name__}: {addr!r} processes={nworkers} threads={nthreads}, memory={format_bytes(memory)}>"
         elif self.scheduler is not None:
             return f"<{self.__class__.__name__}: scheduler={self.scheduler.address!r}>"
         else:
@@ -2145,9 +2144,9 @@ class Client(SyncMethodMixin):
 
         if key is None:
             if pure:
-                key = funcname(func) + "-" + tokenize(func, kwargs, *args)
+                key = f"{funcname(func)}-{tokenize(func, kwargs, *args)}"
             else:
-                key = funcname(func) + "-" + str(uuid.uuid4())
+                key = f"{funcname(func)}-{uuid.uuid4()}"
 
         with self._refcount_lock:
             if key in self.futures:
@@ -2428,7 +2427,7 @@ class Client(SyncMethodMixin):
                         bad_keys.add(key)
                         bad_data[key] = None
                     else:  # pragma: no cover
-                        raise ValueError("Bad value, `errors=%s`" % errors)
+                        raise ValueError(f"Bad value, `errors={errors}`")
 
             keys = [k for k in keys if k not in bad_keys and k not in data]
 
@@ -2600,9 +2599,9 @@ class Client(SyncMethodMixin):
             data = [data]
         if isinstance(data, (list, tuple)):
             if hash:
-                names = [type(x).__name__ + "-" + tokenize(x) for x in data]
+                names = [f"{type(x).__name__}-{tokenize(x)}" for x in data]
             else:
-                names = [type(x).__name__ + "-" + uuid.uuid4().hex for x in data]
+                names = [f"{type(x).__name__}-{uuid.uuid4().hex}" for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)
@@ -2859,57 +2858,78 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
-    @log_errors
-    async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
-        coroutines = []
-        uid = uuid.uuid4().hex
-        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
-
-        def add_coro(name, data):
-            keys = [f.key for f in futures_of(data)]
-
-            async def _():
-                await self.scheduler.publish_wait_flush(uid=uid)
-                await self.scheduler.publish_put(
-                    keys=keys,
-                    name=name,
-                    data=to_serialize(data),
-                    override=override,
-                    client=self.id,
-                )
-
-            coroutines.append(_())
+    async def _publish_dataset(
+        self, *args: Any, name: Key | None = None, override: bool = False, **kwargs: Any
+    ):
+        names: list[Key] = list(kwargs)
+        data = list(kwargs.values())
 
         if name:
-            if len(args) == 0:
+            if not args:
                 raise ValueError(
                     "If name is provided, expecting call signature like"
                     " publish_dataset(df, name='ds')"
                 )
             # in case this is a singleton, collapse it
-            elif len(args) == 1:
-                args = args[0]
-            add_coro(name, args)
+            names.append(name)
+            data.append(args[0] if len(args) == 1 else args)
+        elif args:
+            if len(args) != 1 or not isinstance(args[0], Mapping):
+                raise ValueError(
+                    "If name is omitted, positional argument must be "
+                    "a {name: value} dict"
+                )
+            names.extend(args[0])
+            data.extend(args[0].values())
 
-        for name, data in kwargs.items():
-            add_coro(name, data)
+        # Prevent race condition where the client persists the collection immediately
+        # before publish_dataset, but the persist command hasn't landed on the scheduler
+        # yet when the publish_put RPC call arrives asynchronously.
+        uid = uuid.uuid4().hex
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
 
-        await asyncio.gather(*coroutines)
+        await self.scheduler.publish_put(
+            names=names,
+            keys=[[f.key for f in futures_of(data_i)] for data_i in data],
+            data=[to_serialize(data_i) for data_i in data],
+            override=override,
+            client=self.id,
+            uid=uid,
+        )
 
-    def publish_dataset(self, *args, **kwargs):
+    @overload
+    def publish_dataset(
+        self, *args: Any, name: Key, override: bool = False, **kwargs
+    ): ...
+
+    @overload
+    def publish_dataset(
+        self, *args: Mapping[Key, Any], override: bool = False, **kwargs
+    ): ...
+
+    def publish_dataset(
+        self, *args: Any, name: Key | None = None, override: bool = False, **kwargs
+    ):
         """
         Publish named datasets to scheduler
 
-        This stores a named reference to a dask collection or list of futures
+        This stores a named reference to one or more dask collections or futures
         on the scheduler.  These references are available to other Clients
-        which can download the collection or futures with ``get_dataset``.
+        which can download the collections or futures with ``get_dataset``.
 
-        Datasets are not immediately computed.  You may wish to call
-        ``Client.persist`` prior to publishing a dataset.
+        Datasets are not immediately computed. You should call ``persist`` prior to
+        publishing a dataset. Any unpersisted keys will be stored on the scheduler
+        uncomputed and returned as-is to the user when calling ``get_dataset``.
 
         Parameters
         ----------
-        args : list of objects to publish as name
+        args : One or more objects to publish as `name`.
+            Alternatively, a single dict of {name: object} pairs.
+        name : Dask key (str, int, float, or tuple thereof)
+            Name to publish `args` under
+        override: bool
+            False (default) to raise KeyError if a dataset with the same name already
+            exists on the scheduler; True to overwrite it.
         kwargs : dict
             named collections to publish on the scheduler
 
@@ -2919,7 +2939,10 @@ class Client(SyncMethodMixin):
 
         >>> df = dd.read_csv('s3://...')  # doctest: +SKIP
         >>> df = c.persist(df) # doctest: +SKIP
-        >>> c.publish_dataset(my_dataset=df)  # doctest: +SKIP
+        >>> c.publish_dataset({"my_dataset": df})  # doctest: +SKIP
+
+        Alternative invocation
+        >>> c.publish_dataset(my_dataset=df)
 
         Alternative invocation
         >>> c.publish_dataset(df, name='my_dataset')
@@ -2941,30 +2964,50 @@ class Client(SyncMethodMixin):
         Client.unpublish_dataset
         Client.persist
         """
-        return self.sync(self._publish_dataset, *args, **kwargs)
+        return self.sync(
+            self._publish_dataset, *args, name=name, override=override, **kwargs
+        )
 
-    def unpublish_dataset(self, name, **kwargs):
+    async def _unpublish_dataset(self, name: Key | list[Key]) -> None:
+        names = name if isinstance(name, list) else [name]
+        uid = uuid.uuid4().hex
+        # Prevent race condition where the user calls get_dataset() and immediately
+        # afterwards unpublish_dataset(), thinking that they are holding a reference
+        # to the futures locally, but the futures haven't been registered on the
+        # scheduler yet by the time unpublish_dataset lands on the scheduler.
+        # This method can't be made into just a batched send command as it would
+        # create another race condition, where unpublish_dataset() followed by
+        # get_dataset() would return the just-deleted data.
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
+        await self.scheduler.publish_delete(names=names, client=self.id, uid=uid)
+
+    def unpublish_dataset(self, name: Key | list[Key], **kwargs):
         """
         Remove named datasets from scheduler
 
         Parameters
         ----------
-        name : str
-            The name of the dataset to unpublish
+        name : Dask key (str, int, float, or tuple thereof), or list of keys
+            Name(s) of the dataset(s) to unpublish.
 
         Examples
         --------
         >>> c.list_datasets()  # doctest: +SKIP
-        ['my_dataset']
-        >>> c.unpublish_dataset('my_dataset')  # doctest: +SKIP
+        ['foo', 'bar', 'baz']
+        >>> c.unpublish_dataset('foo')  # doctest: +SKIP
+        >>> c.list_datasets()  # doctest: +SKIP
+        ['bar', 'baz']
+        >>> c.unpublish_dataset(['bar', 'baz'])  # doctest: +SKIP
         >>> c.list_datasets()  # doctest: +SKIP
         []
 
         See Also
         --------
         Client.publish_dataset
+        Client.list_datasets
+        Client.get_dataset
         """
-        return self.sync(self.scheduler.publish_delete, name=name, **kwargs)
+        return self.sync(self._unpublish_dataset, name=name, **kwargs)
 
     def list_datasets(self, **kwargs):
         """
@@ -2973,46 +3016,52 @@ class Client(SyncMethodMixin):
         See Also
         --------
         Client.publish_dataset
+        Client.unpublish_dataset
         Client.get_dataset
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
-    async def _get_dataset(self, name, default=no_default):
-        with self.as_current():
-            out = await self.scheduler.publish_get(name=name, client=self.id)
-        if out is None:
-            if default is no_default:
-                raise KeyError(f"Dataset '{name}' not found")
-            else:
-                return default
-        for fut in futures_of(out["data"]):
-            fut.bind_client(self)
-        self._inform_scheduler_of_futures()
-        return out["data"]
+    async def _get_dataset(self, name: Key | list[Key], default=no_default):
+        names = name if isinstance(name, list) else [name]
+        raw_outs = await self.scheduler.publish_get(names=names)
 
-    def get_dataset(self, name, default=no_default, **kwargs):
+        outs = []
+        for out in raw_outs:
+            if out is None:
+                if default is no_default:
+                    raise KeyError(f"Dataset '{name}' not found")
+                outs.append(default)
+            else:
+                for fut in futures_of(out["data"]):
+                    fut.bind_client(self)
+                outs.append(out["data"])
+
+        self._inform_scheduler_of_futures()
+        return outs if isinstance(name, list) else outs[0]
+
+    def get_dataset(self, name: Key | list[Key], default=no_default, **kwargs):
         """
         Get named dataset from the scheduler if present.
         Return the default or raise a KeyError if not present.
 
         Parameters
         ----------
-        name : str
-            name of the dataset to retrieve
-        default : str
+        name : Dask key (str, int, float, or tuple thereof), or list of keys
+            name(s) of the dataset(s) to retrieve
+        default : Any
             optional, not set by default
             If set, do not raise a KeyError if the name is not present but
             return this default
-        kwargs : dict
-            additional keyword arguments to _get_dataset
 
         Returns
         -------
-        The dataset from the scheduler, if present
+        The dataset from the scheduler, if present.
+        If name is a list of keys, return a list of datasets in the same order.
 
         See Also
         --------
         Client.publish_dataset
+        Client.unpublish_dataset
         Client.list_datasets
         """
         return self.sync(self._get_dataset, name, default=default, **kwargs)
@@ -3100,6 +3149,7 @@ class Client(SyncMethodMixin):
             elif resp["status"] == "error":
                 # Exception raised by the remote function
                 _, exc, tb = clean_exception(**resp)
+                assert exc is not None
                 exc = exc.with_traceback(tb)
             else:
                 assert resp["status"] == "OK"
@@ -3255,8 +3305,20 @@ class Client(SyncMethodMixin):
                     "|".join([f"(?:{mod})" for mod in ignore_modules])
                 )
             if ignore_files:
+                # Given ignore-files = [foo], match:
+                #   /path/to/foo
+                #   /path/to/foo.py[c]
+                #   /path/to/foo/bar.py[c]
+                #   \path\to\foo
+                #   \path\to\foo.py[c]
+                #   \path\to\foo\bar.py[c]
+                #   <frozen foo>
+                # Do not match files that have 'foo' as a substring,
+                # unless the user explicitly states '.*foo.*'.
+                ignore_files_or = "|".join(mod for mod in ignore_files)
                 fname_pattern = re.compile(
-                    r".*[\\/](" + "|".join(mod for mod in ignore_files) + r")([\\/]|$)"
+                    rf".*[\\/]({ignore_files_or})([\\/]|\.pyc?$|$)"
+                    rf"|<frozen ({ignore_files_or})>$"
                 )
         else:
             # stacklevel 0 or less - shows dask internals which likely isn't helpful
@@ -5105,7 +5167,7 @@ class Client(SyncMethodMixin):
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
         name: str,
         idempotent: bool,
-    ):
+    ) -> Any:
         if isinstance(plugin, type):
             raise TypeError("Please provide an instance of a plugin, not a type.")
         if any(
@@ -5868,7 +5930,7 @@ class as_completed:
         with self.lock:
             for f in futures:
                 if not isinstance(f, (Future, BaseActorFuture)):
-                    raise TypeError("Input must be a future, got %s" % f)
+                    raise TypeError(f"Input must be a future, got {f}")
                 self.futures[f] += 1
                 self.loop.add_callback(self._track_future, f)
 

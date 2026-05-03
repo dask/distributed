@@ -178,7 +178,7 @@ class TCP(Comm):
         self._peer_addr = peer_addr
         self.stream = stream
         self._finalizer = weakref.finalize(self, self._get_finalizer())
-        self._finalizer.atexit = False
+        self._finalizer.atexit = False  # type: ignore[misc]
         self._extra: dict = {}
 
         ref = weakref.ref(self)
@@ -468,7 +468,7 @@ class RequireEncryptionMixin:
             # XXX Should we have a dedicated SecurityError class?
             raise RuntimeError(
                 "encryption required by Dask configuration, "
-                "refusing communication from/to %r" % (self.prefix + address,)
+                f"refusing communication from/to {self.prefix + address!r}"
             )
 
 

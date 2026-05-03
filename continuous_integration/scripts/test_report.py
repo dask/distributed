@@ -9,7 +9,7 @@ import re
 import shelve
 import sys
 import zipfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any, cast
 
@@ -32,7 +32,7 @@ COLORS = {
 
 
 @contextlib.contextmanager
-def get_session() -> Iterator[requests.Session]:
+def get_session() -> Generator[requests.Session]:
     retry_strategy = Retry(
         status_forcelist=[429, 500, 502, 503, 504],
         backoff_factor=0.2,
@@ -489,7 +489,7 @@ def main(argv: list[str] | None = None) -> None:
         total.groupby([total.file, total.test])
         .filter(lambda g: (g.status == "x").sum() >= args.nfails)
         .reset_index()
-        .assign(test=lambda df: df.file + "." + df.test)
+        .assign(test=lambda df: f"{df.file}.{df.test}")
         .groupby("test")
     )
     overall = {name: grouped.get_group(name) for name in grouped.groups}

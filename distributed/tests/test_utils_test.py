@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import pathlib
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 from contextlib import contextmanager
@@ -816,8 +818,7 @@ def test_popen_write_during_terminate_deadlock():
         [
             sys.executable,
             "-c",
-            textwrap.dedent(
-                """
+            textwrap.dedent("""
                 import signal
                 import threading
 
@@ -831,8 +832,7 @@ def test_popen_write_during_terminate_deadlock():
                 signal.signal(signal.SIGINT, cb)
                 print('ready', flush=True)
                 e.wait()
-                """
-            ),
+                """),
         ],
         capture_output=True,
     ) as proc:
@@ -847,8 +847,7 @@ def test_popen_timeout(capsys):
             [
                 sys.executable,
                 "-c",
-                textwrap.dedent(
-                    """
+                textwrap.dedent("""
                     import signal
                     import sys
                     import time
@@ -860,8 +859,7 @@ def test_popen_timeout(capsys):
                     while True:
                         time.sleep(0.1)
                         print("slept", flush=True)
-                    """
-                ),
+                    """),
             ],
             capture_output=True,
             terminate_timeout=1,
@@ -1069,3 +1067,15 @@ def test_captured_context_meter():
         ("a", "o", "u"): 6,
     }
     assert isinstance(metrics["foo", "s"], int)
+
+
+def test_popen_file_not_found():
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="tmp-python")
+    os.close(tmp_fd)
+    os.remove(tmp_path)
+    with pytest.raises(
+        FileNotFoundError,
+        match=r"provide an absolute path to an existing installation to popen",
+    ):
+        with popen([tmp_path]):
+            pass

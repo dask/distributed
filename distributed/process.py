@@ -127,7 +127,7 @@ class AsyncProcess:
     def _start_threads(self):
         self._watch_message_thread = threading.Thread(
             target=self._watch_message_queue,
-            name="AsyncProcess %s watch message queue" % self.name,
+            name=f"AsyncProcess {self.name} watch message queue",
             args=(
                 weakref.ref(self),
                 self._process,
@@ -216,7 +216,7 @@ class AsyncProcess:
 
             thread = threading.Thread(
                 target=AsyncProcess._watch_process,
-                name="AsyncProcess %s watch process join" % name,
+                name=f"AsyncProcess {name} watch process join",
                 args=(selfref, process, state, q),
             )
             thread.daemon = True

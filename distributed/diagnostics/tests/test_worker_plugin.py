@@ -113,7 +113,7 @@ async def test_normal_task_transitions_called(c, s, w):
 
     await c.register_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
-    await async_poll_for(lambda: not w.state.tasks, timeout=10)
+    await async_poll_for(lambda: not w.state.tasks)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -159,7 +159,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     await c.register_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
-    await async_poll_for(lambda: not w.state.tasks, timeout=10)
+    await async_poll_for(lambda: not w.state.tasks)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -185,7 +185,7 @@ async def test_dependent_tasks(c, s, w):
 
     await c.register_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await async_poll_for(lambda: not w.state.tasks, timeout=10)
+    await async_poll_for(lambda: not w.state.tasks)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)

@@ -72,7 +72,7 @@ class BatchedSend:
         if self.closed():
             return "<BatchedSend: closed>"
         else:
-            return "<BatchedSend: %d in buffer>" % len(self.buffer)
+            return f"<BatchedSend: {len(self.buffer)} in buffer>"
 
     __str__ = __repr__
 

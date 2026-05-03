@@ -203,7 +203,7 @@ class WorkSpace:
         return purged
 
     def _list_unknown_locks(self):
-        for p in glob.glob(os.path.join(self.base_dir, "*" + DIR_LOCK_EXT)):
+        for p in glob.glob(os.path.join(self.base_dir, f"*{DIR_LOCK_EXT}")):
             try:
                 st = os.stat(p)
             except OSError:

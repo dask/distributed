@@ -401,9 +401,9 @@ def listen(addr, handle_comm, deserialize=True, **kwargs):
         scheme, loc = parse_address(addr, strict=True)
     except ValueError:
         if kwargs.get("ssl_context"):
-            addr = "tls://" + addr
+            addr = f"tls://{addr}"
         else:
-            addr = "tcp://" + addr
+            addr = f"tcp://{addr}"
         scheme, loc = parse_address(addr, strict=True)
 
     backend = registry.get_backend(scheme)

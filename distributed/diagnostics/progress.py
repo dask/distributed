@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import warnings
 from collections import defaultdict
 from timeit import default_timer
 from typing import ClassVar
@@ -10,6 +9,7 @@ from typing import ClassVar
 from tlz import groupby, valmap
 
 from dask.tokenize import tokenize
+from dask.typing import Key
 from dask.utils import key_split
 
 from distributed.diagnostics.plugin import SchedulerPlugin
@@ -147,48 +147,31 @@ class MultiProgress(Progress):
 
     Parameters
     ----------
-
-    func : Callable (deprecated)
-        Function that splits keys. This defaults to ``key_split`` which
-        aligns with naming conventions chosen in the dask project (tuples,
-        hyphens, etc..)
-
-    group_by : Callable | Literal["spans"] | Literal["prefix"], default: "prefix"
+    group_by : Callable | Literal["spans", "prefix"], default: "prefix"
         How to group keys to display multiple bars. Defaults to "prefix",
         which uses ``key_split`` from dask project
 
-    State
-    -----
+    Attributes
+    ----------
     keys: dict
         Maps group name to set of not-yet-complete keys for that group
     all_keys: dict
         Maps group name to set of all keys for that group
-
-    Examples
-    --------
-    >>> split = lambda s: s.split('-')[0]
-    >>> p = MultiProgress(['y-2'], func=split)  # doctest: +SKIP
-    >>> p.keys   # doctest: +SKIP
-    {'x': {'x-1', 'x-2', 'x-3'},
-     'y': {'y-1', 'y-2'}}
     """
+
+    keys: dict[str, set[Key]]
+    all_keys: dict[str, set[Key]]
 
     def __init__(
         self,
         keys,
         scheduler=None,
         *,
-        func=None,
         group_by="prefix",
         minimum=0,
         dt=0.1,
         complete=False,
     ):
-        if func is not None:
-            warnings.warn(
-                "`func` is deprecated, use `group_by`", category=DeprecationWarning
-            )
-            group_by = func
         self.group_by = key_split if group_by in (None, "prefix") else group_by
         self.func = None
         name = f"multi-progress-{tokenize(keys, group_by, minimum, dt, complete)}"
