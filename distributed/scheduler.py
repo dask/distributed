@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import heapq
 import inspect
 import itertools
@@ -31,6 +30,7 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
+from dataclasses import dataclass
 from functools import partial
 from typing import (
     TYPE_CHECKING,
@@ -858,7 +858,7 @@ class WorkerState:
         )
 
 
-@dataclasses.dataclass
+@dataclass(slots=True)
 class ErredTask:
     """Lightweight representation of an erred task without any dependency information
     or runspec.
@@ -868,7 +868,7 @@ class ErredTask:
     TaskState
     """
 
-    key: Hashable
+    key: Key
     timestamp: float
     erred_on: set[str]
     exception_text: str

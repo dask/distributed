@@ -113,12 +113,11 @@ except (AttributeError, OSError):  # pragma: no cover
     thread_time = process_time
 
 
-@dataclass
+@dataclass(slots=True)
 class MeterOutput:
     start: float
     stop: float
     delta: float
-    __slots__ = tuple(__annotations__)
 
 
 @contextmanager
