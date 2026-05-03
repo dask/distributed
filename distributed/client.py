@@ -166,6 +166,10 @@ class FutureCancelledError(CancelledError):
             result += f"\n{self.msg}"
         return result
 
+    # Workaround to tblib <3.2.1
+    def __reduce__(self):
+        return self.__class__, (self.key, self.reason, self.msg)
+
 
 class FuturesCancelledError(CancelledError):
     error_groups: list[CancelledFuturesGroup]
