@@ -1107,7 +1107,7 @@ class ArrayRechunkRun(ShuffleRun[NDIndex, "np.ndarray"]):
         return self.worker_for[id]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ArrayRechunkSpec(ShuffleSpec[NDIndex]):
     new: ChunkedAxes
     old: ChunkedAxes
