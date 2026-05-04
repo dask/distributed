@@ -382,6 +382,8 @@ class _InstructionMatch:
     cls: type[Instruction]
     kwargs: dict[str, Any]
 
+    __slots__ = ("cls", "kwargs")
+
     def __init__(self, cls: type[Instruction], **kwargs: Any):
         self.cls = cls
         self.kwargs = kwargs
