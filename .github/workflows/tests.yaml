@@ -84,7 +84,8 @@ jobs:
             partition: not ci1
 
           - os: ubuntu-latest
-            environment: "3.10"
+            # Don't disturb the various GPU-only deps in the 3.10 environment
+            environment: "3.11"
             label: memray
             extra_packages: [memray]  # Not available on Windows
             partition: memray
