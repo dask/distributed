@@ -23,6 +23,7 @@ dependencies:
   - jupyter_events
   - jupyter-server-proxy
   - jupyterlab
+  - keras
   - locket
   - lz4  # Only tested here
   - msgpack-python
@@ -55,4 +56,3 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/zict
-      - keras
