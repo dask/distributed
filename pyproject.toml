@@ -184,12 +184,12 @@ filterwarnings = [
 minversion = "6"
 markers = [
     "ci1: marks tests as belonging to 1 out of 2 partitions to run on CI ('-m \"not ci1\"' for second partition)",
-    "extra_packages: marks tests that require a special dependency to run.",
-    "slow: marks tests as slow (deselected by default",                                                                            # select with '--runslow')
+    "memray: marks tests that require memray to run (available on Linux/MacOS only)",
+    "slow: marks tests as slow (deselected by default; select with '--runslow')",
     "avoid_ci: marks tests as flaky or broken on CI on all OSs",
     "ipython: marks tests as exercising IPython",
     "gpu: marks tests we want to run on GPUs",
-    "leaking: ignore leaked resources",                                                                                            # see pytest_resourceleaks.py for usage
+    "leaking: ignore leaked resources",  # see pytest_resourceleaks.py for usage
     "workerstate: deterministic test for the worker state machine. Automatically applied to all tests that use the 'ws' fixture.",
 ]
 # pytest-timeout settings
