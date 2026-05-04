@@ -8,13 +8,14 @@ from dask.utils import key_split
 
 from distributed.core import coerce_to_address, connect
 from distributed.diagnostics.progress import AllProgress
+from distributed.scheduler import Scheduler
 from distributed.utils import color_of
 from distributed.worker import dumps_function
 
 logger = logging.getLogger(__name__)
 
 
-def counts(scheduler, allprogress):
+def _counts(scheduler: Scheduler, allprogress: AllProgress) -> dict:
     return merge(
         {"all": valmap(len, allprogress.all), "nbytes": allprogress.nbytes},
         {
@@ -24,10 +25,8 @@ def counts(scheduler, allprogress):
     )
 
 
-def _remove_all_progress_plugin(self, *args, **kwargs):
-    # Wrapper function around `Scheduler.remove_plugin` to avoid raising a
-    # `PicklingError` when using a cythonized scheduler
-    self.remove_plugin(name=AllProgress.name)
+def _teardown(scheduler: Scheduler, allprogress: AllProgress) -> None:
+    scheduler.remove_plugin(name=allprogress.name)
 
 
 async def progress_stream(address, interval):
@@ -54,9 +53,9 @@ async def progress_stream(address, interval):
         {
             "op": "feed",
             "setup": dumps_function(AllProgress),
-            "function": dumps_function(counts),
+            "function": dumps_function(_counts),
             "interval": interval,
-            "teardown": dumps_function(_remove_all_progress_plugin),
+            "teardown": dumps_function(_teardown),
         }
     )
     return comm
