@@ -122,7 +122,6 @@ jobs:
         with:
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
-          use-mamba: true
           activate-environment: dask-distributed
 
       - name: Show conda options
@@ -160,7 +159,7 @@ jobs:
         id: cache
 
       - name: Update environment
-        run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
+        run: conda env update -n dask-distributed -f ${{ env.CONDA_FILE }}
         if: |
           (
             steps.skip-caching.outputs.trigger-found == 'true'
@@ -179,22 +178,22 @@ jobs:
             || steps.cache.outputs.cache-hit != 'true'
           )
         shell: bash -l {0}
-        run: mamba install -y ${{ join(matrix.extra_packages, ' ') }}
+        run: conda install -y ${{ join(matrix.extra_packages, ' ') }}
 
       - name: Install
         shell: bash -l {0}
         run: |
           python -m pip install --no-deps -e .
 
-      - name: mamba list
+      - name: conda list
         shell: bash -l {0}
-        run: mamba list
+        run: conda list
 
-      - name: mamba env export
+      - name: conda env export
         shell: bash -l {0}
         run: |
-          echo -e "--\n--Conda Environment (re-create this with \`mamba env create --name <name> -f <output_file>\`)\n--"
-          mamba env export | grep -E -v '^prefix:.*$'
+          echo -e "--\n--Conda Environment (re-create this with \`conda env create --name <name> -f <output_file>\`)\n--"
+          conda env export | grep -E -v '^prefix:.*$'
 
       - name: Setup SSH
         shell: bash -l {0}
