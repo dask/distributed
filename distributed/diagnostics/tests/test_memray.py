@@ -4,7 +4,7 @@ import pytest
 
 memray = pytest.importorskip("memray")
 
-pytestmark = pytest.mark.extra_packages
+pytestmark = pytest.mark.memray
 
 from distributed import Client, LocalCluster
 from distributed.diagnostics.memray import memray_scheduler, memray_workers

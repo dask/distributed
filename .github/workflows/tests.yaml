@@ -84,10 +84,10 @@ jobs:
             partition: "not ci1"
 
           - os: ubuntu-latest
-            environment: mindeps
+            environment: "3.10"
             label: memray
-            extra_packages: [memray]
-            partition: "extra_packages"
+            extra_packages: [memray]  # Not available on Windows
+            partition: memray
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change `export TEST_ID` in first step below.
