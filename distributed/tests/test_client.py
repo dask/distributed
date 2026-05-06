@@ -86,7 +86,6 @@ from distributed.deploy.subprocess import SubprocessCluster
 from distributed.diagnostics.plugin import UploadDirectory, WorkerPlugin
 from distributed.metrics import time
 from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
-from distributed.shuffle import check_minimal_arrow_version
 from distributed.sizeof import sizeof
 from distributed.utils import get_mp_context, is_valid_xml, open_port, sync, tmp_text
 from distributed.utils_test import (
@@ -3417,17 +3416,16 @@ async def test_cancel_clears_processing(c, s, *workers):
 
 
 def test_default_get(loop_in_thread):
-    has_pyarrow = False
     try:
-        check_minimal_arrow_version()
-        has_pyarrow = True
-    except ImportError:
-        pass
+        from dask.dataframe._compat import HAS_PYARROW
+    except ImportError:  # No pandas
+        HAS_PYARROW = False
+
     loop = loop_in_thread
     with cluster() as (s, [a, b]):
         pre_get = dask.base.get_scheduler()
         # These may change in the future but the selection below should not
-        distributed_default = "p2p" if has_pyarrow else "tasks"
+        distributed_default = "p2p" if HAS_PYARROW else "tasks"
         local_default = "disk"
         assert get_default_shuffle_method() == local_default
         with Client(s["address"], set_as_default=True, loop=loop) as c:

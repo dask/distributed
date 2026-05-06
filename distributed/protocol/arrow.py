@@ -4,11 +4,6 @@ import pyarrow.fs
 
 from distributed.protocol.serialize import dask_deserialize, dask_serialize
 
-if int(pyarrow.__version__.split(".")[0]) < 16:
-    raise ImportError(
-        "Need pyarrow >=16.0. See https://arrow.apache.org/docs/python/install.html"
-    )
-
 
 @dask_serialize.register(pyarrow.RecordBatch)
 def serialize_batch(batch):
