@@ -31,31 +31,24 @@ class TaskStreamPlugin(SchedulerPlugin):
         self.index = 0
 
     def transition(self, key, start, finish, *args, **kwargs):
-        if start == "processing":
-            if key not in self.scheduler.tasks:
-                return
-            if not kwargs.get("startstops"):
-                # Other methods require `kwargs` to have a non-empty list of `startstops`
-                return
+        if start == "processing" and finish in ("memory", "erred"):
+            assert kwargs["startstops"]
             kwargs["key"] = key
-            if finish == "memory" or finish == "erred":
-                self.buffer.append(kwargs)
-                self.index += 1
+            self.buffer.append(kwargs)
+            self.index += 1
 
     def collect(self, start=None, stop=None, count=None):
         def bisect(target, left, right):
-            if left == right:
-                return left
-
-            mid = (left + right) // 2
-            value = max(
-                startstop["stop"] for startstop in self.buffer[mid]["startstops"]
-            )
-
-            if value < target:
-                return bisect(target, mid + 1, right)
-            else:
-                return bisect(target, left, mid)
+            while left != right:
+                mid = (left + right) // 2
+                stop = max(
+                    startstop["stop"] for startstop in self.buffer[mid]["startstops"]
+                )
+                if stop < target:
+                    left = mid + 1
+                else:
+                    right = mid
+            return left
 
         if isinstance(start, str):
             start = time() - parse_timedelta(start)

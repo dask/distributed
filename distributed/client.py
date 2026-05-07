@@ -6308,10 +6308,16 @@ class get_task_stream:
         self._filename = filename
         self.figure = None
         self.client = client or default_client()
-        self.client.get_task_stream(start=0, stop=0)  # ensure plugin
+        self._init = False
 
     def __enter__(self):
-        self.start = time()
+        if not self._init:
+            self.client.get_task_stream(start=0, stop=0)  # ensure plugin
+            self._init = True
+
+        # Smooth over time differences of client vs. workers
+        # FIXME this is very crude. We should query TaskStreamPlugin.index instead.
+        self.start = time() - 0.1
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -6323,6 +6329,13 @@ class get_task_stream:
         self.data.extend(L)
 
     async def __aenter__(self):
+        if not self._init:
+            await self.client.get_task_stream(start=0, stop=0)  # ensure plugin
+            self._init = True
+
+        # Smooth over time differences of client vs. workers
+        # FIXME this is very crude. We should query TaskStreamPlugin.index instead.
+        self.start = time() - 0.1
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
