@@ -1448,8 +1448,8 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     "cost, ntasks, expect_steal",
     [
         pytest.param(10, 10, False, id="not enough work to steal"),
-        pytest.param(10, 12, True, id="enough work to steal"),
-        pytest.param(20, 12, False, id="not enough work for increased cost"),
+        pytest.param(10, 17, True, id="enough work to steal"),
+        pytest.param(20, 17, False, id="not enough work for increased cost"),
     ],
 )
 def test_balance_expensive_tasks(cost, ntasks, expect_steal):
@@ -2013,7 +2013,11 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 2,
-    config={"distributed.scheduler.work-stealing-interval": "100ms", **NO_AMM},
+    config={
+        "distributed.scheduler.work-stealing-interval": "100ms",
+        "distributed.scheduler.default-task-durations": {"slowidentity": 0.01},
+        **NO_AMM
+    },
 )
 async def test_reject_count_margin_metric(c, s, a, b):
     """
@@ -2023,16 +2027,16 @@ async def test_reject_count_margin_metric(c, s, a, b):
     steal = s.extensions["stealing"]
     await steal.stop()
 
-    # Generate large data on worker A to ensure high network transfer cost
-    [x] = await c.scatter([b"0" * 50_000_000], workers=a.address)
+    # Generate large data on worker A to ensure high network transfer cost (~0.1s)
+    [x] = await c.scatter([b"0" * 10_000_000], workers=a.address)
     
-    # Create tasks on A to saturate it and trigger stealing evaluation
+    # Create 14 tasks on A to saturate it (0.01s each). occ_victim will be ~0.14s.
     futures = [
         c.submit(slowidentity, x, pure=False, delay=0.01, workers=a.address, allow_other_workers=True)
-        for _ in range(10)
+        for _ in range(14)
     ]
     
-    while len(a.state.tasks) < 10:
+    while len(a.state.tasks) < 14:
         await asyncio.sleep(0.01)
 
     # Balance will evaluate the cost. High comm_cost, low compute.
