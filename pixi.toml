@@ -1,7 +1,7 @@
 # This file is used by pixi-build in other projects (namely, dask/dask) 
 # to generate a conda package of distributed from git tip
 [workspace]
-channels = ["conda-forge"]
+channels = ["https://prefix.dev/conda-forge"]
 platforms = ["linux-64", "osx-arm64", "win-64"]
 preview = ["pixi-build"]
 
