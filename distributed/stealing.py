@@ -490,7 +490,7 @@ class WorkStealing(SchedulerPlugin):
 
                     # Require at least 50% ROI on the network transfer cost to prevent thrashing
                     margin = comm_cost_thief * 0.5
-                    
+
                     would_steal_without_margin = (
                         occ_thief + comm_cost_thief + compute
                         <= occ_victim - (comm_cost_victim + compute) / 2
@@ -536,7 +536,11 @@ class WorkStealing(SchedulerPlugin):
                         logger.debug(
                             "Work-stealing margin heuristic rejected steal of task %s "
                             "(thief=%s, victim=%s, level=%d, margin=%.4f)",
-                            ts.key, thief.address, victim.address, level, margin,
+                            ts.key,
+                            thief.address,
+                            victim.address,
+                            level,
+                            margin,
                         )
                 self.scheduler.check_idle_saturated(
                     victim, occ=combined_occupancy(victim)

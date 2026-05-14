@@ -2016,7 +2016,7 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
     config={
         "distributed.scheduler.work-stealing-interval": "100ms",
         "distributed.scheduler.default-task-durations": {"slowidentity": 0.01},
-        **NO_AMM
+        **NO_AMM,
     },
 )
 async def test_reject_count_margin_metric(c, s, a, b):
@@ -2029,13 +2029,20 @@ async def test_reject_count_margin_metric(c, s, a, b):
 
     # Generate large data on worker A to ensure high network transfer cost (~0.1s)
     [x] = await c.scatter([b"0" * 10_000_000], workers=a.address)
-    
+
     # Create 14 tasks on A to saturate it (0.01s each). occ_victim will be ~0.14s.
     futures = [
-        c.submit(slowidentity, x, pure=False, delay=0.01, workers=a.address, allow_other_workers=True)
+        c.submit(
+            slowidentity,
+            x,
+            pure=False,
+            delay=0.01,
+            workers=a.address,
+            allow_other_workers=True,
+        )
         for _ in range(14)
     ]
-    
+
     while len(a.state.tasks) < 14:
         await asyncio.sleep(0.01)
 
@@ -2044,6 +2051,8 @@ async def test_reject_count_margin_metric(c, s, a, b):
     steal.balance()
 
     assert sum(steal.metrics["reject_count_margin_total"].values()) >= 1
+
+
 @gen_cluster(
     nthreads=[("", 1)],
     client=True,
