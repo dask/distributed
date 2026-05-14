@@ -2011,6 +2011,36 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
 
 
 @gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={"distributed.scheduler.work-stealing-interval": "100ms", **NO_AMM},
+)
+async def test_reject_count_margin_metric(c, s, a, b):
+    """
+    Verify that the margin heuristic increments reject_count_margin_total
+    when a steal is suppressed that old logic would have permitted.
+    """
+    steal = s.extensions["stealing"]
+    await steal.stop()
+
+    # Generate large data on worker A to ensure high network transfer cost
+    [x] = await c.scatter([b"0" * 50_000_000], workers=a.address)
+    
+    # Create tasks on A to saturate it and trigger stealing evaluation
+    futures = [
+        c.submit(slowidentity, x, pure=False, delay=0.01, workers=a.address, allow_other_workers=True)
+        for _ in range(10)
+    ]
+    
+    while len(a.state.tasks) < 10:
+        await asyncio.sleep(0.01)
+
+    # Balance will evaluate the cost. High comm_cost, low compute.
+    # Without margin, it would steal. With 50% ROI margin, it should reject.
+    steal.balance()
+
+    assert sum(steal.metrics["reject_count_margin_total"].values()) >= 1
+@gen_cluster(
     nthreads=[("", 1)],
     client=True,
     config={"distributed.scheduler.worker-saturation": "inf"},
