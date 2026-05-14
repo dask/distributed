@@ -5714,6 +5714,12 @@ class Scheduler(SchedulerState, ServerNode):
                 f"Removing worker {ws.address!r} caused the cluster to lose scattered "
                 f"data, which can't be recovered: {lost_keys} ({stimulus_id=})"
             )
+        if not expected and processing_keys:
+            logger.warning(
+                f"Worker {ws.address!r} dropped unexpectedly. "
+                f"Interrupting {len(processing_keys)} processing tasks: "
+                f"{processing_keys} ({stimulus_id=})"
+            )
 
         event_msg = {
             "action": "remove-worker",
