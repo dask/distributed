@@ -486,8 +486,11 @@ class WorkStealing(SchedulerPlugin):
                     comm_cost_thief = self.scheduler.get_comm_cost(ts, thief)
                     comm_cost_victim = self.scheduler.get_comm_cost(ts, victim)
                     compute = self.scheduler._get_prefix_duration(ts.prefix)
+
+                    # Require at least 50% ROI on the network transfer cost to prevent thrashing
+                    margin = comm_cost_thief * 0.5
                     if (
-                        occ_thief + comm_cost_thief + compute
+                        occ_thief + comm_cost_thief + compute + margin
                         <= occ_victim - (comm_cost_victim + compute) / 2
                     ):
                         self.move_task_request(ts, victim, thief)
