@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from operator import mul
 from time import sleep
-
+from unittest.mock import patch
 import pytest
 from tlz import merge, sliding_window
 
@@ -2015,7 +2015,7 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
     nthreads=[("127.0.0.1", 1)] * 2,
     config={
         "distributed.scheduler.work-stealing-interval": "100ms",
-        "distributed.scheduler.default-task-durations": {"slowidentity": 0.01},
+        "distributed.scheduler.default-task-durations": {"slowidentity": 0.021},
         **NO_AMM,
     },
 )
@@ -2027,31 +2027,37 @@ async def test_reject_count_margin_metric(c, s, a, b):
     steal = s.extensions["stealing"]
     await steal.stop()
 
-    # Generate large data on worker A to ensure high network transfer cost (~0.1s)
-    [x] = await c.scatter([b"0" * 10_000_000], workers=a.address)
+    futures = c.map(
+        slowidentity,
+        range(21),
+        workers=a.address,
+        allow_other_workers=True,
+        delay=0.021,
+    )
 
-    # Create 14 tasks on A to saturate it (0.01s each). occ_victim will be ~0.14s.
-    futures = [
-        c.submit(
-            slowidentity,
-            x,
-            pure=False,
-            delay=0.01,
-            workers=a.address,
-            allow_other_workers=True,
-        )
-        for _ in range(14)
-    ]
-
-    while len(a.state.tasks) < 14:
+    while len(s.tasks) < 21:
         await asyncio.sleep(0.01)
 
-    # Balance will evaluate the cost. High comm_cost, low compute.
-    # Without margin, it would steal. With 50% ROI margin, it should reject.
-    steal.balance()
+    while len(a.state.tasks) < 21:
+        await asyncio.sleep(0.01)
+
+    for ws in s.workers.values():
+        s.check_idle_saturated(ws)
+
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+    assert a_ws in s.saturated, (
+        f"Worker A not saturated: occupancy={a_ws.occupancy:.3f}, "
+        f"nthreads={a_ws.nthreads}, processing={len(a_ws.processing)}"
+    )
+    assert b_ws in s.idle.values(), f"Worker B not idle: processing={len(b_ws.processing)}"
+
+    with patch.object(
+        s, "get_comm_cost", side_effect=lambda ts, ws: 0.3 if ws == b_ws else 0.0
+    ):
+        steal.balance()
 
     assert sum(steal.metrics["reject_count_margin_total"].values()) >= 1
-
 
 @gen_cluster(
     nthreads=[("", 1)],
