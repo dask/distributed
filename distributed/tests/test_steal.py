@@ -2050,7 +2050,9 @@ async def test_reject_count_margin_metric(c, s, a, b):
         f"Worker A not saturated: occupancy={a_ws.occupancy:.3f}, "
         f"nthreads={a_ws.nthreads}, processing={len(a_ws.processing)}"
     )
-    assert b_ws in s.idle.values(), f"Worker B not idle: processing={len(b_ws.processing)}"
+    assert (
+        b_ws in s.idle.values()
+    ), f"Worker B not idle: processing={len(b_ws.processing)}"
 
     with patch.object(
         s, "get_comm_cost", side_effect=lambda ts, ws: 0.3 if ws == b_ws else 0.0
@@ -2058,6 +2060,7 @@ async def test_reject_count_margin_metric(c, s, a, b):
         steal.balance()
 
     assert sum(steal.metrics["reject_count_margin_total"].values()) >= 1
+
 
 @gen_cluster(
     nthreads=[("", 1)],
