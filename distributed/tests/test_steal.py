@@ -12,6 +12,7 @@ from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from operator import mul
 from time import sleep
 from unittest.mock import patch
+
 import pytest
 from tlz import merge, sliding_window
 
