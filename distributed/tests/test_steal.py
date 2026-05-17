@@ -1449,6 +1449,8 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     "cost, ntasks, expect_steal",
     [
         pytest.param(10, 10, False, id="not enough work to steal"),
+        # The 50% margin heuristic raises the minimum backlog needed to justify
+        # stealing these expensive tasks; 12 was enough before, 17 is enough now.
         pytest.param(10, 17, True, id="enough work to steal"),
         pytest.param(20, 17, False, id="not enough work for increased cost"),
     ],
@@ -2028,6 +2030,9 @@ async def test_reject_count_margin_metric(c, s, a, b):
     steal = s.extensions["stealing"]
     await steal.stop()
 
+    # Use enough short tasks to satisfy Scheduler.check_idle_saturated() for a
+    # single busy worker while still keeping the steal in the margin-rejection
+    # window once get_comm_cost() is patched below.
     futures = c.map(
         slowidentity,
         range(21),

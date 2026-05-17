@@ -488,7 +488,9 @@ class WorkStealing(SchedulerPlugin):
                     comm_cost_victim = self.scheduler.get_comm_cost(ts, victim)
                     compute = self.scheduler._get_prefix_duration(ts.prefix)
 
-                    # Require at least 50% ROI on the network transfer cost to prevent thrashing
+                    # Be conservative about marginal steals: require headroom equal
+                    # to 50% of the thief's transfer cost to absorb estimation noise
+                    # and routine network jitter.
                     margin = comm_cost_thief * 0.5
 
                     would_steal_without_margin = (
