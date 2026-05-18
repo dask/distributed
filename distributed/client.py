@@ -1713,17 +1713,7 @@ class Client(SyncMethodMixin):
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         if self._previous_as_current:
-            try:
-                _current_client.reset(self._previous_as_current)
-            except ValueError as e:
-                if not e.args[0].endswith(" was created in a different Context"):
-                    raise  # pragma: nocover
-                warnings.warn(
-                    "It is deprecated to enter and exit the Client context "
-                    "manager from different tasks",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            _current_client.reset(self._previous_as_current)
         await self._close(
             # if we're handling an exception, we assume that it's more
             # important to deliver that exception than shutdown gracefully.
@@ -1732,17 +1722,7 @@ class Client(SyncMethodMixin):
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._previous_as_current:
-            try:
-                _current_client.reset(self._previous_as_current)
-            except ValueError as e:
-                if not e.args[0].endswith(" was created in a different Context"):
-                    raise  # pragma: nocover
-                warnings.warn(
-                    "It is deprecated to enter and exit the Client context "
-                    "manager from different threads",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            _current_client.reset(self._previous_as_current)
         self.close()
 
     def __del__(self):
