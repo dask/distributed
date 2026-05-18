@@ -37,8 +37,9 @@ def validate_preload_argv(ctx, param, value):
         for a in unexpected_args:
             raise click.NoSuchOption(a)
         raise click.UsageError(
-            "Got unexpected extra argument%s: (%s)"
-            % ("s" if len(value) > 1 else "", " ".join(value))
+            "Got unexpected extra argument{}: ({})".format(
+                "s" if len(value) > 1 else "", " ".join(value)
+            )
         )
 
     preload_modules = {
@@ -55,8 +56,7 @@ def validate_preload_argv(ctx, param, value):
 
     if len(preload_commands) > 1:
         raise click.UsageError(
-            "Multiple --preload modules with click-configurable setup: %s"
-            % list(preload_modules.keys())
+            f"Multiple --preload modules with click-configurable setup: {list(preload_modules.keys())}"
         )
 
     if value and not preload_commands:

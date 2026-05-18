@@ -53,41 +53,42 @@ jobs:
           - os: ubuntu-latest
             environment: "3.10"
             label: no_queue
-            partition: "ci1"
+            partition: ci1
           - os: ubuntu-latest
             environment: "3.10"
             label: no_queue
-            partition: "not ci1"
+            partition: not ci1
 
           # dask.array P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
             label: numpy
             extra_packages: [numpy=1.24]
-            partition: "ci1"
+            partition: ci1
           - os: ubuntu-latest
             environment: mindeps
             label: numpy
             extra_packages: [numpy=1.24]
-            partition: "not ci1"
+            partition: not ci1
 
           # dask.dataframe P2P shuffle
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
             extra_packages: [numpy=1.24, pandas=2.0, pyarrow=16.0]
-            partition: "ci1"
+            partition: ci1
           - os: ubuntu-latest
             environment: mindeps
             label: pandas
             extra_packages: [numpy=1.24, pandas=2.0, pyarrow=16.0]
-            partition: "not ci1"
+            partition: not ci1
 
           - os: ubuntu-latest
-            environment: mindeps
+            # Don't disturb the various GPU-only deps in the 3.10 environment
+            environment: "3.11"
             label: memray
-            extra_packages: [memray]
-            partition: "extra_packages"
+            extra_packages: [memray]  # Not available on Windows
+            partition: memray
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change `export TEST_ID` in first step below.
@@ -112,7 +113,7 @@ jobs:
         shell: bash
 
       - name: Checkout source
-        uses: actions/checkout@v4.1.3
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
@@ -121,7 +122,6 @@ jobs:
         with:
           miniforge-version: latest
           condarc-file: continuous_integration/condarc
-          use-mamba: true
           activate-environment: dask-distributed
 
       - name: Show conda options
@@ -150,16 +150,16 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ env.CONDA }}/envs
-          key: conda-${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
+          key: conda-${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ matrix.extra_packages }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
         env:
           # Increase this value to reset cache if
           # continuous_integration/environment-${{ matrix.environment }}.yaml has not
           # changed. See also same variable in .pre-commit-config.yaml
-          CACHE_NUMBER: 0
+          CACHE_NUMBER: 2
         id: cache
 
       - name: Update environment
-        run: mamba env update -n dask-distributed -f ${{ env.CONDA_FILE }}
+        run: conda env update -n dask-distributed -f ${{ env.CONDA_FILE }}
         if: |
           (
             steps.skip-caching.outputs.trigger-found == 'true'
@@ -168,25 +168,32 @@ jobs:
             || steps.cache.outputs.cache-hit != 'true'
           )
 
+      - name: Extra Installs
+        if: |
+          matrix.extra_packages
+          && (
+            steps.skip-caching.outputs.trigger-found == 'true'
+            || (github.event_name == 'pull_request'
+                && contains(github.event.pull_request.labels.*.name, 'skip-caching'))
+            || steps.cache.outputs.cache-hit != 'true'
+          )
+        shell: bash -l {0}
+        run: conda install -y ${{ join(matrix.extra_packages, ' ') }}
+
       - name: Install
         shell: bash -l {0}
         run: |
           python -m pip install --no-deps -e .
 
-      - name: Extra Installs
-        if: ${{ matrix.extra_packages }}
+      - name: conda list
         shell: bash -l {0}
-        run: mamba install -y ${{ join(matrix.extra_packages, ' ') }}
+        run: conda list
 
-      - name: mamba list
-        shell: bash -l {0}
-        run: mamba list
-
-      - name: mamba env export
+      - name: conda env export
         shell: bash -l {0}
         run: |
-          echo -e "--\n--Conda Environment (re-create this with \`mamba env create --name <name> -f <output_file>\`)\n--"
-          mamba env export | grep -E -v '^prefix:.*$'
+          echo -e "--\n--Conda Environment (re-create this with \`conda env create --name <name> -f <output_file>\`)\n--"
+          conda env export | grep -E -v '^prefix:.*$'
 
       - name: Setup SSH
         shell: bash -l {0}
@@ -272,7 +279,7 @@ jobs:
           always() &&
           (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure') &&
           github.event_name != 'schedule'
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v6
         with:
           name: ${{ env.TEST_ID }}
           # See https://community.codecov.com/t/upload-issues-unable-to-locate-build-via-github-actions-api/3954

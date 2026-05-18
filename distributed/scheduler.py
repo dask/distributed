@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import heapq
 import inspect
 import itertools
@@ -31,6 +30,7 @@ from collections.abc import (
     Set,
 )
 from contextlib import suppress
+from dataclasses import dataclass
 from functools import partial
 from typing import (
     TYPE_CHECKING,
@@ -59,7 +59,7 @@ from tlz import (
     take,
     valmap,
 )
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._expr import LLGExpr
@@ -68,7 +68,6 @@ from dask.core import istask, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
-    _deprecated_kwarg,
     format_bytes,
     format_time,
     key_split,
@@ -96,7 +95,6 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ErrorMessage,
     OKMessage,
@@ -859,7 +857,7 @@ class WorkerState:
         )
 
 
-@dataclasses.dataclass
+@dataclass(slots=True)
 class ErredTask:
     """Lightweight representation of an erred task without any dependency information
     or runspec.
@@ -869,7 +867,7 @@ class ErredTask:
     TaskState
     """
 
-    key: Hashable
+    key: Key
     timestamp: float
     erred_on: set[str]
     exception_text: str
@@ -918,9 +916,7 @@ class Computation:
         return (
             f"<Computation {self.id}: "
             + "Tasks: "
-            + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-            )
+            + ", ".join(f"{k}: {v}" for (k, v) in sorted(self.states.items()) if v)
             + ">"
         )
 
@@ -1089,9 +1085,7 @@ class TaskPrefix(TaskCollection):
             "<"
             + self.name
             + ": "
-            + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-            )
+            + ", ".join(f"{k}: {v}" for (k, v) in sorted(self.states.items()) if v)
             + ">"
         )
 
@@ -1182,9 +1176,7 @@ class TaskGroup(TaskCollection):
             "<"
             + (self.name or "no-group")
             + ": "
-            + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-            )
+            + ", ".join(f"{k}: {v}" for (k, v) in sorted(self.states.items()) if v)
             + ">"
         )
 
@@ -4420,11 +4412,11 @@ class Scheduler(SchedulerState, ServerNode):
         if port is None:
             return None
         elif protocol:
-            return "%(protocol)s://%(host)s:%(port)d" % {
-                "protocol": ws.address.split("://")[0],
-                "host": ws.host,
-                "port": port,
-            }
+            return "{}://{}:{}".format(
+                ws.address.split("://")[0],
+                ws.host,
+                port,
+            )
         else:
             return ws.host, port
 
@@ -4717,13 +4709,13 @@ class Scheduler(SchedulerState, ServerNode):
         host = get_address_host(address)
 
         if address in self.workers:
-            raise ValueError("Worker already exists %s" % address)
+            raise ValueError(f"Worker already exists {address}")
 
         if name in self.aliases:
             logger.warning("Worker tried to connect with a duplicate name: %s", name)
             msg = {
                 "status": "error",
-                "message": "name taken, %s" % name,
+                "message": f"name taken, {name}",
                 "time": time(),
             }
             await comm.write(msg)
@@ -5590,7 +5582,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event(worker, {"action": "close-worker"})
         self.worker_send(worker, {"op": "close", "reason": "scheduler-close-worker"})
 
-    @_deprecated_kwarg("safe", "expected")
     @log_errors
     async def remove_worker(
         self,
@@ -5736,19 +5727,9 @@ class Scheduler(SchedulerState, ServerNode):
         awaitables = []
         for plugin in list(self.plugins.values()):
             try:
-                try:
-                    result = plugin.remove_worker(
-                        scheduler=self, worker=address, stimulus_id=stimulus_id
-                    )
-                except TypeError:
-                    parameters = inspect.signature(plugin.remove_worker).parameters
-                    if "stimulus_id" not in parameters and not any(
-                        p.kind is p.VAR_KEYWORD for p in parameters.values()
-                    ):
-                        # Deprecated (see add_plugin)
-                        result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
-                    else:
-                        raise
+                result = plugin.remove_worker(
+                    scheduler=self, worker=address, stimulus_id=stimulus_id
+                )
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:
@@ -6257,15 +6238,6 @@ class Scheduler(SchedulerState, ServerNode):
                 category=UserWarning,
             )
 
-        parameters = inspect.signature(plugin.remove_worker).parameters
-        if not any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
-            warnings.warn(
-                "The signature of `SchedulerPlugin.remove_worker` now requires `**kwargs` "
-                "to ensure that plugins remain forward-compatible. Not including "
-                "`**kwargs` in the signature will no longer be supported in future versions.",
-                FutureWarning,
-            )
-
         self.plugins[name] = plugin
 
     def remove_plugin(self, name: str | None = None) -> None:
@@ -6289,17 +6261,10 @@ class Scheduler(SchedulerState, ServerNode):
         self,
         plugin: bytes | SchedulerPlugin,
         name: str | None = None,
-        idempotent: bool | None = None,
+        *,
+        idempotent: bool,
     ) -> None:
         """Register a plugin on the scheduler."""
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_scheduler_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
         if not isinstance(plugin, SchedulerPlugin):
             plugin = loads(plugin)
             assert isinstance(plugin, SchedulerPlugin)
@@ -8167,18 +8132,10 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(
-        self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
+        self, comm: None, plugin: bytes, name: str, *, idempotent: bool
     ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_worker_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
         if name in self.worker_plugins and idempotent:
             return {}
 
@@ -8202,19 +8159,10 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def register_nanny_plugin(
-        self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
+        self, comm: None, plugin: bytes, name: str, idempotent: bool
     ) -> dict[str, OKMessage]:
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
-
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_nanny_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
 
         if name in self.nanny_plugins and idempotent:
             return {}

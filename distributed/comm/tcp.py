@@ -468,7 +468,7 @@ class RequireEncryptionMixin:
             # XXX Should we have a dedicated SecurityError class?
             raise RuntimeError(
                 "encryption required by Dask configuration, "
-                "refusing communication from/to %r" % (self.prefix + address,)
+                f"refusing communication from/to {self.prefix + address!r}"
             )
 
 

@@ -2,10 +2,6 @@
 *.pyd
 *.py~
 
-# Cython files
-*.c
-*.so
-
 build/
 dist/
 *.egg-info

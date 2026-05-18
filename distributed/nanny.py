@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from typing import ClassVar, Literal, cast
+from typing import ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -102,7 +102,7 @@ class Nanny(ServerNode):
            For the same reason, be warned that changing
            ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
            ``forkserver`` may inhibit some environment variables; if you do, you should
-           set the variables yourself in the shell before you start ``dask-worker``.
+           set the variables yourself in the shell before you start ``dask worker``.
 
     See Also
     --------
@@ -283,7 +283,7 @@ class Nanny(ServerNode):
     memory_monitor = DeprecatedMemoryMonitor()
 
     def __repr__(self):
-        return "<Nanny: %s, threads: %d>" % (self.worker_address, self.nthreads)
+        return f"<Nanny: {self.worker_address}, threads: {self.nthreads}>"
 
     async def _unregister(self, timeout=10):
         if self.process is None:
@@ -453,14 +453,7 @@ class Nanny(ServerNode):
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
-        if not isinstance(plugin, NannyPlugin):
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin inherits from `NannyPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        plugin = cast(NannyPlugin, plugin)
+        assert isinstance(plugin, NannyPlugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
@@ -773,11 +766,11 @@ class WorkerProcess:
     def _death_message(self, pid, exitcode):
         assert exitcode is not None
         if exitcode == 255:
-            return "Worker process %d was killed by unknown signal" % (pid,)
+            return f"Worker process {pid} was killed by unknown signal"
         elif exitcode >= 0:
-            return "Worker process %d exited with status %d" % (pid, exitcode)
+            return f"Worker process {pid} exited with status {exitcode}"
         else:
-            return "Worker process %d was killed by signal %d" % (pid, -exitcode)
+            return f"Worker process {pid} was killed by signal {-exitcode}"
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()

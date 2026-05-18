@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from distributed import Nanny, Scheduler, SchedulerPlugin, Worker
+from distributed import Scheduler, SchedulerPlugin, Worker
 from distributed.protocol.pickle import dumps
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
@@ -74,70 +74,6 @@ async def test_add_remove_worker(s):
         ("add_worker", b.address),
         ("remove_worker", a.address),
         ("remove_worker", b.address),
-    ]
-
-    events[:] = []
-    s.remove_plugin(plugin.name)
-    async with Worker(s.address):
-        pass
-    assert events == []
-
-
-@gen_cluster(nthreads=[])
-async def test_remove_worker_renamed_kwargs_allowed(s):
-    events = []
-
-    class MyPlugin(SchedulerPlugin):
-        name = "MyPlugin"
-
-        def remove_worker(self, worker, scheduler, **kwds):
-            assert scheduler is s
-            events.append(("remove_worker", worker))
-
-    plugin = MyPlugin()
-    s.add_plugin(plugin)
-    assert events == []
-
-    a = Worker(s.address)
-    await a
-    await a.close()
-
-    assert events == [
-        ("remove_worker", a.address),
-    ]
-
-    events[:] = []
-    s.remove_plugin(plugin.name)
-    async with Worker(s.address):
-        pass
-    assert events == []
-
-
-@gen_cluster(nthreads=[])
-async def test_remove_worker_without_kwargs_deprecated(s):
-    events = []
-
-    class DeprecatedPlugin(SchedulerPlugin):
-        name = "DeprecatedPlugin"
-
-        def remove_worker(self, worker, scheduler):
-            assert scheduler is s
-            events.append(("remove_worker", worker))
-
-    plugin = DeprecatedPlugin()
-    with pytest.warns(
-        FutureWarning,
-        match="The signature of `SchedulerPlugin.remove_worker` now requires `\\*\\*kwargs`",
-    ):
-        s.add_plugin(plugin)
-    assert events == []
-
-    a = Worker(s.address)
-    await a
-    await a.close()
-
-    assert events == [
-        ("remove_worker", a.address),
     ]
 
     events[:] = []
@@ -386,22 +322,6 @@ async def test_register_plugin(c, s, a, b):
     assert n_plugins == len(s.plugins)
 
 
-@gen_cluster(client=True)
-async def test_register_scheduler_plugin_deprecated(c, s, a, b):
-    class Dummy(SchedulerPlugin):
-        name = "Dummy"
-
-        def start(self, scheduler):
-            scheduler.foo = "bar"
-
-    assert not hasattr(s, "foo")
-    with pytest.warns(
-        DeprecationWarning, match="register_scheduler_plugin.*deprecated"
-    ):
-        await c.register_scheduler_plugin(Dummy())
-        assert s.foo == "bar"
-
-
 @gen_cluster(nthreads=[])
 async def test_unregister_scheduler_plugin(s):
     class Plugin(SchedulerPlugin):
@@ -569,46 +489,6 @@ async def test_update_graph_hook_complex(c, s, a, b):
     assert plugin.success
 
 
-@gen_cluster(client=True, nthreads=[("", 1)])
-async def test_scheduler_plugin_in_register_worker_plugin_overrides(c, s, a):
-    class DuckPlugin(SchedulerPlugin):
-        def start(self, scheduler):
-            scheduler.foo = 123
-
-        def stop(self, scheduler):
-            pass
-
-    n_existing_plugins = len(s.plugins)
-    assert not hasattr(s, "foo")
-    with (
-        pytest.warns(UserWarning, match="`SchedulerPlugin` as a worker plugin"),
-        pytest.warns(DeprecationWarning, match="use `Client.register_plugin` instead"),
-    ):
-        await c.register_worker_plugin(DuckPlugin(), nanny=False)
-    assert len(s.plugins) == n_existing_plugins + 1
-    assert s.foo == 123
-
-
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_scheduler_plugin_in_register_worker_plugin_overrides_nanny(c, s, a):
-    class DuckPlugin(SchedulerPlugin):
-        def start(self, scheduler):
-            scheduler.foo = 123
-
-        def stop(self, scheduler):
-            pass
-
-    n_existing_plugins = len(s.plugins)
-    assert not hasattr(s, "foo")
-    with (
-        pytest.warns(UserWarning, match="`SchedulerPlugin` as a nanny plugin"),
-        pytest.warns(DeprecationWarning, match="use `Client.register_plugin` instead"),
-    ):
-        await c.register_worker_plugin(DuckPlugin(), nanny=True)
-    assert len(s.plugins) == n_existing_plugins + 1
-    assert s.foo == 123
-
-
 @gen_cluster(client=True, nthreads=[])
 async def test_register_idempotent_plugin(c, s):
     class IdempotentPlugin(SchedulerPlugin):
@@ -649,62 +529,6 @@ async def test_register_non_idempotent_plugin(c, s):
     assert "nonidempotentplugin" in s.plugins
     assert s.plugins["nonidempotentplugin"].instance == "second"
 
-    third = NonIdempotentPlugin(instance="third")
-    with pytest.warns(
-        FutureWarning,
-        match="`Scheduler.register_scheduler_plugin` now requires `idempotent`",
-    ):
-        await s.register_scheduler_plugin(
-            plugin=dumps(third), name="nonidempotentplugin"
-        )
-    assert "nonidempotentplugin" in s.plugins
-    assert s.plugins["nonidempotentplugin"].instance == "third"
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_register_plugin_with_idempotent_keyword_is_deprecated(c, s):
-    class NonIdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "nonidempotentplugin"
-            self.instance = instance
-            # We want to overrule this
-            self.idempotent = True
-
-    first = NonIdempotentPlugin(instance="first")
-    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
-        await c.register_plugin(first, idempotent=False)
-    assert "nonidempotentplugin" in s.plugins
-
-    second = NonIdempotentPlugin(instance="second")
-    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
-        await c.register_plugin(second, idempotent=False)
-    assert "nonidempotentplugin" in s.plugins
-    assert s.plugins["nonidempotentplugin"].instance == "second"
-
-    class IdempotentPlugin(SchedulerPlugin):
-        def __init__(self, instance=None):
-            self.name = "idempotentplugin"
-            self.instance = instance
-            # We want to overrule this
-            self.idempotent = False
-
-        def start(self, scheduler):
-            if self.instance != "first":
-                raise RuntimeError(
-                    "Only the first plugin should be started when idempotent is set"
-                )
-
-    first = IdempotentPlugin(instance="first")
-    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
-        await c.register_plugin(first, idempotent=True)
-    assert "idempotentplugin" in s.plugins
-
-    second = IdempotentPlugin(instance="second")
-    with pytest.warns(FutureWarning, match="`idempotent` argument is deprecated"):
-        await c.register_plugin(second, idempotent=True)
-    assert "idempotentplugin" in s.plugins
-    assert s.plugins["idempotentplugin"].instance == "first"
-
 
 @gen_cluster(nthreads=[])
 async def test_register_idempotent_plugins_directly(s):
@@ -744,12 +568,3 @@ async def test_register_non_idempotent_plugins_directly(s):
     await s.register_scheduler_plugin(plugin=dumps(second), idempotent=False)
     assert "nonidempotentplugin" in s.plugins
     assert s.plugins["nonidempotentplugin"].instance == "second"
-
-    third = NonIdempotentPlugin(instance="third")
-    with pytest.warns(
-        FutureWarning,
-        match="`Scheduler.register_scheduler_plugin` now requires `idempotent`",
-    ):
-        await s.register_scheduler_plugin(plugin=dumps(third))
-    assert "nonidempotentplugin" in s.plugins
-    assert s.plugins["nonidempotentplugin"].instance == "third"

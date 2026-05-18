@@ -1,16 +1,17 @@
-name: dask-distributed-313
+name: dask-distributed
 channels:
   - conda-forge
+  - defaults
 dependencies:
   - python=3.13
   - packaging
   - pip
   - asyncssh
-  - bokeh>3
+  - bokeh
   - click
   - cloudpickle
   - coverage
-  - dask  # overridden by git tip below
+  - dask  # overridden by git tip below; pulls in optional dependencies
   - fsspec  # overridden by git tip below
   - gilknocker
   - h5py
@@ -20,6 +21,7 @@ dependencies:
   - jupyter_events
   - jupyter-server-proxy
   - jupyterlab
+  - keras
   - locket
   - msgpack-python
   - netcdf4
@@ -48,4 +50,3 @@ dependencies:
       - git+https://github.com/dask/dask
       - git+https://github.com/dask/zict
       - git+https://github.com/fsspec/filesystem_spec
-      - keras

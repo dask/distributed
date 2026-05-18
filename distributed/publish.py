@@ -99,7 +99,7 @@ class PublishExtension:
                         old["keys"], f"published-{stringify(name)}"
                     )
                 else:
-                    raise KeyError("Dataset %s already exists" % name)
+                    raise KeyError(f"Dataset {name} already exists")
 
             self.scheduler.client_desires_keys(keys_i, f"published-{stringify(name)}")
             self.datasets[name] = {"data": data_i, "keys": keys_i}

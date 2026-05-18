@@ -9,13 +9,12 @@ from contextlib import suppress
 from typing import Any
 
 from packaging.version import parse as parse_version
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask.config
-from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
+from dask.utils import format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
-from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.deploy.adaptive import Adaptive
 from distributed.exceptions import WorkerStartTimeoutError
@@ -339,10 +338,6 @@ class Cluster(SyncMethodMixin):
             self._get_logs, cluster=cluster, scheduler=scheduler, workers=workers
         )
 
-    @_deprecated(use_instead="get_logs")
-    def logs(self, *args, **kwargs):
-        return self.get_logs(*args, **kwargs)
-
     def get_client(self):
         """Return client for the cluster
 
@@ -551,7 +546,7 @@ class Cluster(SyncMethodMixin):
         return getattr(self, "_name", type(self).__name__)
 
     def __repr__(self):
-        text = "%s(%s, %r, workers=%d, threads=%d" % (
+        text = "{}({}, {!r}, workers={}, threads={}".format(
             self._cluster_class_name,
             self.name,
             self.scheduler_address,
@@ -561,7 +556,7 @@ class Cluster(SyncMethodMixin):
 
         memory = [w["memory_limit"] for w in self.scheduler_info["workers"].values()]
         if all(memory):
-            text += ", memory=" + format_bytes(sum(memory))
+            text += f", memory={format_bytes(sum(memory))}"
 
         text += ")"
         return text

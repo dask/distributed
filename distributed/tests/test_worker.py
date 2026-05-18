@@ -647,7 +647,7 @@ async def test_Executor(c, s):
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
-    await async_poll_for(lambda: w.status == Status.closed, timeout=5)
+    await async_poll_for(lambda: w.status == Status.closed)
 
 
 @gen_cluster(nthreads=[])
@@ -725,7 +725,7 @@ async def test_types(c, s, a, b):
 
     await c._cancel(y)
 
-    await async_poll_for(lambda: y.key not in b.data, timeout=5)
+    await async_poll_for(lambda: y.key not in b.data)
     assert y.key not in b.state.tasks
 
 
@@ -921,7 +921,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     await asyncio.sleep(0.1)
 
     del futures
-    await async_poll_for(lambda: a.state.executing_count == 0, timeout=0.5)
+    await async_poll_for(lambda: a.state.executing_count == 0)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -1170,7 +1170,6 @@ async def test_statistical_profiling(c, s, a, b):
 @nodebug
 @gen_cluster(
     client=True,
-    timeout=30,
     config={
         "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
@@ -1542,7 +1541,7 @@ async def test_close_gracefully_no_suspicious_tasks(c, s, a, b):
         await c.run(close_gracefully, workers=[to_close])
     except CommClosedError:
         pass
-    await async_poll_for(lambda: to_close not in s.workers, 5)
+    await async_poll_for(lambda: to_close not in s.workers)
 
     assert b.address not in s.workers
     assert s.tasks[fut.key].suspicious == 0
@@ -1606,7 +1605,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=10)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_lifetime(c, s, a):
     # Note: test was occasionally failing with lifetime="1 seconds"
     async with Worker(s.address, lifetime="2 seconds") as b:
@@ -3262,7 +3261,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=5)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_get_data_cancelled_error(c, s, a):
     """Something somewhere in the networking stack raises CancelledError while
     get_data is running
@@ -3737,7 +3736,7 @@ async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
             y = c.submit(inc, x, key="y", workers=[b.address])
             await b.in_execute.wait()
             del x, y
-            await async_poll_for(lambda: "x" not in b.data, timeout=5)
+            await async_poll_for(lambda: "x" not in b.data)
 
             if state == "resumed":
                 y = c.submit(inc, 1, key="y", workers=[a.address])
@@ -3751,7 +3750,7 @@ async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
                 assert await z == 3
                 del y, z
 
-            await async_poll_for(lambda: not b.state.tasks, timeout=5)
+            await async_poll_for(lambda: not b.state.tasks)
 
     assert not log.getvalue()
 
@@ -3773,6 +3772,6 @@ async def test_suppress_compute_failure_for_cancelled_tasks(c, s, a):
 
         await wait_for_state("x", "cancelled", a)
         await block_event.set()
-        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+        await async_poll_for(lambda: not a.state.tasks)
 
     assert not log.getvalue()

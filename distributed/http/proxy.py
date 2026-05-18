@@ -43,7 +43,7 @@ try:
                 self.host_allowlist.append(self.host)
 
             # slash is removed during regex in handler
-            proxied_path = "/%s" % proxied_path
+            proxied_path = f"/{proxied_path}"
 
             worker = f"{self.host}:{port}"
             if not check_worker_dashboard_exits(self.scheduler, worker):

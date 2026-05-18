@@ -3,7 +3,6 @@ from __future__ import annotations
 import html
 import logging
 import sys
-import warnings
 import weakref
 from collections.abc import Callable
 from contextlib import suppress
@@ -202,34 +201,27 @@ class ProgressWidget(ProgressBar):
             _, exception, _ = clean_exception(exception)
             self.bar.bar_style = "danger"
             self.elapsed_time.value = (
-                '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '
-                "<tt>"
-                + repr(exception)
-                + "</tt>:"
-                + format_time(self.elapsed)
-                + " "
-                + "</div>"
+                '<div style="padding: 0px 10px 5px 10px">'
+                f"<b>Exception</b> <tt>{exception!r}</tt>:{format_time(self.elapsed)} "
+                "</div>"
             )
         elif not remaining:
             self.bar.bar_style = "success"
             self.elapsed_time.value = (
-                '<div style="padding: 0px 10px 5px 10px"><b>Finished:</b> '
-                + format_time(self.elapsed)
-                + "</div>"
+                '<div style="padding: 0px 10px 5px 10px">'
+                f"<b>Finished:</b> {format_time(self.elapsed)}"
+                "</div>"
             )
 
     def _draw_bar(self, remaining, all, **kwargs):
         ndone = all - remaining
         self.elapsed_time.value = (
-            '<div style="padding: 0px 10px 5px 10px"><b>Computing:</b> '
-            + format_time(self.elapsed)
-            + "</div>"
+            '<div style="padding: 0px 10px 5px 10px">'
+            f"<b>Computing:</b> {format_time(self.elapsed)}"
+            "</div>"
         )
         self.bar.value = ndone / all if all else 1.0
-        self.bar_text.value = (
-            '<div style="padding: 0px 10px 0px 10px; text-align:right;">%d / %d</div>'
-            % (ndone, all)
-        )
+        self.bar_text.value = f'<div style="padding: 0px 10px 0px 10px; text-align:right;">{ndone} / {all}</div>'
 
 
 class MultiProgressBar:
@@ -238,7 +230,6 @@ class MultiProgressBar:
         keys,
         scheduler=None,
         *,
-        func=None,
         group_by="prefix",
         interval="100ms",
         complete=False,
@@ -252,13 +243,7 @@ class MultiProgressBar:
                 self.client = weakref.ref(key.client)
                 break
 
-        if func is not None:
-            warnings.warn(
-                "`func` is deprecated, use `group_by` instead",
-                category=DeprecationWarning,
-            )
-            group_by = func
-        elif group_by in (None, "prefix"):
+        if group_by in (None, "prefix"):
             group_by = key_split
 
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
@@ -409,13 +394,9 @@ class MultiProgressWidget(MultiProgressBar):
             _, exception, _ = clean_exception(exception)
             # self.bars[self.func(key)].bar_style = 'danger'  # TODO
             self.elapsed_time.value = (
-                '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '
-                + "<tt>"
-                + repr(exception)
-                + "</tt>:"
-                + format_time(self.elapsed)
-                + " "
-                + "</div>"
+                '<div style="padding: 0px 10px 5px 10px">'
+                f"<b>Exception</b> <tt>{exception!r}</tt>:{format_time(self.elapsed)} "
+                "</div>"
             )
         else:
             self.elapsed_time.value = (
@@ -430,14 +411,13 @@ class MultiProgressWidget(MultiProgressBar):
         for k, ntasks in all.items():
             ndone = ntasks - remaining[k]
             self.elapsed_time.value = (
-                '<div style="padding: 0px 10px 5px 10px"><b>Computing:</b> '
-                + format_time(self.elapsed)
-                + "</div>"
+                '<div style="padding: 0px 10px 5px 10px">'
+                f"<b>Computing:</b> {format_time(self.elapsed)}"
+                "</div>"
             )
             self.bars[k].value = ndone / ntasks if ntasks else 1.0
             self.bar_texts[k].value = (
-                '<div style="padding: 0px 10px 0px 10px; text-align: right">%d / %d</div>'
-                % (ndone, ntasks)
+                f'<div style="padding: 0px 10px 0px 10px; text-align: right">{ndone} / {ntasks}</div>'
             )
 
 
@@ -482,11 +462,6 @@ def progress(
         futures = [futures]
     if notebook is None:
         notebook = is_kernel()  # often but not always correct assumption
-    if kwargs.get("func", None) is not None:
-        warnings.warn(
-            "`func` is deprecated, use `group_by` instead", category=DeprecationWarning
-        )
-        group_by = kwargs.pop("func")
     if group_by not in ("spans", "prefix") and not isinstance(group_by, Callable):
         raise ValueError("`group_by` should be 'spans', 'prefix', or a Callable")
     if notebook:

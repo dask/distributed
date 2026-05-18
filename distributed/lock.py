@@ -36,9 +36,6 @@ class Lock(Semaphore):
         Name of the lock to acquire.  Choosing the same name allows two
         disconnected processes to coordinate a lock.  If not given, a random
         name will be generated.
-    client: Client (optional)
-        Client to use for communication with the scheduler.  If not given, the
-        default global client will be used.
 
     Examples
     --------
@@ -48,23 +45,8 @@ class Lock(Semaphore):
     >>> lock.release()  # doctest: +SKIP
     """
 
-    def __init__(
-        self,
-        name=None,
-        client=_no_value,
-        scheduler_rpc=None,
-        loop=None,
-    ):
-        if client is not _no_value:
-            import warnings
-
-            warnings.warn(
-                "The `client` parameter is deprecated. It is no longer necessary to pass a client to Lock.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        self.name = name or "lock-" + uuid.uuid4().hex
+    def __init__(self, name=None, scheduler_rpc=None, loop=None):
+        self.name = name or f"lock-{uuid.uuid4().hex}"
         super().__init__(
             max_leases=1,
             name=name,

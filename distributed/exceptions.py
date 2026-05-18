@@ -38,8 +38,4 @@ class WorkerStartTimeoutError(TimeoutError):
         super().__init__(available_workers, expected_workers, timeout)
 
     def __str__(self) -> str:
-        return "Only %d/%d workers arrived after %s" % (
-            self.available_workers,
-            self.expected_workers,
-            self.timeout,
-        )
+        return f"Only {self.available_workers}/{self.expected_workers} workers arrived after {self.timeout}"

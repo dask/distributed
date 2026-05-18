@@ -16,11 +16,6 @@ build:
   string: py_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
   noarch: python
   script: {{ PYTHON }} -m pip install . -vv --no-deps
-  entry_points:
-    # Old style CLI
-    - dask-scheduler = distributed.cli.dask_scheduler:main
-    - dask-ssh = distributed.cli.dask_ssh:main
-    - dask-worker = distributed.cli.dask_worker:main
 
 requirements:
   host:
@@ -61,9 +56,6 @@ test:
     - distributed.protocol
   commands:
     - pip check
-    - dask-scheduler --help
-    - dask-ssh --help
-    - dask-worker --help
     - dask scheduler --help
     - dask ssh --help
     - dask worker --help

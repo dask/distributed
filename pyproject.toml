@@ -55,11 +55,6 @@ worker = "distributed.cli.dask_worker:main"
 ssh = "distributed.cli.dask_ssh:main"
 spec = "distributed.cli.dask_spec:main"
 
-[project.scripts]
-dask-ssh = "distributed.cli.dask_ssh:main"
-dask-scheduler = "distributed.cli.dask_scheduler:main"
-dask-worker = "distributed.cli.dask_worker:main"
-
 [tool.setuptools.packages.find]
 exclude = ["*tests*"]
 namespaces = false
@@ -84,7 +79,6 @@ ignore = [
     "E714",   # Test for object identity should be `is not`
     "E721",   # Use `is` and `is not` for type comparisons, or `isinstance()` for isinstance checks
     "E741",   # Ambiguous variable name: `l`
-    "UP031",  # TODO: apply this rule
     "RUF001", # String contains ambiguous letter
     "RUF002", # Docstring contains ambiguous letter
     "RUF005", # Consider unpacking operator instead of concatenation
@@ -103,6 +97,7 @@ ignore = [
 "**__init__.py" = ["F401", "F811"]
 "distributed/shuffle/tests/test_shuffle.py" = ["F601"]
 "distributed/utils.py" = ["F821"]
+"test_*.py" = ["UP031"]
 
 [tool.ruff.lint.isort]
 section-order = [
@@ -184,12 +179,12 @@ filterwarnings = [
 minversion = "6"
 markers = [
     "ci1: marks tests as belonging to 1 out of 2 partitions to run on CI ('-m \"not ci1\"' for second partition)",
-    "extra_packages: marks tests that require a special dependency to run.",
-    "slow: marks tests as slow (deselected by default",                                                                            # select with '--runslow')
+    "memray: marks tests that require memray to run (available on Linux/MacOS only)",
+    "slow: marks tests as slow (deselected by default; select with '--runslow')",
     "avoid_ci: marks tests as flaky or broken on CI on all OSs",
     "ipython: marks tests as exercising IPython",
     "gpu: marks tests we want to run on GPUs",
-    "leaking: ignore leaked resources",                                                                                            # see pytest_resourceleaks.py for usage
+    "leaking: ignore leaked resources",  # see pytest_resourceleaks.py for usage
     "workerstate: deterministic test for the worker state machine. Automatically applied to all tests that use the 'ws' fixture.",
 ]
 # pytest-timeout settings

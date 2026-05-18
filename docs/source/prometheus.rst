@@ -191,9 +191,6 @@ dask_worker_transfer_outgoing_count
     Number of open data transfers to other workers
 dask_worker_transfer_outgoing_count_total
     Total number of data transfers to other workers since the worker was started
-dask_worker_concurrent_fetch_requests
-    **Deprecated:** This metric has been renamed to
-    ``dask_worker_transfer_incoming_count``.
 dask_worker_tick_count_total
     Total number of ticks observed since the server started
 dask_worker_tick_duration_maximum_seconds

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import os
-from time import sleep
-
 import pytest
 from tlz import frequencies
 
@@ -86,49 +83,35 @@ async def test_collect(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_no_startstops(c, s, a, b):
-    tasks = TaskStreamPlugin(s)
-    s.add_plugin(tasks)
-    # just to create the key on the scheduler
-    future = c.submit(inc, 1)
-    await wait(future)
-    assert len(tasks.buffer) == 1
-
-    tasks.transition(future.key, "processing", "erred", stimulus_id="s1")
-    # Transition was not recorded because it didn't contain `startstops`
-    assert len(tasks.buffer) == 1
-
-    tasks.transition(future.key, "processing", "erred", stimulus_id="s2", startstops=[])
-    # Transition was not recorded because `startstops` was empty
-    assert len(tasks.buffer) == 1
-
-    tasks.transition(
-        future.key,
-        "processing",
-        "erred",
-        stimulus_id="s3",
-        startstops=[dict(start=time(), stop=time())],
-    )
-    assert len(tasks.buffer) == 2
-
-
-@gen_cluster(client=True)
 async def test_client(c, s, a, b):
-    L = await c.get_task_stream()
-    assert L == ()
+    await c.get_task_stream()
 
-    futures = c.map(slowinc, range(10), delay=0.1)
+    futures = c.map(inc, range(10))
     await wait(futures)
-
-    tasks = s.plugins[TaskStreamPlugin.name]
-    L = await c.get_task_stream()
-    assert L == tuple(tasks.buffer)
+    data = await c.get_task_stream()
+    assert len(data) == 10
 
 
 def test_client_sync(client):
-    with get_task_stream(client=client) as ts:
-        sleep(0.1)  # to smooth over time differences on the scheduler
-        # to smooth over time differences on the scheduler
+    client.get_task_stream()
+
+    futures = client.map(inc, range(10))
+    wait(futures)
+    data = client.get_task_stream()
+    assert len(data) == 10
+
+
+@gen_cluster(client=True)
+async def test_client_ctx(c, s, a, b):
+    async with get_task_stream() as ts:
+        futures = c.map(inc, range(10))
+        await wait(futures)
+
+    assert len(ts.data) == 10
+
+
+def test_client_ctx_sync(client):
+    with get_task_stream() as ts:
         futures = client.map(inc, range(10))
         wait(futures)
 
@@ -140,23 +123,29 @@ async def test_get_task_stream_plot(c, s, a, b):
     bkm = pytest.importorskip("bokeh.models")
     await c.get_task_stream()
 
-    futures = c.map(slowinc, range(10), delay=0.1)
+    futures = c.map(inc, range(10))
     await wait(futures)
 
     data, figure = await c.get_task_stream(plot=True)
+    assert len(data) == 10
     assert isinstance(figure, bkm.Plot)
 
 
-def test_get_task_stream_save(client, tmp_path):
+@gen_cluster(client=True)
+async def test_get_task_stream_save(c, s, a, b, tmp_path):
     bkm = pytest.importorskip("bokeh.models")
-    tmpdir = str(tmp_path)
-    fn = os.path.join(tmpdir, "foo.html")
+    await c.get_task_stream()
 
-    with get_task_stream(plot="save", filename=fn) as ts:
-        wait(client.map(inc, range(10)))
+    futures = c.map(inc, range(10))
+    await wait(futures)
+
+    fn = str(tmp_path / "foo.html")
+    data, figure = await c.get_task_stream(plot="save", filename=fn)
+    assert len(data) == 10
+
     with open(fn) as f:
         data = f.read()
     assert "inc" in data
     assert "bokeh" in data
 
-    assert isinstance(ts.figure, bkm.Plot)
+    assert isinstance(figure, bkm.Plot)
