@@ -16,7 +16,6 @@ import warnings
 import weakref
 from collections import defaultdict, deque
 from collections.abc import (
-    Awaitable,
     Callable,
     Container,
     Coroutine,
@@ -559,33 +558,18 @@ class Server:
             if not pc.is_running():
                 pc.start()
 
-    def _stop_listeners(self) -> asyncio.Future:
-        listeners_to_stop: set[Awaitable] = set()
-
+    def _stop_listeners(self) -> None:
         for listener in self.listeners:
-            future = listener.stop()
-            if inspect.isawaitable(future):
-                warnings.warn(
-                    f"{type(listener)} is using an asynchronous `stop` method. "
-                    "Support for asynchronous `Listener.stop` has been deprecated and "
-                    "will be removed in a future version",
-                    DeprecationWarning,
-                )
-                listeners_to_stop.add(future)
-            elif hasattr(listener, "abort_handshaking_comms"):
+            listener.stop()
+            if hasattr(listener, "abort_handshaking_comms"):
                 listener.abort_handshaking_comms()
-
-        return asyncio.gather(*listeners_to_stop)
 
     def stop(self) -> None:
         if self.__stopped:
             return
         self.__stopped = True
         self.monitor.close()
-        if not (stop_listeners := self._stop_listeners()).done():
-            self._ongoing_background_tasks.call_soon(
-                asyncio.wait_for(stop_listeners, timeout=None)  # type: ignore[arg-type]
-            )
+        self._stop_listeners()
         if self._workdir is not None:
             self._workdir.release()
 
@@ -932,7 +916,7 @@ class Server:
 
             self.__stopped = True
             self.monitor.close()
-            await self._stop_listeners()
+            self._stop_listeners()
 
             # TODO: Deal with exceptions
             await self._ongoing_background_tasks.stop()

@@ -9,6 +9,7 @@ import socket
 import sys
 import threading
 import weakref
+from contextlib import asynccontextmanager
 from unittest import mock
 
 import pytest
@@ -16,10 +17,11 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed import core
 from distributed.batched import BatchedSend
 from distributed.comm.core import CommClosedError, FatalCommClosedError
 from distributed.comm.registry import backends
-from distributed.comm.tcp import TCPBackend, TCPListener
+from distributed.comm.tcp import TCPBackend, TCPConnector
 from distributed.core import (
     ConnectionPool,
     RPCClosed,
@@ -171,13 +173,11 @@ class MyServer(Server):
     default_port = 8756
 
 
-@pytest.mark.slow
 @gen_test()
 async def test_server_listen():
     """
     Test various Server.listen() arguments and their effect.
     """
-    import socket
 
     try:
         EXTERNAL_IP4 = get_ip()
@@ -185,8 +185,6 @@ async def test_server_listen():
             EXTERNAL_IP6 = get_ipv6()
     except socket.gaierror:
         pytest.skip("no network access")
-
-    from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def listen_on(cls, *args, **kwargs):
@@ -631,8 +629,6 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
     Ensure a closed connection pool guarantees to have no connections left open
     even if it is closed mid-connecting
     """
-    from distributed.comm.registry import backends
-    from distributed.comm.tcp import TCPBackend, TCPConnector
 
     class SlowConnector(TCPConnector):
         async def connect(self, address, deserialize, **connection_args):
@@ -672,8 +668,6 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
 @gen_test()
 async def test_connection_pool_outside_cancellation(monkeypatch):
     # Ensure cancellation errors are properly reraised
-    from distributed.comm.registry import backends
-    from distributed.comm.tcp import TCPBackend, TCPConnector
 
     class SlowConnector(TCPConnector):
         async def connect(self, address, deserialize, **connection_args):
@@ -707,11 +701,9 @@ async def test_connection_pool_outside_cancellation(monkeypatch):
         assert all(t.cancelled() for t in tasks)
 
 
+@pytest.mark.slow
 @gen_test()
 async def test_connection_pool_catch_all_cancellederrors(monkeypatch):
-    from distributed.comm.registry import backends
-    from distributed.comm.tcp import TCPBackend, TCPConnector
-
     in_connect = asyncio.Event()
     block_connect = asyncio.Event()
 
@@ -922,7 +914,6 @@ async def test_ticks(s, a, b):
 @gen_cluster(config={"distributed.admin.tick.interval": "20 ms"})
 async def test_tick_logging(s, a, b):
     pytest.importorskip("crick")
-    from distributed import core
 
     old = core.tick_maximum_delay
     core.tick_maximum_delay = 0.001
@@ -1287,25 +1278,6 @@ def test_expects_comm():
     assert not _expects_comm(instance.comm_not_leading_position)
 
     assert not _expects_comm(instance.stream_not_leading_position)
-
-
-class AsyncStopTCPListener(TCPListener):
-    async def stop(self):
-        await asyncio.sleep(0)
-        super().stop()
-
-
-class TCPAsyncListenerBackend(TCPBackend):
-    _listener_class = AsyncStopTCPListener
-
-
-@gen_test()
-async def test_async_listener_stop(monkeypatch):
-    monkeypatch.setitem(backends, "tcp", TCPAsyncListenerBackend())
-    with pytest.warns(DeprecationWarning):
-        async with Server({}) as s:
-            await s.listen(0)
-            assert s.listeners
 
 
 @gen_test()

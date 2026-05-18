@@ -1619,7 +1619,7 @@ class Worker(BaseWorker, ServerNode):
                         # otherwise
                         c.close()
 
-        await self._stop_listeners()
+        self._stop_listeners()
         await self.rpc.close()
 
         # Give some time for a UCX scheduler to complete closing endpoints
