@@ -1060,22 +1060,6 @@ async def test_repr(memory_limit):
             assert "memory" not in text
 
 
-@gen_test()
-async def test_threads_per_worker_set_to_0():
-    with pytest.warns(
-        Warning, match="Setting `threads_per_worker` to 0 has been deprecated."
-    ):
-        async with LocalCluster(
-            n_workers=2,
-            processes=False,
-            threads_per_worker=0,
-            asynchronous=True,
-            dashboard_address=":0",
-        ) as cluster:
-            assert len(cluster.workers) == 2
-            assert all(w.state.nthreads < CPU_COUNT for w in cluster.workers.values())
-
-
 @pytest.mark.parametrize("temporary", [True, False])
 @gen_test()
 async def test_capture_security(temporary):

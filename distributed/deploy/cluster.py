@@ -12,7 +12,7 @@ from packaging.version import parse as parse_version
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask.config
-from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
+from dask.utils import format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
 from distributed.core import Status
@@ -346,10 +346,6 @@ class Cluster(SyncMethodMixin):
         return self.sync(
             self._get_logs, cluster=cluster, scheduler=scheduler, workers=workers
         )
-
-    @_deprecated(use_instead="get_logs")
-    def logs(self, *args, **kwargs):
-        return self.get_logs(*args, **kwargs)
 
     def get_client(self):
         """Return client for the cluster
