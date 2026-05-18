@@ -11,7 +11,6 @@ import sys
 import tempfile
 import threading
 import traceback
-import warnings
 import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -3470,22 +3469,6 @@ async def test_do_not_block_event_loop_during_shutdown(s):
     await asyncio.gather(block(), close(), set_future())
 
 
-@gen_cluster(nthreads=[])
-async def test_reconnect_argument_deprecated(s):
-    with pytest.deprecated_call(match="`reconnect` argument"):
-        async with Worker(s.address, reconnect=False):
-            pass
-    with pytest.raises(ValueError, match="reconnect=True"):
-        async with Worker(s.address, reconnect=True):
-            pass
-
-    with warnings.catch_warnings():
-        # No argument should not warn or raise
-        warnings.simplefilter("error")
-        async with Worker(s.address):
-            pass
-
-
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_running_before_running_plugins(c, s, caplog):
     class InitWorkerNewThread(WorkerPlugin):
@@ -3555,23 +3538,6 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # Test that y does not get stuck.
         assert await y == 2
-
-
-@gen_cluster()
-async def test_deprecation_of_renamed_worker_attributes(s, a, b):
-    msg = (
-        "The `Worker.outgoing_count` attribute has been renamed to "
-        "`Worker.transfer_outgoing_count_total`"
-    )
-    with pytest.warns(DeprecationWarning, match=msg):
-        assert a.outgoing_count == a.transfer_outgoing_count_total
-
-    msg = (
-        "The `Worker.outgoing_current_count` attribute has been renamed to "
-        "`Worker.transfer_outgoing_count`"
-    )
-    with pytest.warns(DeprecationWarning, match=msg):
-        assert a.outgoing_current_count == a.transfer_outgoing_count
 
 
 @gen_cluster(client=True, Worker=Nanny)

@@ -2914,13 +2914,9 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
 
     assert tg.prefix is tp
     assert tp.groups == {tg}
-    with pytest.warns(FutureWarning, match="active"):
-        assert tp.groups == tp.active
     # these must be true since in this simple case there is a 1to1 mapping
     # between prefix and group
     assert tg.states == tp.states
-    with pytest.warns(FutureWarning, match="active_states"):
-        assert tp.states == tp.active_states
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
@@ -2936,13 +2932,9 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     tp = s.task_prefixes["add"]
     assert tg.prefix is tp
     assert tp.groups == {tg}
-    with pytest.warns(FutureWarning, match="active"):
-        assert tp.groups == tp.active
     # these must be true since in this simple case there is a 1to1 mapping
     # between prefix and group
     assert tg.states == tp.states
-    with pytest.warns(FutureWarning, match="active_states"):
-        assert tp.states == tp.active_states
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
@@ -2964,8 +2956,6 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
 
     assert tg.prefix is tp
     assert tp.groups == {tg}
-    with pytest.warns(FutureWarning, match="active"):
-        assert tp.groups == tp.active
     assert tg.states["forgotten"] == 4
     assert tg.states["released"] == 1
     assert sum(tg.states.values()) == 5
@@ -2973,8 +2963,6 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert len(tp) == 5
 
     assert tg.states == tp.states
-    with pytest.warns(FutureWarning, match="active_states"):
-        assert tp.states == tp.active_states
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
@@ -3000,11 +2988,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     # these must be zero because we remove fully-forgotten task groups
     # from the prefixes
     assert tp.groups == set()
-    with pytest.warns(FutureWarning, match="active"):
-        assert tp.groups == tp.active
     assert all(count == 0 for count in tp.states.values())
-    with pytest.warns(FutureWarning, match="active_states"):
-        assert tp.states == tp.active_states
     assert len(tp) == 0
     assert tp.duration == 0
     assert tp.nbytes_total == 0
@@ -3437,11 +3421,6 @@ def test_memorystate():
     assert m.unmanaged_old == 15
     assert m.unmanaged_recent == 17
     assert m.optimistic == 83
-
-    with pytest.warns(FutureWarning):
-        assert m.managed_spilled == m.spilled
-    with pytest.warns(FutureWarning):
-        assert m.managed_in_memory == m.managed
 
     assert repr(m) == dedent("""
             Process memory (RSS)  : 100 B

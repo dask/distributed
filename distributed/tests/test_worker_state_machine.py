@@ -1016,34 +1016,6 @@ async def test_fetch_to_missing_on_network_failure(c, s, a):
         await wait_for_state("y", "missing", a)
 
 
-@gen_cluster()
-async def test_deprecated_worker_attributes(s, a, b):
-    n = a.state.generation
-    msg = (
-        "The `Worker.generation` attribute has been moved to "
-        "`Worker.state.generation`"
-    )
-    with pytest.warns(FutureWarning, match=msg):
-        assert a.generation == n
-    with pytest.warns(FutureWarning, match=msg):
-        a.generation -= 1
-        assert a.generation == n - 1
-    assert a.state.generation == n - 1
-
-    # Old and new names differ
-    msg = (
-        "The `Worker.in_flight_tasks` attribute has been moved to "
-        "`Worker.state.in_flight_tasks_count`"
-    )
-    with pytest.warns(FutureWarning, match=msg):
-        assert a.in_flight_tasks == 0
-
-    with pytest.warns(FutureWarning, match="attribute has been removed"):
-        assert a.data_needed == set()
-    with pytest.warns(FutureWarning, match="attribute has been removed"):
-        assert a.waiting_for_data_count == 0
-
-
 @pytest.mark.parametrize("n_remote_workers", [1, 2])
 @pytest.mark.parametrize(
     "nbytes,n_in_flight_per_worker",

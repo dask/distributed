@@ -112,18 +112,12 @@ from distributed.utils import (
 )
 from distributed.utils_comm import gather_from_workers, retry_operation
 from distributed.versions import get_versions
-from distributed.worker_memory import (
-    DeprecatedMemoryManagerAttribute,
-    DeprecatedMemoryMonitor,
-    WorkerDataParameter,
-    WorkerMemoryManager,
-)
+from distributed.worker_memory import WorkerDataParameter, WorkerMemoryManager
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     BaseWorker,
     CancelComputeEvent,
     ComputeTaskEvent,
-    DeprecatedWorkerStateAttribute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FindMissingEvent,
@@ -494,7 +488,6 @@ class Worker(BaseWorker, ServerNode):
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
-        reconnect: bool | None = None,
         executor: Executor | dict[str, Executor] | Literal["offload"] | None = None,
         resources: dict[str, float] | None = None,
         silence_logs: int | None = None,
@@ -531,31 +524,12 @@ class Worker(BaseWorker, ServerNode):
         # Allow overriding the dict-like that stores the task outputs.
         # This is meant for power users only. See WorkerMemoryManager for details.
         data: WorkerDataParameter = None,
-        # Deprecated parameters; please use dask config instead.
-        memory_target_fraction: float | Literal[False] | None = None,
-        memory_spill_fraction: float | Literal[False] | None = None,
-        memory_pause_fraction: float | Literal[False] | None = None,
         ###################################
         # Parameters to Server
         scheduler_sni: str | None = None,
         WorkerStateClass: type = WorkerState,
         **kwargs,
     ):
-        if reconnect is not None:
-            if reconnect:
-                raise ValueError(
-                    "The `reconnect=True` option for `Worker` has been removed. "
-                    "To improve cluster stability, workers now always shut down in the face of network disconnects. "
-                    "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
-                )
-            else:
-                warnings.warn(
-                    "The `reconnect` argument to `Worker` is deprecated, and will be removed in a future release. "
-                    "Worker reconnection is now always disabled, so passing `reconnect=False` is unnecessary. "
-                    "See https://github.com/dask/distributed/issues/6350 for details.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
 
         self.__exit_stack = stack = contextlib.ExitStack()
         self.nanny = nanny
@@ -765,13 +739,7 @@ class Worker(BaseWorker, ServerNode):
         self._protocol = protocol
 
         self.memory_manager = WorkerMemoryManager(
-            self,
-            data=data,
-            nthreads=nthreads,
-            memory_limit=memory_limit,
-            memory_target_fraction=memory_target_fraction,
-            memory_spill_fraction=memory_spill_fraction,
-            memory_pause_fraction=memory_pause_fraction,
+            self, data=data, nthreads=nthreads, memory_limit=memory_limit
         )
 
         transfer_incoming_bytes_limit = math.inf
@@ -880,74 +848,6 @@ class Worker(BaseWorker, ServerNode):
            ``self.memory_manager.data``.
         """
         return self.memory_manager.data
-
-    # Deprecated attributes moved to self.memory_manager.<name>
-    memory_limit = DeprecatedMemoryManagerAttribute()
-    memory_target_fraction = DeprecatedMemoryManagerAttribute()
-    memory_spill_fraction = DeprecatedMemoryManagerAttribute()
-    memory_pause_fraction = DeprecatedMemoryManagerAttribute()
-    memory_monitor = DeprecatedMemoryMonitor()
-
-    ###########################
-    # State machine accessors #
-    ###########################
-
-    # Deprecated attributes moved to self.state.<name>
-    actors = DeprecatedWorkerStateAttribute()
-    available_resources = DeprecatedWorkerStateAttribute()
-    busy_workers = DeprecatedWorkerStateAttribute()
-    comm_nbytes = DeprecatedWorkerStateAttribute(target="transfer_incoming_bytes")
-    comm_threshold_bytes = DeprecatedWorkerStateAttribute(
-        target="transfer_incoming_bytes_throttle_threshold"
-    )
-    constrained = DeprecatedWorkerStateAttribute()
-    data_needed_per_worker = DeprecatedWorkerStateAttribute(target="data_needed")
-    executed_count = DeprecatedWorkerStateAttribute()
-    executing_count = DeprecatedWorkerStateAttribute()
-    generation = DeprecatedWorkerStateAttribute()
-    has_what = DeprecatedWorkerStateAttribute()
-    incoming_count = DeprecatedWorkerStateAttribute(
-        target="transfer_incoming_count_total"
-    )
-    in_flight_tasks = DeprecatedWorkerStateAttribute(target="in_flight_tasks_count")
-    in_flight_workers = DeprecatedWorkerStateAttribute()
-    log = DeprecatedWorkerStateAttribute()
-    long_running = DeprecatedWorkerStateAttribute()
-    nthreads = DeprecatedWorkerStateAttribute()
-    stimulus_log = DeprecatedWorkerStateAttribute()
-    stimulus_story = DeprecatedWorkerStateAttribute()
-    story = DeprecatedWorkerStateAttribute()
-    ready = DeprecatedWorkerStateAttribute()
-    tasks = DeprecatedWorkerStateAttribute()
-    target_message_size = DeprecatedWorkerStateAttribute(
-        target="transfer_message_bytes_limit"
-    )
-    total_out_connections = DeprecatedWorkerStateAttribute(
-        target="transfer_incoming_count_limit"
-    )
-    total_resources = DeprecatedWorkerStateAttribute()
-    transition_counter = DeprecatedWorkerStateAttribute()
-    transition_counter_max = DeprecatedWorkerStateAttribute()
-    validate = DeprecatedWorkerStateAttribute()
-    validate_task = DeprecatedWorkerStateAttribute()
-
-    @property
-    def data_needed(self) -> set[TaskState]:
-        warnings.warn(
-            "The `Worker.data_needed` attribute has been removed; "
-            "use `Worker.state.data_needed[address]`",
-            FutureWarning,
-        )
-        return {ts for tss in self.state.data_needed.values() for ts in tss}
-
-    @property
-    def waiting_for_data_count(self) -> int:
-        warnings.warn(
-            "The `Worker.waiting_for_data_count` attribute has been removed; "
-            "use `len(Worker.state.waiting)`",
-            FutureWarning,
-        )
-        return len(self.state.waiting)
 
     ##################
     # Administrative #
@@ -2658,56 +2558,6 @@ class Worker(BaseWorker, ServerNode):
                 self.log_event(topic, msg)
 
             raise
-
-    @property
-    def incoming_transfer_log(self):
-        warnings.warn(
-            "The `Worker.incoming_transfer_log` attribute has been renamed to "
-            "`Worker.transfer_incoming_log`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_incoming_log
-
-    @property
-    def outgoing_count(self):
-        warnings.warn(
-            "The `Worker.outgoing_count` attribute has been renamed to "
-            "`Worker.transfer_outgoing_count_total`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_outgoing_count_total
-
-    @property
-    def outgoing_current_count(self):
-        warnings.warn(
-            "The `Worker.outgoing_current_count` attribute has been renamed to "
-            "`Worker.transfer_outgoing_count`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_outgoing_count
-
-    @property
-    def outgoing_transfer_log(self):
-        warnings.warn(
-            "The `Worker.outgoing_transfer_log` attribute has been renamed to "
-            "`Worker.transfer_outgoing_log`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_outgoing_log
-
-    @property
-    def total_in_connections(self):
-        warnings.warn(
-            "The `Worker.total_in_connections` attribute has been renamed to "
-            "`Worker.transfer_outgoing_count_limit`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_outgoing_count_limit
 
 
 _worker_cvar: contextvars.ContextVar[Worker] = contextvars.ContextVar("_worker_cvar")

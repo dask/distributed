@@ -67,7 +67,6 @@ from dask._task_spec import GraphNode, convert_legacy_graph
 from dask.core import istask, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
-    _deprecated,
     format_bytes,
     format_time,
     key_split,
@@ -373,16 +372,6 @@ class MemoryState:
     @property
     def optimistic(self) -> int:
         return self.managed + self.unmanaged_old
-
-    @property
-    def managed_in_memory(self) -> int:
-        warnings.warn("managed_in_memory has been renamed to managed", FutureWarning)
-        return self.managed
-
-    @property
-    def managed_spilled(self) -> int:
-        warnings.warn("managed_spilled has been renamed to spilled", FutureWarning)
-        return self.spilled
 
     def __repr__(self) -> str:
         return (
@@ -1066,19 +1055,9 @@ class TaskPrefix(TaskCollection):
                 del self._types[typename]
 
     @property
-    @_deprecated(use_instead="groups")  # type: ignore[untyped-decorator]
-    def active(self) -> Set[TaskGroup]:
-        return self.groups
-
-    @property
     def groups(self) -> Set[TaskGroup]:
         """Insertion-sorted set-like of groups associated to this prefix"""
         return self._groups.keys()
-
-    @property
-    @_deprecated(use_instead="states")  # type: ignore[untyped-decorator]
-    def active_states(self) -> dict[TaskStateState, int]:
-        return self.states
 
     def __repr__(self) -> str:
         return (

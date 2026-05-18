@@ -57,11 +57,7 @@ from distributed.utils import (
     wait_for,
 )
 from distributed.worker import Worker, run
-from distributed.worker_memory import (
-    DeprecatedMemoryManagerAttribute,
-    DeprecatedMemoryMonitor,
-    NannyMemoryManager,
-)
+from distributed.worker_memory import NannyMemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -276,11 +272,6 @@ class Nanny(ServerNode):
 
         self._listen_address = listen_address
         Nanny._instances.add(self)
-
-    # Deprecated attributes; use Nanny.memory_manager.<name> instead
-    memory_limit = DeprecatedMemoryManagerAttribute()
-    memory_terminate_fraction = DeprecatedMemoryManagerAttribute()
-    memory_monitor = DeprecatedMemoryMonitor()
 
     def __repr__(self):
         return f"<Nanny: {self.worker_address}, threads: {self.nthreads}>"
