@@ -151,7 +151,7 @@ class Actor(TaskRef):
             and getattr(thread_state, "actor", False)
         ):
             # actor calls actor on same worker
-            actor = self._worker.actors[self.key]
+            actor = self._worker.state.actors[self.key]
             attr = getattr(actor, key)
 
             if iscoroutinefunction(attr):
