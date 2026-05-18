@@ -21,7 +21,6 @@ from time import sleep
 import psutil
 import pytest
 from tlz import first, pluck, sliding_window
-from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -589,17 +588,6 @@ async def test_gather_missing_workers_replicated(c, s, a, b, know_real):
 async def test_io_loop(s):
     async with Worker(s.address) as w:
         assert w.io_loop is w.loop is s.loop
-
-
-@gen_cluster(nthreads=[])
-async def test_io_loop_alternate_loop(s, loop):
-    with pytest.warns(
-        DeprecationWarning,
-        match=r"The `loop` argument to `Worker` is ignored, and will be "
-        r"removed in a future release. The Worker always binds to the current loop",
-    ):
-        async with Worker(s.address, loop=loop) as w:
-            assert w.io_loop is w.loop is IOLoop.current()
 
 
 @gen_cluster(client=True)

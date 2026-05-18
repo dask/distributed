@@ -20,7 +20,7 @@ import cloudpickle
 import psutil
 import pytest
 from tlz import concat, first, merge
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 import dask
 from dask import bag, delayed
@@ -1441,15 +1441,6 @@ async def test_update_graph_culls(s, a, b):
         span_metadata={},
     )
     assert "z" not in s.tasks
-
-
-@gen_test()
-async def test_io_loop(loop):
-    with pytest.warns(
-        DeprecationWarning, match=r"the loop kwarg to Scheduler is deprecated"
-    ):
-        s = Scheduler(loop=loop, dashboard_address=":0", validate=True)
-    assert s.io_loop is IOLoop.current()
 
 
 @gen_cluster(client=True)

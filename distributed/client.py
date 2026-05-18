@@ -1255,20 +1255,6 @@ class Client(SyncMethodMixin):
         ReplayTaskClient(self)
 
     @property
-    def io_loop(self) -> IOLoop | None:
-        warnings.warn(
-            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        return self.loop
-
-    @io_loop.setter
-    def io_loop(self, value: IOLoop) -> None:
-        warnings.warn(
-            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        self.loop = value
-
-    @property
     def loop(self) -> IOLoop | None:
         loop = self.__loop
         if loop is None:
@@ -1278,13 +1264,6 @@ class Client(SyncMethodMixin):
             # loop is still acceptable - so we cache access to the loop.
             self.__loop = loop = self._loop_runner.loop
         return loop
-
-    @loop.setter
-    def loop(self, value: IOLoop) -> None:
-        warnings.warn(
-            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        self.__loop = value
 
     @contextmanager
     def as_current(self):

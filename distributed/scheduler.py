@@ -3895,7 +3895,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __init__(
         self,
-        loop: IOLoop | None = None,
+        *,
         services: dict | None = None,
         service_kwargs: dict | None = None,
         allowed_failures: int | None = None,
@@ -3923,12 +3923,6 @@ class Scheduler(SchedulerState, ServerNode):
         if dask.config.get("distributed.scheduler.pickle", default=True) is False:
             raise RuntimeError(
                 "Pickling can no longer be disabled with the `distributed.scheduler.pickle` option. Please remove this configuration to start the scheduler."
-            )
-        if loop is not None:
-            warnings.warn(
-                "the loop kwarg to Scheduler is deprecated",
-                DeprecationWarning,
-                stacklevel=2,
             )
 
         self.loop = self.io_loop = IOLoop.current()

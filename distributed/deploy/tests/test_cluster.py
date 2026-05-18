@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from tornado.ioloop import IOLoop
 
 from distributed import LocalCluster, Status
 from distributed.deploy.cluster import Cluster, _exponential_backoff
@@ -49,22 +48,6 @@ async def test_cluster_wait_for_worker():
             ]
         )
         assert len(cluster.scheduler.workers) == 4
-
-
-@gen_test()
-async def test_deprecated_loop_properties():
-    class ExampleCluster(Cluster):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.loop = self.io_loop = IOLoop.current()
-
-    with pytest.warns(DeprecationWarning) as warninfo:
-        async with ExampleCluster(asynchronous=True, loop=IOLoop.current()):
-            pass
-
-    assert [(w.category, *w.message.args) for w in warninfo] == [
-        (DeprecationWarning, "setting the loop property is deprecated")
-    ]
 
 
 def test_exponential_backoff():

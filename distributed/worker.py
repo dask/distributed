@@ -485,7 +485,6 @@ class Worker(BaseWorker, ServerNode):
         *,
         scheduler_file: str | None = None,
         nthreads: int | None = None,
-        loop: IOLoop | None = None,  # Deprecated
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
@@ -531,13 +530,7 @@ class Worker(BaseWorker, ServerNode):
         WorkerStateClass: type = WorkerState,
         **kwargs,
     ):
-        if loop is not None:
-            warnings.warn(
-                "The `loop` argument to `Worker` is ignored, and will be removed in a future release. "
-                "The Worker always binds to the current loop",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+
         self.__exit_stack = stack = contextlib.ExitStack()
         self.nanny = nanny
         self._lock = threading.Lock()

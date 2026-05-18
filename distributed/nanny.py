@@ -123,7 +123,6 @@ class Nanny(ServerNode):
         scheduler_file=None,
         worker_port: int | str | Collection[int] | None = 0,
         nthreads=None,
-        loop=None,
         local_directory=None,
         services=None,
         name=None,
@@ -150,14 +149,6 @@ class Nanny(ServerNode):
         config=None,
         **worker_kwargs,
     ):
-        if loop is not None:
-            warnings.warn(
-                "the `loop` kwarg to `Nanny` is ignored, and will be removed in a future release. "
-                "The Nanny always binds to the current loop.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         self.__exit_stack = stack = contextlib.ExitStack()
         self.process = None
         self._setup_logging(logger)

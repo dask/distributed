@@ -12,7 +12,6 @@ import threading
 import traceback
 import types
 import uuid
-import warnings
 import weakref
 from collections import defaultdict, deque
 from collections.abc import (
@@ -228,7 +227,6 @@ class Server:
         deserializers=None,
         connection_args=None,
         timeout=None,
-        io_loop=None,
         local_directory=None,
         needs_workdir=True,
     ):
@@ -263,13 +261,6 @@ class Server:
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
             self._updated_sys_path = True
-
-        if io_loop is not None:
-            warnings.warn(
-                "The io_loop kwarg to Server is ignored and will be deprecated",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         self._status = Status.init
         self.handlers = {

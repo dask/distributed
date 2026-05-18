@@ -103,15 +103,6 @@ class Cluster(SyncMethodMixin):
             self.__loop = loop = self._loop_runner.loop
         return loop
 
-    @loop.setter
-    def loop(self, value: IOLoop) -> None:
-        warnings.warn(
-            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        if value is None:
-            raise ValueError("expected an IOLoop, got None")
-        self.__loop = value
-
     @property
     def called_from_running_loop(self):
         try:
