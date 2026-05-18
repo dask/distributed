@@ -68,7 +68,6 @@ from dask.core import istask, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
     _deprecated,
-    _deprecated_kwarg,
     format_bytes,
     format_time,
     key_split,
@@ -5589,7 +5588,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event(worker, {"action": "close-worker"})
         self.worker_send(worker, {"op": "close", "reason": "scheduler-close-worker"})
 
-    @_deprecated_kwarg("safe", "expected")
     @log_errors
     async def remove_worker(
         self,
@@ -5735,19 +5733,9 @@ class Scheduler(SchedulerState, ServerNode):
         awaitables = []
         for plugin in list(self.plugins.values()):
             try:
-                try:
-                    result = plugin.remove_worker(
-                        scheduler=self, worker=address, stimulus_id=stimulus_id
-                    )
-                except TypeError:
-                    parameters = inspect.signature(plugin.remove_worker).parameters
-                    if "stimulus_id" not in parameters and not any(
-                        p.kind is p.VAR_KEYWORD for p in parameters.values()
-                    ):
-                        # Deprecated (see add_plugin)
-                        result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
-                    else:
-                        raise
+                result = plugin.remove_worker(
+                    scheduler=self, worker=address, stimulus_id=stimulus_id
+                )
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:
@@ -6254,15 +6242,6 @@ class Scheduler(SchedulerState, ServerNode):
             warnings.warn(
                 f"Scheduler already contains a plugin with name {name}; overwriting.",
                 category=UserWarning,
-            )
-
-        parameters = inspect.signature(plugin.remove_worker).parameters
-        if not any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
-            warnings.warn(
-                "The signature of `SchedulerPlugin.remove_worker` now requires `**kwargs` "
-                "to ensure that plugins remain forward-compatible. Not including "
-                "`**kwargs` in the signature will no longer be supported in future versions.",
-                FutureWarning,
             )
 
         self.plugins[name] = plugin
