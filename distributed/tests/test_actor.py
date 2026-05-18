@@ -546,7 +546,7 @@ def test_compute_sync(client):
     assert result == 0 + 1 + 2 + 3 + 4
 
     def check(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(check).values()):
@@ -630,7 +630,7 @@ def test_worker_actor_handle_is_weakref_sync(client):
     del counter
 
     def check(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(check).values()):
@@ -651,7 +651,7 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
     final.compute(actors=counter, optimize_graph=False)
 
     def worker_tasks_running(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(worker_tasks_running).values()):
