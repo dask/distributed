@@ -6,7 +6,6 @@ import gc
 import logging
 import os
 import sys
-import warnings
 from collections.abc import Iterator
 from contextlib import suppress
 from typing import Any
@@ -20,6 +19,7 @@ from dask.system import CPU_COUNT
 
 from distributed import Nanny
 from distributed._signals import wait_for_signals
+from distributed.cli.utils import deprecated_option
 from distributed.comm import get_address_host_port
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
@@ -180,8 +180,11 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     default=None,
     help="Seconds to wait for a scheduler before closing",
 )
-@click.option(
-    "--dashboard-prefix", type=str, default="", help="Prefix for the dashboard"
+@deprecated_option(  # type: ignore[untyped-decorator]
+    "--dashboard-prefix",
+    type=str,
+    default=None,
+    help="Prefix for the dashboard",
 )
 @click.option(
     "--lifetime",
@@ -251,7 +254,7 @@ def main(  # type: ignore[no-untyped-def]
     resources,
     dashboard,
     scheduler_file,
-    dashboard_prefix,
+    dashboard_prefix,  # deprecated
     tls_ca_file,
     tls_cert,
     tls_key,
@@ -261,13 +264,6 @@ def main(  # type: ignore[no-untyped-def]
     **kwargs,
 ):
     """Launch a Dask worker attached to an existing scheduler"""
-
-    if "dask-worker" in sys.argv[0]:
-        warnings.warn(
-            "dask-worker is deprecated and will be removed in a future release; use `dask worker` instead",
-            FutureWarning,
-            stacklevel=1,
-        )
 
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)

@@ -21,7 +21,6 @@ from distributed.metrics import time
 from distributed.utils import get_ip, open_port
 from distributed.utils_test import (
     gen_cluster,
-    inc,
     popen,
     requires_ipv6,
     wait_for_log_line,
@@ -812,20 +811,3 @@ def test_error_during_startup(monkeypatch, nanny, loop):
                 ],
             ) as worker:
                 assert worker.wait(10) == 1
-
-
-def test_single_executable_deprecated():
-    assert (
-        b"FutureWarning: dask-worker is deprecated"
-        in subprocess.run(["dask-worker"], capture_output=True).stderr
-    )
-
-
-@pytest.mark.slow
-@gen_cluster(nthreads=[], client=True)
-async def test_single_executable_works(c, s):
-    with popen(["dask-worker", s.address]):
-        # make sure the worker still works
-        await c.wait_for_workers(1)
-        results = await c.submit(inc, 1).result()
-        assert results == 2

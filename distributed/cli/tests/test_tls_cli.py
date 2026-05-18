@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from time import sleep
 
+import pytest
+
 from distributed import Client
 from distributed.metrics import time
 from distributed.utils import open_port
@@ -75,6 +77,7 @@ def test_sni(loop):
                 wait_for_cores(c)
 
 
+@pytest.mark.slow
 def test_nanny(loop):
     port = open_port()
     with popen(

@@ -7,12 +7,12 @@ import logging
 import os
 import re
 import sys
-import warnings
 
 import click
 
 from distributed import Scheduler
 from distributed._signals import wait_for_signals
+from distributed.cli.utils import deprecated_option
 from distributed.compatibility import asyncio_run
 from distributed.config import get_loop_factory
 from distributed.preloading import validate_preload_argv
@@ -81,11 +81,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "it possible for anyone with access to your dashboard address to run"
     "Python code",
 )
-@click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
+@deprecated_option(
+    "--show/--no-show", default=False, help="Show web UI [default: --show]"
+)
 @click.option(
     "--dashboard-prefix", type=str, default="", help="Prefix for the dashboard app"
 )
-@click.option(
+@deprecated_option(
     "--use-xheaders",
     type=bool,
     default=False,
@@ -124,10 +126,10 @@ def main(
     port,
     protocol,
     interface,
-    show,
+    show,  # deprecated
     dashboard,
     dashboard_prefix,
-    use_xheaders,
+    use_xheaders,  # deprecated
     pid_file,
     tls_ca_file,
     tls_cert,
@@ -137,14 +139,6 @@ def main(
     **kwargs,
 ):
     """Launch a Dask scheduler."""
-
-    if "dask-scheduler" in sys.argv[0]:
-        warnings.warn(
-            "dask-scheduler is deprecated and will be removed in a future release; use `dask scheduler` instead",
-            FutureWarning,
-            stacklevel=1,
-        )
-
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
 

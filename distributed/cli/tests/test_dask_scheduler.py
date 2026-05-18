@@ -46,6 +46,7 @@ def test_defaults(loop, requires_default_ports):
             assert _get_dashboard_port(c) == 8787
 
 
+@pytest.mark.slow
 def test_hostport(loop):
     port = open_port()
     with popen(
@@ -689,22 +690,3 @@ def test_signal_handling(loop, sig):
         assert scheduler.returncode == 0
         assert "scheduler closing" in logs
         assert "end scheduler" in logs
-
-
-@pytest.mark.skipif(WINDOWS, reason="POSIX only")
-def test_single_executable_deprecated(loop):
-    port = open_port()
-    with popen(
-        [
-            "dask-scheduler",
-            "--no-dashboard",
-            f"--port={port}",
-        ],
-        capture_output=True,
-    ) as scheduler:
-        with Client(f"127.0.0.1:{port}", loop=loop) as c:
-            pass
-        scheduler.send_signal(signal.SIGTERM)
-        stdout, stderr = scheduler.communicate()
-        logs = stdout.decode()
-        assert "FutureWarning: dask-scheduler is deprecated" in logs

@@ -1163,12 +1163,14 @@ def popen(
     if not os.path.isabs(executable_path):
         executable_path = os.path.join(sysconfig.get_path("scripts"), executable_path)
 
-    # On Windows, it's valid to start a process using only '{program-name}' and Windows will
-    # automatically find and execute '{program-name}.exe'.
+    # On Windows, it's valid to start a process using only '{program-name}' and Windows
+    # will automatically find and execute '{program-name}.exe'.
     #
-    # That allows e.g. `popen(["dask-worker"])` to work despite the installed file being called 'dask-worker.exe'.
+    # That allows e.g. `popen(["dask", "worker"])` to work despite the installed file
+    # being called 'dask.exe'.
     #
-    # docs: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw
+    # docs:
+    # https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw
     #
     if WINDOWS:
         executable_exists = os.path.isfile(executable_path) or os.path.isfile(
