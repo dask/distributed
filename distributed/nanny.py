@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from typing import ClassVar, Literal, cast
+from typing import ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -462,14 +462,7 @@ class Nanny(ServerNode):
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
-        if not isinstance(plugin, NannyPlugin):
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin inherits from `NannyPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        plugin = cast(NannyPlugin, plugin)
+        assert isinstance(plugin, NannyPlugin)
 
         if name is None:
             name = _get_plugin_name(plugin)

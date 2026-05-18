@@ -5144,7 +5144,6 @@ class Client(SyncMethodMixin):
         self,
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
         name: str | None = None,
-        idempotent: bool | None = None,
     ):
         """Register a plugin.
 
@@ -5157,23 +5156,11 @@ class Client(SyncMethodMixin):
         name :
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
-        idempotent :
-            Do not re-register if a plugin of the given name already exists.
-            If None, ``plugin.idempotent`` is taken if defined, False otherwise.
         """
         if name is None:
             name = _get_plugin_name(plugin)
         assert name
-        if idempotent is not None:
-            warnings.warn(
-                "The `idempotent` argument is deprecated and will be removed in a "
-                "future version. Please mark your plugin as idempotent by setting its "
-                "`.idempotent` attribute to `True`.",
-                FutureWarning,
-                stacklevel=2,
-            )
-        else:
-            idempotent = getattr(plugin, "idempotent", False)
+        idempotent = getattr(plugin, "idempotent", False)
         assert isinstance(idempotent, bool)
         return self._register_plugin(plugin, name, idempotent)
 
@@ -5237,42 +5224,7 @@ class Client(SyncMethodMixin):
             idempotent=idempotent,
         )
 
-    def register_scheduler_plugin(
-        self,
-        plugin: SchedulerPlugin,
-        name: str | None = None,
-        idempotent: bool | None = None,
-    ):
-        """
-        Register a scheduler plugin.
-
-        .. deprecated:: 2023.9.2
-            Use :meth:`Client.register_plugin` instead.
-
-        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
-
-        Parameters
-        ----------
-        plugin : SchedulerPlugin
-            SchedulerPlugin instance to pass to the scheduler.
-        name : str
-            Name for the plugin; if None, a name is taken from the
-            plugin instance or automatically generated if not present.
-        idempotent : bool
-            Do not re-register if a plugin of the given name already exists.
-        """
-        warnings.warn(
-            "`Client.register_scheduler_plugin` has been deprecated; "
-            "please `Client.register_plugin` instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return cast(OKMessage, self.register_plugin(plugin, name, idempotent))
-
-    async def _unregister_scheduler_plugin(self, name):
-        return await self.scheduler.unregister_scheduler_plugin(name=name)
-
-    def unregister_scheduler_plugin(self, name):
+    def unregister_scheduler_plugin(self, name: str):
         """Unregisters a scheduler plugin
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -5305,7 +5257,7 @@ class Client(SyncMethodMixin):
         --------
         register_scheduler_plugin
         """
-        return self.sync(self._unregister_scheduler_plugin, name=name)
+        return self.sync(self.scheduler.unregister_scheduler_plugin, name=name)
 
     def register_worker_callbacks(self, setup=None):
         """
@@ -5356,145 +5308,6 @@ class Client(SyncMethodMixin):
                 assert exc
                 raise exc.with_traceback(tb)
         return cast(dict[str, OKMessage], responses)
-
-    def register_worker_plugin(
-        self,
-        plugin: NannyPlugin | WorkerPlugin,
-        name: str | None = None,
-        nanny: bool | None = None,
-    ):
-        """
-        Registers a lifecycle worker plugin for all current and future workers.
-
-        .. deprecated:: 2023.9.2
-            Use :meth:`Client.register_plugin` instead.
-
-        This registers a new object to handle setup, task state transitions and
-        teardown for workers in this cluster. The plugin will instantiate
-        itself on all currently connected workers. It will also be run on any
-        worker that connects in the future.
-
-        The plugin may include methods ``setup``, ``teardown``, ``transition``,
-        and ``release_key``.  See the
-        ``dask.distributed.WorkerPlugin`` class or the examples below for the
-        interface and docstrings.  It must be serializable with the pickle or
-        cloudpickle modules.
-
-        If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
-        used then that will control idempotency.  If a plugin with that name has
-        already been registered, then it will be removed and replaced by the new one.
-
-        For alternatives to plugins, you may also wish to look into preload
-        scripts.
-
-        Parameters
-        ----------
-        plugin : WorkerPlugin or NannyPlugin
-            WorkerPlugin or NannyPlugin instance to register.
-        name : str, optional
-            A name for the plugin.
-            Registering a plugin with the same name will have no effect.
-            If plugin has no name attribute a random name is used.
-        nanny : bool, optional
-            Whether to register the plugin with workers or nannies.
-
-        Examples
-        --------
-        >>> class MyPlugin(WorkerPlugin):
-        ...     def __init__(self, *args, **kwargs):
-        ...         pass  # the constructor is up to you
-        ...     def setup(self, worker: dask.distributed.Worker):
-        ...         pass
-        ...     def teardown(self, worker: dask.distributed.Worker):
-        ...         pass
-        ...     def transition(self, key: str, start: str, finish: str,
-        ...                    **kwargs):
-        ...         pass
-        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
-        ...         pass
-
-        >>> plugin = MyPlugin(1, 2, 3)
-        >>> client.register_plugin(plugin)
-
-        You can get access to the plugin with the ``get_worker`` function
-
-        >>> client.register_plugin(other_plugin, name='my-plugin')
-        >>> def f():
-        ...    worker = get_worker()
-        ...    plugin = worker.plugins['my-plugin']
-        ...    return plugin.my_state
-
-        >>> future = client.run(f)
-
-        See Also
-        --------
-        distributed.WorkerPlugin
-        unregister_worker_plugin
-        """
-        warnings.warn(
-            "`Client.register_worker_plugin` has been deprecated; "
-            "please use `Client.register_plugin` instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if name is None:
-            name = _get_plugin_name(plugin)
-
-        assert name
-
-        method: Callable
-        if isinstance(plugin, WorkerPlugin):
-            method = self._register_worker_plugin
-            if nanny is True:
-                warnings.warn(
-                    "Registering a `WorkerPlugin` as a nanny plugin is not "
-                    "allowed, registering as a worker plugin instead. "
-                    "To register as a nanny plugin, inherit from `NannyPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        elif isinstance(plugin, NannyPlugin):
-            method = self._register_nanny_plugin
-            if nanny is False:
-                warnings.warn(
-                    "Registering a `NannyPlugin` as a worker plugin is not "
-                    "allowed, registering as a nanny plugin instead. "
-                    "To register as a worker plugin, inherit from `WorkerPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        elif isinstance(plugin, SchedulerPlugin):  # type: ignore[unreachable]
-            if nanny:
-                warnings.warn(
-                    "Registering a `SchedulerPlugin` as a nanny plugin is not "
-                    "allowed, registering as a scheduler plugin instead. "
-                    "To register as a nanny plugin, inherit from `NannyPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            else:
-                warnings.warn(
-                    "Registering a `SchedulerPlugin` as a worker plugin is not "
-                    "allowed, registering as a scheduler plugin instead. "
-                    "To register as a worker plugin, inherit from `WorkerPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            method = self._register_scheduler_plugin
-        else:
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin inherits from `NannyPlugin` "
-                "or `WorkerPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if nanny is True:
-                method = self._register_nanny_plugin
-            else:
-                method = self._register_worker_plugin
-
-        return self.sync(method, plugin=plugin, name=name, idempotent=False)
 
     async def _unregister_worker_plugin(self, name, nanny=None):
         if nanny:

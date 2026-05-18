@@ -6267,17 +6267,10 @@ class Scheduler(SchedulerState, ServerNode):
         self,
         plugin: bytes | SchedulerPlugin,
         name: str | None = None,
-        idempotent: bool | None = None,
+        *,
+        idempotent: bool,
     ) -> None:
         """Register a plugin on the scheduler."""
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_scheduler_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
         if not isinstance(plugin, SchedulerPlugin):
             plugin = loads(plugin)
             assert isinstance(plugin, SchedulerPlugin)
@@ -8145,18 +8138,10 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(
-        self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
+        self, comm: None, plugin: bytes, name: str, *, idempotent: bool
     ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_worker_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
         if name in self.worker_plugins and idempotent:
             return {}
 
@@ -8180,19 +8165,10 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def register_nanny_plugin(
-        self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
+        self, comm: None, plugin: bytes, name: str, idempotent: bool
     ) -> dict[str, OKMessage]:
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
-
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_nanny_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
 
         if name in self.nanny_plugins and idempotent:
             return {}

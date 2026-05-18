@@ -1871,14 +1871,7 @@ class Worker(BaseWorker, ServerNode):
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
-        if not isinstance(plugin, WorkerPlugin):
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin subclasses `WorkerPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        plugin = cast(WorkerPlugin, plugin)
+        assert isinstance(plugin, WorkerPlugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
