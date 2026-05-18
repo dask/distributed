@@ -1244,13 +1244,9 @@ def test_expects_comm():
 
         def comm_arg(self, comm): ...
 
-        def stream_arg(self, stream): ...
-
         def two_arg(self, arg, other): ...
 
         def comm_arg_other(self, comm, other): ...
-
-        def stream_arg_other(self, stream, other): ...
 
         def arg_kwarg(self, arg, other=None): ...
 
@@ -1258,26 +1254,16 @@ def test_expects_comm():
 
         def comm_not_leading_position(self, other, comm): ...
 
-        def stream_not_leading_position(self, other, stream): ...
-
-    expected_warning = "first argument of a RPC handler `stream` is deprecated"
-
     instance = A()
 
     assert not _expects_comm(instance.empty)
     assert not _expects_comm(instance.one_arg)
     assert _expects_comm(instance.comm_arg)
-    with pytest.warns(FutureWarning, match=expected_warning):
-        assert _expects_comm(instance.stream_arg)
     assert not _expects_comm(instance.two_arg)
     assert _expects_comm(instance.comm_arg_other)
-    with pytest.warns(FutureWarning, match=expected_warning):
-        assert _expects_comm(instance.stream_arg_other)
     assert not _expects_comm(instance.arg_kwarg)
     assert _expects_comm(instance.comm_posarg_only)
     assert not _expects_comm(instance.comm_not_leading_position)
-
-    assert not _expects_comm(instance.stream_not_leading_position)
 
 
 @gen_test()

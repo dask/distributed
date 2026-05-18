@@ -122,19 +122,11 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 @functools.cache
 def _expects_comm(func: Callable) -> bool:
-    sig = inspect.signature(func)
-    params = list(sig.parameters)
-    if params and params[0] == "comm":
-        return True
-    if params and params[0] == "stream":
-        warnings.warn(
-            "Calling the first argument of a RPC handler `stream` is "
-            "deprecated. Defining this argument is optional. Either remove the "
-            f"argument or rename it to `comm` in {func}.",
-            FutureWarning,
-        )
-        return True
-    return False
+    """Return True if func expects a first argument named 'comm';
+    False otherwise.
+    """
+    params = inspect.signature(func).parameters
+    return bool(params) and next(iter(params)) == "comm"
 
 
 class Server:
