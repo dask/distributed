@@ -1576,7 +1576,7 @@ class Worker(BaseWorker, ServerNode):
         setproctitle("dask worker [closing]")
 
         if nanny and self.nanny:
-            with self.rpc(self.nanny) as r:
+            async with self.rpc(self.nanny) as r:
                 await r.close_gracefully(reason=reason)
 
         # Cancel async instructions

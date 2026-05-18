@@ -1178,17 +1178,6 @@ class rpc:
         self.status = Status.closed
         return await asyncio.gather(*self.close_comms())
 
-    def __enter__(self):
-        warnings.warn(
-            "the rpc synchronous context manager is deprecated",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        asyncio.ensure_future(self.close_rpc())
-
     async def __aenter__(self):
         return self
 
@@ -1245,18 +1234,6 @@ class PooledRPCCall:
         return send_recv_from_rpc
 
     async def close_rpc(self):
-        pass
-
-    # For compatibility with rpc()
-    def __enter__(self):
-        warnings.warn(
-            "the rpc synchronous context manager is deprecated",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
     async def __aenter__(self):
