@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import reprlib
 from collections import defaultdict
 from collections.abc import Callable, Collection, Coroutine, Mapping
 from functools import partial
@@ -384,7 +385,10 @@ async def retry(
         try:
             return await coro()
         except retry_on_exceptions as ex:
-            operation = operation or str(coro)
+            if not operation:
+                r = reprlib.Repr()
+                r.maxother = 200
+                operation = r.repr(coro)
             logger.info(
                 f"Retrying {operation} after exception in attempt {i_try}/{count}: {ex}"
             )
