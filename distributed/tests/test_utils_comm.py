@@ -230,7 +230,7 @@ def test_retry_does_retry_and_sleep(cleanup):
     assert sleep_calls == [0.0, 1.0, 3.0, 6.0, 6.0]
 
 
-def test_retry_truncates_large_coro_repr(cleanup, caplog):
+def test_retry_truncates_large_coro_repr(cleanup, caplog, monkeypatch):
     """Test that retry truncates excessively large string representations of coro."""
 
     class MyEx(Exception):
@@ -252,6 +252,11 @@ def test_retry_truncates_large_coro_repr(cleanup, caplog):
             delay_max=0,
             jitter_fraction=0,
         )
+
+    # distributed.config sets propagate=False on the top-level "distributed"
+    # logger, so caplog (attached to root) won't see records without re-enabling
+    # propagation on the parent for the duration of the test.
+    monkeypatch.setattr(logging.getLogger("distributed"), "propagate", True)
 
     with caplog.at_level(logging.INFO, logger="distributed.utils_comm"):
         with pytest.raises(MyEx):
