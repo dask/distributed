@@ -615,7 +615,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.name = name
 
-        executor_pool_prefix = f"{self.name}-" if self.name else ""
+        executor_pool_prefix = f"{self.name}-" if self.name is not None else ""
         # Common executors always available
         self.executors = {
             "offload": utils._offload_executor,

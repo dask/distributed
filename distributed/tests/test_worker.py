@@ -2147,6 +2147,16 @@ async def test_executor_inherit_threadname_from_worker(c, s):
         result = await c.gather(c.submit(get_thread_name, pure=False))
         assert "WorkerName-Dask-Default-Threads" in result
 
+    # LocalCluster by default assigns numbers starting from zero
+    # as the worker names
+    async with Worker(
+        s.address,
+        nthreads=1,
+        name=0,
+    ):
+        result = await c.gather(c.submit(get_thread_name, pure=False))
+        assert "0-Dask-Default-Threads" in result
+
     async with Worker(
         s.address,
         nthreads=1,
