@@ -20,7 +20,14 @@ from distributed.utils_comm import (
     subs_multiple,
     unpack_remotedata,
 )
-from distributed.utils_test import BarrierGetData, BrokenComm, gen_cluster, inc
+from distributed.utils_test import (
+    BarrierGetData,
+    BrokenComm,
+    captured_logger,
+    gen_cluster,
+    gen_test,
+    inc,
+)
 
 
 def test_pack_data():
@@ -230,7 +237,9 @@ def test_retry_does_retry_and_sleep(cleanup):
     assert sleep_calls == [0.0, 1.0, 3.0, 6.0, 6.0]
 
 
-def test_retry_truncates_large_coro_repr(cleanup, caplog, monkeypatch):
+@gen_test()
+@pytest.mark.parametrize("count", [1, 2])
+async def test_retry_truncates_large_coro_repr(count):
     """Test that retry truncates excessively large string representations of coro."""
 
     class MyEx(Exception):
@@ -247,29 +256,23 @@ def test_retry_truncates_large_coro_repr(cleanup, caplog, monkeypatch):
         return await retry(
             LargeReprCallable(),
             retry_on_exceptions=(MyEx,),
-            count=1,
+            count=count,
             delay_min=0,
             delay_max=0,
             jitter_fraction=0,
         )
 
-    # distributed.config sets propagate=False on the top-level "distributed"
-    # logger, so caplog (attached to root) won't see records without re-enabling
-    # propagation on the parent for the duration of the test.
-    monkeypatch.setattr(logging.getLogger("distributed"), "propagate", True)
+    with (
+        captured_logger("distributed.utils_comm", level=logging.INFO) as caplog,
+        pytest.raises(MyEx),
+    ):
+        await f()
 
-    with caplog.at_level(logging.INFO, logger="distributed.utils_comm"):
-        with pytest.raises(MyEx):
-            asyncio_run(f(), loop_factory=get_loop_factory())
-
-    assert len(caplog.records) == 1
-    msg = caplog.records[0].getMessage()
-    # reprlib truncates the 500-char repr to maxother (200) chars
-    assert len(msg) < 500
+    msg = caplog.getvalue()
     # reprlib uses "..." to indicate truncation
-    assert "..." in msg
+    assert "xxxxx..." in msg
     # Verify the full 500-char repr is NOT present
-    assert "x" * 500 not in msg
+    assert 200 * count < len(msg) < 300 * count
 
 
 def test_unpack_remotedata():
