@@ -19,7 +19,7 @@ mismatched_version["packages"]["distributed"] = "0.0.0.dev0"
 missing_version = get_versions()
 del missing_version["packages"]["distributed"]
 
-# if a node doesn't report any version info, we treat them as UNKNOWN
+# if a node doesn't report any version info, we treat it as UNKNOWN
 # the happens if the node is pre-32cb96e, i.e. <=2.9.1
 unknown_version = None
 

@@ -2016,7 +2016,7 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
     config={"distributed.scheduler.worker-saturation": "inf"},
 )
 async def test_do_not_ping_pong(c, s, a):
-    """Regression test that work-stealing does not contihuously move all tasks between
+    """Regression test that work-stealing does not continuously move all tasks between
     two workers without reaching a stable state, eating up CPU time while doing so.
     """
     in_event = Event()

@@ -71,7 +71,7 @@ with suppress(ImportError):
     compressions["lz4"] = Compression(
         "lz4",
         lz4.block.compress,
-        # Avoid expensive deep copies when deserializing writeable numpy arrays
+        # Avoid expensive deep copies when deserializing writable numpy arrays
         # See distributed.protocol.numpy.deserialize_numpy_ndarray
         # Note that this is only useful for buffers smaller than distributed.comm.shard;
         # larger ones are deep-copied between decompression and serialization anyway in

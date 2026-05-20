@@ -72,7 +72,7 @@ async def test_remove_with_client(c, s):
         assert len(worker.plugins) == n_existing_plugins + 1
         assert "bar" in worker.plugins
 
-        # let's remove 'bar' and we should have none worker plugins
+        # let's remove 'bar' and we should have no worker plugins
         await c.unregister_worker_plugin("bar")
         assert worker._my_plugin_status == "teardown"
         assert s.worker_plugins == existing_plugins

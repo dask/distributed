@@ -313,7 +313,7 @@ def SSHCluster(
     >>> client = Client(cluster)
 
     Create a cluster with three workers, each with two threads
-    and host the dashdoard on port 8797:
+    and host the dashboard on port 8797:
 
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(

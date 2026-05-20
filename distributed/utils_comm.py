@@ -361,17 +361,17 @@ async def retry(
     coro
         The coroutine function to call and await
     count
-        The maximum number of re-tries before giving up. 0 means no re-try; must be >= 0.
+        The maximum number of retries before giving up. 0 means no retry; must be >= 0.
     delay_min
-        The base factor for the delay (in seconds); this is the first non-zero delay between re-tries.
+        The base factor for the delay (in seconds); this is the first non-zero delay between retries.
     delay_max
-        The maximum delay (in seconds) between consecutive re-tries (without jitter)
+        The maximum delay (in seconds) between consecutive retries (without jitter)
     jitter_fraction
         The maximum jitter to add to the delay, as fraction of the total delay. No jitter is added if this
         value is <= 0.
-        Using a non-zero value here avoids "herd effects" of many operations re-tried at the same time
+        Using a non-zero value here avoids "herd effects" of many operations retried at the same time
     retry_on_exceptions
-        A tuple of exception classes to retry. Other exceptions are not caught and re-tried, but propagate immediately.
+        A tuple of exception classes to retry. Other exceptions are not caught and retried, but propagate immediately.
     operation
         A human-readable description of the operation attempted; used only for logging failures
 
@@ -380,7 +380,7 @@ async def retry(
     Any
         Whatever `await coro()` returned
     """
-    # this loop is a no-op in case max_retries<=0
+    # this loop is a no-op in case count<=0
     for i_try in range(count):
         try:
             return await coro()

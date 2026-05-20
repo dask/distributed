@@ -19,9 +19,9 @@ constraints, one will observe a perfect balance in memory occupation across work
 In all other use cases, however, as the computation goes it could cause an imbalance in
 memory usage.
 
-When a task runs on a worker and requires in input the output of a task from a different
+When a task runs on a worker and requires as input the output of a task from a different
 worker, Dask will transparently transfer the data between workers, ending up with
-multiple copies of the same data on different workers. This is generally desirable, as
+multiple copies of the same data on different workers. This is generally desirable, since
 it avoids re-transferring the data if it's required again later on. However, it also
 causes increased overall memory usage across the cluster.
 

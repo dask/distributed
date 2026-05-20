@@ -1014,7 +1014,7 @@ async def test_connection_pool_detects_remote_close():
         conn2 = await p.connect(server.address)
         assert conn2 is not conn
         p.reuse(server.address, conn2)
-        # check that `conn` has ben removed from the internal data structures
+        # check that `conn` has been removed from the internal data structures
         assert p.open == 1 and p.active == 0
 
         # check connection pool invariants hold even after it detects a closed connection

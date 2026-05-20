@@ -50,7 +50,7 @@ dask_scheduler_gil_contention_seconds_total
        configuration to be set.
 
 dask_scheduler_gc_collection_seconds_total
-    Total time spent on garbage dask_scheduler_gc_collection_seconds_total
+    Total time spent on garbage collection
 
     .. note::
         Due to measurement overhead, this metric only measures
@@ -167,7 +167,7 @@ dask_worker_gil_contention_seconds_total
        configuration to be set.
 
 dask_worker_gc_collection_seconds_total
-    Total time spent on garbage dask_scheduler_gc_collection_seconds_total
+    Total time spent on garbage collection
 
     .. note::
         Due to measurement overhead, this metric only measures

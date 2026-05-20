@@ -16,10 +16,10 @@ to various exceptions appearing when you interact with your local client, such a
 ``KilledWorker``, ``TimeoutError`` and ``CommClosedError``.
 
 Note the special case of ``KilledWorker``: this means that a particular task was
-tried on a worker, and it died, and then the same task was sent to another worker,
+tried on a worker, the worker died, and then the same task was sent to another worker,
 which also died. After a configurable number of deaths (config key
 ``distributed.scheduler.allowed-failures``), Dask decides to blame the
-task itself, and returns this exception. Note, that it is possible for a task to be
+task itself and returns this exception. Note that it is possible for a task to be
 unfairly blamed - the worker happened to die while the task was active, perhaps
 due to another thread - complicating diagnosis.
 
@@ -59,15 +59,15 @@ behaviour is expected.
 Unrecoverable Exception
 '''''''''''''''''''''''
 
-The worker is a python process, and like any other code, an exception may occur
+The worker is a Python process and, like any other code, an exception may occur
 which causes the process to exit. One typical example of this might be a
-version mismatch between the packages of the client and worker, so that
+version mismatch between the packages installed on the client and the worker, so that
 a message sent to the worker errors while being unpacked. There are a number of
 packages that need to match, not only ``dask`` and ``distributed``.
 
-In this case, you should expect to see the full python traceback in the worker's
+In this case, you should expect to see the full Python traceback in the worker's
 log. In the event of a version mismatch, this might be complaining about a bad
-import or missing attribute. However, other fatal exceptions are also possible,
+import or a missing attribute. However, other fatal exceptions are also possible,
 such as trying to allocate more memory than the system has available, or writing
 temporary files without appropriate permissions.
 
@@ -92,7 +92,7 @@ Killed by Nanny
 '''''''''''''''
 
 The Dask "nanny" is a process which watches the worker, and restarts it if
-necessary. It also tracks the worker's memory usage, and if it should cross
+necessary. It also tracks the worker's memory usage, and if it crosses
 a given fraction of total memory, then also the worker will be restarted,
 interrupting any work in progress. The log will show a message like
 
@@ -117,7 +117,7 @@ with compiled code), or due to something external, e.g., the ``kill`` command, o
 stopping of the container or machine on which the worker is running.
 
 In the best case, you may have a line in the logs from the OS saying that the
-worker was shut down, such as the single word "killed"  or something more descriptive.
+worker was shut down, such as the single word "killed" or something more descriptive.
 In these cases, the fault may well be in your code, and you might be able to use the
 same debugging tools as in the previous section.
 

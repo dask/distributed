@@ -2193,7 +2193,7 @@ class Worker(BaseWorker, ServerNode):
                     # e.g. thread synchronization overhead only, since thread-noncpu and
                     # thread-cpu inside the thread detract from it. However, it may
                     # become substantial in case of misalignment between the size of the
-                    # thread pool and the number of running tasks in the worker stater
+                    # thread pool and the number of running tasks in the worker state
                     # machine (e.g. https://github.com/dask/distributed/issues/5882)
                     with context_meter.meter("executor"):
                         result = await run_in_executor_with_context(

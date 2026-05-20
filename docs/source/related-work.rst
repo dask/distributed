@@ -104,7 +104,7 @@ project.  It uses a centralized hub to farm out jobs to several ``ipengine``
 processes running on remote workers.  It communicates over ZeroMQ sockets and
 centralizes communication through the central hub.
 
-IPython parallel has been around for a while and, while not particularly fancy,
+IPython Parallel has been around for a while and, while not particularly fancy,
 is quite stable and robust.
 
 IPython Parallel offers parallel ``map`` and remote ``apply`` functions that
@@ -145,17 +145,17 @@ The primary advantages of ``distributed`` over IPython Parallel include
 ``Distributed`` workers share data in a peer-to-peer fashion, without having to
 send intermediate results through a central bottleneck.  This allows
 ``distributed`` to be more effective for more complex algorithms and to manage
-larger datasets in a more natural manner.  IPython parallel does not provide a
+larger datasets in a more natural manner.  IPython Parallel does not provide a
 mechanism for workers to communicate with each other, except by using the
 central node as an intermediary for data transfer or by relying on some other
 medium, like a shared file system.  Data transfer through the central node can
-easily become a bottleneck and so IPython parallel has been mostly helpful in
+easily become a bottleneck and so IPython Parallel has been mostly helpful in
 embarrassingly parallel work (the bulk of applications) but has not been used
 extensively for more sophisticated algorithms that require non-trivial
 communication patterns.
 
 The distributed client includes a dynamic task scheduler capable of managing
-deep data dependencies between tasks.  The IPython parallel docs include `a
+deep data dependencies between tasks.  The IPython Parallel docs include `a
 recipe`_ for executing task graphs with data dependencies.  This same idea is
 core to all of ``distributed``, which uses a dynamic task scheduler for all
 operations.  Notably, ``distributed.Future`` objects can be used within
@@ -171,7 +171,7 @@ The ability to use futures cheaply within ``submit`` and ``map`` methods
 enables the construction of very sophisticated data pipelines with simple code.
 Additionally, distributed can serve as a full dask task scheduler, enabling
 support for distributed arrays, dataframes, machine learning pipelines, and any
-other application build on dask graphs.  The dynamic task schedulers within
+other application built on dask graphs.  The dynamic task schedulers within
 ``distributed`` are adapted from the dask_ task schedulers and so are fairly
 sophisticated/efficient.
 
@@ -180,13 +180,13 @@ sophisticated/efficient.
 IPython Parallel has the following advantages over ``distributed``
 
 1.  Maturity:  IPython Parallel has been around for a while.
-2.  Explicit control over the worker processes:  IPython parallel
+2.  Explicit control over the worker processes:  IPython Parallel
     allows you to execute arbitrary statements on the workers, allowing it to
     serve in system administration tasks.
 3.  Deployment help:  IPython Parallel has mechanisms built-in to aid
     deployment on SGE, MPI, etc..  Distributed does not have any such sugar,
     though is fairly simple to `set up <https://docs.dask.org/en/latest/setup.html>`_ by hand.
-4.  Various other advantages:  Over the years IPython parallel has accrued a
+4.  Various other advantages:  Over the years IPython Parallel has accrued a
     variety of helpful features like IPython interaction magics, ``@parallel``
     decorators, etc..
 

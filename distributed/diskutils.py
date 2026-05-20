@@ -65,7 +65,7 @@ class WorkDir:
                 except OSError:
                     logger.exception(
                         "Could not acquire workspace lock on "
-                        "path: %s ."
+                        "path: %s."
                         "Continuing without lock. "
                         "This may result in workspaces not being "
                         "cleaned up",

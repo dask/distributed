@@ -359,7 +359,7 @@ async def test_oversubscribing_leases(c, s, a, b):
 
         with sem:
             # This simulates a task which holds the GIL for longer than the
-            # lease-timeout. This is twice the lease timeout to ensurre that the
+            # lease-timeout. This is twice the lease timeout to ensure that the
             # leases are actually timed out
             slowidentity(delay=0.2)
 

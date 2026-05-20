@@ -114,19 +114,20 @@ class SchedulerPlugin:
             keys:
                 The keys the Client is interested in when calling `update_graph`.
             tasks:
-                The
+                All the keys submitted through `update_graph` (including those not
+                directly requested by the Client)
             annotations:
                 Fully resolved annotations as applied to the tasks in the format::
 
                     {
                         "annotation": {
-                            "key": "value,
+                            key: value,
                             ...
                         },
                         ...
                     }
             priority:
-                Task calculated priorities as assigned to the tasks.
+                Calculated priorities as assigned to the tasks.
             stimulus_id:
                 ID of the stimulus causing the graph update
             **kwargs:
@@ -239,10 +240,10 @@ class SchedulerPlugin:
 class WorkerPlugin:
     """Interface to extend the Worker
 
-    A worker plugin enables custom code to run at different stages of the Workers'
+    A worker plugin enables custom code to run at different stages of the Worker's
     lifecycle.
 
-    A plugin enables custom code to run at each of step of a Workers's life. Whenever such
+    A plugin enables custom code to run at each step of a Worker's life. Whenever such
     an event happens, the corresponding method on this class will be called. Note that the
     user code always runs within the Worker's main thread.
 
@@ -329,7 +330,7 @@ class WorkerPlugin:
 class NannyPlugin:
     """Interface to extend the Nanny
 
-    A worker plugin enables custom code to run at different stages of the Workers'
+    A worker plugin enables custom code to run at different stages of the Worker's
     lifecycle. A nanny plugin does the same thing, but benefits from being able
     to run code before the worker is started, or to restart the worker if
     necessary.
@@ -818,7 +819,7 @@ class ForwardLoggingPlugin(WorkerPlugin):
         higher, even if the forwarded logger's own level is lower.
 
     topic : str
-        The name of the topic to which to the worker should log the forwarded log
+        The name of the topic to which the worker should log the forwarded log
         records.
     """
 
@@ -897,7 +898,7 @@ UPLOAD_DIRECTORY_MODES = ["all", "scheduler", "workers"]
 
 
 class UploadDirectory(SchedulerPlugin):
-    """Scheduler to upload a local directory to the cluster.
+    """Scheduler plugin to upload a local directory to the cluster.
 
     Parameters
     ----------

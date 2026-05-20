@@ -16,7 +16,7 @@ logger = logging.getLogger("distributed.dask_ssh")
         """Launch a Dask cluster over SSH. A 'dask scheduler' process will run on the
         first host specified in [HOSTNAMES] or in the hostfile, unless --scheduler is specified
         explicitly. One or more 'dask worker' processes will be run on each host. Use the flag
-        --nworkers to adjust how many dask worker process are run on each host and the flag
+        --nworkers to adjust how many dask worker processes are run on each host and the flag
         --nthreads to adjust how many CPUs are used by each dask worker process."""
     ),
 )

@@ -52,7 +52,7 @@ def test_unpack_frames_partial():
         unpack_frames(b"".join(frames[:-1]))
 
 
-class TestMergeMemroyviews:
+class TestMergeMemoryviews:
     def test_empty(self):
         empty = merge_memoryviews([])
         assert isinstance(empty, memoryview) and len(empty) == 0

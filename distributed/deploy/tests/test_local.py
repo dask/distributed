@@ -822,7 +822,7 @@ def test_local_tls(loop, temporary):
             **c.security.get_connection_args("client"),
         )
 
-        # If we connect to a TLS localculster without ssl information we should fail
+        # If we connect to a TLS localcluster without ssl information we should fail
         sync(
             loop,
             assert_cannot_connect,

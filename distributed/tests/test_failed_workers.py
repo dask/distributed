@@ -613,7 +613,7 @@ async def test_failing_worker_with_additional_replicas_on_cluster(c, s, w0, w2):
         # We'll schedule tasks on two workers, s.t. f1 is replicated. We will
         # suspend one of the workers and kill the origin worker of f1 such that a
         # comm failure causes the worker to handle a missing dependency. It will ask
-        # the schedule such that it knows that a replica is available on f2 and
+        # the scheduler such that it knows that a replica is available on f2 and
         # reschedules the fetch
         f2 = c.submit(dummy, f1, key="f2", workers=[w1.worker_address])
         f3 = c.submit(dummy, f1, key="f3", workers=[w2.worker_address])

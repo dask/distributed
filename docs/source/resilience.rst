@@ -8,7 +8,7 @@ failures and other known bugs.
 User code failures
 ------------------
 
-When a function raises an error that error is kept and transmitted to the
+When a function raises an error, that error is kept and transmitted to the
 client on request.  Any attempt to gather that result *or any dependent
 result* will raise that exception.
 
@@ -40,7 +40,7 @@ future computations then those results will be recomputed by surviving workers.
 The scheduler maintains a full history of how each result was produced and so is
 able to reproduce those same computations on other workers.
 
-This has some fail cases.
+This has some failure cases.
 
 1.  If results depend on impure functions then you may get a different
     (although still entirely accurate) result
