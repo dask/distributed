@@ -118,7 +118,7 @@ class AsyncTaskGroup(_LoopBoundMixin):
 
         Returns
         -------
-            None
+        None
 
         Raises
         ------

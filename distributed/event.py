@@ -250,7 +250,7 @@ class Event:
         return self.client.sync(self.client.scheduler.event_clear, name=self.name)
 
     def set(self):
-        """Set the event (set its flag to true).
+        """Set the event (set its flag to True).
 
         All waiters will now be released.
         """

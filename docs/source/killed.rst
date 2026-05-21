@@ -92,7 +92,7 @@ Killed by Nanny
 '''''''''''''''
 
 The Dask "nanny" is a process which watches the worker, and restarts it if
-necessary. It also tracks the worker's memory usage, and if it crosses
+necessary. It also tracks the worker's memory usage and, if it crosses
 a given fraction of total memory, then also the worker will be restarted,
 interrupting any work in progress. The log will show a message like
 

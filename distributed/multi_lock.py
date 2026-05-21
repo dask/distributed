@@ -79,12 +79,13 @@ class MultiLockExtension:
                     return True
         return False
 
-    def _retain_locks(self, locks, id):
-        """Cancel/release previously requested/acquired locks
+    def _retain_locks(self, locks: list[str], id: Hashable) -> None:
+        """Cancel/release previously requested/acquired locks not in the
+        given allowlist
 
         Parameters
         ----------
-        locks: List[str]
+        locks: list[str]
             Names of the locks to retain.
         id: Hashable
             Identifier of the `MultiLock` instance retaining the locks.
