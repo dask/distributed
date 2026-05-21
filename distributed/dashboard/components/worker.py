@@ -463,7 +463,7 @@ def systemmonitor_doc(worker, extra, doc):
     doc.add_root(sysmon.root)
 
 
-@standard_doc("Dask Work Counters", active_page="counters")
+@standard_doc("Dask Worker Counters", active_page="counters")
 def counters_doc(server, extra, doc):
     counter = Counters(server, sizing_mode="stretch_both")
     add_periodic_callback(doc, counter, 500)

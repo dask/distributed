@@ -132,11 +132,11 @@ Resources are Abstract
 ----------------------
 
 Resources listed in this way are just abstract quantities.  We could equally
-well have used terms "mem", "memory", "bytes" etc. above because, from Dask's
+have used terms "mem", "memory", "bytes" etc. above because, from Dask's
 perspective, this is just an abstract term.  You can choose any term as long as
 you are consistent across workers and clients.
 
-It's worth noting that Dask separately track number of cores and available
+It's worth noting that Dask separately tracks the number of cores and available
 memory as actual resources and uses these in normal scheduling operation.
 
 

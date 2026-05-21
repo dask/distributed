@@ -183,7 +183,7 @@ def test_retry_no_exception(cleanup):
 
 
 def test_retry0_raises_immediately(cleanup):
-    # test that using max_reties=0 raises after 1 call
+    # test that using max_retries=0 raises after 1 call
 
     n_calls = 0
 

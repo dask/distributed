@@ -116,7 +116,7 @@ async def test_jupyter_idle_timeout_returned():
 @pytest.mark.slow
 @pytest.mark.xfail(WINDOWS, reason="Subprocess launching scheduler TimeoutError")
 @pytest.mark.xfail(MACOS, reason="Client fails to connect on OSX")
-def test_shutsdown_cleanly(requires_default_ports):
+def test_shutdowns_cleanly(requires_default_ports):
     requests = pytest.importorskip("requests")
 
     port = open_port()

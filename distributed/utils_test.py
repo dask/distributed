@@ -1887,7 +1887,7 @@ def assert_valid_story(story, ordered_timestamps=True):
     story: list[tuple]
         Output of Worker.story
     ordered_timestamps: bool, optional
-        If False, timestamps are not required to be monotically increasing.
+        If False, timestamps are not required to be monotonically increasing.
         Useful for asserting stories composed from the scheduler and
         multiple workers
     """
@@ -1966,7 +1966,7 @@ def assert_story(
         If False (the default), the story may contain more events than expect; extra
         events are ignored.
     ordered_timestamps: bool, optional
-        If False, timestamps are not required to be monotically increasing.
+        If False, timestamps are not required to be monotonically increasing.
         Useful for asserting stories composed from the scheduler and
         multiple workers
     """

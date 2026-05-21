@@ -93,7 +93,7 @@ def test_has_cuda_context():
         raise e
 
 
-def test_1_visible_devices():
+def test_one_visible_devices():
     if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 

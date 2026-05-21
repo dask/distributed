@@ -43,7 +43,7 @@ class SemaphoreMetricCollector(PrometheusCollector):
             self.build_name("release_total"),
             "Total number of leases released per semaphore\n"
             "Note: If a semaphore is closed while there are still leases active, "
-            "this count will not equal `semaphore_acquired_total` after execution.",
+            "this count will not equal `semaphore_acquire_total` after execution.",
             labels=["name"],
         )
 

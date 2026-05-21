@@ -214,7 +214,7 @@ class DumpArtefact(Mapping):
         Returns
         -------
         stories : dict
-            A dict of stories for the keys/stimulus ID's in ``*key_or_stimulus_id`.`
+            A dict of stories for the keys/stimulus ID's in ``*key_or_stimulus_id``.
         """
         keys = set(key_or_stimulus_id)
         stories = defaultdict(list)
@@ -275,7 +275,7 @@ class DumpArtefact(Mapping):
     ) -> None:
         """
         Splits the Dump Artefact into a tree of yaml files with
-        ``root_dir`` as it's base.
+        ``root_dir`` as its base.
 
         The root level of the tree contains a directory for the scheduler
         and directories for each individual worker.

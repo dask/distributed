@@ -865,7 +865,7 @@ async def test_actor_worker_host_leaves_gracefully(c, s, a):
         enter_ev = Event()
         wait_ev = Event()
 
-        def foo(couner, enter_ev, wait_ev):
+        def foo(counter, enter_ev, wait_ev):
             enter_ev.set()
             wait_ev.wait()
 
@@ -896,7 +896,7 @@ async def test_actor_worker_host_dies(c, s, a):
         enter_ev = Event()
         wait_ev = Event()
 
-        def foo(couner, enter_ev, wait_ev):
+        def foo(counter, enter_ev, wait_ev):
             enter_ev.set()
             wait_ev.wait()
 

@@ -37,7 +37,7 @@ and giving up on parallelism.
 
 **Good example**
 
-We do want to steal task tasks that only need to move dependent pieces of data,
+We do want to steal tasks that only need to move dependent pieces of data,
 especially when the computation time is expensive (here 100 seconds.)
 
 .. code-block:: python
@@ -61,7 +61,7 @@ would finish more quickly if stolen or if it remains on the original/victim
 worker.
 
 The longer the backlog of stealable tasks, and the smaller the number of active
-workers we have both increase our willingness to steal.  This is balanced
+workers, both increase our willingness to steal.  This is balanced
 against the compute-to-communicate cost ratio.
 
 Replicate Popular Data
@@ -129,14 +129,14 @@ the task and sends a response to the scheduler:
     scheduler that it should not replicate the task elsewhere.
 
 This avoids redundant work, and also the duplication of side effects for more
-exotic tasks.  However, concurrent or repeated execution of the same task *is
+exotic tasks. However, concurrent or repeated execution of the same task *is
 still possible* in the event of worker death or a disrupted network connection.
 
 
 Disabling Work Stealing
 ---------------------------
 
-Work stealing is a toggleable setting on the Dask Scheduler; to disable 
-work stealing, you can toggle the scheduler ``work-stealing`` configuration 
+Work stealing is a toggleable setting on the Dask Scheduler; to disable
+work stealing, you can toggle the scheduler ``work-stealing`` configuration
 option to ``"False"`` either by setting ``DASK_DISTRIBUTED__SCHEDULER__WORK_STEALING="False"``
 or through your `Dask configuration file <https://docs.dask.org/en/latest/configuration.html>`_

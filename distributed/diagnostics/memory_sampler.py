@@ -123,7 +123,7 @@ class MemorySampler:
             self.samples[label or key] = samples
 
     def to_pandas(self, *, align: bool = False) -> pd.DataFrame:
-        """Return the data series as a pandas.Dataframe.
+        """Return the data series as a pandas DataFrame.
 
         Parameters
         ==========

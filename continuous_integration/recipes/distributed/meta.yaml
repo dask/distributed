@@ -71,7 +71,7 @@ about:
   license_file: LICENSE.txt
   description: |
     Distributed is a lightweight library for distributed computing in Python.
-    It extends both the concurrent.futures and dask APIs to moderate sized
+    It extends both the concurrent.futures and dask APIs to moderately sized
     clusters.
   doc_url: https://distributed.dask.org
   doc_source_url: https://github.com/dask/distributed/blob/main/docs/source/index.rst

@@ -21,7 +21,7 @@ class KillWorker(WorkerPlugin):
     ----------
     delay: str
         The expected amount of time for a worker to live.
-        The actual time will vary, treating worker death as a poisson process.
+        The actual time will vary, treating worker death as a Poisson process.
     mode: str
         or "graceful" which calls worker.close(...)
         Either "sys.exit" which calls sys.exit(0)

@@ -92,7 +92,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     type=bool,
     default=False,
     show_default=True,
-    help="User xheaders in dashboard app for ssl termination in header",
+    help="Use xheaders in dashboard app for ssl termination in header",
 )
 @click.option("--pid-file", type=str, default="", help="File to write the process PID")
 @click.option(

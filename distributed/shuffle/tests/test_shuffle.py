@@ -1519,7 +1519,7 @@ async def test_crashed_worker_after_shuffle_persisted(c, s, a):
         Nanny(s.address, nthreads=1) as n,
         wait_until_worker_has_tasks(UNPACK_PREFIX, n.worker_address, 1, s) as event,
     ):
-        df = df = dask.datasets.timeseries(
+        df = dask.datasets.timeseries(
             start="2000-01-01",
             end="2000-01-10",
             dtypes={"x": float, "y": float},

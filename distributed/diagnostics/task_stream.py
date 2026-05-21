@@ -114,8 +114,6 @@ def rectangles(msgs, workers=None, start_boundary=0):
             worker_thread = f"{msg['worker']}-{msg['thread']}"
         except Exception:
             continue
-            logger.warning("Message contained bad information: %s", msg, exc_info=True)
-            worker_thread = ""
 
         if worker_thread not in workers:
             workers[worker_thread] = len(workers) / 2

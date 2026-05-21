@@ -1614,7 +1614,7 @@ class Client(SyncMethodMixin):
                 await self.scheduler.identity(n_workers=n_workers)
             )
         except OSError:
-            logger.debug("Not able to query scheduler for identity")
+            logger.debug("Unable to query scheduler for identity")
 
     async def _wait_for_workers(
         self, n_workers: int, timeout: float | None = None

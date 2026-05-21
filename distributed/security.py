@@ -36,19 +36,19 @@ class Security:
     tls_client_key : str, optional
         Path to a key file for the client, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
-        parameter be omitted.
+        parameter may be omitted.
     tls_scheduler_cert : str, optional
         Path to a certificate file for the scheduler, encoded in PEM format.
     tls_scheduler_key : str, optional
         Path to a key file for the scheduler, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
-        parameter be omitted.
+        parameter may be omitted.
     tls_worker_cert : str, optional
         Path to a certificate file for a worker, encoded in PEM format.
     tls_worker_key : str, optional
         Path to a key file for a worker, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
-        parameter be omitted.
+        parameter may be omitted.
     extra_conn_args : mapping, optional
         Mapping with keyword arguments to pass down to connections.
     """

@@ -161,9 +161,9 @@ class ContextMeter:
 
     Usage
     -----
-    1. In high level code, call :meth:`add_callback` to install a hook that defines an
+    1. In high-level code, call :meth:`add_callback` to install a hook that defines an
        activity
-    2. In low level code, typically many stack levels below, log quantitative events
+    2. In low-level code, typically many stack levels below, log quantitative events
        (e.g. elapsed time, transferred bytes, etc.) so that they will be attributed to
        the high-level code calling it, either with :meth:`meter`,
        :meth:`meter_function`, or :meth:`digest_metric`.

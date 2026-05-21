@@ -74,7 +74,7 @@ MsgPack as a base serialization format for the following reasons:
    anywhere near being a bottleneck, even under heavy use.
 *  Unlike JSON it supports bytestrings
 *  It covers the standard set of types necessary to encode most information
-*  It is widely implemented in a number of languages (see cross language
+*  It is widely implemented in a number of languages (see cross-language
    section below)
 
 However, MsgPack fails (correctly) in the following ways:
@@ -148,7 +148,7 @@ This has a few advantages:
     (like R or Julia) and reuse the Python scheduler.  The worker and client
     code is fairly simple and much easier to reimplement than the scheduler,
     which is complex.
-3.  The scheduler might some day be rewritten in more heavily optimized C or Go
+3.  The scheduler might someday be rewritten in more heavily optimized C or Go
 
 Compression
 -----------
@@ -163,7 +163,7 @@ compression is at least a 10% improvement, we send the compressed bytes rather
 than the original payload.  We record the compression used within the header as
 a string like ``'lz4'`` or ``'snappy'``.
 
-To avoid compressing large amounts of uncompressable data we first try to
+To avoid compressing large amounts of incompressible data we first try to
 compress a sample.  We take 10kB chunks from five locations in the dataset,
 arrange them together, and try compressing the result.  If this doesn't result
 in significant compression then we don't try to compress the full result.
@@ -260,7 +260,7 @@ These frames are optional.
 Payload frames are used to send large or language-specific data.  These values
 will be inserted into the administrative message after they are decoded.  The
 header is msgpack encoded and contains encoding and compression information for
-the all subsequent payload messages.
+all subsequent payload messages.
 
 A Payload may be spread across many frames.  Each frame may be separately
 compressed.

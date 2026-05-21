@@ -9,7 +9,7 @@ Performance
 
 -  The central scheduler spends a few hundred microseconds on every task.  For
    optimal performance, task durations should be greater than 10-100ms.
--  Dask can not parallelize within individual tasks.  Individual tasks should
+-  Dask cannot parallelize within individual tasks.  Individual tasks should
    be a comfortable size so as not to overwhelm any particular worker.
 -  Dask assigns tasks to workers heuristically.  It *usually* makes the right
    decision, but non-optimal situations do occur.
