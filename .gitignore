@@ -39,3 +39,6 @@ test_short_report.html
 
 # Test failures will dump the cluster state in here
 test_cluster_dump/
+# pixi environments
+.pixi/*
+!.pixi/config.toml
