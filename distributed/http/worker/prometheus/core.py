@@ -52,15 +52,6 @@ class WorkerMetricCollector(PrometheusCollector):
                 tasks.add_metric([state], n)
         yield tasks
 
-        yield GaugeMetricFamily(
-            self.build_name("concurrent_fetch_requests"),
-            (
-                "Deprecated: This metric has been renamed to transfer_incoming_count.\n"
-                "Number of open fetch requests to other workers"
-            ),
-            value=ws.transfer_incoming_count,
-        )
-
         if self.server.monitor.monitor_gil_contention:
             yield CounterMetricFamily(
                 self.build_name("gil_contention"),

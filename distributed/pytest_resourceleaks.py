@@ -19,7 +19,7 @@ If you do, the specified checks won't report errors.
 
 Known issues
 ------------
-- Tests that contain imports will be flagged as leaking RAM (memory and tracemallock
+- Tests that contain imports will be flagged as leaking RAM (memory and tracemalloc
   checks) if it's the first time in the test suite that the import happens; e.g.
 
       def test1():

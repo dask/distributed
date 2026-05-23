@@ -1047,50 +1047,6 @@ async def test_release_evloop_while_spilling(c, s, a):
     assert not any(v for k, v in c.items() if k >= 2.0), dict(c)
 
 
-@pytest.mark.parametrize(
-    "cls,name,value",
-    [
-        (Worker, "memory_limit", 123e9),
-        (Worker, "memory_target_fraction", 0.789),
-        (Worker, "memory_spill_fraction", 0.789),
-        (Worker, "memory_pause_fraction", 0.789),
-        (Nanny, "memory_limit", 123e9),
-        (Nanny, "memory_terminate_fraction", 0.789),
-    ],
-)
-@gen_cluster(nthreads=[])
-async def test_deprecated_attributes(s, cls, name, value):
-    async with cls(s.address) as a:
-        with pytest.warns(FutureWarning, match=name):
-            setattr(a, name, value)
-        with pytest.warns(FutureWarning, match=name):
-            assert getattr(a, name) == value
-        assert getattr(a.memory_manager, name) == value
-
-
-@gen_cluster(nthreads=[("", 1)])
-async def test_deprecated_memory_monitor_method_worker(s, a):
-    with pytest.warns(FutureWarning, match="memory_monitor"):
-        await a.memory_monitor()
-
-
-@gen_cluster(nthreads=[("", 1)], Worker=Nanny)
-async def test_deprecated_memory_monitor_method_nanny(s, a):
-    with pytest.warns(FutureWarning, match="memory_monitor"):
-        a.memory_monitor()
-
-
-@pytest.mark.parametrize(
-    "name",
-    ["memory_target_fraction", "memory_spill_fraction", "memory_pause_fraction"],
-)
-@gen_cluster(nthreads=[])
-async def test_deprecated_params(s, name):
-    with pytest.warns(FutureWarning, match=name):
-        async with Worker(s.address, **{name: 0.789}) as a:
-            assert getattr(a.memory_manager, name) == 0.789
-
-
 @gen_cluster(config={"distributed.worker.memory.monitor-interval": "10ms"})
 async def test_pause_while_idle(s, a, b):
     sa = s.workers[a.address]

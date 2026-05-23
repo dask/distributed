@@ -77,7 +77,7 @@ def test_soft_memory_limit_cgroups2(monkeypatch):
             # Absurdly low, unlikely to match real value
             return io.StringIO("20")
         if path == "/sys/fs/cgroup/memory.high":
-            # should take precedence
+            # Should take precedence
             return io.StringIO("10")
         return builtin_open(path, *args, **kwargs)
 
@@ -96,7 +96,7 @@ def test_softest_memory_limit_cgroups2(monkeypatch):
             # Absurdly low, unlikely to match real value
             return io.StringIO("20")
         if path == "/sys/fs/cgroup/memory.low":
-            # should take precedence
+            # Should take precedence
             return io.StringIO("10")
         return builtin_open(path, *args, **kwargs)
 

@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from typing import ClassVar, Literal, cast
+from typing import ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -57,11 +57,7 @@ from distributed.utils import (
     wait_for,
 )
 from distributed.worker import Worker, run
-from distributed.worker_memory import (
-    DeprecatedMemoryManagerAttribute,
-    DeprecatedMemoryMonitor,
-    NannyMemoryManager,
-)
+from distributed.worker_memory import NannyMemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +98,7 @@ class Nanny(ServerNode):
            For the same reason, be warned that changing
            ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
            ``forkserver`` may inhibit some environment variables; if you do, you should
-           set the variables yourself in the shell before you start ``dask-worker``.
+           set the variables yourself in the shell before you start ``dask worker``.
 
     See Also
     --------
@@ -127,7 +123,6 @@ class Nanny(ServerNode):
         scheduler_file=None,
         worker_port: int | str | Collection[int] | None = 0,
         nthreads=None,
-        loop=None,
         local_directory=None,
         services=None,
         name=None,
@@ -154,14 +149,6 @@ class Nanny(ServerNode):
         config=None,
         **worker_kwargs,
     ):
-        if loop is not None:
-            warnings.warn(
-                "the `loop` kwarg to `Nanny` is ignored, and will be removed in a future release. "
-                "The Nanny always binds to the current loop.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         self.__exit_stack = stack = contextlib.ExitStack()
         self.process = None
         self._setup_logging(logger)
@@ -285,11 +272,6 @@ class Nanny(ServerNode):
 
         self._listen_address = listen_address
         Nanny._instances.add(self)
-
-    # Deprecated attributes; use Nanny.memory_manager.<name> instead
-    memory_limit = DeprecatedMemoryManagerAttribute()
-    memory_terminate_fraction = DeprecatedMemoryManagerAttribute()
-    memory_monitor = DeprecatedMemoryMonitor()
 
     def __repr__(self):
         return f"<Nanny: {self.worker_address}, threads: {self.nthreads}>"
@@ -462,14 +444,7 @@ class Nanny(ServerNode):
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
-        if not isinstance(plugin, NannyPlugin):
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin inherits from `NannyPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        plugin = cast(NannyPlugin, plugin)
+        assert isinstance(plugin, NannyPlugin)
 
         if name is None:
             name = _get_plugin_name(plugin)

@@ -3,7 +3,6 @@ from __future__ import annotations
 import html
 import logging
 import sys
-import warnings
 import weakref
 from collections.abc import Callable
 from contextlib import suppress
@@ -144,13 +143,6 @@ class TextProgressBar(ProgressBar):
             # loop is still acceptable - so we cache access to the loop.
             self.__loop = loop = self._loop_runner.loop
         return loop
-
-    @loop.setter
-    def loop(self, value: IOLoop) -> None:
-        warnings.warn(
-            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        self.__loop = value
 
     def _draw_bar(self, remaining, all, **kwargs):
         frac = (1 - remaining / all) if all else 1.0

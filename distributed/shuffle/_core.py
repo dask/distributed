@@ -228,7 +228,7 @@ class ShuffleRun(Generic[_T_partition_id, _T_partition_type]):
         self, address: str, shards: list[tuple[_T_partition_id, Any]]
     ) -> OKMessage | ErrorMessage:
         if _mean_shard_size(shards) < 65536:
-            # Don't send buffers individually over the tcp comms.
+            # Don't send buffers individually over the TCP comms.
             # Instead, merge everything into an opaque bytes blob, send it all at once,
             # and unpickle it on the other side.
             # Performance tests informing the size threshold:

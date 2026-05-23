@@ -156,8 +156,8 @@ keyword argument.  In this case keys are randomly generated (by ``uuid4``.)
 .. _pure: https://toolz.readthedocs.io/en/latest/purity.html
 
 
-Async/await Operation
----------------------
+Async/await Operations
+----------------------
 
 If we are operating in an asynchronous environment then the blocking functions
 listed above become asynchronous equivalents.  You must start your client

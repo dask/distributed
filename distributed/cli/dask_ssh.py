@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
-import warnings
 from textwrap import dedent
 
 import click
@@ -18,7 +16,7 @@ logger = logging.getLogger("distributed.dask_ssh")
         """Launch a Dask cluster over SSH. A 'dask scheduler' process will run on the
         first host specified in [HOSTNAMES] or in the hostfile, unless --scheduler is specified
         explicitly. One or more 'dask worker' processes will be run on each host. Use the flag
-        --nworkers to adjust how many dask worker process are run on each host and the flag
+        --nworkers to adjust how many dask worker processes are run on each host and the flag
         --nthreads to adjust how many CPUs are used by each dask worker process."""
     ),
 )
@@ -146,13 +144,6 @@ def main(
     remote_dask_worker,
     local_directory,
 ):
-    if "dask-ssh" in sys.argv[0]:
-        warnings.warn(
-            "dask-ssh is deprecated and will be removed in a future release; use `dask ssh` instead",
-            FutureWarning,
-            stacklevel=1,
-        )
-
     try:
         hostnames = list(hostnames)
         if hostfile:

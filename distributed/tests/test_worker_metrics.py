@@ -130,10 +130,10 @@ async def test_task_lifecycle(c, s, a, b):
 async def test_async_task(c, s, a):
     """Test that async tasks are metered"""
     await c.submit(asyncio.sleep, 0.1, key=("x-123", 0))
-    assert a.digests_total["execute", span_id(s), "x" "thread-cpu", "seconds"] == 0
-    assert (
-        0 < a.digests_total["execute", span_id(s), "x", "thread-noncpu", "seconds"] < 1
-    )
+    cpu = a.digests_total["execute", span_id(s), "x", "thread-cpu", "seconds"]
+    noncpu = a.digests_total["execute", span_id(s), "x", "thread-noncpu", "seconds"]
+    assert cpu == 0
+    assert 0 < noncpu < 1
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

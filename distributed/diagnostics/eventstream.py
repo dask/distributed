@@ -47,7 +47,7 @@ async def eventstream(address, interval):
          'disk_load_start': time(), 'disk_load_stop': time(),
          'other': 'junk'}
 
-    Where ``status`` is either 'OK', or 'error'
+    Where ``status`` is either `OK` or `error`
 
     Parameters
     ----------

@@ -4,53 +4,11 @@ import datetime
 import os
 import ssl
 import tempfile
-import warnings
 
 import dask
 from dask.widgets import get_template
 
 __all__ = ("Security",)
-
-
-if ssl.OPENSSL_VERSION_INFO >= (1, 1, 0, 7):
-    # The OP_NO_SSL* and OP_NO_TLS* become deprecated in favor of
-    # 'SSLContext.minimum_version' from Python 3.7 onwards, however
-    # this attribute is not available unless the ssl module is compiled
-    # with OpenSSL 1.1.0g or newer.
-    # https://docs.python.org/3.10/library/ssl.html#ssl.SSLContext.minimum_version
-    # https://docs.python.org/3.7/library/ssl.html#ssl.SSLContext.minimum_version
-
-    # these _set_minimum_version and _set_maximum_version depend on the validation
-    # already performed in `Security._set_tls_version_field`,
-    # and that they only apply to freshly created ssl.SSLContext instances in
-    # _get_tls_context
-    def _set_minimum_version(ctx: ssl.SSLContext, version: ssl.TLSVersion) -> None:
-        ctx.minimum_version = version
-
-    def _set_maximum_version(ctx: ssl.SSLContext, version: ssl.TLSVersion) -> None:
-        ctx.maximum_version = version
-
-else:
-
-    def _set_minimum_version(ctx: ssl.SSLContext, version: ssl.TLSVersion) -> None:
-        # if the ctx.maximum_version attribute is unsupported then we can infer
-        # that TLS 1.3 is not supported.
-        # _set_tls_version_field enforces that version is TLSVersion.TLSv1_2,
-        # or TLSVersion.TLSv1_3
-        if version is not ssl.TLSVersion.TLSv1_2:
-            raise ValueError(f"Unsupported TLS/SSL version: {version!r}")
-        ctx.options |= (
-            ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3 | ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
-        )
-
-    def _set_maximum_version(ctx: ssl.SSLContext, version: ssl.TLSVersion) -> None:
-        # if the ctx.maximum_version attribute is unsupported then we can infer
-        # that TLSv1_3 is not supported.
-        # _set_tls_version_field enforces that version is TLSVersion.TLSv1_2,
-        # TLSVersion.TLSv1_3, or None
-        # _get_tls_context enforces that version is not None
-        if version is not ssl.TLSVersion.TLSv1_2:
-            raise ValueError(f"Unsupported TLS/SSL version: {version!r}")
 
 
 class Security:
@@ -78,19 +36,19 @@ class Security:
     tls_client_key : str, optional
         Path to a key file for the client, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
-        parameter be omitted.
+        parameter may be omitted.
     tls_scheduler_cert : str, optional
         Path to a certificate file for the scheduler, encoded in PEM format.
     tls_scheduler_key : str, optional
         Path to a key file for the scheduler, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
-        parameter be omitted.
+        parameter may be omitted.
     tls_worker_cert : str, optional
         Path to a certificate file for a worker, encoded in PEM format.
     tls_worker_key : str, optional
         Path to a key file for a worker, encoded in PEM format.
         Alternatively, the key may be appended to the cert file, and this
-        parameter be omitted.
+        parameter may be omitted.
     extra_conn_args : mapping, optional
         Mapping with keyword arguments to pass down to connections.
     """
@@ -112,11 +70,8 @@ class Security:
 
     def __init__(self, require_encryption=None, **kwargs):
         if ssl.OPENSSL_VERSION_INFO < (1, 1, 1):
-            warnings.warn(
-                f"support for {ssl.OPENSSL_VERSION} is deprecated,"
-                " and will be removed in a future release",
-                DeprecationWarning,
-            )
+            raise ImportError("Dask TLS support requires OpenSSL 1.1.1 or newer")
+
         extra = set(kwargs).difference(self.__slots__)
         if extra:
             raise TypeError(f"Unknown parameters: {sorted(extra)!r}")
@@ -299,9 +254,11 @@ class Security:
 
             # the _set_tls_version_field method enforces that
             # self.tls_min_version is TLSv1_2, or TLSv1_3
-            _set_minimum_version(ctx, self.tls_min_version)
+            # This depends on the validation already performed in
+            # `Security._set_tls_version_field`.
+            ctx.minimum_version = self.tls_min_version
             if self.tls_max_version is not None:
-                _set_maximum_version(ctx, self.tls_max_version)
+                ctx.maximum_version = self.tls_max_version
 
             cert_in_memory = "\n" in cert
             key_in_memory = key is not None and "\n" in key

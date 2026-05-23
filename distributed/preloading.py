@@ -129,7 +129,7 @@ def _import_module(name: str, file_dir: str | None = None) -> ModuleType:
 def _download_module(url: str) -> ModuleType:
     logger.info("Downloading preload at %s", url)
     assert is_webaddress(url)
-    # This is the only place where urrllib3 is used and it is a relatively heavy
+    # This is the only place where urllib3 is used and it is a relatively heavy
     # import. Do lazy import to reduce import time
     import urllib3
 

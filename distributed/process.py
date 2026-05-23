@@ -268,7 +268,7 @@ class AsyncProcess:
         # logging may fail - defer calls to after the callback is added
         if original_exit_code is None:
             logger.warning(
-                "[%s] process %r exit status was already read will report exitcode 255",
+                "[%s] process %r exit status was already read, will report exitcode 255",
                 r,
                 state.pid,
             )

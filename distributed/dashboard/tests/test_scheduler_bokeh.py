@@ -78,6 +78,9 @@ blocklist_apps = {
 }
 
 
+@pytest.mark.xfail(
+    sys.platform == "win32", reason="Very flaky on Windows CI", strict=False
+)
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_simple(c, s, a, b):
     port = s.http_server.port

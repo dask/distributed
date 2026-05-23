@@ -546,7 +546,7 @@ def test_compute_sync(client):
     assert result == 0 + 1 + 2 + 3 + 4
 
     def check(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(check).values()):
@@ -630,7 +630,7 @@ def test_worker_actor_handle_is_weakref_sync(client):
     del counter
 
     def check(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(check).values()):
@@ -651,7 +651,7 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
     final.compute(actors=counter, optimize_graph=False)
 
     def worker_tasks_running(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(worker_tasks_running).values()):
@@ -865,7 +865,7 @@ async def test_actor_worker_host_leaves_gracefully(c, s, a):
         enter_ev = Event()
         wait_ev = Event()
 
-        def foo(couner, enter_ev, wait_ev):
+        def foo(counter, enter_ev, wait_ev):
             enter_ev.set()
             wait_ev.wait()
 
@@ -896,7 +896,7 @@ async def test_actor_worker_host_dies(c, s, a):
         enter_ev = Event()
         wait_ev = Event()
 
-        def foo(couner, enter_ev, wait_ev):
+        def foo(counter, enter_ev, wait_ev):
             enter_ev.set()
             wait_ev.wait()
 

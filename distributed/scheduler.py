@@ -67,8 +67,6 @@ from dask._task_spec import GraphNode, convert_legacy_graph
 from dask.core import istask, validate_key
 from dask.typing import Key, no_default
 from dask.utils import (
-    _deprecated,
-    _deprecated_kwarg,
     format_bytes,
     format_time,
     key_split,
@@ -374,16 +372,6 @@ class MemoryState:
     @property
     def optimistic(self) -> int:
         return self.managed + self.unmanaged_old
-
-    @property
-    def managed_in_memory(self) -> int:
-        warnings.warn("managed_in_memory has been renamed to managed", FutureWarning)
-        return self.managed
-
-    @property
-    def managed_spilled(self) -> int:
-        warnings.warn("managed_spilled has been renamed to spilled", FutureWarning)
-        return self.spilled
 
     def __repr__(self) -> str:
         return (
@@ -1067,19 +1055,9 @@ class TaskPrefix(TaskCollection):
                 del self._types[typename]
 
     @property
-    @_deprecated(use_instead="groups")  # type: ignore[untyped-decorator]
-    def active(self) -> Set[TaskGroup]:
-        return self.groups
-
-    @property
     def groups(self) -> Set[TaskGroup]:
         """Insertion-sorted set-like of groups associated to this prefix"""
         return self._groups.keys()
-
-    @property
-    @_deprecated(use_instead="states")  # type: ignore[untyped-decorator]
-    def active_states(self) -> dict[TaskStateState, int]:
-        return self.states
 
     def __repr__(self) -> str:
         return (
@@ -3917,7 +3895,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __init__(
         self,
-        loop: IOLoop | None = None,
+        *,
         services: dict | None = None,
         service_kwargs: dict | None = None,
         allowed_failures: int | None = None,
@@ -3945,12 +3923,6 @@ class Scheduler(SchedulerState, ServerNode):
         if dask.config.get("distributed.scheduler.pickle", default=True) is False:
             raise RuntimeError(
                 "Pickling can no longer be disabled with the `distributed.scheduler.pickle` option. Please remove this configuration to start the scheduler."
-            )
-        if loop is not None:
-            warnings.warn(
-                "the loop kwarg to Scheduler is deprecated",
-                DeprecationWarning,
-                stacklevel=2,
             )
 
         self.loop = self.io_loop = IOLoop.current()
@@ -5589,7 +5561,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event(worker, {"action": "close-worker"})
         self.worker_send(worker, {"op": "close", "reason": "scheduler-close-worker"})
 
-    @_deprecated_kwarg("safe", "expected")
     @log_errors
     async def remove_worker(
         self,
@@ -5741,19 +5712,9 @@ class Scheduler(SchedulerState, ServerNode):
         awaitables = []
         for plugin in list(self.plugins.values()):
             try:
-                try:
-                    result = plugin.remove_worker(
-                        scheduler=self, worker=address, stimulus_id=stimulus_id
-                    )
-                except TypeError:
-                    parameters = inspect.signature(plugin.remove_worker).parameters
-                    if "stimulus_id" not in parameters and not any(
-                        p.kind is p.VAR_KEYWORD for p in parameters.values()
-                    ):
-                        # Deprecated (see add_plugin)
-                        result = plugin.remove_worker(scheduler=self, worker=address)  # type: ignore
-                    else:
-                        raise
+                result = plugin.remove_worker(
+                    scheduler=self, worker=address, stimulus_id=stimulus_id
+                )
                 if inspect.isawaitable(result):
                     awaitables.append(result)
             except Exception as e:
@@ -6262,15 +6223,6 @@ class Scheduler(SchedulerState, ServerNode):
                 category=UserWarning,
             )
 
-        parameters = inspect.signature(plugin.remove_worker).parameters
-        if not any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
-            warnings.warn(
-                "The signature of `SchedulerPlugin.remove_worker` now requires `**kwargs` "
-                "to ensure that plugins remain forward-compatible. Not including "
-                "`**kwargs` in the signature will no longer be supported in future versions.",
-                FutureWarning,
-            )
-
         self.plugins[name] = plugin
 
     def remove_plugin(self, name: str | None = None) -> None:
@@ -6294,17 +6246,10 @@ class Scheduler(SchedulerState, ServerNode):
         self,
         plugin: bytes | SchedulerPlugin,
         name: str | None = None,
-        idempotent: bool | None = None,
+        *,
+        idempotent: bool,
     ) -> None:
         """Register a plugin on the scheduler."""
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_scheduler_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
         if not isinstance(plugin, SchedulerPlugin):
             plugin = loads(plugin)
             assert isinstance(plugin, SchedulerPlugin)
@@ -8172,18 +8117,10 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(
-        self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
+        self, comm: None, plugin: bytes, name: str, *, idempotent: bool
     ) -> dict[str, OKMessage]:
         """Registers a worker plugin on all running and future workers"""
         logger.info("Registering Worker plugin %s", name)
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_worker_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
         if name in self.worker_plugins and idempotent:
             return {}
 
@@ -8207,19 +8144,10 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def register_nanny_plugin(
-        self, comm: None, plugin: bytes, name: str, idempotent: bool | None = None
+        self, comm: None, plugin: bytes, name: str, idempotent: bool
     ) -> dict[str, OKMessage]:
         """Registers a nanny plugin on all running and future nannies"""
         logger.info("Registering Nanny plugin %s", name)
-
-        if idempotent is None:
-            warnings.warn(
-                "The signature of `Scheduler.register_nanny_plugin` now requires "
-                "`idempotent`. Not including `idempotent` in the signature will no longer "
-                "be supported in future versions.",
-                FutureWarning,
-            )
-            idempotent = False
 
         if name in self.nanny_plugins and idempotent:
             return {}

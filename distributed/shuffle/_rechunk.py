@@ -12,7 +12,7 @@ bricks.
 
 For example, to take an FFT of an n-D array, one uses a sequence of 1D
 FFTs along each axis. The implementation in dask (and indeed almost
-all distributed array frameworks) requires that 1D
+all distributed array frameworks) requires that the
 axis along which the FFT is taken is local to a single brick. So to
 perform the global FFT we need to arrange that each axis in turn is
 local to bricks.

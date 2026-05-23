@@ -12,11 +12,9 @@ import threading
 import traceback
 import types
 import uuid
-import warnings
 import weakref
 from collections import defaultdict, deque
 from collections.abc import (
-    Awaitable,
     Callable,
     Container,
     Coroutine,
@@ -123,19 +121,11 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 @functools.cache
 def _expects_comm(func: Callable) -> bool:
-    sig = inspect.signature(func)
-    params = list(sig.parameters)
-    if params and params[0] == "comm":
-        return True
-    if params and params[0] == "stream":
-        warnings.warn(
-            "Calling the first argument of a RPC handler `stream` is "
-            "deprecated. Defining this argument is optional. Either remove the "
-            f"argument or rename it to `comm` in {func}.",
-            FutureWarning,
-        )
-        return True
-    return False
+    """Return True if func expects a first argument named 'comm';
+    False otherwise.
+    """
+    params = inspect.signature(func).parameters
+    return bool(params) and next(iter(params)) == "comm"
 
 
 class Server:
@@ -237,7 +227,6 @@ class Server:
         deserializers=None,
         connection_args=None,
         timeout=None,
-        io_loop=None,
         local_directory=None,
         needs_workdir=True,
     ):
@@ -272,13 +261,6 @@ class Server:
         if self.local_directory not in sys.path:
             sys.path.insert(0, self.local_directory)
             self._updated_sys_path = True
-
-        if io_loop is not None:
-            warnings.warn(
-                "The io_loop kwarg to Server is ignored and will be deprecated",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         self._status = Status.init
         self.handlers = {
@@ -559,33 +541,18 @@ class Server:
             if not pc.is_running():
                 pc.start()
 
-    def _stop_listeners(self) -> asyncio.Future:
-        listeners_to_stop: set[Awaitable] = set()
-
+    def _stop_listeners(self) -> None:
         for listener in self.listeners:
-            future = listener.stop()
-            if inspect.isawaitable(future):
-                warnings.warn(
-                    f"{type(listener)} is using an asynchronous `stop` method. "
-                    "Support for asynchronous `Listener.stop` has been deprecated and "
-                    "will be removed in a future version",
-                    DeprecationWarning,
-                )
-                listeners_to_stop.add(future)
-            elif hasattr(listener, "abort_handshaking_comms"):
+            listener.stop()
+            if hasattr(listener, "abort_handshaking_comms"):
                 listener.abort_handshaking_comms()
-
-        return asyncio.gather(*listeners_to_stop)
 
     def stop(self) -> None:
         if self.__stopped:
             return
         self.__stopped = True
         self.monitor.close()
-        if not (stop_listeners := self._stop_listeners()).done():
-            self._ongoing_background_tasks.call_soon(
-                asyncio.wait_for(stop_listeners, timeout=None)  # type: ignore[arg-type]
-            )
+        self._stop_listeners()
         if self._workdir is not None:
             self._workdir.release()
 
@@ -932,7 +899,7 @@ class Server:
 
             self.__stopped = True
             self.monitor.close()
-            await self._stop_listeners()
+            self._stop_listeners()
 
             # TODO: Deal with exceptions
             await self._ongoing_background_tasks.stop()
@@ -1194,17 +1161,6 @@ class rpc:
         self.status = Status.closed
         return await asyncio.gather(*self.close_comms())
 
-    def __enter__(self):
-        warnings.warn(
-            "the rpc synchronous context manager is deprecated",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        asyncio.ensure_future(self.close_rpc())
-
     async def __aenter__(self):
         return self
 
@@ -1261,18 +1217,6 @@ class PooledRPCCall:
         return send_recv_from_rpc
 
     async def close_rpc(self):
-        pass
-
-    # For compatibility with rpc()
-    def __enter__(self):
-        warnings.warn(
-            "the rpc synchronous context manager is deprecated",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
         pass
 
     async def __aenter__(self):

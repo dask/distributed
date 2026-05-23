@@ -160,7 +160,7 @@ def test_fast(client):
 
 
 def test_multibar_with_spans(client):
-    """Test progress(group_by='spans'"""
+    """Test progress (group_by='spans')"""
     with span("span 1"):
         L = client.map(inc, range(100))
     with span("span 2"):

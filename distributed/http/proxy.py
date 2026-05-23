@@ -13,7 +13,7 @@ try:
     class GlobalProxyHandler(ProxyHandler):
         """
         A tornado request handler that proxies HTTP and websockets
-        from a port to any valid endpoint'.
+        from a port to any valid endpoint.
         """
 
         def initialize(self, dask_server=None, extra=None):
@@ -46,7 +46,7 @@ try:
             proxied_path = f"/{proxied_path}"
 
             worker = f"{self.host}:{port}"
-            if not check_worker_dashboard_exits(self.scheduler, worker):
+            if not check_worker_dashboard_exists(self.scheduler, worker):
                 msg = f"Worker &lt;{html.escape(worker)}&gt; does not exist"
                 self.set_status(400)
                 self.finish(msg)
@@ -121,7 +121,7 @@ except ImportError:
             self.write(msg)
 
 
-def check_worker_dashboard_exits(scheduler, worker):
+def check_worker_dashboard_exists(scheduler, worker):
     """Check addr:port exists as a worker in scheduler list
 
     Parameters

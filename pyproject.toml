@@ -55,11 +55,6 @@ worker = "distributed.cli.dask_worker:main"
 ssh = "distributed.cli.dask_ssh:main"
 spec = "distributed.cli.dask_spec:main"
 
-[project.scripts]
-dask-ssh = "distributed.cli.dask_ssh:main"
-dask-scheduler = "distributed.cli.dask_scheduler:main"
-dask-worker = "distributed.cli.dask_worker:main"
-
 [tool.setuptools.packages.find]
 exclude = ["*tests*"]
 namespaces = false

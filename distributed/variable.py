@@ -160,8 +160,8 @@ class Variable:
     >>> from dask.distributed import Client, Variable # doctest: +SKIP
     >>> client = Client()  # doctest: +SKIP
     >>> x = Variable('x')  # doctest: +SKIP
-    >>> x.set(123)  # docttest: +SKIP
-    >>> x.get()  # docttest: +SKIP
+    >>> x.set(123)  # doctest: +SKIP
+    >>> x.get()  # doctest: +SKIP
     123
     >>> future = client.submit(f, x)  # doctest: +SKIP
     >>> x.set(future)  # doctest: +SKIP

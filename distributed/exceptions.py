@@ -18,7 +18,7 @@ class Reschedule(Exception):
 
 
 class WorkerStartTimeoutError(TimeoutError):
-    """Raised when the expected number of workers to not start within the timeout period."""
+    """Raised when the expected number of workers do not start within the timeout period."""
 
     #: Number of workers that are available.
     available_workers: int

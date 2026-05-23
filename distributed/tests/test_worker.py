@@ -11,7 +11,6 @@ import sys
 import tempfile
 import threading
 import traceback
-import warnings
 import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -22,7 +21,6 @@ from time import sleep
 import psutil
 import pytest
 from tlz import first, pluck, sliding_window
-from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -590,17 +588,6 @@ async def test_gather_missing_workers_replicated(c, s, a, b, know_real):
 async def test_io_loop(s):
     async with Worker(s.address) as w:
         assert w.io_loop is w.loop is s.loop
-
-
-@gen_cluster(nthreads=[])
-async def test_io_loop_alternate_loop(s, loop):
-    with pytest.warns(
-        DeprecationWarning,
-        match=r"The `loop` argument to `Worker` is ignored, and will be "
-        r"removed in a future release. The Worker always binds to the current loop",
-    ):
-        async with Worker(s.address, loop=loop) as w:
-            assert w.io_loop is w.loop is IOLoop.current()
 
 
 @gen_cluster(client=True)
@@ -2160,6 +2147,16 @@ async def test_executor_inherit_threadname_from_worker(c, s):
         result = await c.gather(c.submit(get_thread_name, pure=False))
         assert "WorkerName-Dask-Default-Threads" in result
 
+    # LocalCluster by default assigns numbers starting from zero
+    # as the worker names
+    async with Worker(
+        s.address,
+        nthreads=1,
+        name=0,
+    ):
+        result = await c.gather(c.submit(get_thread_name, pure=False))
+        assert "0-Dask-Default-Threads" in result
+
     async with Worker(
         s.address,
         nthreads=1,
@@ -3349,22 +3346,6 @@ async def test_do_not_block_event_loop_during_shutdown(s):
     await asyncio.gather(block(), close(), set_future())
 
 
-@gen_cluster(nthreads=[])
-async def test_reconnect_argument_deprecated(s):
-    with pytest.deprecated_call(match="`reconnect` argument"):
-        async with Worker(s.address, reconnect=False):
-            pass
-    with pytest.raises(ValueError, match="reconnect=True"):
-        async with Worker(s.address, reconnect=True):
-            pass
-
-    with warnings.catch_warnings():
-        # No argument should not warn or raise
-        warnings.simplefilter("error")
-        async with Worker(s.address):
-            pass
-
-
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_running_before_running_plugins(c, s, caplog):
     class InitWorkerNewThread(WorkerPlugin):
@@ -3434,23 +3415,6 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # Test that y does not get stuck.
         assert await y == 2
-
-
-@gen_cluster()
-async def test_deprecation_of_renamed_worker_attributes(s, a, b):
-    msg = (
-        "The `Worker.outgoing_count` attribute has been renamed to "
-        "`Worker.transfer_outgoing_count_total`"
-    )
-    with pytest.warns(DeprecationWarning, match=msg):
-        assert a.outgoing_count == a.transfer_outgoing_count_total
-
-    msg = (
-        "The `Worker.outgoing_current_count` attribute has been renamed to "
-        "`Worker.transfer_outgoing_count`"
-    )
-    with pytest.warns(DeprecationWarning, match=msg):
-        assert a.outgoing_current_count == a.transfer_outgoing_count
 
 
 @gen_cluster(client=True, Worker=Nanny)

@@ -150,7 +150,7 @@ properties:
               Controls when a specific task group is identified as rootish when
               worker saturation is set.
             
-              A task group is identifier as rootish if it has only up to a certain number
+              A task group is identified as rootish if it has only up to a certain number
               of dependencies (5 by default). This can be faulty for very large datasets
               where the number of data tasks from xarray can be higher than 5.
               
@@ -164,7 +164,7 @@ properties:
 
             description: |
               Controls the number of transitive dependencies a task group can have to be considered rootish.
-              It checks the number of dependencies each dependency of a rootish task groups has.
+              It checks the number of dependencies each dependency of a rootish task group has.
               
               The same caveats as for `rootish-taskgroup` apply.
 
@@ -291,7 +291,7 @@ properties:
           allowed-imports:
             type: array
             description: |
-              A list of trusted root modules the schedular is allowed to import (incl. submodules). For security reasons, the
+              A list of trusted root modules the scheduler is allowed to import (incl. submodules). For security reasons, the
               scheduler does not import arbitrary Python modules.
 
           active-memory-manager:

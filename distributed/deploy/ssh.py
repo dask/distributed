@@ -71,7 +71,6 @@ class Worker(Process):
         address: str,
         connect_options: dict,
         kwargs: dict,
-        worker_module="deprecated",
         worker_class="distributed.Nanny",
         remote_python=None,
         loop=None,
@@ -79,50 +78,21 @@ class Worker(Process):
     ):
         super().__init__()
 
-        if worker_module != "deprecated":
-            raise ValueError(
-                "worker_module has been deprecated in favor of worker_class. "
-                "Please specify a Python class rather than a CLI module."
+        if loop is not None:
+            warnings.warn(
+                "The `loop` parameter has been deprecated and has no effect.",
+                DeprecationWarning,
+                stacklevel=2,
             )
 
         self.address = address
         self.scheduler = scheduler
         self.worker_class = worker_class
         self.connect_options = connect_options
-        self.kwargs = copy.copy(kwargs)
         self.name = name
         self.remote_python = remote_python
-        if kwargs.get("nprocs") is not None and kwargs.get("n_workers") is not None:
-            raise ValueError(
-                "Both nprocs and n_workers were specified. Use n_workers only."
-            )
-        elif kwargs.get("nprocs") is not None:
-            warnings.warn(
-                "The nprocs argument will be removed in a future release. It has been "
-                "renamed to n_workers.",
-                FutureWarning,
-            )
-            self.n_workers = self.kwargs.pop("nprocs", 1)
-        else:
-            self.n_workers = self.kwargs.pop("n_workers", 1)
-
-    @property
-    def nprocs(self):
-        warnings.warn(
-            "The nprocs attribute will be removed in a future release. It has been "
-            "renamed to n_workers.",
-            FutureWarning,
-        )
-        return self.n_workers
-
-    @nprocs.setter
-    def nprocs(self, value):
-        warnings.warn(
-            "The nprocs attribute will be removed in a future release. It has been "
-            "renamed to n_workers.",
-            FutureWarning,
-        )
-        self.n_workers = value
+        self.kwargs = copy.copy(kwargs)
+        self.n_workers = self.kwargs.pop("n_workers", 1)
 
     async def start(self):
         try:
@@ -291,7 +261,6 @@ def SSHCluster(
     connect_options: dict | list[dict] | None = None,
     worker_options: dict | None = None,
     scheduler_options: dict | None = None,
-    worker_module: str = "deprecated",
     worker_class: str = "distributed.Nanny",
     remote_python: str | list[str] | None = None,
     **kwargs: Any,
@@ -344,7 +313,7 @@ def SSHCluster(
     >>> client = Client(cluster)
 
     Create a cluster with three workers, each with two threads
-    and host the dashdoard on port 8797:
+    and host the dashboard on port 8797:
 
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
@@ -386,12 +355,6 @@ def SSHCluster(
     connect_options = connect_options or {}
     worker_options = worker_options or {}
     scheduler_options = scheduler_options or {}
-
-    if worker_module != "deprecated":
-        raise ValueError(
-            "worker_module has been deprecated in favor of worker_class. "
-            "Please specify a Python class rather than a CLI module."
-        )
 
     if set(kwargs) & old_cluster_kwargs:
         from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster

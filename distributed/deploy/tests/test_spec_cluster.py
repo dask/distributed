@@ -305,14 +305,6 @@ async def test_get_logs():
 
 
 @gen_test()
-async def test_logs_deprecated():
-    async with SpecCluster(asynchronous=True, scheduler=scheduler) as cluster:
-        with pytest.warns(FutureWarning, match="get_logs"):
-            logs = await cluster.logs()
-    assert logs["Scheduler"]
-
-
-@gen_test()
 async def test_scheduler_info():
     async with SpecCluster(
         workers=worker_spec, scheduler=scheduler, asynchronous=True

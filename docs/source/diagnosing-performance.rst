@@ -26,7 +26,7 @@ pieces of performance information available and how to access them.
 Task start and stop times
 -------------------------
 
-Workers capture durations associated to tasks.  For each task that passes
+Workers capture durations associated with tasks.  For each task that passes
 through a worker we record start and stop times for each of the following:
 
 1.  Serialization (gray)
@@ -76,7 +76,7 @@ page to allow users to select different periods in time.
    :alt: Dask profiler
    :width: 70%
 
-Profiles are also grouped by the task that was being run at the time.  You can
+Profiles are also grouped by the task that was being run at that time.  You can
 select a task name from the selection menu at the top of the page.  You can
 also click on the rectangle corresponding to the task in the main task stream
 plot on the ``/status`` page.
@@ -120,7 +120,7 @@ Performance Reports
 Often when benchmarking and/or profiling, users may want to record a
 particular computation or even a full workflow.  Dask can save the bokeh
 dashboards as static HTML plots including the task stream, worker profiles,
-bandwidths, etc. This is done wrapping a computation with the
+bandwidth, etc. This is done wrapping a computation with the
 :class:`distributed.performance_report` context manager:
 
 .. code-block:: python
