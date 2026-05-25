@@ -5968,7 +5968,8 @@ class Scheduler(SchedulerState, ServerNode):
     def remove_client(self, client: str, stimulus_id: str | None = None) -> None:
         """Remove client from network"""
         stimulus_id = stimulus_id or f"remove-client-{time()}"
-        client_address = self.clients.get(client).address if client in self.clients else None
+        client_state = self.clients.get(client)
+        client_address = client_state.address if client_state is not None else None
         if self.status == Status.running:
             if client_address is not None:
                 logger.info("Remove client %s at %s", client, client_address)
