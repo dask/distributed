@@ -878,15 +878,16 @@ async def test_clear_events_client_removal(c, s, a, b):
         assert time() < start + 2
 
 
-@gen_cluster(client=True, nthreads=[])
-async def test_client_connection_logs_include_address(c, s):
+@gen_cluster(nthreads=[])
+async def test_client_connection_logs_include_address(s):
     with captured_logger("distributed.scheduler", level=logging.INFO) as caplog:
-        await c.close()
+        async with Client(s.address, asynchronous=True) as c:
+            client_id = c.id
 
     logs = caplog.getvalue()
-    assert f"Receive client connection: {c.id} at " in logs
-    assert f"Remove client {c.id} at " in logs
-    assert f"Close client connection: {c.id} at " in logs
+    assert f"Receive client connection: {client_id} at " in logs
+    assert f"Remove client {client_id} at " in logs
+    assert f"Close client connection: {client_id} at " in logs
 
 
 @gen_cluster(client=True, nthreads=[])
