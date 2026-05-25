@@ -38,7 +38,6 @@ repos:
           - pytest
           - tornado
           - pyarrow
-          - urllib3
           - git+https://github.com/dask/dask
           - git+https://github.com/dask/zict
 
