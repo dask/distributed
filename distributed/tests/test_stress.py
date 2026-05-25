@@ -175,7 +175,6 @@ def vsum(*args):
 
 
 @pytest.mark.skip(reason="times out")
-@pytest.mark.avoid_ci
 @pytest.mark.slow
 @gen_cluster(
     client=True,
