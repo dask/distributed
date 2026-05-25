@@ -92,6 +92,12 @@ def test_values(client):
     assert p.status == "error"
 
 
+def test_multi_progressbar_widget_empty_keys_does_not_error():
+    p = MultiProgressWidget([])
+    p._draw_stop(remaining={}, status="finished")
+    assert "Finished" in p.elapsed_time.value
+
+
 def test_progressbar_done(client):
     L = [client.submit(inc, i) for i in range(5)]
     wait(L)
