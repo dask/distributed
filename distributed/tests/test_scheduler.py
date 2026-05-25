@@ -879,6 +879,17 @@ async def test_clear_events_client_removal(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[])
+async def test_client_connection_logs_include_address(c, s):
+    with captured_logger("distributed.scheduler", level=logging.INFO) as caplog:
+        await c.close()
+
+    logs = caplog.getvalue()
+    assert f"Receive client connection: {c.id} at " in logs
+    assert f"Remove client {c.id} at " in logs
+    assert f"Close client connection: {c.id} at " in logs
+
+
+@gen_cluster(client=True, nthreads=[])
 async def test_add_worker(c, s):
     x = c.submit(inc, 1, key="x")
     await wait_for_state("x", ("queued", "no-worker"), s)
