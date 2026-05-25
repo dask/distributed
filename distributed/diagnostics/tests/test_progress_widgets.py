@@ -93,7 +93,7 @@ def test_values(client):
 
 
 def test_multi_progressbar_widget_empty_keys_does_not_error():
-    p = MultiProgressWidget([])
+    p = MultiProgressWidget([], scheduler="tcp://127.0.0.1:1")
     p._draw_stop(remaining={}, status="finished")
     assert "Finished" in p.elapsed_time.value
 
