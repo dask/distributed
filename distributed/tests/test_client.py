@@ -7950,7 +7950,7 @@ class TestClientSecurityLoader:
                     pass
 
 
-@pytest.mark.avoid_ci(reason="This is slow and probably not worth the cost")
+@pytest.mark.skip(reason="This is very slow and probably not worth the cost")
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_benchmark_hardware(c, s, a, b):
