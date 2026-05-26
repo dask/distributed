@@ -221,11 +221,8 @@ jobs:
         run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
 
       - name: Print host info
-        # host_info.py imports numpy, which isn't a direct dependency of distributed
-        if: matrix.environment != 'mindeps'
         shell: bash -l {0}
-        run: |
-          python continuous_integration/scripts/host_info.py
+        run: python continuous_integration/scripts/host_info.py
 
       - name: Test
         id: run_tests
