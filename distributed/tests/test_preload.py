@@ -176,13 +176,13 @@ backends["foo"] = TCPBackend()
 async def test_web_preload():
     with (
         mock.patch(
-            "urllib3.PoolManager.request",
+            "urllib.request.urlopen",
             **{
-                "return_value.data": b"def dask_setup(dask_server):"
+                "return_value.__enter__.return_value.read.return_value": b"def dask_setup(dask_server):"
                 b"\n    dask_server.foo = 1"
                 b"\n"
             },
-        ) as request,
+        ) as mock_urlopen,
         captured_logger("distributed.preloading") as log,
     ):
         async with Scheduler(
@@ -200,9 +200,7 @@ async def test_web_preload():
             )
             is not None
         )
-    assert request.mock_calls == [
-        mock.call(method="GET", url="http://example.com/preload", retries=mock.ANY)
-    ]
+    assert mock_urlopen.call_args_list == [mock.call("http://example.com/preload")]
 
 
 @gen_cluster(nthreads=[])
@@ -233,15 +231,13 @@ async def test_web_preload_worker():
         dask.config.set(scheduler_address="tcp://127.0.0.1:{port}")
         """).encode()
     with mock.patch(
-        "urllib3.PoolManager.request",
-        **{"return_value.data": data},
-    ) as request:
+        "urllib.request.urlopen",
+        **{"return_value.__enter__.return_value.read.return_value": data},
+    ) as mock_urlopen:
         async with Scheduler(port=port, host="localhost", dashboard_address=":0") as s:
             async with Nanny(preload_nanny=["http://example.com/preload"]) as nanny:
                 assert nanny.scheduler_addr == s.address
-    assert request.mock_calls == [
-        mock.call(method="GET", url="http://example.com/preload", retries=mock.ANY)
-    ]
+    assert mock_urlopen.call_args_list == [mock.call("http://example.com/preload")]
 
 
 # This test is blocked on https://github.com/dask/distributed/issues/5819
