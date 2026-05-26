@@ -811,3 +811,29 @@ def test_error_during_startup(monkeypatch, nanny, loop):
                 ],
             ) as worker:
                 assert worker.wait(10) == 1
+
+
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@gen_cluster(client=True, nthreads=[])
+async def test_uvloop(c, s, nanny):
+    uvloop = pytest.importorskip("uvloop")
+
+    def check():
+        return isinstance(asyncio.get_event_loop(), uvloop.Loop)
+
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "worker",
+            s.address,
+            nanny,
+            "--no-dashboard",
+        ],
+        env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
+    ):
+        await c.wait_for_workers(1)
+        assert all((await c.run(check)).values())
+        if nanny == "--nanny":
+            assert all((await c.run(check, nanny=True)).values())
