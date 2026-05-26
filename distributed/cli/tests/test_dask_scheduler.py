@@ -25,6 +25,7 @@ from distributed.utils import get_ip, get_ip_interface, open_port
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
+    gen_test,
     popen,
 )
 
@@ -694,7 +695,8 @@ def test_signal_handling(loop, sig):
         assert "end scheduler" in logs
 
 
-def test_uvloop(loop):
+@gen_test()
+async def test_uvloop():
     uvloop = pytest.importorskip("uvloop")
     port = open_port()
 
@@ -713,5 +715,5 @@ def test_uvloop(loop):
         ],
         env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
     ):
-        with Client(f"127.0.0.1:{port}", loop=loop) as c:
-            assert c.run_on_scheduler(check)
+        async with Client(f"127.0.0.1:{port}", asynchronous=True) as c:
+            assert await c.run_on_scheduler(check)

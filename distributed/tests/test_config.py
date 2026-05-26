@@ -360,7 +360,7 @@ async def test():
 if __name__ == "__main__":
     with distributed.Client(processes=True, n_workers=1) as client:
         assert client.sync(test)  # client loop
-        assert client.run_on_scheduler(test)  # also client loop loop
+        assert client.run_on_scheduler(test)  # also client loop
         assert client.run(test)  # nanny loop
 """
 
