@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shutil
@@ -24,6 +25,7 @@ from distributed.utils import get_ip, get_ip_interface, open_port
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
+    gen_test,
     popen,
 )
 
@@ -672,7 +674,8 @@ def test_signal_handling(loop, sig):
         [
             sys.executable,
             "-m",
-            "distributed.cli.dask_scheduler",
+            "dask",
+            "scheduler",
             f"--port={port}",
             "--dashboard-address=:0",
         ],
@@ -690,3 +693,27 @@ def test_signal_handling(loop, sig):
         assert scheduler.returncode == 0
         assert "scheduler closing" in logs
         assert "end scheduler" in logs
+
+
+@gen_test()
+async def test_uvloop():
+    uvloop = pytest.importorskip("uvloop")
+    port = open_port()
+
+    def check():
+        return isinstance(asyncio.get_event_loop(), uvloop.Loop)
+
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
+            "--no-dashboard",
+            "--host",
+            f"127.0.0.1:{port}",
+        ],
+        env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
+    ):
+        async with Client(f"127.0.0.1:{port}", asynchronous=True) as c:
+            assert await c.run_on_scheduler(check)
