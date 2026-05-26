@@ -128,30 +128,6 @@ each task will run in a separate process:
                             resources={'process': 1}) for arg in args]
 
 
-What happens if no worker can satisfy a resource restriction?
--------------------------------------------------------------
-
-Dask clusters are dynamic: workers may join later, and those future workers may
-provide resources that are not available right now. Because of that, submitting
-a task with currently unsatisfied resource restrictions does not immediately
-raise an exception. Instead, the task remains in the scheduler's
-``no-worker`` state and waits until a suitable worker becomes available.
-
-For example, if every connected worker advertises at most ``{"GPU": 1}``, then
-submitting a task with ``resources={"GPU": 2}`` will keep the task waiting
-rather than fail immediately.
-
-If you expect the required resources to be unavailable permanently, consider one
-of the following:
-
-- call :meth:`distributed.Future.result` with ``timeout=...`` so your client
-  code does not wait forever;
-- inspect the task state in the dashboard or scheduler diagnostics to confirm it
-  is in ``no-worker``;
-- validate your cluster's available resources before submitting tasks with
-  restrictive resource requirements.
-
-
 Resources are Abstract
 ----------------------
 
