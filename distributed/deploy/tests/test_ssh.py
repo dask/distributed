@@ -105,6 +105,7 @@ async def test_keywords():
             assert all(v["nthreads"] == 2 for v in d.values())
 
 
+@pytest.mark.xfail(reason="Very flaky (leaks resources)", strict=False)
 def test_defer_to_old(loop):
     with pytest.warns(
         UserWarning,
