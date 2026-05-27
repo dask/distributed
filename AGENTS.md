@@ -11,6 +11,9 @@ Dask Distributed is the distributed scheduler for the Dask framework, enabling p
 The project uses **Pixi** for environment management.
 
 ```bash
+# Run arbitrary Python commands
+pixi run -- python -c 'print("Hello world!")'
+
 # Run tests
 pixi run test
 
@@ -76,6 +79,14 @@ Tests live in `distributed/tests/` (67 files) and each submodule has its own `te
 Tests are partitioned by the `ci1` marker for parallel CI execution. Resource leak detection (fds, processes, threads) runs in CI via `distributed/pytest_resourceleaks.py`.
 
 Timeout: 300 seconds per test (signal-based on Unix, thread-based on Windows).
+
+## Key Patterns for Contributors
+
+**IMPORTANT**: never call .compute() or .persist() in the middle of graph definition
+(e.g. in all methods of Array, Series, DataFrame, Bag, Delayed). The only place when the
+graph is materialized should be where the end user explicitly calls .compute() or
+.persist(). When you are defining the graph, you must work with available metadata to
+infer the outputs.
 
 ## Code Style
 
