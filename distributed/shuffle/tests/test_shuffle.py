@@ -1107,11 +1107,11 @@ def test_processing_chain(tmp_path, drop_column):
         f"col{next(counter)}": pd.array(range(100), dtype="float32"),
         f"col{next(counter)}": pd.array(range(100), dtype="float64"),
         f"col{next(counter)}": pd.array(
-            [np.datetime64("2022-01-01") + i for i in range(100)],
+            [np.datetime64("2022-01-01") + np.timedelta64(i, "D") for i in range(100)],
             dtype="datetime64[ns]",
         ),
         f"col{next(counter)}": pd.array(
-            [np.timedelta64(1, "D") + i for i in range(100)],
+            [np.timedelta64(i, "D") for i in range(100)],
             dtype="timedelta64[ns]",
         ),
         # FIXME PyArrow does not support complex numbers:
@@ -1131,7 +1131,7 @@ def test_processing_chain(tmp_path, drop_column):
         f"col{next(counter)}": pd.array(range(100), dtype="UInt64"),
         # pandas dtypes
         f"col{next(counter)}": pd.array(
-            [np.datetime64("2022-01-01") + i for i in range(100)],
+            [np.datetime64("2022-01-01") + np.timedelta64(i, "D") for i in range(100)],
             dtype=pd.DatetimeTZDtype(tz="Europe/Berlin"),
         ),
         f"col{next(counter)}": pd.array(["x", "y"] * 50, dtype="category"),
