@@ -5000,6 +5000,7 @@ class Client(SyncMethodMixin):
         plot=False,
         filename="task-stream.html",
         bokeh_resources=None,
+        start_index=None,
     ):
         """Get task stream data from scheduler
 
@@ -5070,6 +5071,7 @@ class Client(SyncMethodMixin):
             plot=plot,
             filename=filename,
             bokeh_resources=bokeh_resources,
+            start_index=start_index,
         )
 
     async def _get_task_stream(
@@ -5080,8 +5082,11 @@ class Client(SyncMethodMixin):
         plot=False,
         filename="task-stream.html",
         bokeh_resources=None,
+        start_index=None,
     ):
-        msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
+        msgs = await self.scheduler.get_task_stream(
+            start=start, stop=stop, count=count, start_index=start_index
+        )
         if plot:
             from distributed.diagnostics.task_stream import rectangles
 
@@ -6080,39 +6085,33 @@ class get_task_stream:
         self._filename = filename
         self.figure = None
         self.client = client or default_client()
-        self._init = False
+        self._start_index = None
 
     def __enter__(self):
-        if not self._init:
-            self.client.get_task_stream(start=0, stop=0)  # ensure plugin
-            self._init = True
-
-        # Smooth over time differences of client vs. workers
-        # FIXME this is very crude. We should query TaskStreamPlugin.index instead.
-        self.start = time() - 0.1
+        # Record the scheduler's task-stream cursor on entry and collect
+        # everything appended after it on exit. Using the monotonic index
+        # instead of a wall-clock boundary avoids dropping tasks when there is
+        # latency or clock skew between the client and the workers.
+        self._start_index = self.client.sync(
+            self.client.scheduler.get_task_stream_index
+        )
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         L = self.client.get_task_stream(
-            start=self.start, plot=self._plot, filename=self._filename
+            start_index=self._start_index, plot=self._plot, filename=self._filename
         )
         if self._plot:
             L, self.figure = L
         self.data.extend(L)
 
     async def __aenter__(self):
-        if not self._init:
-            await self.client.get_task_stream(start=0, stop=0)  # ensure plugin
-            self._init = True
-
-        # Smooth over time differences of client vs. workers
-        # FIXME this is very crude. We should query TaskStreamPlugin.index instead.
-        self.start = time() - 0.1
+        self._start_index = await self.client.scheduler.get_task_stream_index()
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         L = await self.client.get_task_stream(
-            start=self.start, plot=self._plot, filename=self._filename
+            start_index=self._start_index, plot=self._plot, filename=self._filename
         )
         if self._plot:
             L, self.figure = L

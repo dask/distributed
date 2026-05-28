@@ -37,7 +37,17 @@ class TaskStreamPlugin(SchedulerPlugin):
             self.buffer.append(kwargs)
             self.index += 1
 
-    def collect(self, start=None, stop=None, count=None):
+    def collect(self, start=None, stop=None, count=None, start_index=None):
+        # ``start_index`` selects records by their position in the monotonically
+        # increasing append counter (``self.index``) rather than by wall-clock
+        # time. This is immune to clock differences and latency between the
+        # client and the workers, which can otherwise cause time-based ``start``
+        # boundaries to drop tasks that have already completed.
+        if start_index is not None:
+            buffer_start = start_index - (self.index - len(self.buffer))
+            buffer_start = max(0, min(buffer_start, len(self.buffer)))
+            return [self.buffer[i] for i in range(buffer_start, len(self.buffer))]
+
         def bisect(target, left, right):
             while left != right:
                 mid = (left + right) // 2
