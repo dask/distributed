@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import deque
+
 import pytest
 from tlz import frequencies
 
@@ -80,6 +82,45 @@ async def test_collect(c, s, a, b):
 
     assert tasks.collect(stop=start + 100, count=3) == tasks.collect(count=3)
     assert tasks.collect(start=start, count=3) == list(tasks.buffer)[:3]
+
+
+@gen_cluster(client=True)
+async def test_collect_start_index(c, s, a, b):
+    tasks = TaskStreamPlugin(s)
+    s.add_plugin(tasks)
+
+    futures = c.map(slowinc, range(5), delay=0.05)
+    await wait(futures)
+    midpoint = tasks.index
+
+    futures = c.map(slowinc, range(5, 10), delay=0.05)
+    await wait(futures)
+
+    # ``start_index`` selects by append position, not wall-clock time, so it
+    # returns exactly the records appended at or after the given index.
+    assert len(tasks.collect(start_index=0)) == 10
+    assert len(tasks.collect(start_index=midpoint)) == 5
+    assert len(tasks.collect(start_index=tasks.index)) == 0
+
+
+def test_collect_start_index_ignores_clock():
+    # When the worker clock lags the client clock (or there is latency), a task
+    # can finish with a recorded stop time that is earlier than the client's
+    # ``start`` boundary. The time-based collection then drops the task, which
+    # is the latency/clock-skew failure from the original bug report. The
+    # index-based path must still return it.
+    plugin = TaskStreamPlugin.__new__(TaskStreamPlugin)
+    plugin.buffer = deque()
+    plugin.index = 0
+
+    now = time()
+    plugin.buffer.append({"key": "task", "startstops": [{"stop": now - 100}]})
+    plugin.index += 1
+
+    # Time-based collection misses the task because its stop time is in the past.
+    assert plugin.collect(start=now) == []
+    # Index-based collection captures it regardless of the clock.
+    assert len(plugin.collect(start_index=0)) == 1
 
 
 @gen_cluster(client=True)
