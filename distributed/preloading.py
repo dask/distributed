@@ -40,7 +40,9 @@ def validate_preload_argv(ctx, param, value):
         for a in unexpected_args:
             raise click.NoSuchOption(a)
         raise click.UsageError(
-            "Got unexpected extra argument{}: ({})".format(
+            "Got unexpected extra argument{}: ({}). If you intended these as "
+            "values for a --preload module, list --preload before them. "
+            "Otherwise check spelling -- see '--help' for valid options.".format(
                 "s" if len(value) > 1 else "", " ".join(value)
             )
         )
