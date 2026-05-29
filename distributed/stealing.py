@@ -118,6 +118,7 @@ class WorkStealing(SchedulerPlugin):
         self.metrics = {
             "request_count_total": defaultdict(int),
             "request_cost_total": defaultdict(int),
+            "reject_count_margin_total": defaultdict(int),
         }
         self._request_counter = 0
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
@@ -486,10 +487,22 @@ class WorkStealing(SchedulerPlugin):
                     comm_cost_thief = self.scheduler.get_comm_cost(ts, thief)
                     comm_cost_victim = self.scheduler.get_comm_cost(ts, victim)
                     compute = self.scheduler._get_prefix_duration(ts.prefix)
-                    if (
+
+                    # Be conservative about marginal steals: require headroom equal
+                    # to 50% of the thief's transfer cost to absorb estimation noise
+                    # and routine network jitter.
+                    margin = comm_cost_thief * 0.5
+
+                    would_steal_without_margin = (
                         occ_thief + comm_cost_thief + compute
                         <= occ_victim - (comm_cost_victim + compute) / 2
-                    ):
+                    )
+                    would_steal_with_margin = (
+                        occ_thief + comm_cost_thief + compute + margin
+                        <= occ_victim - (comm_cost_victim + compute) / 2
+                    )
+
+                    if would_steal_with_margin:
                         self.move_task_request(ts, victim, thief)
                         cost = compute + comm_cost_victim
                         log.append(
@@ -520,6 +533,17 @@ class WorkStealing(SchedulerPlugin):
                         # for removing ts from stealable. If we made sure to
                         # properly clean up, we would not need this
                         stealable.discard(ts)
+                    elif would_steal_without_margin:
+                        self.metrics["reject_count_margin_total"][level] += 1
+                        logger.debug(
+                            "Work-stealing margin heuristic rejected steal of task %s "
+                            "(thief=%s, victim=%s, level=%d, margin=%.4f)",
+                            ts.key,
+                            thief.address,
+                            victim.address,
+                            level,
+                            margin,
+                        )
                 self.scheduler.check_idle_saturated(
                     victim, occ=combined_occupancy(victim)
                 )
