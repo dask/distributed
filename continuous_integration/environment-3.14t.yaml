@@ -1,0 +1,56 @@
+name: dask-distributed
+channels:
+  - conda-forge
+dependencies:
+  - python-freethreading=3.14
+  - packaging
+  - pip
+  - asyncssh
+  - bokeh>3
+  - click
+  - cloudpickle
+  - coverage
+  - dask  # overridden by git tip below; pulls in optional dependencies
+  - fsspec  # overridden by git tip below
+  # - gilknocker  # Makes no sense in free-threading
+  - h5py
+  # - ipykernel  # No 3.14t build for Windows yet
+  - ipywidgets
+  - jinja2
+  - jupyter_events
+  # - jupyter-server-proxy  # No ipykernel 3.14t for Windows yet
+  # - jupyterlab  # No ipykernel 3.14t for Windows yet
+  - locket
+  # FIXME https://github.com/msgpack/msgpack-python/issues/613
+  # tests.yml replaces this with a pure-python variant.
+  - msgpack-python
+  - netcdf4
+  - paramiko
+  - pre-commit
+  - prometheus_client
+  - psutil
+  - pyarrow
+  - pytest
+  - pytest-cov
+  - pytest-faulthandler
+  - pytest-repeat
+  - pytest-rerunfailures
+  - pytest-timeout
+  # FIXME requests depends on urllib3, which in turn (only in conda) installs optional
+  # dependency brotli, which does not release the GIL.
+  # tests.yaml force-uninstalls brotli to work around this.
+  - requests
+  - scikit-learn
+  - scipy
+  - setproctitle
+  - sortedcollections
+  - tblib
+  - toolz
+  - tornado
+  - zict  # overridden by git tip below
+  - zstandard
+  - pip:
+      - git+https://github.com/dask/dask
+      - git+https://github.com/dask/zict
+      - git+https://github.com/fsspec/filesystem_spec
+      - keras
