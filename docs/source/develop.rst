@@ -185,3 +185,31 @@ run automatically when you make a git commit. This can be done by running::
 from the root of the distributed repository. Now the code linters will be run each time
 you commit changes. You can skip these checks with ``git commit --no-verify`` or with
 the short version ``git commit -n``.
+
+Making Pull Requests
+--------------------
+
+Pull Request Etiquette
+~~~~~~~~~~~~~~~~~~~~~~
+
+When opening a Pull Request you are beginning a dialog with maintainers. This is a bidirectional
+relationship where you are asking for the reviewer's time to look at your contribution, and 
+the reviewer will likely ask for your input and engage you in discussion around the changes.
+
+Please do not propose code that you are not willing to stand behind and discuss.
+Be prepared to respond to review feedback, apply critical thinking and iterate on your contributions.
+
+We ask that you fill out all sections of PR templates and provide reasoning behind your changes,
+ideally with a linked issue that has been discussed by the community.
+
+Automated Contributions and AI Policy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+We encourage the use of AI and automated tools to assist in code development,
+documentation, and testing. However, we ask that contributors disclose these tools and
+use them in a way that aligns with Dask's community guidelines. In particular:
+
+- do not use tools to think or speak for you in discussions, code reviews, or any other 
+  interactions within the Dask community.
+- Before you open a PR, you (the human) must fully review, understand, and approve
+  everything that the AI agent wrote.
