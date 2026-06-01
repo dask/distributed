@@ -3992,14 +3992,22 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         http_server_modules = dask.config.get("distributed.scheduler.http.routes")
+        explicit_dashboard_request = dashboard is True
         show_dashboard = dashboard or (dashboard is None and dashboard_address)
         # install vanilla route if show_dashboard but bokeh is not installed
         if show_dashboard:
             try:
                 import distributed.dashboard.scheduler
-            except ImportError:
+            except ImportError as e:
                 show_dashboard = False
                 http_server_modules.append("distributed.http.scheduler.missing_bokeh")
+                if explicit_dashboard_request:
+                    logger.warning(
+                        "Dashboard is disabled; the scheduler will serve a diagnostic "
+                        "placeholder page instead. Explicit dashboard request could not "
+                        "be satisfied because %s",
+                        e,
+                    )
         routes = get_handlers(
             server=self, modules=http_server_modules, prefix=http_prefix
         )
