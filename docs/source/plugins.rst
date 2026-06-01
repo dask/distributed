@@ -116,6 +116,8 @@ Built-In Worker Plugins
 -----------------------
 
 .. autoclass:: distributed.diagnostics.plugin.UploadFile
+.. autoclass:: distributed.diagnostics.plugin.ForwardLoggingPlugin
+.. autoclass:: distributed.diagnostics.plugin.ForwardOutput
 
 
 Nanny Plugins
