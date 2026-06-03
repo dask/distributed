@@ -2,10 +2,15 @@ name: Tests
 
 on:
   push:
+    branches: [main]
+    tags: ["*"]
   pull_request:
-  schedule:
-    - cron: "0 6,18 * * *"
   workflow_dispatch:
+  schedule:
+    # Rerun CI in order to detect flaky tests. Note that all packages are pinned, so
+    # these scheduled runs are unaffected by upstream releases.
+    # The upstream.yml workflow will instead pick up upstream changes.
+    - cron: "0 6,18 * * *"
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
@@ -17,233 +22,138 @@ jobs:
   test:
     # Do not run the schedule job on forks
     if: github.repository == 'dask/distributed' || github.event_name != 'schedule'
+
+    # If you change the pattern of this name, please adjust
+    # continuous_integration/scripts/test_report.py accordingly
+    name: ${{ matrix.os }} ${{ matrix.environment }} ${{ matrix.task }} ${{ matrix.partition }}
     runs-on: ${{ matrix.os }}
-    # If you change the pattern of this name, please adjust the scripts/test_report.py parsing accordingly
-    name: ${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ matrix.partition }}
     timeout-minutes: 120
 
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        environment: [mindeps, "3.10", "3.11", "3.12", "3.13", "3.14"]
-        label: [default]
-        extra_packages: [null]
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest]
+        environment: [py310, py311, py312, py313, py314]
+        task: [test-ci]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
-
-        exclude:
+        include:
           # MacOS CI does not have many hosts available; run it on 3.14 only
           - os: macos-latest
-            environment: mindeps
+            environment: py314
+            task: test-ci
+            partition: ci1
           - os: macos-latest
-            environment: "3.10"
-          - os: macos-latest
-            environment: "3.11"
-          - os: macos-latest
-            environment: "3.12"
-          - os: macos-latest
-            environment: "3.13"
+            environment: py314
+            task: test-ci
+            partition: not ci1
 
-          - os: windows-latest
+          # Minimum dependencies
+          - os: ubuntu-latest
             environment: mindeps
+            task: test-ci
+            partition: ci1
+          - os: ubuntu-latest
+            environment: mindeps
+            task: test-ci
+            partition: not ci1
 
-        include:
+          - os: ubuntu-latest
+            environment: mindeps-array
+            task: test-ci
+            partition: ci1
+          - os: ubuntu-latest
+            environment: mindeps-array
+            task: test-ci
+            partition: not ci1
+
+          - os: ubuntu-latest
+            environment: mindeps-dataframe
+            task: test-ci
+            partition: ci1
+          - os: ubuntu-latest
+            environment: mindeps-dataframe
+            task: test-ci
+            partition: not ci1
+
           # Set distributed.scheduler.worker-saturation: .inf
           - os: ubuntu-latest
-            environment: "3.10"
-            label: no_queue
+            environment: py310
+            task: test-noqueue
             partition: ci1
           - os: ubuntu-latest
-            environment: "3.10"
-            label: no_queue
+            environment: py310
+            task: test-noqueue
             partition: not ci1
 
-          # dask.array P2P shuffle
-          - os: ubuntu-latest
-            environment: mindeps
-            label: numpy
-            extra_packages: [numpy=1.24]
-            partition: ci1
-          - os: ubuntu-latest
-            environment: mindeps
-            label: numpy
-            extra_packages: [numpy=1.24]
-            partition: not ci1
-
-          # dask.dataframe P2P shuffle
-          - os: ubuntu-latest
-            environment: mindeps
-            label: pandas
-            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=16.0]
-            partition: ci1
-          - os: ubuntu-latest
-            environment: mindeps
-            label: pandas
-            extra_packages: [numpy=1.24, pandas=2.0, pyarrow=16.0]
-            partition: not ci1
-
-          - os: ubuntu-latest
-            # Don't disturb the various GPU-only deps in the 3.10 environment
-            environment: "3.11"
-            label: memray
-            extra_packages: [memray]  # Not available on Windows
-            partition: memray
-
-        # Uncomment to stress-test the test suite for random failures.
-        # Must also change `export TEST_ID` in first step below.
-        # This will take a LONG time and delay all PRs across the whole github.com/dask!
-        # To avoid hamstringing other people, change 'on: [push, pull_request]' above
-        # to just 'on: [push]'; this way the stress test will run exclusively in your
-        # branch (https://github.com/<your name>/distributed/actions).
-        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-
-    env:
-      CONDA_FILE: continuous_integration/environment-${{ matrix.environment }}.yaml
+          # Free-threading (WIP - tests don't pass yet)
+          # - os: ubuntu-latest
+          #   environment: py314t
+          #   task: test-ci
+          #   partition: ci1
+          # - os: ubuntu-latest
+          #   environment: py314t
+          #   task: test-ci
+          #   partition: not ci1
 
     steps:
-      - name: Set $TEST_ID
-        run: |
-          export PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
-          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-$PARTITION_LABEL"
-          # Switch to this version for stress-test:
-          # export TEST_ID="$TEST_ID-${{ matrix.run }}"
-          echo "TEST_ID: $TEST_ID"
-          echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
-        shell: bash
-
       - name: Checkout source
         uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
 
-      - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v4.0.1
+      - uses: prefix-dev/setup-pixi@v0.9.6
         with:
-          miniforge-version: latest
-          condarc-file: continuous_integration/condarc
-          activate-environment: dask-distributed
+          pixi-version: v0.70.1
+          environments: ${{ matrix.environment }}
+          cache: true
+          locked: true
 
-      - name: Show conda options
-        shell: bash -l {0}
-        run: conda config --show
-
-      - name: Check if caching is enabled
-        uses: xarray-contrib/ci-trigger@v1.2
-        id: skip-caching
-        with:
-          keyword: "[skip-caching]"
-
-      - name: Get Date
-        if: |
-          (
-            steps.skip-caching.outputs.trigger-found != 'true'
-            && !(github.event_name == 'pull_request'
-                 && contains(github.event.pull_request.labels.*.name, 'skip-caching'))
-          )
-        id: get-date
-        run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
-        shell: bash
-
-      - name: Cache Conda env
-        if: steps.skip-caching.outputs.trigger-found != 'true'
-        uses: actions/cache@v5
-        with:
-          path: ${{ env.CONDA }}/envs
-          key: conda-${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.label }}-${{ matrix.extra_packages }}-${{ steps.get-date.outputs.today }}-${{ hashFiles(env.CONDA_FILE) }}-${{ env.CACHE_NUMBER }}
-        env:
-          # Increase this value to reset cache if
-          # continuous_integration/environment-${{ matrix.environment }}.yaml has not
-          # changed. See also same variable in .pre-commit-config.yaml
-          CACHE_NUMBER: 2
-        id: cache
-
-      - name: Update environment
-        run: conda env update -n dask-distributed -f ${{ env.CONDA_FILE }}
-        if: |
-          (
-            steps.skip-caching.outputs.trigger-found == 'true'
-            || (github.event_name == 'pull_request'
-                && contains(github.event.pull_request.labels.*.name, 'skip-caching'))
-            || steps.cache.outputs.cache-hit != 'true'
-          )
-
-      - name: Extra Installs
-        if: |
-          matrix.extra_packages
-          && (
-            steps.skip-caching.outputs.trigger-found == 'true'
-            || (github.event_name == 'pull_request'
-                && contains(github.event.pull_request.labels.*.name, 'skip-caching'))
-            || steps.cache.outputs.cache-hit != 'true'
-          )
-        shell: bash -l {0}
-        run: conda install -y ${{ join(matrix.extra_packages, ' ') }}
-
-      - name: Install
+      - name: Set $TEST_ID
         shell: bash -l {0}
         run: |
-          python -m pip install --no-deps -e .
-
-      - name: conda list
-        shell: bash -l {0}
-        run: conda list
-
-      - name: conda env export
-        shell: bash -l {0}
-        run: |
-          echo -e "--\n--Conda Environment (re-create this with \`conda env create --name <name> -f <output_file>\`)\n--"
-          conda env export | grep -E -v '^prefix:.*$'
+          PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
+          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.task }}-$PARTITION_LABEL"
+          echo "TEST_ID: $TEST_ID"
+          echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
 
       - name: Setup SSH
-        shell: bash -l {0}
         # FIXME no SSH available on Windows
         # https://github.com/dask/distributed/issues/4509
-        if: ${{ matrix.os != 'windows-latest' }}
-        run: bash continuous_integration/scripts/setup_ssh.sh
+        if: matrix.os != 'windows-latest'
+        run: continuous_integration/scripts/setup_ssh.sh
 
       - name: Reconfigure pytest-timeout
         shell: bash -l {0}
         # No SIGALRM available on Windows
-        if: ${{ matrix.os != 'windows-latest' }}
+        if: matrix.os != 'windows-latest'
         run: sed -i.bak 's/timeout_method = "thread"/timeout_method = "signal"/' pyproject.toml
 
       - name: Disable IPv6
         shell: bash -l {0}
         # FIXME ipv6-related failures on Ubuntu and MacOS github actions CI
         # https://github.com/dask/distributed/issues/4514
-        if: ${{ matrix.os  != 'windows-latest' }}
+        if: matrix.os  != 'windows-latest'
         run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
 
-      - name: Set up dask env to disable job queuing
-        shell: bash -l {0}
-        if: ${{ matrix.label == 'no_queue' }}
-        run: echo "DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION=inf" >> $GITHUB_ENV
-
       - name: Print host info
-        shell: bash -l {0}
-        run: python continuous_integration/scripts/host_info.py
+        run: pixi run -e ${{ matrix.environment }} host-info
 
       - name: Test
         id: run_tests
         shell: bash -l {0}
-        env:
-          PYTHONFAULTHANDLER: 1
-          MINDEPS: ${{ matrix.environment == 'mindeps' }}
         run: |
           source continuous_integration/scripts/set_ulimit.sh
           set -o pipefail
           mkdir reports
 
-          python -m pytest distributed \
-            -m "${{ matrix.partition }}" --runslow \
-            --leaks=fds,processes,threads \
-            --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID \
-            --cov=distributed --cov-report=xml \
+          pixi run -e ${{ matrix.environment }} test-ci \
+            -m "${{ matrix.partition }}" \
+            -o junit_suite_name=$TEST_ID \
           | tee reports/stdout
 
       - name: Generate junit XML report in case of pytest-timeout
-        if: ${{ failure() }}
+        if: failure()
         shell: bash -l {0}
         run: |
           if [ ! -e reports/pytest.xml ]
@@ -251,11 +161,11 @@ jobs:
             # This should only ever happen on Windows.
             # On Linux and MacOS, pytest-timeout kills off the individual tests
             # See (reconfigure pytest-timeout above)
-            python continuous_integration/scripts/parse_stdout.py < reports/stdout > reports/pytest.xml
+            pixi run -e ${{ matrix.environment }} parse-pytest-stdout < reports/stdout > reports/pytest.xml
           fi
 
       # - name: Debug with tmate on failure
-      #   if: ${{ failure() }}
+      #   if: failure()
       #   uses: mxschmitt/action-tmate@v3
 
       # https://community.codecov.com/t/files-missing-from-report/3902/7
