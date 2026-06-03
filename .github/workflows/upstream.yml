@@ -37,15 +37,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Invalidate pixi lock
-        run: rm -f pixi.lock
-
-      - uses: prefix-dev/setup-pixi@v0
+      - uses: prefix-dev/setup-pixi@v0.9.6
         with:
-          pixi-version: v0.69.0
+          pixi-version: v0.70.1
           environments: ${{ matrix.environment }}
+          run-install: false
           cache: false
           locked: false
+
+      - name: pixi update
+        run: pixi update -e ${{ matrix.environment }}
+
+      - name: pixi install
+        run: pixi install -e ${{ matrix.environment }}
 
       - name: Setup SSH
         # FIXME no SSH available on Windows

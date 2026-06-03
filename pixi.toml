@@ -84,7 +84,7 @@ pyarrow = "*"
 
 # Compression
 lz4 = "*"
-python-snappy = "*"
+# python-snappy = "*"  # Temporarily in feature.optional-gil below
 zstandard = "*"
 
 # Other opotional dependencies
@@ -116,6 +116,7 @@ gilknocker = "*"  # Makes no sense in free-threading
 ipykernel = "*"  # No 3.14t build for Windows yet
 jupyter-server-proxy = "*"  # Depends on ipykernel
 jupyterlab = "*"    # Depends on ipykernel
+python-snappy = "*"  # Dependency cramjam does not release the GIL
 
 [feature.optional-problematic.target.linux-64.dependencies]
 crick = "*"  # Not available for 3.14, 3.14t, and linux-aarch64
@@ -161,6 +162,11 @@ msgpack-python = { git = "https://github.com/dask/dask", subdirectory = "continu
 
 [feature.nightly.dependencies]
 python = "=3.14"
+# Need nodejs to build bokeh from sources.
+# Can't use bokeh nightlies from the bokeh/label/dev channel because it would downgrade
+# NumPy to the latest release (and building NumPy from sources takes longer than
+# building Bokeh).
+nodejs = "*"
 # See ../dask/continuous_integration/pixi-recipes/README.md
 fsspec = { git = "https://github.com/dask/dask", subdirectory = "continuous_integration/pixi-recipes/fsspec" }
 s3fs = { git = "https://github.com/dask/dask", subdirectory = "continuous_integration/pixi-recipes/s3fs" }
