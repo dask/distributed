@@ -194,7 +194,7 @@ test = "pytest"
 coverage = "coverage"
 coverage-clean = "rm -rf .coverage coverage.xml coverage_html_report pytest-stdout.log"
 test-ci = "coverage run -m pytest --junit-xml=pytest.xml --runslow --leaks=fds,processes,threads"
-post-test-ci = "continuous_integration/scripts/post_test_ci.sh"
+post-test-ci = "bash continuous_integration/scripts/post_test_ci.sh"
 
 [feature.test.tasks.test-noqueue]
 env = { DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION = "inf" }
@@ -214,7 +214,7 @@ conda-build = "*"
 anaconda-client = "*"
 
 [feature.build.tasks]
-conda-build = "continuous_integration/scripts/conda_build.sh"
+conda-build = "bash continuous_integration/scripts/conda_build.sh"
 
 [feature.build.tasks.conda-upload]
 cwd = "dist/conda"
