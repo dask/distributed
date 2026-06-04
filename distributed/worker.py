@@ -42,7 +42,7 @@ from typing import (
 )
 
 from tlz import keymap, pluck
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._task_spec import GraphNode
@@ -64,7 +64,6 @@ from distributed.collections import LRU
 from distributed.comm import Comm, connect, get_address_host, parse_address
 from distributed.comm import resolve_address as comm_resolve_address
 from distributed.comm.addressing import address_from_user_args
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     ConnectionPool,
     ErrorMessage,
@@ -113,18 +112,12 @@ from distributed.utils import (
 )
 from distributed.utils_comm import gather_from_workers, retry_operation
 from distributed.versions import get_versions
-from distributed.worker_memory import (
-    DeprecatedMemoryManagerAttribute,
-    DeprecatedMemoryMonitor,
-    WorkerDataParameter,
-    WorkerMemoryManager,
-)
+from distributed.worker_memory import WorkerDataParameter, WorkerMemoryManager
 from distributed.worker_state_machine import (
     AcquireReplicasEvent,
     BaseWorker,
     CancelComputeEvent,
     ComputeTaskEvent,
-    DeprecatedWorkerStateAttribute,
     ExecuteFailureEvent,
     ExecuteSuccessEvent,
     FindMissingEvent,
@@ -492,11 +485,9 @@ class Worker(BaseWorker, ServerNode):
         *,
         scheduler_file: str | None = None,
         nthreads: int | None = None,
-        loop: IOLoop | None = None,  # Deprecated
         local_directory: str | None = None,
         services: dict | None = None,
         name: Any | None = None,
-        reconnect: bool | None = None,
         executor: Executor | dict[str, Executor] | Literal["offload"] | None = None,
         resources: dict[str, float] | None = None,
         silence_logs: int | None = None,
@@ -533,38 +524,13 @@ class Worker(BaseWorker, ServerNode):
         # Allow overriding the dict-like that stores the task outputs.
         # This is meant for power users only. See WorkerMemoryManager for details.
         data: WorkerDataParameter = None,
-        # Deprecated parameters; please use dask config instead.
-        memory_target_fraction: float | Literal[False] | None = None,
-        memory_spill_fraction: float | Literal[False] | None = None,
-        memory_pause_fraction: float | Literal[False] | None = None,
         ###################################
         # Parameters to Server
         scheduler_sni: str | None = None,
         WorkerStateClass: type = WorkerState,
         **kwargs,
     ):
-        if reconnect is not None:
-            if reconnect:
-                raise ValueError(
-                    "The `reconnect=True` option for `Worker` has been removed. "
-                    "To improve cluster stability, workers now always shut down in the face of network disconnects. "
-                    "For details, or if this is an issue for you, see https://github.com/dask/distributed/issues/6350."
-                )
-            else:
-                warnings.warn(
-                    "The `reconnect` argument to `Worker` is deprecated, and will be removed in a future release. "
-                    "Worker reconnection is now always disabled, so passing `reconnect=False` is unnecessary. "
-                    "See https://github.com/dask/distributed/issues/6350 for details.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-        if loop is not None:
-            warnings.warn(
-                "The `loop` argument to `Worker` is ignored, and will be removed in a future release. "
-                "The Worker always binds to the current loop",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+
         self.__exit_stack = stack = contextlib.ExitStack()
         self.nanny = nanny
         self._lock = threading.Lock()
@@ -649,7 +615,7 @@ class Worker(BaseWorker, ServerNode):
 
         self.name = name
 
-        executor_pool_prefix = f"{self.name}-" if self.name else ""
+        executor_pool_prefix = f"{self.name}-" if self.name is not None else ""
         # Common executors always available
         self.executors = {
             "offload": utils._offload_executor,
@@ -773,13 +739,7 @@ class Worker(BaseWorker, ServerNode):
         self._protocol = protocol
 
         self.memory_manager = WorkerMemoryManager(
-            self,
-            data=data,
-            nthreads=nthreads,
-            memory_limit=memory_limit,
-            memory_target_fraction=memory_target_fraction,
-            memory_spill_fraction=memory_spill_fraction,
-            memory_pause_fraction=memory_pause_fraction,
+            self, data=data, nthreads=nthreads, memory_limit=memory_limit
         )
 
         transfer_incoming_bytes_limit = math.inf
@@ -888,74 +848,6 @@ class Worker(BaseWorker, ServerNode):
            ``self.memory_manager.data``.
         """
         return self.memory_manager.data
-
-    # Deprecated attributes moved to self.memory_manager.<name>
-    memory_limit = DeprecatedMemoryManagerAttribute()
-    memory_target_fraction = DeprecatedMemoryManagerAttribute()
-    memory_spill_fraction = DeprecatedMemoryManagerAttribute()
-    memory_pause_fraction = DeprecatedMemoryManagerAttribute()
-    memory_monitor = DeprecatedMemoryMonitor()
-
-    ###########################
-    # State machine accessors #
-    ###########################
-
-    # Deprecated attributes moved to self.state.<name>
-    actors = DeprecatedWorkerStateAttribute()
-    available_resources = DeprecatedWorkerStateAttribute()
-    busy_workers = DeprecatedWorkerStateAttribute()
-    comm_nbytes = DeprecatedWorkerStateAttribute(target="transfer_incoming_bytes")
-    comm_threshold_bytes = DeprecatedWorkerStateAttribute(
-        target="transfer_incoming_bytes_throttle_threshold"
-    )
-    constrained = DeprecatedWorkerStateAttribute()
-    data_needed_per_worker = DeprecatedWorkerStateAttribute(target="data_needed")
-    executed_count = DeprecatedWorkerStateAttribute()
-    executing_count = DeprecatedWorkerStateAttribute()
-    generation = DeprecatedWorkerStateAttribute()
-    has_what = DeprecatedWorkerStateAttribute()
-    incoming_count = DeprecatedWorkerStateAttribute(
-        target="transfer_incoming_count_total"
-    )
-    in_flight_tasks = DeprecatedWorkerStateAttribute(target="in_flight_tasks_count")
-    in_flight_workers = DeprecatedWorkerStateAttribute()
-    log = DeprecatedWorkerStateAttribute()
-    long_running = DeprecatedWorkerStateAttribute()
-    nthreads = DeprecatedWorkerStateAttribute()
-    stimulus_log = DeprecatedWorkerStateAttribute()
-    stimulus_story = DeprecatedWorkerStateAttribute()
-    story = DeprecatedWorkerStateAttribute()
-    ready = DeprecatedWorkerStateAttribute()
-    tasks = DeprecatedWorkerStateAttribute()
-    target_message_size = DeprecatedWorkerStateAttribute(
-        target="transfer_message_bytes_limit"
-    )
-    total_out_connections = DeprecatedWorkerStateAttribute(
-        target="transfer_incoming_count_limit"
-    )
-    total_resources = DeprecatedWorkerStateAttribute()
-    transition_counter = DeprecatedWorkerStateAttribute()
-    transition_counter_max = DeprecatedWorkerStateAttribute()
-    validate = DeprecatedWorkerStateAttribute()
-    validate_task = DeprecatedWorkerStateAttribute()
-
-    @property
-    def data_needed(self) -> set[TaskState]:
-        warnings.warn(
-            "The `Worker.data_needed` attribute has been removed; "
-            "use `Worker.state.data_needed[address]`",
-            FutureWarning,
-        )
-        return {ts for tss in self.state.data_needed.values() for ts in tss}
-
-    @property
-    def waiting_for_data_count(self) -> int:
-        warnings.warn(
-            "The `Worker.waiting_for_data_count` attribute has been removed; "
-            "use `len(Worker.state.waiting)`",
-            FutureWarning,
-        )
-        return len(self.state.waiting)
 
     ##################
     # Administrative #
@@ -1456,7 +1348,7 @@ class Worker(BaseWorker, ServerNode):
         self.start_services(self.ip)
 
         try:
-            listening_address = "%s%s:%d" % (self.listener.prefix, self.ip, self.port)
+            listening_address = f"{self.listener.prefix}{self.ip}:{self.port}"
         except Exception:
             listening_address = f"{self.listener.prefix}{self.ip}"
 
@@ -1466,7 +1358,7 @@ class Worker(BaseWorker, ServerNode):
             # only if name was not None
             logger.info("          Worker name: %26s", self.name)
         for k, v in self.service_ports.items():
-            logger.info("  {:>16} at: {:>26}".format(k, self.ip + ":" + str(v)))
+            logger.info("  {:>16} at: {:>26}".format(k, f"{self.ip}:{v}"))
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
         logger.info("-" * 49)
         logger.info("              Threads: %26d", self.state.nthreads)
@@ -1477,7 +1369,7 @@ class Worker(BaseWorker, ServerNode):
             )
         logger.info("      Local Directory: %26s", self.local_directory)
 
-        setproctitle("dask worker [%s]" % self.address)
+        setproctitle(f"dask worker [{self.address}]")
 
         plugins_msgs = await asyncio.gather(
             *(
@@ -1577,7 +1469,7 @@ class Worker(BaseWorker, ServerNode):
         setproctitle("dask worker [closing]")
 
         if nanny and self.nanny:
-            with self.rpc(self.nanny) as r:
+            async with self.rpc(self.nanny) as r:
                 await r.close_gracefully(reason=reason)
 
         # Cancel async instructions
@@ -1620,7 +1512,7 @@ class Worker(BaseWorker, ServerNode):
                         # otherwise
                         c.close()
 
-        await self._stop_listeners()
+        self._stop_listeners()
         await self.rpc.close()
 
         # Give some time for a UCX scheduler to complete closing endpoints
@@ -1872,14 +1764,7 @@ class Worker(BaseWorker, ServerNode):
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
-        if not isinstance(plugin, WorkerPlugin):
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin subclasses `WorkerPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        plugin = cast(WorkerPlugin, plugin)
+        assert isinstance(plugin, WorkerPlugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
@@ -2190,7 +2075,7 @@ class Worker(BaseWorker, ServerNode):
         key = actor
         actor = self.state.actors[key]
         func = getattr(actor, function)
-        name = key_split(key) + "." + function
+        name = f"{key_split(key)}.{function}"
 
         try:
             if iscoroutinefunction(func):
@@ -2308,7 +2193,7 @@ class Worker(BaseWorker, ServerNode):
                     # e.g. thread synchronization overhead only, since thread-noncpu and
                     # thread-cpu inside the thread detract from it. However, it may
                     # become substantial in case of misalignment between the size of the
-                    # thread pool and the number of running tasks in the worker stater
+                    # thread pool and the number of running tasks in the worker state
                     # machine (e.g. https://github.com/dask/distributed/issues/5882)
                     with context_meter.meter("executor"):
                         result = await run_in_executor_with_context(
@@ -2673,56 +2558,6 @@ class Worker(BaseWorker, ServerNode):
                 self.log_event(topic, msg)
 
             raise
-
-    @property
-    def incoming_transfer_log(self):
-        warnings.warn(
-            "The `Worker.incoming_transfer_log` attribute has been renamed to "
-            "`Worker.transfer_incoming_log`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_incoming_log
-
-    @property
-    def outgoing_count(self):
-        warnings.warn(
-            "The `Worker.outgoing_count` attribute has been renamed to "
-            "`Worker.transfer_outgoing_count_total`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_outgoing_count_total
-
-    @property
-    def outgoing_current_count(self):
-        warnings.warn(
-            "The `Worker.outgoing_current_count` attribute has been renamed to "
-            "`Worker.transfer_outgoing_count`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_outgoing_count
-
-    @property
-    def outgoing_transfer_log(self):
-        warnings.warn(
-            "The `Worker.outgoing_transfer_log` attribute has been renamed to "
-            "`Worker.transfer_outgoing_log`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_outgoing_log
-
-    @property
-    def total_in_connections(self):
-        warnings.warn(
-            "The `Worker.total_in_connections` attribute has been renamed to "
-            "`Worker.transfer_outgoing_count_limit`",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.transfer_outgoing_count_limit
 
 
 _worker_cvar: contextvars.ContextVar[Worker] = contextvars.ContextVar("_worker_cvar")
@@ -3152,7 +2987,7 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
             sarg = repr(arg)
         except Exception:
             sarg = "< could not convert arg to str >"
-        skwarg = repr(argname) + ": " + sarg
+        skwarg = f"{argname!r}: {sarg}"
         strs[i] = skwarg
         length += len(skwarg) + 2
         if max_len is not None and length > max_len:

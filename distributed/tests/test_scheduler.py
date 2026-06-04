@@ -20,7 +20,7 @@ import cloudpickle
 import psutil
 import pytest
 from tlz import concat, first, merge
-from tornado.ioloop import IOLoop
+from tornado.ioloop import PeriodicCallback
 
 import dask
 from dask import bag, delayed
@@ -41,7 +41,7 @@ from distributed import (
     wait,
 )
 from distributed.comm.addressing import parse_host_port
-from distributed.compatibility import LINUX, MACOS, WINDOWS, PeriodicCallback
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, clean_exception, connect, rpc
 from distributed.metrics import time
 from distributed.protocol import serialize
@@ -449,7 +449,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
             range(rootish_threshold),
             key=[f"first-{i}" for i in range(rootish_threshold)],
         )
-        await async_poll_for(lambda: s.queued, 5)
+        await async_poll_for(lambda: s.queued)
 
         second_batch = c2.map(
             lambda i: event.wait(),
@@ -457,7 +457,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
             key=[f"second-{i}" for i in range(rootish_threshold)],
             fifo_timeout=0,
         )
-        await async_poll_for(lambda: second_batch[0].key in s.tasks, 5)
+        await async_poll_for(lambda: second_batch[0].key in s.tasks)
 
         # All of the second batch should be queued after the first batch
         assert [ts.key for ts in s.queued.sorted()] == [
@@ -472,7 +472,7 @@ async def test_queued_release_multiple_workers(c, s, *workers):
         await c.close()
         del c, first_batch
 
-        await async_poll_for(lambda: len(s.tasks) == len(second_batch), 5)
+        await async_poll_for(lambda: len(s.tasks) == len(second_batch))
 
         # Second batch should move up the queue and start processing
         assert len(s.queued) == len(second_batch) - s.total_nthreads, list(
@@ -586,13 +586,13 @@ async def test_queued_remove_add_worker(c, s, a, b):
     event = Event()
     fs = c.map(lambda i: event.wait(), range(10))
 
-    await async_poll_for(lambda: len(s.queued) == 6, timeout=5)
+    await async_poll_for(lambda: len(s.queued) == 6)
     await s.remove_worker(a.address, stimulus_id="fake")
     assert len(s.queued) == 8
 
     # Add a new worker
     async with Worker(s.address, nthreads=2) as w:
-        await async_poll_for(lambda: len(s.queued) == 6, timeout=5)
+        await async_poll_for(lambda: len(s.queued) == 6)
 
         await event.set()
         await wait(fs)
@@ -609,10 +609,10 @@ async def test_secede_opens_slot(c, s, a):
         second.wait()
 
     fs = c.map(func, [first] * 5, [second] * 5, key=[f"x{i}" for i in range(5)])
-    await async_poll_for(lambda: a.state.executing, timeout=5)
+    await async_poll_for(lambda: a.state.executing)
 
     await first.set()
-    await async_poll_for(lambda: len(a.state.long_running) == len(fs), timeout=5)
+    await async_poll_for(lambda: len(a.state.long_running) == len(fs))
 
     await second.set()
     await c.gather(fs)
@@ -826,13 +826,6 @@ async def test_remove_worker_from_scheduler(c, s, a, b):
     assert len(s.workers[b.address].processing) + len(s.queued) == len(futs)
     await ev.set()
     await c.gather(futs)
-
-
-@gen_cluster(client=True)
-async def test_remove_worker_from_scheduler_warns_on_safe(c, s, a, b):
-    with pytest.warns(FutureWarning, match="expected"):
-        await s.remove_worker(address=a.address, safe=True, stimulus_id="test")
-    assert a.address not in s.workers
 
 
 @gen_cluster()
@@ -1450,15 +1443,6 @@ async def test_update_graph_culls(s, a, b):
     assert "z" not in s.tasks
 
 
-@gen_test()
-async def test_io_loop(loop):
-    with pytest.warns(
-        DeprecationWarning, match=r"the loop kwarg to Scheduler is deprecated"
-    ):
-        s = Scheduler(loop=loop, dashboard_address=":0", validate=True)
-    assert s.io_loop is IOLoop.current()
-
-
 @gen_cluster(client=True)
 async def test_story(c, s, a, b):
     x = delayed(inc)(1)
@@ -1489,7 +1473,7 @@ async def test_scatter_no_workers(c, s, direct):
         await c.scatter(123, timeout=0.1, direct=direct)
     assert time() < start + 5
 
-    fut = c.scatter({"y": 2}, timeout=5, direct=direct)
+    fut = c.scatter({"y": 2}, timeout=15, direct=direct)
     await asyncio.sleep(0.1)
     async with Worker(s.address) as w:
         await fut
@@ -1497,7 +1481,7 @@ async def test_scatter_no_workers(c, s, direct):
 
     # Test race condition between worker init and scatter
     w = Worker(s.address)
-    await asyncio.gather(c.scatter({"z": 3}, timeout=5, direct=direct), w)
+    await asyncio.gather(c.scatter({"z": 3}, timeout=15, direct=direct), w)
     assert w.data["z"] == 3
     await w.close()
 
@@ -2358,7 +2342,7 @@ async def test_resources_reset_after_cancelled_task(c, s, a):
     assert a.state.available_resources == {"A": 0}
 
     await lock.release()
-    await async_poll_for(lambda: not a.state.tasks, timeout=5)
+    await async_poll_for(lambda: not a.state.tasks)
     assert s.workers[a.address].used_resources == {"A": 0}
     assert a.state.available_resources == {"A": 1}
 
@@ -2396,7 +2380,7 @@ async def test_gh2187(c, s, a, b):
 @gen_cluster(client=True)
 async def test_collect_versions(c, s, a, b):
     cs = s.clients[c.id]
-    (w1, w2) = s.workers.values()
+    w1, w2 = s.workers.values()
     assert cs.versions
     assert w1.versions
     assert w2.versions
@@ -2587,7 +2571,7 @@ async def test_no_workers_timeout_queued(c, s, a):
     """Don't trip no-workers-timeout when there are queued tasks AND processing tasks"""
     ev = Event()
     futures = [c.submit(lambda ev: ev.wait(), ev, pure=False) for _ in range(3)]
-    await async_poll_for(lambda: len(s.tasks) == 3 and a.state.tasks, timeout=5)
+    await async_poll_for(lambda: len(s.tasks) == 3 and a.state.tasks)
     assert s.queued or math.isinf(s.WORKER_SATURATION)
 
     s._check_no_workers()
@@ -2766,14 +2750,14 @@ async def test_adaptive_target_empty_cluster(c, s, queue):
     assert s.adaptive_target() == 0
 
     f = c.submit(inc, -1)
-    await async_poll_for(lambda: s.tasks, timeout=5)
+    await async_poll_for(lambda: s.tasks)
     assert s.adaptive_target() == 1
     del f
 
     if queue:
         # only queuing supports fast scale-up for empty clusters https://github.com/dask/distributed/issues/6962
         fs = c.map(inc, range(100))
-        await async_poll_for(lambda: len(s.tasks) == len(fs), timeout=5)
+        await async_poll_for(lambda: len(s.tasks) == len(fs))
         assert s.adaptive_target() > 1
 
 
@@ -2930,13 +2914,9 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
 
     assert tg.prefix is tp
     assert tp.groups == {tg}
-    with pytest.warns(FutureWarning, match="active"):
-        assert tp.groups == tp.active
     # these must be true since in this simple case there is a 1to1 mapping
     # between prefix and group
     assert tg.states == tp.states
-    with pytest.warns(FutureWarning, match="active_states"):
-        assert tp.states == tp.active_states
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
@@ -2952,13 +2932,9 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     tp = s.task_prefixes["add"]
     assert tg.prefix is tp
     assert tp.groups == {tg}
-    with pytest.warns(FutureWarning, match="active"):
-        assert tp.groups == tp.active
     # these must be true since in this simple case there is a 1to1 mapping
     # between prefix and group
     assert tg.states == tp.states
-    with pytest.warns(FutureWarning, match="active_states"):
-        assert tp.states == tp.active_states
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
@@ -2980,8 +2956,6 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
 
     assert tg.prefix is tp
     assert tp.groups == {tg}
-    with pytest.warns(FutureWarning, match="active"):
-        assert tp.groups == tp.active
     assert tg.states["forgotten"] == 4
     assert tg.states["released"] == 1
     assert sum(tg.states.values()) == 5
@@ -2989,8 +2963,6 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     assert len(tp) == 5
 
     assert tg.states == tp.states
-    with pytest.warns(FutureWarning, match="active_states"):
-        assert tp.states == tp.active_states
     assert tg.duration == tp.duration
     assert tg.all_durations == tp.all_durations
     assert tg.nbytes_total == tp.nbytes_total
@@ -3016,11 +2988,7 @@ async def test_task_group_and_prefix_statistics(c, s, a, b, no_time_resync):
     # these must be zero because we remove fully-forgotten task groups
     # from the prefixes
     assert tp.groups == set()
-    with pytest.warns(FutureWarning, match="active"):
-        assert tp.groups == tp.active
     assert all(count == 0 for count in tp.states.values())
-    with pytest.warns(FutureWarning, match="active_states"):
-        assert tp.states == tp.active_states
     assert len(tp) == 0
     assert tp.duration == 0
     assert tp.nbytes_total == 0
@@ -3075,7 +3043,7 @@ async def test_task_group_done(c, s, a, b):
 
     await wait([x0, x1, x2, y])
     del x2  # forgotten
-    await async_poll_for(lambda: ("x", 2) not in s.tasks, timeout=5)
+    await async_poll_for(lambda: ("x", 2) not in s.tasks)
 
     tg = s.task_groups["x"]
     assert tg.states == {
@@ -3119,10 +3087,7 @@ async def test_task_group_not_done_noworker(c, s, a, b):
 
 
 @gen_cluster(
-    client=True,
-    nthreads=[],
-    config={"distributed.scheduler.worker-saturation": 1.0},
-    timeout=3,
+    client=True, nthreads=[], config={"distributed.scheduler.worker-saturation": 1.0}
 )
 async def test_task_group_not_done_queued(c, s):
     """TaskGroup.done is False if any of its tasks are in queued state"""
@@ -3457,23 +3422,13 @@ def test_memorystate():
     assert m.unmanaged_recent == 17
     assert m.optimistic == 83
 
-    with pytest.warns(FutureWarning):
-        assert m.managed_spilled == m.spilled
-    with pytest.warns(FutureWarning):
-        assert m.managed_in_memory == m.managed
-
-    assert (
-        repr(m)
-        == dedent(
-            """
+    assert repr(m) == dedent("""
             Process memory (RSS)  : 100 B
               - managed by Dask   : 68 B
               - unmanaged (old)   : 15 B
               - unmanaged (recent): 17 B
             Spilled to disk       : 12 B
-            """
-        ).lstrip()
-    )
+            """).lstrip()
 
 
 def test_memorystate_sum():
@@ -3879,14 +3834,12 @@ async def test_rebalance_raises_missing_data3(c, s, a, b, explicit):
     futures = await c.scatter(range(100), workers=[a.address])
 
     if explicit:
-        pytest.xfail(
-            reason="""Freeing keys and gathering data is using different
+        pytest.xfail(reason="""Freeing keys and gathering data is using different
                    channels (stream vs explicit RPC). Therefore, the
                    partial-fail is very timing sensitive and subject to a race
                    condition. This test assumes that the data is freed before
                    the rebalance get_data requests come in but merely deleting
-                   the futures is not sufficient to guarantee this"""
-        )
+                   the futures is not sufficient to guarantee this""")
         keys = [f.key for f in futures]
         del futures
         out = await s.rebalance(keys=keys)
@@ -4059,7 +4012,7 @@ async def test_gather_on_worker_bad_recipient(c, s, a, b):
     """The recipient is missing"""
     x = await c.scatter("x")
     await b.close()
-    await async_poll_for(lambda: s.workers.keys() == {a.address}, timeout=5)
+    await async_poll_for(lambda: s.workers.keys() == {a.address})
     out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == {x.key}
 
@@ -4257,7 +4210,7 @@ async def test_transition_counter_max_worker(c, s, a):
     a.state.transition_counter_max = 1
     fut = c.submit(inc, 2)
     with captured_logger("distributed.worker") as logger:
-        await async_poll_for(lambda: a.state.transition_counter > 0, timeout=5)
+        await async_poll_for(lambda: a.state.transition_counter > 0)
 
     assert "TransitionCounterMaxExceeded" in logger.getvalue()
     # Worker state is corrupted. Avoid test failure on gen_cluster teardown.
@@ -4646,7 +4599,7 @@ async def test_transition_waiting_memory(c, s, a, b):
             assert s.tasks["y"].state == "waiting"
             await wait_for_state("y", "memory", b)
 
-    await async_poll_for(lambda: not b.state.tasks, timeout=5)
+    await async_poll_for(lambda: not b.state.tasks)
 
     assert s.tasks["x"].state == "no-worker"
     assert s.tasks["y"].state == "waiting"
@@ -4776,8 +4729,7 @@ async def test_transition_failure_triggers_log_event():
                 event["action"] == "scheduler-transition-failed"
                 for _, event in s.get_events("transitions")
             )
-            == 1,
-            timeout=5,
+            == 1
         )
 
 
@@ -4859,8 +4811,7 @@ async def test_deadlock_dependency_of_queued_released_when_worker_removed(
     with freeze_batched_send(b.batched_stream):
         await async_poll_for(
             lambda: b.state.tasks.get(dep.key) is not None
-            and b.state.tasks.get(dep.key).state == "memory",
-            timeout=5,
+            and b.state.tasks.get(dep.key).state == "memory"
         )
         assert s.queued
         await s.remove_worker(address=a.address, stimulus_id="test")
@@ -5057,7 +5008,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
             await in_f.clear()
 
             # Make sure that the scheduler knows that both workers hold 'g' in memory
-            await async_poll_for(lambda: len(s.tasks["g"].who_has) == 2, timeout=5)
+            await async_poll_for(lambda: len(s.tasks["g"].who_has) == 2)
             # Remove worker 'b' while it's processing h1
             await s.remove_worker(b.address, stimulus_id="remove_b1")
             await block_hb.set()
@@ -5080,7 +5031,7 @@ async def test_fan_out_pattern_deadlock(c, s, a):
 
         del ha, hb
         # Make sure that h2 gets forgotten on worker 'a'
-        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+        await async_poll_for(lambda: not a.state.tasks)
     # Ensure that no other errors including transition failures were logged
     assert (
         logger.getvalue()
@@ -5140,12 +5091,12 @@ async def test_stimulus_from_erred_task(c, s, a):
         ) as wrapped_stimulus:
             frozen_stream_from_a_ctx.__exit__(None, None, None)
             # Make sure the `stimulus_task_finished` gets processed
-            await async_poll_for(lambda: wrapped_stimulus.call_count == 1, timeout=5)
+            await async_poll_for(lambda: wrapped_stimulus.call_count == 1)
 
         # Allow the scheduler to talk to the worker again
         frozen_stream_to_a_ctx.__exit__(None, None, None)
         # Make sure all data gets forgotten on worker 'a'
-        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+        await async_poll_for(lambda: not a.state.tasks)
 
     # Ensure that no other errors including transition failures were logged
     assert (
@@ -5223,7 +5174,7 @@ async def test_data_producers(c, s, a):
 
     arr = MyArray()
     x = c.compute(arr)
-    await async_poll_for(lambda: s.tasks, 5)
+    await async_poll_for(lambda: s.tasks)
     assert (
         sum([s.is_rootish(v) and v.run_spec.data_producer for v in s.tasks.values()])
         == 2

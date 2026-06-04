@@ -4,7 +4,7 @@ import copy
 import uuid
 import weakref
 from collections import defaultdict
-from collections.abc import Hashable, Iterable, Iterator, Mapping
+from collections.abc import Generator, Hashable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from itertools import islice
 from typing import TYPE_CHECKING, Any, TypedDict
@@ -34,7 +34,7 @@ class SpanMetadata(TypedDict):
 
 
 @contextmanager
-def span(*tags: str) -> Iterator[str]:
+def span(*tags: str) -> Generator[str]:
     """Tag group of tasks to be part of a certain group, called a span.
 
     This context manager can be nested, thus creating sub-spans. If you close and

@@ -142,7 +142,7 @@ class Actor(TaskRef):
     def __getattr__(self, key):
         if self._future and self._future.status not in ("finished", "pending"):
             raise RuntimeError(
-                "Worker holding Actor was lost.  Status: " + self._future.status
+                f"Worker holding Actor was lost.  Status: {self._future.status}"
             )
         self._try_bind_worker_client()
         if (
@@ -151,7 +151,7 @@ class Actor(TaskRef):
             and getattr(thread_state, "actor", False)
         ):
             # actor calls actor on same worker
-            actor = self._worker.actors[self.key]
+            actor = self._worker.state.actors[self.key]
             attr = getattr(actor, key)
 
             if iscoroutinefunction(attr):
@@ -245,6 +245,8 @@ class BaseActorFuture(abc.ABC, Awaitable[_T]):
     Actor
     """
 
+    __slots__ = ()
+
     @abc.abstractmethod
     def result(self, timeout: str | timedelta | float | None = None) -> _T: ...
 
@@ -255,7 +257,7 @@ class BaseActorFuture(abc.ABC, Awaitable[_T]):
         return "<ActorFuture>"
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class EagerActorFuture(BaseActorFuture[_T]):
     """Future to an actor's method call when an actor calls another actor on the same worker"""
 
@@ -272,7 +274,7 @@ class EagerActorFuture(BaseActorFuture[_T]):
         return True
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class _OK(Generic[_T]):
     _v: _T
 
@@ -280,7 +282,7 @@ class _OK(Generic[_T]):
         return self._v
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class _Error:
     _e: Exception
 
@@ -289,10 +291,16 @@ class _Error:
 
 
 class ActorFuture(BaseActorFuture[_T]):
+    _io_loop: IOLoop
+    _event: LateLoopEvent
+    _out: _Error | _OK[_T] | None
+
+    __slots__ = tuple(__annotations__)
+
     def __init__(self, io_loop: IOLoop):
         self._io_loop = io_loop
         self._event = LateLoopEvent()
-        self._out: _Error | _OK[_T] | None = None
+        self._out = None
 
     def __await__(self) -> Generator[object, None, _T]:
         return self._result().__await__()

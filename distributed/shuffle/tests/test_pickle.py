@@ -28,7 +28,7 @@ def test_pickle_zero_copy():
     a[0] = 4  # Test that pickle_bytelist does not deep copy
     bin = bytearray(b"".join(frames))  # Deep-copies buffers
     [a2] = unpickle_bytestream(bin)
-    a2[1] = 5  # Test that unpickle_bytelist does not deep copy
+    a2[1] = 5  # Test that unpickle_bytestream does not deep copy
     [a3] = unpickle_bytestream(bin)
     expect = np.array([4, 5, 3])
     assert (a3 == expect).all()

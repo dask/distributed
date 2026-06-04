@@ -83,7 +83,7 @@ async def test_computations_long_running(c, s, a):
 
     x = c.submit(func, ev, key="x")
     await wait_for_state("x", "long-running", a)
-    await async_poll_for(lambda: s.total_occupancy == 0, timeout=5)
+    await async_poll_for(lambda: s.total_occupancy == 0)
     y = c.submit(inc, 1, key="y")
     assert await y == 2
     await ev.set()

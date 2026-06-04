@@ -15,7 +15,7 @@ import weakref
 from collections.abc import Callable, Collection
 from inspect import isawaitable
 from queue import Empty
-from typing import ClassVar, Literal, cast
+from typing import ClassVar, Literal
 
 from toolz import merge
 from tornado.ioloop import IOLoop
@@ -57,11 +57,7 @@ from distributed.utils import (
     wait_for,
 )
 from distributed.worker import Worker, run
-from distributed.worker_memory import (
-    DeprecatedMemoryManagerAttribute,
-    DeprecatedMemoryMonitor,
-    NannyMemoryManager,
-)
+from distributed.worker_memory import NannyMemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +98,7 @@ class Nanny(ServerNode):
            For the same reason, be warned that changing
            ``distributed.worker.multiprocessing-method`` from ``spawn`` to ``fork`` or
            ``forkserver`` may inhibit some environment variables; if you do, you should
-           set the variables yourself in the shell before you start ``dask-worker``.
+           set the variables yourself in the shell before you start ``dask worker``.
 
     See Also
     --------
@@ -127,7 +123,6 @@ class Nanny(ServerNode):
         scheduler_file=None,
         worker_port: int | str | Collection[int] | None = 0,
         nthreads=None,
-        loop=None,
         local_directory=None,
         services=None,
         name=None,
@@ -154,14 +149,6 @@ class Nanny(ServerNode):
         config=None,
         **worker_kwargs,
     ):
-        if loop is not None:
-            warnings.warn(
-                "the `loop` kwarg to `Nanny` is ignored, and will be removed in a future release. "
-                "The Nanny always binds to the current loop.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         self.__exit_stack = stack = contextlib.ExitStack()
         self.process = None
         self._setup_logging(logger)
@@ -286,13 +273,8 @@ class Nanny(ServerNode):
         self._listen_address = listen_address
         Nanny._instances.add(self)
 
-    # Deprecated attributes; use Nanny.memory_manager.<name> instead
-    memory_limit = DeprecatedMemoryManagerAttribute()
-    memory_terminate_fraction = DeprecatedMemoryManagerAttribute()
-    memory_monitor = DeprecatedMemoryMonitor()
-
     def __repr__(self):
-        return "<Nanny: %s, threads: %d>" % (self.worker_address, self.nthreads)
+        return f"<Nanny: {self.worker_address}, threads: {self.nthreads}>"
 
     async def _unregister(self, timeout=10):
         if self.process is None:
@@ -462,14 +444,7 @@ class Nanny(ServerNode):
     ) -> ErrorMessage | OKMessage:
         if isinstance(plugin, bytes):
             plugin = pickle.loads(plugin)
-        if not isinstance(plugin, NannyPlugin):
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin inherits from `NannyPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        plugin = cast(NannyPlugin, plugin)
+        assert isinstance(plugin, NannyPlugin)
 
         if name is None:
             name = _get_plugin_name(plugin)
@@ -594,7 +569,7 @@ class Nanny(ServerNode):
             "Closing Nanny gracefully at %r. Reason: %s", self.address_safe, reason
         )
 
-    async def close(  # type:ignore[override]
+    async def close(  # type: ignore[override]
         self, timeout: float = 5, reason: str = "nanny-close"
     ) -> Literal["OK"]:
         """
@@ -782,11 +757,11 @@ class WorkerProcess:
     def _death_message(self, pid, exitcode):
         assert exitcode is not None
         if exitcode == 255:
-            return "Worker process %d was killed by unknown signal" % (pid,)
+            return f"Worker process {pid} was killed by unknown signal"
         elif exitcode >= 0:
-            return "Worker process %d exited with status %d" % (pid, exitcode)
+            return f"Worker process {pid} exited with status {exitcode}"
         else:
-            return "Worker process %d was killed by signal %d" % (pid, -exitcode)
+            return f"Worker process {pid} was killed by signal {-exitcode}"
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()

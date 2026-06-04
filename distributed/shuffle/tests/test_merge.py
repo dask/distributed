@@ -24,7 +24,7 @@ from distributed import get_client
 try:
     import pyarrow as pa
 except ImportError:
-    pa = None
+    pa = None  # type: ignore[assignment]
 
 pytestmark = pytest.mark.ci1
 
@@ -265,7 +265,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 assert_eq(
                     await c.compute(ddl.join(ddr, how=how)),
                     expected,
-                    # FIXME: There's an discrepancy with an empty index for
+                    # FIXME: There's a discrepancy with an empty index for
                     # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                     # Temporarily avoid index check until the discrepancy is fixed.
                     check_index=not expected.index.empty,
@@ -275,7 +275,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                 assert_eq(
                     await c.compute(ddr.join(ddl, how=how)),
                     expected,
-                    # FIXME: There's an discrepancy with an empty index for
+                    # FIXME: There's a discrepancy with an empty index for
                     # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                     # Temporarily avoid index check until the discrepancy is fixed.
                     check_index=not expected.index.empty,
@@ -295,7 +295,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                         )
                     ),
                     expected,
-                    # FIXME: There's an discrepancy with an empty index for
+                    # FIXME: There's a discrepancy with an empty index for
                     # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                     # Temporarily avoid index check until the discrepancy is fixed.
                     check_index=not expected.index.empty,
@@ -315,7 +315,7 @@ async def test_merge_by_multiple_columns(c, s, a, b, how):
                         )
                     ),
                     expected,
-                    # FIXME: There's an discrepancy with an empty index for
+                    # FIXME: There's a discrepancy with an empty index for
                     # pandas=2.0 (xref https://github.com/dask/dask/issues/9957).
                     # Temporarily avoid index check until the discrepancy is fixed.
                     check_index=not expected.index.empty,

@@ -307,7 +307,7 @@ class TCP(Comm):
             self._closed = True
             convert_stream_closed_error(self, e)
         except BaseException:
-            # Some OSError or a another "low-level" exception. We do not really know
+            # Some OSError or another "low-level" exception. We do not really know
             # what was already written to the underlying socket, so it is not even safe
             # to retry here using the same stream. The only safe thing to do is to
             # abort. (See also GitHub #4133).
@@ -468,7 +468,7 @@ class RequireEncryptionMixin:
             # XXX Should we have a dedicated SecurityError class?
             raise RuntimeError(
                 "encryption required by Dask configuration, "
-                "refusing communication from/to %r" % (self.prefix + address,)
+                f"refusing communication from/to {self.prefix + address!r}"
             )
 
 
@@ -679,7 +679,7 @@ class BaseTCPListener(BaseListener, RequireEncryptionMixin):
 
         if self.bound_address is None:
             self.bound_address = get_tcp_server_address(self.tcp_server)
-        # IPv6 getsockname() can return more a 4-len tuple
+        # IPv6 getsockname() can return more than a 4-element tuple
         return self.bound_address[:2]
 
     @property

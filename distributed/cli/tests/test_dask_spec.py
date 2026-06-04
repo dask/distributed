@@ -172,3 +172,46 @@ async def test_signal_handling_scheduler(sig):
         assert "exception" not in logs
     finally:
         await scheduler.wait()
+
+
+@gen_test()
+async def test_uvloop():
+    uvloop = pytest.importorskip("uvloop")
+    port = open_port()
+    env = {"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"}
+
+    def check():
+        return isinstance(asyncio.get_event_loop(), uvloop.Loop)
+
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "spec",
+            "--spec",
+            json.dumps({"cls": "dask.distributed.Scheduler", "opts": {"port": port}}),
+        ],
+        env=env,
+    ):
+        with popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "spec",
+                f"tcp://localhost:{port}",
+                "--spec",
+                json.dumps(
+                    {
+                        "cls": "dask.distributed.Worker",
+                        "opts": {"nanny": False, "nthreads": 1},
+                    }
+                ),
+            ],
+            env=env,
+        ):
+            async with Client(f"tcp://localhost:{port}", asynchronous=True) as client:
+                await client.wait_for_workers(1)
+                assert await client.run_on_scheduler(check)
+                assert all((await client.run(check)).values())

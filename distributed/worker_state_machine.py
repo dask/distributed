@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import random
-import warnings
 import weakref
 from collections import Counter, defaultdict, deque
 from collections.abc import (
@@ -57,7 +56,6 @@ if TYPE_CHECKING:
     # Circular imports
     from distributed.diagnostics.plugin import WorkerPlugin
     from distributed.scheduler import T_runspec
-    from distributed.worker import Worker
 
 # Not to be confused with distributed.scheduler.TaskStateState
 TaskStateState: TypeAlias = Literal[
@@ -382,6 +380,8 @@ class _InstructionMatch:
     cls: type[Instruction]
     kwargs: dict[str, Any]
 
+    __slots__ = ("cls", "kwargs")
+
     def __init__(self, cls: type[Instruction], **kwargs: Any):
         self.cls = cls
         self.kwargs = kwargs
@@ -436,7 +436,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
 
     key: Key
     run_id: int
-    nbytes: int | None
+    nbytes: int
     type: bytes  # serialized class
     typename: str
     metadata: dict
@@ -1765,7 +1765,7 @@ class WorkerState:
             assert ts.state == "memory"
             assert ts.key in self.data or ts.key in self.actors
             assert ts.type is not None
-            assert ts.nbytes is not None
+        assert ts.nbytes is not None
 
         try:
             type_serialized = pickle.dumps(ts.type)
@@ -3922,32 +3922,3 @@ class TaskCounter:
             # will remain in released state and never transition to anything else.
             self._current_count[ts.prefix, ts.state] += 1
         self._new_tasks.clear()
-
-
-class DeprecatedWorkerStateAttribute:
-    name: str
-    target: str | None
-
-    def __init__(self, target: str | None = None):
-        self.target = target
-
-    def __set_name__(self, owner: type, name: str) -> None:
-        self.name = name
-
-    def _warn_deprecated(self) -> None:
-        warnings.warn(
-            f"The `Worker.{self.name}` attribute has been moved to "
-            f"`Worker.state.{self.target or self.name}`",
-            FutureWarning,
-        )
-
-    def __get__(self, instance: Worker | None, owner: type[Worker]) -> Any:
-        if instance is None:
-            # This is triggered by Sphinx
-            return None  # pragma: nocover
-        self._warn_deprecated()
-        return getattr(instance.state, self.target or self.name)
-
-    def __set__(self, instance: Worker, value: Any) -> None:
-        self._warn_deprecated()
-        setattr(instance.state, self.target or self.name, value)

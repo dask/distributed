@@ -85,8 +85,7 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
         if len(self._threads) < self._max_workers:
             t = threading.Thread(
                 target=_worker,
-                name=self._thread_name_prefix
-                + "-%d-%d" % (os.getpid(), next(self._counter)),
+                name=f"{self._thread_name_prefix}-{os.getpid()}-{next(self._counter)}",
                 args=(self, self._work_queue),
             )
             t.daemon = True

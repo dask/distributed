@@ -226,7 +226,7 @@ def test_heapset_sorted_flag_left():
     assert not heap
     assert_heap_sorted(heap)
 
-    # discarding`` the last element resets the sorted flag
+    # discarding the last element resets the sorted flag
     heap.add(c1)
     heap.add(c2)
     assert not heap._sorted

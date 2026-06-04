@@ -665,16 +665,14 @@ async def test_lose_replica_during_fetch(c, s, w1, w2, w3, as_deps):
 
         assert len(s.tasks["x"].who_has) == 2
         await w2.close()
-        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1, timeout=5)
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1)
 
         if as_deps:
             y2 = c.submit(inc, x, key="y2", workers=[w1.address])
         else:
             s.request_acquire_replicas(w1.address, ["x"], stimulus_id="test")
 
-        await async_poll_for(
-            lambda: w1.state.tasks["x"].who_has == {w3.address}, timeout=5
-        )
+        await async_poll_for(lambda: w1.state.tasks["x"].who_has == {w3.address})
 
     await wait_for_state("x", "memory", w1)
     assert_story(
@@ -930,7 +928,7 @@ async def test_task_state_instance_are_garbage_collected(c, s, a, b):
             await asyncio.sleep(0.01)
 
         gc.collect()
-        # Gargabe collection might already be running in which case gc.collect()'s behavior is undefined.
+        # Garbage collection might already be running in which case gc.collect()'s behavior is undefined.
         # Try again and hope for the best.
         while SchedulerTaskState._instances:
             await asyncio.sleep(0.01)
@@ -1016,34 +1014,6 @@ async def test_fetch_to_missing_on_network_failure(c, s, a):
 
         await wait_for_state("x", "missing", a)
         await wait_for_state("y", "missing", a)
-
-
-@gen_cluster()
-async def test_deprecated_worker_attributes(s, a, b):
-    n = a.state.generation
-    msg = (
-        "The `Worker.generation` attribute has been moved to "
-        "`Worker.state.generation`"
-    )
-    with pytest.warns(FutureWarning, match=msg):
-        assert a.generation == n
-    with pytest.warns(FutureWarning, match=msg):
-        a.generation -= 1
-        assert a.generation == n - 1
-    assert a.state.generation == n - 1
-
-    # Old and new names differ
-    msg = (
-        "The `Worker.in_flight_tasks` attribute has been moved to "
-        "`Worker.state.in_flight_tasks_count`"
-    )
-    with pytest.warns(FutureWarning, match=msg):
-        assert a.in_flight_tasks == 0
-
-    with pytest.warns(FutureWarning, match="attribute has been removed"):
-        assert a.data_needed == set()
-    with pytest.warns(FutureWarning, match="attribute has been removed"):
-        assert a.waiting_for_data_count == 0
 
 
 @pytest.mark.parametrize("n_remote_workers", [1, 2])

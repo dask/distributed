@@ -13,7 +13,7 @@ from tornado.httpclient import AsyncHTTPClient
 
 from dask.system import CPU_COUNT
 
-from distributed import Client, LocalCluster, Nanny, Worker, get_client
+from distributed import Client, LocalCluster, Nanny, Worker, WorkerPlugin, get_client
 from distributed.compatibility import LINUX, asyncio_run
 from distributed.config import get_loop_factory
 from distributed.core import Status
@@ -470,6 +470,7 @@ def test_repeated(loop_in_thread):
 def test_bokeh(loop, processes):
     pytest.importorskip("bokeh")
     requests = pytest.importorskip("requests")
+
     with LocalCluster(
         n_workers=0,
         silence_logs=False,
@@ -770,8 +771,7 @@ async def test_adapt_then_manual():
         def wait_workers(n):
             return async_poll_for(
                 lambda: len(cluster.scheduler.workers) == n
-                and len(cluster.workers) == n,
-                timeout=5,
+                and len(cluster.workers) == n
             )
 
         await wait_workers(8)
@@ -822,7 +822,7 @@ def test_local_tls(loop, temporary):
             **c.security.get_connection_args("client"),
         )
 
-        # If we connect to a TLS localculster without ssl information we should fail
+        # If we connect to a TLS localcluster without ssl information we should fail
         sync(
             loop,
             assert_cannot_connect,
@@ -1060,22 +1060,6 @@ async def test_repr(memory_limit):
             assert "memory" not in text
 
 
-@gen_test()
-async def test_threads_per_worker_set_to_0():
-    with pytest.warns(
-        Warning, match="Setting `threads_per_worker` to 0 has been deprecated."
-    ):
-        async with LocalCluster(
-            n_workers=2,
-            processes=False,
-            threads_per_worker=0,
-            asynchronous=True,
-            dashboard_address=":0",
-        ) as cluster:
-            assert len(cluster.workers) == 2
-            assert all(w.state.nthreads < CPU_COUNT for w in cluster.workers.values())
-
-
 @pytest.mark.parametrize("temporary", [True, False])
 @gen_test()
 async def test_capture_security(temporary):
@@ -1276,12 +1260,11 @@ async def test_connect_to_closed_cluster():
         Client(cluster, asynchronous=True)
 
 
-class MyPlugin:
+class MyPlugin(WorkerPlugin):
     def setup(self, worker=None):
         import my_nonexistent_library  # noqa
 
 
-@pytest.mark.slow
 def test_localcluster_start_exception(loop):
     with raises_with_cause(
         RuntimeError,

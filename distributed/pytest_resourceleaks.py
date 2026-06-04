@@ -19,7 +19,7 @@ If you do, the specified checks won't report errors.
 
 Known issues
 ------------
-- Tests that contain imports will be flagged as leaking RAM (memory and tracemallock
+- Tests that contain imports will be flagged as leaking RAM (memory and tracemalloc
   checks) if it's the first time in the test suite that the import happens; e.g.
 
       def test1():
@@ -61,7 +61,7 @@ from distributed.metrics import time
 
 def pytest_addoption(parser):
     group = parser.getgroup("resource leaks")
-    known_checkers = ", ".join(sorted("'%s'" % s for s in all_checkers))
+    known_checkers = ", ".join(sorted(f"'{s}'" for s in all_checkers))
     group.addoption(
         "-L",
         "--leaks",
@@ -329,7 +329,7 @@ class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
                 break
             count = stat.count_diff or stat.count
             lines += [f"  - leaked {size_diff / 2**20:.1f} MiB in {count} calls at:"]
-            lines += ["    " + line for line in stat.traceback.format()]
+            lines += [f"    {line}" for line in stat.traceback.format()]
 
         return "\n".join(lines)
 

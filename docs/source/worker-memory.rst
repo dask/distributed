@@ -4,7 +4,7 @@ For cluster-wide memory-management, see :doc:`memory`.
 
 Workers are given a target memory limit to stay under with the
 command line ``--memory-limit`` keyword or the ``memory_limit=`` Python
-keyword argument, which sets the memory limit per worker processes launched
+keyword argument, which sets the memory limit per worker process launched
 by dask worker ::
 
     $ dask worker tcp://scheduler:port --memory-limit=auto  # TOTAL_MEMORY * min(1, nthreads / total_nthreads)
@@ -43,8 +43,8 @@ The approach above can fail for a few reasons:
 
 To address this, we periodically monitor the :ref:`process memory <memtypes>` of the
 worker every 200 ms. If the system reported memory use is above 70% of the target memory
-usage (*spill threshold*), then the worker will start dumping unused data to disk, even
-if internal ``sizeof`` recording hasn't yet reached the normal 60% threshold. This
+limit (*spill threshold*), then the worker will start dumping unused data to disk, even
+if internal ``sizeof`` measurements haven't yet reached the normal 60% threshold. This
 more aggressive spilling will continue until process memory falls below 60%.
 
 Pause worker
@@ -123,7 +123,7 @@ unmanaged recent
 
     By default, :meth:`distributed.Client.rebalance`,
     :meth:`distributed.scheduler.Scheduler.rebalance`, and the
-    :doc:`active_memory_manager` ignore unmanaged recent memory. This behaviour can also
+    :doc:`active_memory_manager` ignore unmanaged recent memory. This behavior can also
     be tweaked using the Dask config - see the specific components' documentation.
 
 spilled

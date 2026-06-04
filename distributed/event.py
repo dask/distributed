@@ -179,7 +179,7 @@ class Event:
 
     def __init__(self, name=None, client=None):
         self._client = client
-        self.name = name or "event-" + uuid.uuid4().hex
+        self.name = name or f"event-{uuid.uuid4().hex}"
 
     @property
     def client(self):
@@ -231,7 +231,7 @@ class Event:
 
         Returns
         -------
-        True if the event was set of false, if a timeout happened
+        True if the event was set; False if a timeout happened
         """
         self._verify_running()
         timeout = parse_timedelta(timeout)
@@ -250,7 +250,7 @@ class Event:
         return self.client.sync(self.client.scheduler.event_clear, name=self.name)
 
     def set(self):
-        """Set the event (set its flag to false).
+        """Set the event (set its flag to True).
 
         All waiters will now be released.
         """

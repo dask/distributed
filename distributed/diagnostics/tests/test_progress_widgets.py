@@ -5,8 +5,6 @@ from operator import add
 
 import pytest
 
-from dask.utils import key_split
-
 from distributed.client import wait
 from distributed.spans import span
 from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
@@ -162,7 +160,7 @@ def test_fast(client):
 
 
 def test_multibar_with_spans(client):
-    """Test progress(group_by='spans'"""
+    """Test progress (group_by='spans')"""
     with span("span 1"):
         L = client.map(inc, range(100))
     with span("span 2"):
@@ -186,22 +184,6 @@ def test_multibar_with_spans(client):
     assert all("100 / 100" in v for k, v in bar_texts.items() if k != "default")
     assert bar_labels.keys() == {"span 1", "span 2", "span 3", "default"}
     assert all(f">{k}<" in v for k, v in bar_labels.items())
-
-
-def test_multibar_func_warns(client):
-    """Deprecate `func`, use `group_by`"""
-    L = client.map(inc, range(100))
-    L2 = client.map(dec, L)
-    L3 = client.map(add, L, L2)
-
-    # ensure default value if nothing is set
-    p = MultiProgressWidget(L3)
-    assert p.group_by == key_split
-
-    with pytest.warns(
-        DeprecationWarning, match="`func` is deprecated, use `group_by` instead"
-    ):
-        MultiProgressWidget(L3, func="foo")
 
 
 @gen_cluster(client=True, client_kwargs={"serializers": ["msgpack"]})

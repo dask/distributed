@@ -28,10 +28,6 @@ def test_serialize_deserialize_sparse():
 def test_serialize_deserialize_sparse_large():
     n = 100000000
     x = np.arange(n)
-    data = np.ones(n, dtype=np.int16)
-
-    s = sparse.COO([x], data)
-
+    s = sparse.COO(x)
     header, frames = serialize(s)
-
     s2 = deserialize(header, frames)

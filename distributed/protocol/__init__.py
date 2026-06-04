@@ -14,7 +14,6 @@ from distributed.protocol.serialize import (
     dask_serialize,
     deserialize,
     deserialize_bytes,
-    nested_deserialize,
     register_generic,
     register_serialization,
     register_serialization_family,

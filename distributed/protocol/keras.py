@@ -12,8 +12,6 @@ from distributed.protocol.serialize import (
 
 @dask_serialize.register(keras.Model)
 def serialize_keras_model(model):
-    import keras
-
     if keras.__version__ < "1.2.0":
         raise ImportError(
             "Need Keras >= 1.2.0. Try python -m pip install keras --upgrade --no-deps"

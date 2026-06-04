@@ -23,6 +23,7 @@ from collections.abc import (
     Coroutine,
     Iterable,
     Iterator,
+    Mapping,
     Sequence,
 )
 from concurrent.futures import ThreadPoolExecutor
@@ -43,12 +44,13 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
+    overload,
 )
 
 from packaging.version import parse as parse_version
 from tlz import first, groupby, merge, partition_all, valmap
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask._expr import Expr, HLGExpr, LLGExpr
@@ -74,7 +76,6 @@ from distributed import cluster_dump, preloading
 from distributed import versions as version_module
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
-from distributed.compatibility import PeriodicCallback
 from distributed.core import (
     CommClosedError,
     ConnectionPool,
@@ -150,11 +151,11 @@ _T = TypeVar("_T")
 
 
 class FutureCancelledError(CancelledError):
-    key: str
+    key: Key
     reason: str
     msg: str | None
 
-    def __init__(self, key: str, reason: str | None, msg: str | None = None):
+    def __init__(self, key: Key, reason: str | None, msg: str | None = None):
         self.key = key
         self.reason = reason if reason else "unknown"
         self.msg = msg
@@ -162,9 +163,10 @@ class FutureCancelledError(CancelledError):
     def __str__(self) -> str:
         result = f"{self.key} cancelled for reason: {self.reason}."
         if self.msg:
-            result = "\n".join([result, self.msg])
+            result += f"\n{self.msg}"
         return result
 
+    # Workaround to tblib <3.2.1
     def __reduce__(self):
         return self.__class__, (self.key, self.reason, self.msg)
 
@@ -294,21 +296,35 @@ class Future(TaskRef, Generic[_T]):
     Client:  Creates futures
     """
 
+    key: Key
+    _client: Client | None
+    _input_state: FutureState | None
+    _state: FutureState | None
+    _id: tuple[str, int]
+    _cleared: bool
+
     _is_finalizing: staticmethod[[], bool] = staticmethod(sys.is_finalizing)
+    _cb_executor: ClassVar[ThreadPoolExecutor | None] = None
+    _cb_executor_pid: ClassVar[int | None] = None
 
-    _cb_executor = None
-    _cb_executor_pid = None
-    _counter = itertools.count()
-    # Make sure this stays unique even across multiple processes or hosts
-    _uid = uuid.uuid4().hex
+    # Generate _id of Future instances as (_uid, next(_counter))
+    # Make sure _uid stays unique even across multiple processes or hosts
+    _uid: ClassVar[str] = uuid.uuid4().hex
+    _counter: ClassVar[itertools.count[int]] = itertools.count()
 
-    def __init__(self, key, client=None, state=None, _id=None):
+    def __init__(
+        self,
+        key: Key,
+        client: Client | None = None,
+        state: FutureState | None = None,
+        _id: tuple[str, int] | None = None,
+    ):
         self.key = key
-        self._cleared = False
         self._client = client
-        self._id = _id or (Future._uid, next(Future._counter))
         self._input_state = state
         self._state = None
+        self._id = _id or (Future._uid, next(Future._counter))
+        self._cleared = False
         self._bind_late()
 
     @property
@@ -650,7 +666,10 @@ class FutureState:
 
     __slots__ = ("_event", "key", "status", "type", "exception", "traceback")
 
-    def __init__(self, key: str):
+    key: Key
+    status: Literal["pending", "cancelled", "finished", "lost", "error"]
+
+    def __init__(self, key: Key):
         self._event = None
         self.key = key
         self.exception = None
@@ -896,7 +915,7 @@ class _MapExpr(Expr):
                 if self.pure:
                     tok = tokenize(self.func, self.kwargs)
                     keys = [
-                        self.key + "-" + tokenize(tok, args)  # type: ignore
+                        f"{self.key}-{tokenize(tok, args)}"
                         for args in zip(*self.iterables)
                     ]
                 else:
@@ -1084,7 +1103,7 @@ class Client(SyncMethodMixin):
             name = dask.config.get("client-name", None)
         self.id = (
             type(self).__name__
-            + ("-" + name + "-" if name else "-")
+            + (f"-{name}-" if name else "-")
             + str(uuid.uuid1(clock_seq=os.getpid()))
         )
         self.generation = 0
@@ -1236,20 +1255,6 @@ class Client(SyncMethodMixin):
         ReplayTaskClient(self)
 
     @property
-    def io_loop(self) -> IOLoop | None:
-        warnings.warn(
-            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        return self.loop
-
-    @io_loop.setter
-    def io_loop(self, value: IOLoop) -> None:
-        warnings.warn(
-            "The io_loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        self.loop = value
-
-    @property
     def loop(self) -> IOLoop | None:
         loop = self.__loop
         if loop is None:
@@ -1259,13 +1264,6 @@ class Client(SyncMethodMixin):
             # loop is still acceptable - so we cache access to the loop.
             self.__loop = loop = self._loop_runner.loop
         return loop
-
-    @loop.setter
-    def loop(self, value: IOLoop) -> None:
-        warnings.warn(
-            "setting the loop property is deprecated", DeprecationWarning, stacklevel=2
-        )
-        self.__loop = value
 
     @contextmanager
     def as_current(self):
@@ -1378,17 +1376,8 @@ class Client(SyncMethodMixin):
         if addr:
             nworkers = info.get("n_workers", 0)
             nthreads = info.get("total_threads", 0)
-            text = "<%s: %r processes=%d threads=%d" % (
-                self.__class__.__name__,
-                addr,
-                nworkers,
-                nthreads,
-            )
             memory = info.get("total_memory", 0)
-            text += ", memory=" + format_bytes(memory)
-            text += ">"
-            return text
-
+            return f"<{self.__class__.__name__}: {addr!r} processes={nworkers} threads={nthreads}, memory={format_bytes(memory)}>"
         elif self.scheduler is not None:
             return f"<{self.__class__.__name__}: scheduler={self.scheduler.address!r}>"
         else:
@@ -1625,7 +1614,7 @@ class Client(SyncMethodMixin):
                 await self.scheduler.identity(n_workers=n_workers)
             )
         except OSError:
-            logger.debug("Not able to query scheduler for identity")
+            logger.debug("Unable to query scheduler for identity")
 
     async def _wait_for_workers(
         self, n_workers: int, timeout: float | None = None
@@ -1703,17 +1692,7 @@ class Client(SyncMethodMixin):
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         if self._previous_as_current:
-            try:
-                _current_client.reset(self._previous_as_current)
-            except ValueError as e:
-                if not e.args[0].endswith(" was created in a different Context"):
-                    raise  # pragma: nocover
-                warnings.warn(
-                    "It is deprecated to enter and exit the Client context "
-                    "manager from different tasks",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            _current_client.reset(self._previous_as_current)
         await self._close(
             # if we're handling an exception, we assume that it's more
             # important to deliver that exception than shutdown gracefully.
@@ -1722,17 +1701,7 @@ class Client(SyncMethodMixin):
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._previous_as_current:
-            try:
-                _current_client.reset(self._previous_as_current)
-            except ValueError as e:
-                if not e.args[0].endswith(" was created in a different Context"):
-                    raise  # pragma: nocover
-                warnings.warn(
-                    "It is deprecated to enter and exit the Client context "
-                    "manager from different threads",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            _current_client.reset(self._previous_as_current)
         self.close()
 
     def __del__(self):
@@ -2150,9 +2119,9 @@ class Client(SyncMethodMixin):
 
         if key is None:
             if pure:
-                key = funcname(func) + "-" + tokenize(func, kwargs, *args)
+                key = f"{funcname(func)}-{tokenize(func, kwargs, *args)}"
             else:
-                key = funcname(func) + "-" + str(uuid.uuid4())
+                key = f"{funcname(func)}-{uuid.uuid4()}"
 
         with self._refcount_lock:
             if key in self.futures:
@@ -2433,7 +2402,7 @@ class Client(SyncMethodMixin):
                         bad_keys.add(key)
                         bad_data[key] = None
                     else:  # pragma: no cover
-                        raise ValueError("Bad value, `errors=%s`" % errors)
+                        raise ValueError(f"Bad value, `errors={errors}`")
 
             keys = [k for k in keys if k not in bad_keys and k not in data]
 
@@ -2605,9 +2574,9 @@ class Client(SyncMethodMixin):
             data = [data]
         if isinstance(data, (list, tuple)):
             if hash:
-                names = [type(x).__name__ + "-" + tokenize(x) for x in data]
+                names = [f"{type(x).__name__}-{tokenize(x)}" for x in data]
             else:
-                names = [type(x).__name__ + "-" + uuid.uuid4().hex for x in data]
+                names = [f"{type(x).__name__}-{uuid.uuid4().hex}" for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)
@@ -2864,57 +2833,78 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
-    @log_errors
-    async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
-        coroutines = []
-        uid = uuid.uuid4().hex
-        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
-
-        def add_coro(name, data):
-            keys = [f.key for f in futures_of(data)]
-
-            async def _():
-                await self.scheduler.publish_wait_flush(uid=uid)
-                await self.scheduler.publish_put(
-                    keys=keys,
-                    name=name,
-                    data=to_serialize(data),
-                    override=override,
-                    client=self.id,
-                )
-
-            coroutines.append(_())
+    async def _publish_dataset(
+        self, *args: Any, name: Key | None = None, override: bool = False, **kwargs: Any
+    ):
+        names: list[Key] = list(kwargs)
+        data = list(kwargs.values())
 
         if name:
-            if len(args) == 0:
+            if not args:
                 raise ValueError(
                     "If name is provided, expecting call signature like"
                     " publish_dataset(df, name='ds')"
                 )
             # in case this is a singleton, collapse it
-            elif len(args) == 1:
-                args = args[0]
-            add_coro(name, args)
+            names.append(name)
+            data.append(args[0] if len(args) == 1 else args)
+        elif args:
+            if len(args) != 1 or not isinstance(args[0], Mapping):
+                raise ValueError(
+                    "If name is omitted, positional argument must be "
+                    "a {name: value} dict"
+                )
+            names.extend(args[0])
+            data.extend(args[0].values())
 
-        for name, data in kwargs.items():
-            add_coro(name, data)
+        # Prevent race condition where the client persists the collection immediately
+        # before publish_dataset, but the persist command hasn't landed on the scheduler
+        # yet when the publish_put RPC call arrives asynchronously.
+        uid = uuid.uuid4().hex
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
 
-        await asyncio.gather(*coroutines)
+        await self.scheduler.publish_put(
+            names=names,
+            keys=[[f.key for f in futures_of(data_i)] for data_i in data],
+            data=[to_serialize(data_i) for data_i in data],
+            override=override,
+            client=self.id,
+            uid=uid,
+        )
 
-    def publish_dataset(self, *args, **kwargs):
+    @overload
+    def publish_dataset(
+        self, *args: Any, name: Key, override: bool = False, **kwargs
+    ): ...
+
+    @overload
+    def publish_dataset(
+        self, *args: Mapping[Key, Any], override: bool = False, **kwargs
+    ): ...
+
+    def publish_dataset(
+        self, *args: Any, name: Key | None = None, override: bool = False, **kwargs
+    ):
         """
         Publish named datasets to scheduler
 
-        This stores a named reference to a dask collection or list of futures
+        This stores a named reference to one or more dask collections or futures
         on the scheduler.  These references are available to other Clients
-        which can download the collection or futures with ``get_dataset``.
+        which can download the collections or futures with ``get_dataset``.
 
-        Datasets are not immediately computed.  You may wish to call
-        ``Client.persist`` prior to publishing a dataset.
+        Datasets are not immediately computed. You should call ``persist`` prior to
+        publishing a dataset. Any unpersisted keys will be stored on the scheduler
+        uncomputed and returned as-is to the user when calling ``get_dataset``.
 
         Parameters
         ----------
-        args : list of objects to publish as name
+        args : One or more objects to publish as `name`.
+            Alternatively, a single dict of {name: object} pairs.
+        name : Dask key (str, int, float, or tuple thereof)
+            Name to publish `args` under
+        override: bool
+            False (default) to raise KeyError if a dataset with the same name already
+            exists on the scheduler; True to overwrite it.
         kwargs : dict
             named collections to publish on the scheduler
 
@@ -2924,7 +2914,10 @@ class Client(SyncMethodMixin):
 
         >>> df = dd.read_csv('s3://...')  # doctest: +SKIP
         >>> df = c.persist(df) # doctest: +SKIP
-        >>> c.publish_dataset(my_dataset=df)  # doctest: +SKIP
+        >>> c.publish_dataset({"my_dataset": df})  # doctest: +SKIP
+
+        Alternative invocation
+        >>> c.publish_dataset(my_dataset=df)
 
         Alternative invocation
         >>> c.publish_dataset(df, name='my_dataset')
@@ -2946,30 +2939,50 @@ class Client(SyncMethodMixin):
         Client.unpublish_dataset
         Client.persist
         """
-        return self.sync(self._publish_dataset, *args, **kwargs)
+        return self.sync(
+            self._publish_dataset, *args, name=name, override=override, **kwargs
+        )
 
-    def unpublish_dataset(self, name, **kwargs):
+    async def _unpublish_dataset(self, name: Key | list[Key]) -> None:
+        names = name if isinstance(name, list) else [name]
+        uid = uuid.uuid4().hex
+        # Prevent race condition where the user calls get_dataset() and immediately
+        # afterwards unpublish_dataset(), thinking that they are holding a reference
+        # to the futures locally, but the futures haven't been registered on the
+        # scheduler yet by the time unpublish_dataset lands on the scheduler.
+        # This method can't be made into just a batched send command as it would
+        # create another race condition, where unpublish_dataset() followed by
+        # get_dataset() would return the just-deleted data.
+        self._send_to_scheduler({"op": "publish_flush_batched_send", "uid": uid})
+        await self.scheduler.publish_delete(names=names, client=self.id, uid=uid)
+
+    def unpublish_dataset(self, name: Key | list[Key], **kwargs):
         """
         Remove named datasets from scheduler
 
         Parameters
         ----------
-        name : str
-            The name of the dataset to unpublish
+        name : Dask key (str, int, float, or tuple thereof), or list of keys
+            Name(s) of the dataset(s) to unpublish.
 
         Examples
         --------
         >>> c.list_datasets()  # doctest: +SKIP
-        ['my_dataset']
-        >>> c.unpublish_dataset('my_dataset')  # doctest: +SKIP
+        ['foo', 'bar', 'baz']
+        >>> c.unpublish_dataset('foo')  # doctest: +SKIP
+        >>> c.list_datasets()  # doctest: +SKIP
+        ['bar', 'baz']
+        >>> c.unpublish_dataset(['bar', 'baz'])  # doctest: +SKIP
         >>> c.list_datasets()  # doctest: +SKIP
         []
 
         See Also
         --------
         Client.publish_dataset
+        Client.list_datasets
+        Client.get_dataset
         """
-        return self.sync(self.scheduler.publish_delete, name=name, **kwargs)
+        return self.sync(self._unpublish_dataset, name=name, **kwargs)
 
     def list_datasets(self, **kwargs):
         """
@@ -2978,46 +2991,52 @@ class Client(SyncMethodMixin):
         See Also
         --------
         Client.publish_dataset
+        Client.unpublish_dataset
         Client.get_dataset
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
-    async def _get_dataset(self, name, default=no_default):
-        with self.as_current():
-            out = await self.scheduler.publish_get(name=name, client=self.id)
-        if out is None:
-            if default is no_default:
-                raise KeyError(f"Dataset '{name}' not found")
-            else:
-                return default
-        for fut in futures_of(out["data"]):
-            fut.bind_client(self)
-        self._inform_scheduler_of_futures()
-        return out["data"]
+    async def _get_dataset(self, name: Key | list[Key], default=no_default):
+        names = name if isinstance(name, list) else [name]
+        raw_outs = await self.scheduler.publish_get(names=names)
 
-    def get_dataset(self, name, default=no_default, **kwargs):
+        outs = []
+        for out in raw_outs:
+            if out is None:
+                if default is no_default:
+                    raise KeyError(f"Dataset '{name}' not found")
+                outs.append(default)
+            else:
+                for fut in futures_of(out["data"]):
+                    fut.bind_client(self)
+                outs.append(out["data"])
+
+        self._inform_scheduler_of_futures()
+        return outs if isinstance(name, list) else outs[0]
+
+    def get_dataset(self, name: Key | list[Key], default=no_default, **kwargs):
         """
         Get named dataset from the scheduler if present.
         Return the default or raise a KeyError if not present.
 
         Parameters
         ----------
-        name : str
-            name of the dataset to retrieve
-        default : str
+        name : Dask key (str, int, float, or tuple thereof), or list of keys
+            name(s) of the dataset(s) to retrieve
+        default : Any
             optional, not set by default
             If set, do not raise a KeyError if the name is not present but
             return this default
-        kwargs : dict
-            additional keyword arguments to _get_dataset
 
         Returns
         -------
-        The dataset from the scheduler, if present
+        The dataset from the scheduler, if present.
+        If name is a list of keys, return a list of datasets in the same order.
 
         See Also
         --------
         Client.publish_dataset
+        Client.unpublish_dataset
         Client.list_datasets
         """
         return self.sync(self._get_dataset, name, default=default, **kwargs)
@@ -5084,7 +5103,6 @@ class Client(SyncMethodMixin):
         self,
         plugin: NannyPlugin | SchedulerPlugin | WorkerPlugin,
         name: str | None = None,
-        idempotent: bool | None = None,
     ):
         """Register a plugin.
 
@@ -5097,23 +5115,11 @@ class Client(SyncMethodMixin):
         name :
             Name for the plugin; if None, a name is taken from the
             plugin instance or automatically generated if not present.
-        idempotent :
-            Do not re-register if a plugin of the given name already exists.
-            If None, ``plugin.idempotent`` is taken if defined, False otherwise.
         """
         if name is None:
             name = _get_plugin_name(plugin)
         assert name
-        if idempotent is not None:
-            warnings.warn(
-                "The `idempotent` argument is deprecated and will be removed in a "
-                "future version. Please mark your plugin as idempotent by setting its "
-                "`.idempotent` attribute to `True`.",
-                FutureWarning,
-                stacklevel=2,
-            )
-        else:
-            idempotent = getattr(plugin, "idempotent", False)
+        idempotent = getattr(plugin, "idempotent", False)
         assert isinstance(idempotent, bool)
         return self._register_plugin(plugin, name, idempotent)
 
@@ -5177,42 +5183,7 @@ class Client(SyncMethodMixin):
             idempotent=idempotent,
         )
 
-    def register_scheduler_plugin(
-        self,
-        plugin: SchedulerPlugin,
-        name: str | None = None,
-        idempotent: bool | None = None,
-    ):
-        """
-        Register a scheduler plugin.
-
-        .. deprecated:: 2023.9.2
-            Use :meth:`Client.register_plugin` instead.
-
-        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
-
-        Parameters
-        ----------
-        plugin : SchedulerPlugin
-            SchedulerPlugin instance to pass to the scheduler.
-        name : str
-            Name for the plugin; if None, a name is taken from the
-            plugin instance or automatically generated if not present.
-        idempotent : bool
-            Do not re-register if a plugin of the given name already exists.
-        """
-        warnings.warn(
-            "`Client.register_scheduler_plugin` has been deprecated; "
-            "please `Client.register_plugin` instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return cast(OKMessage, self.register_plugin(plugin, name, idempotent))
-
-    async def _unregister_scheduler_plugin(self, name):
-        return await self.scheduler.unregister_scheduler_plugin(name=name)
-
-    def unregister_scheduler_plugin(self, name):
+    def unregister_scheduler_plugin(self, name: str):
         """Unregisters a scheduler plugin
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -5245,7 +5216,7 @@ class Client(SyncMethodMixin):
         --------
         register_scheduler_plugin
         """
-        return self.sync(self._unregister_scheduler_plugin, name=name)
+        return self.sync(self.scheduler.unregister_scheduler_plugin, name=name)
 
     def register_worker_callbacks(self, setup=None):
         """
@@ -5296,145 +5267,6 @@ class Client(SyncMethodMixin):
                 assert exc
                 raise exc.with_traceback(tb)
         return cast(dict[str, OKMessage], responses)
-
-    def register_worker_plugin(
-        self,
-        plugin: NannyPlugin | WorkerPlugin,
-        name: str | None = None,
-        nanny: bool | None = None,
-    ):
-        """
-        Registers a lifecycle worker plugin for all current and future workers.
-
-        .. deprecated:: 2023.9.2
-            Use :meth:`Client.register_plugin` instead.
-
-        This registers a new object to handle setup, task state transitions and
-        teardown for workers in this cluster. The plugin will instantiate
-        itself on all currently connected workers. It will also be run on any
-        worker that connects in the future.
-
-        The plugin may include methods ``setup``, ``teardown``, ``transition``,
-        and ``release_key``.  See the
-        ``dask.distributed.WorkerPlugin`` class or the examples below for the
-        interface and docstrings.  It must be serializable with the pickle or
-        cloudpickle modules.
-
-        If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
-        used then that will control idempotency.  If a plugin with that name has
-        already been registered, then it will be removed and replaced by the new one.
-
-        For alternatives to plugins, you may also wish to look into preload
-        scripts.
-
-        Parameters
-        ----------
-        plugin : WorkerPlugin or NannyPlugin
-            WorkerPlugin or NannyPlugin instance to register.
-        name : str, optional
-            A name for the plugin.
-            Registering a plugin with the same name will have no effect.
-            If plugin has no name attribute a random name is used.
-        nanny : bool, optional
-            Whether to register the plugin with workers or nannies.
-
-        Examples
-        --------
-        >>> class MyPlugin(WorkerPlugin):
-        ...     def __init__(self, *args, **kwargs):
-        ...         pass  # the constructor is up to you
-        ...     def setup(self, worker: dask.distributed.Worker):
-        ...         pass
-        ...     def teardown(self, worker: dask.distributed.Worker):
-        ...         pass
-        ...     def transition(self, key: str, start: str, finish: str,
-        ...                    **kwargs):
-        ...         pass
-        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
-        ...         pass
-
-        >>> plugin = MyPlugin(1, 2, 3)
-        >>> client.register_plugin(plugin)
-
-        You can get access to the plugin with the ``get_worker`` function
-
-        >>> client.register_plugin(other_plugin, name='my-plugin')
-        >>> def f():
-        ...    worker = get_worker()
-        ...    plugin = worker.plugins['my-plugin']
-        ...    return plugin.my_state
-
-        >>> future = client.run(f)
-
-        See Also
-        --------
-        distributed.WorkerPlugin
-        unregister_worker_plugin
-        """
-        warnings.warn(
-            "`Client.register_worker_plugin` has been deprecated; "
-            "please use `Client.register_plugin` instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if name is None:
-            name = _get_plugin_name(plugin)
-
-        assert name
-
-        method: Callable
-        if isinstance(plugin, WorkerPlugin):
-            method = self._register_worker_plugin
-            if nanny is True:
-                warnings.warn(
-                    "Registering a `WorkerPlugin` as a nanny plugin is not "
-                    "allowed, registering as a worker plugin instead. "
-                    "To register as a nanny plugin, inherit from `NannyPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        elif isinstance(plugin, NannyPlugin):
-            method = self._register_nanny_plugin
-            if nanny is False:
-                warnings.warn(
-                    "Registering a `NannyPlugin` as a worker plugin is not "
-                    "allowed, registering as a nanny plugin instead. "
-                    "To register as a worker plugin, inherit from `WorkerPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        elif isinstance(plugin, SchedulerPlugin):  # type: ignore[unreachable]
-            if nanny:
-                warnings.warn(
-                    "Registering a `SchedulerPlugin` as a nanny plugin is not "
-                    "allowed, registering as a scheduler plugin instead. "
-                    "To register as a nanny plugin, inherit from `NannyPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            else:
-                warnings.warn(
-                    "Registering a `SchedulerPlugin` as a worker plugin is not "
-                    "allowed, registering as a scheduler plugin instead. "
-                    "To register as a worker plugin, inherit from `WorkerPlugin`.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            method = self._register_scheduler_plugin
-        else:
-            warnings.warn(
-                "Registering duck-typed plugins has been deprecated. "
-                "Please make sure your plugin inherits from `NannyPlugin` "
-                "or `WorkerPlugin`.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if nanny is True:
-                method = self._register_nanny_plugin
-            else:
-                method = self._register_worker_plugin
-
-        return self.sync(method, plugin=plugin, name=name, idempotent=False)
 
     async def _unregister_worker_plugin(self, name, nanny=None):
         if nanny:
@@ -5886,7 +5718,7 @@ class as_completed:
         with self.lock:
             for f in futures:
                 if not isinstance(f, (Future, BaseActorFuture)):
-                    raise TypeError("Input must be a future, got %s" % f)
+                    raise TypeError(f"Input must be a future, got {f}")
                 self.futures[f] += 1
                 self.loop.add_callback(self._track_future, f)
 
@@ -6248,10 +6080,16 @@ class get_task_stream:
         self._filename = filename
         self.figure = None
         self.client = client or default_client()
-        self.client.get_task_stream(start=0, stop=0)  # ensure plugin
+        self._init = False
 
     def __enter__(self):
-        self.start = time()
+        if not self._init:
+            self.client.get_task_stream(start=0, stop=0)  # ensure plugin
+            self._init = True
+
+        # Smooth over time differences of client vs. workers
+        # FIXME this is very crude. We should query TaskStreamPlugin.index instead.
+        self.start = time() - 0.1
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -6263,6 +6101,13 @@ class get_task_stream:
         self.data.extend(L)
 
     async def __aenter__(self):
+        if not self._init:
+            await self.client.get_task_stream(start=0, stop=0)  # ensure plugin
+            self._init = True
+
+        # Smooth over time differences of client vs. workers
+        # FIXME this is very crude. We should query TaskStreamPlugin.index instead.
+        self.start = time() - 0.1
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):

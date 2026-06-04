@@ -21,7 +21,6 @@ from distributed.metrics import time
 from distributed.utils import get_ip, open_port
 from distributed.utils_test import (
     gen_cluster,
-    inc,
     popen,
     requires_ipv6,
     wait_for_log_line,
@@ -613,6 +612,29 @@ def test_version_option():
     assert result.exit_code == 0
 
 
+def test_unknown_option_reports_no_such_option():
+    # Regression: dash-prefixed unknown tokens should still surface as
+    # click's "No such option" error rather than the catch-all preload
+    # message (see GH#9094).
+    runner = CliRunner()
+    result = runner.invoke(main, ["tcp://127.0.0.1:8786", "--nprocs", "1"])
+    assert result.exit_code == 2
+    assert "No such option" in result.output
+    assert "--nprocs" in result.output
+
+
+def test_stray_positional_hints_at_help_and_preload():
+    # GH#9094: stray positional arguments (which Click otherwise lets
+    # leak through into preload_argv) should produce a message that
+    # points the user at --help and explains the --preload ordering rule.
+    runner = CliRunner()
+    result = runner.invoke(main, ["tcp://127.0.0.1:8786", "foo", "bar"])
+    assert result.exit_code == 2
+    assert "unexpected extra argument" in result.output
+    assert "--help" in result.output
+    assert "--preload" in result.output
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("no_nanny", [True, False])
 def test_worker_timeout(no_nanny):
@@ -814,18 +836,27 @@ def test_error_during_startup(monkeypatch, nanny, loop):
                 assert worker.wait(10) == 1
 
 
-def test_single_executable_deprecated():
-    assert (
-        b"FutureWarning: dask-worker is deprecated"
-        in subprocess.run(["dask-worker"], capture_output=True).stderr
-    )
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@gen_cluster(client=True, nthreads=[])
+async def test_uvloop(c, s, nanny):
+    uvloop = pytest.importorskip("uvloop")
 
+    def check():
+        return isinstance(asyncio.get_event_loop(), uvloop.Loop)
 
-@pytest.mark.slow
-@gen_cluster(nthreads=[], client=True)
-async def test_single_executable_works(c, s):
-    with popen(["dask-worker", s.address]):
-        # make sure the worker still works
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "worker",
+            s.address,
+            nanny,
+            "--no-dashboard",
+        ],
+        env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
+    ):
         await c.wait_for_workers(1)
-        results = await c.submit(inc, 1).result()
-        assert results == 2
+        assert all((await c.run(check)).values())
+        if nanny == "--nanny":
+            assert all((await c.run(check, nanny=True)).values())

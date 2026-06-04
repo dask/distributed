@@ -11,7 +11,6 @@ import sys
 import tempfile
 import threading
 import traceback
-import warnings
 import weakref
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -22,7 +21,6 @@ from time import sleep
 import psutil
 import pytest
 from tlz import first, pluck, sliding_window
-from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -592,17 +590,6 @@ async def test_io_loop(s):
         assert w.io_loop is w.loop is s.loop
 
 
-@gen_cluster(nthreads=[])
-async def test_io_loop_alternate_loop(s, loop):
-    with pytest.warns(
-        DeprecationWarning,
-        match=r"The `loop` argument to `Worker` is ignored, and will be "
-        r"removed in a future release. The Worker always binds to the current loop",
-    ):
-        async with Worker(s.address, loop=loop) as w:
-            assert w.io_loop is w.loop is IOLoop.current()
-
-
 @gen_cluster(client=True)
 async def test_access_key(c, s, a, b):
     def f(i):
@@ -659,7 +646,7 @@ async def test_Executor(c, s):
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_close_on_disconnect(s, w):
     await s.close()
-    await async_poll_for(lambda: w.status == Status.closed, timeout=5)
+    await async_poll_for(lambda: w.status == Status.closed)
 
 
 @gen_cluster(nthreads=[])
@@ -737,7 +724,7 @@ async def test_types(c, s, a, b):
 
     await c._cancel(y)
 
-    await async_poll_for(lambda: y.key not in b.data, timeout=5)
+    await async_poll_for(lambda: y.key not in b.data)
     assert y.key not in b.state.tasks
 
 
@@ -933,7 +920,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     await asyncio.sleep(0.1)
 
     del futures
-    await async_poll_for(lambda: a.state.executing_count == 0, timeout=0.5)
+    await async_poll_for(lambda: a.state.executing_count == 0)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -1182,7 +1169,6 @@ async def test_statistical_profiling(c, s, a, b):
 @nodebug
 @gen_cluster(
     client=True,
-    timeout=30,
     config={
         "distributed.worker.profile.enabled": True,
         "distributed.worker.profile.interval": "1ms",
@@ -1554,7 +1540,7 @@ async def test_close_gracefully_no_suspicious_tasks(c, s, a, b):
         await c.run(close_gracefully, workers=[to_close])
     except CommClosedError:
         pass
-    await async_poll_for(lambda: to_close not in s.workers, 5)
+    await async_poll_for(lambda: to_close not in s.workers)
 
     assert b.address not in s.workers
     assert s.tasks[fut.key].suspicious == 0
@@ -1618,7 +1604,7 @@ async def test_close_async_task_handles_cancellation(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=10)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_lifetime(c, s, a):
     # Note: test was occasionally failing with lifetime="1 seconds"
     async with Worker(s.address, lifetime="2 seconds") as b:
@@ -2160,6 +2146,16 @@ async def test_executor_inherit_threadname_from_worker(c, s):
     ):
         result = await c.gather(c.submit(get_thread_name, pure=False))
         assert "WorkerName-Dask-Default-Threads" in result
+
+    # LocalCluster by default assigns numbers starting from zero
+    # as the worker names
+    async with Worker(
+        s.address,
+        nthreads=1,
+        name=0,
+    ):
+        result = await c.gather(c.submit(get_thread_name, pure=False))
+        assert "0-Dask-Default-Threads" in result
 
     async with Worker(
         s.address,
@@ -3274,7 +3270,7 @@ async def test_gather_dep_no_longer_in_flight_tasks(c, s, a):
         assert not any("missing-dep" in msg for msg in f2_story)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], timeout=5)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_get_data_cancelled_error(c, s, a):
     """Something somewhere in the networking stack raises CancelledError while
     get_data is running
@@ -3483,22 +3479,6 @@ async def test_do_not_block_event_loop_during_shutdown(s):
     await asyncio.gather(block(), close(), set_future())
 
 
-@gen_cluster(nthreads=[])
-async def test_reconnect_argument_deprecated(s):
-    with pytest.deprecated_call(match="`reconnect` argument"):
-        async with Worker(s.address, reconnect=False):
-            pass
-    with pytest.raises(ValueError, match="reconnect=True"):
-        async with Worker(s.address, reconnect=True):
-            pass
-
-    with warnings.catch_warnings():
-        # No argument should not warn or raise
-        warnings.simplefilter("error")
-        async with Worker(s.address):
-            pass
-
-
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_running_before_running_plugins(c, s, caplog):
     class InitWorkerNewThread(WorkerPlugin):
@@ -3568,23 +3548,6 @@ async def test_execute_preamble_abort_retirement(c, s):
 
         # Test that y does not get stuck.
         assert await y == 2
-
-
-@gen_cluster()
-async def test_deprecation_of_renamed_worker_attributes(s, a, b):
-    msg = (
-        "The `Worker.outgoing_count` attribute has been renamed to "
-        "`Worker.transfer_outgoing_count_total`"
-    )
-    with pytest.warns(DeprecationWarning, match=msg):
-        assert a.outgoing_count == a.transfer_outgoing_count_total
-
-    msg = (
-        "The `Worker.outgoing_current_count` attribute has been renamed to "
-        "`Worker.transfer_outgoing_count`"
-    )
-    with pytest.warns(DeprecationWarning, match=msg):
-        assert a.outgoing_current_count == a.transfer_outgoing_count
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -3749,7 +3712,7 @@ async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
             y = c.submit(inc, x, key="y", workers=[b.address])
             await b.in_execute.wait()
             del x, y
-            await async_poll_for(lambda: "x" not in b.data, timeout=5)
+            await async_poll_for(lambda: "x" not in b.data)
 
             if state == "resumed":
                 y = c.submit(inc, 1, key="y", workers=[a.address])
@@ -3763,7 +3726,7 @@ async def test_suppress_keyerror_for_cancelled_tasks(c, s, a, state):
                 assert await z == 3
                 del y, z
 
-            await async_poll_for(lambda: not b.state.tasks, timeout=5)
+            await async_poll_for(lambda: not b.state.tasks)
 
     assert not log.getvalue()
 
@@ -3785,6 +3748,6 @@ async def test_suppress_compute_failure_for_cancelled_tasks(c, s, a):
 
         await wait_for_state("x", "cancelled", a)
         await block_event.set()
-        await async_poll_for(lambda: not a.state.tasks, timeout=5)
+        await async_poll_for(lambda: not a.state.tasks)
 
     assert not log.getvalue()

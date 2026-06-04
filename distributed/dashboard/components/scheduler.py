@@ -957,7 +957,7 @@ class BandwidthTypes(DashboardComponent):
             "type": list(bw.keys()),
             "bandwidth_text": [format_bytes(x) for x in bw.values()],
         }
-        self.root.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
+        self.root.title.text = f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
         update(self.source, result)
 
 
@@ -980,7 +980,7 @@ class BandwidthWorkers(DashboardComponent):
         values = [hex(x)[2:] for x in range(64, 256)][::-1]
         mapper = linear_cmap(
             field_name="bandwidth",
-            palette=["#" + x + x + "FF" for x in values],
+            palette=[f"#{x}{x}FF" for x in values],
             low=0,
             high=1,
         )
@@ -1057,7 +1057,7 @@ class BandwidthWorkers(DashboardComponent):
             "bandwidth": value,
             "bandwidth_text": list(map(format_bytes, value)),
         }
-        self.root.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
+        self.root.title.text = f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
         update(self.source, result)
 
 
@@ -1727,7 +1727,7 @@ class MemoryByKey(DashboardComponent):
             "nbytes_text": [format_bytes(nbytes[name]) for name in names],
             "color": [color_of(name) for name in names],
         }
-        self.root.title.text = "Total Use: " + format_bytes(sum(nbytes.values()))
+        self.root.title.text = f"Total Use: {format_bytes(sum(nbytes.values()))}"
 
         update(self.source, result)
 
@@ -2331,7 +2331,7 @@ class TaskGraph(DashboardComponent):
     @log_errors
     def update(self):
         # If there are too many tasks in the scheduler we'll disable this
-        # compoonents to not overload scheduler or client. Once we drop
+        # components to not overload scheduler or client. Once we drop
         # below the threshold, the data is filled up again as usual
         if len(self.scheduler.tasks) > self.max_items:
             self.subtitle.text = "Scheduler has too many tasks to display."
@@ -2863,7 +2863,7 @@ class TaskGroupGraph(DashboardComponent):
             # Add some status to hover
             tasks_processing = tg.states["processing"]
             tasks_memory = tg.states["memory"]
-            tasks_relased = tg.states["released"]
+            tasks_released = tg.states["released"]
             tasks_erred = tg.states["erred"]
 
             nodes_data["comp_tasks"].append(
@@ -2876,7 +2876,7 @@ class TaskGroupGraph(DashboardComponent):
                 f"{tasks_memory} ({tasks_memory / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_released"].append(
-                f"{tasks_relased} ({tasks_relased / tot_tasks * 100:.0f} %)"
+                f"{tasks_released} ({tasks_released / tot_tasks * 100:.0f} %)"
             )
             nodes_data["in_erred"].append(
                 f"{tasks_erred} ({tasks_erred / tot_tasks * 100:.0f} %)"
@@ -2963,7 +2963,7 @@ class TaskGroupProgress(DashboardComponent):
     def _should_update(self) -> bool:
         """
         Whether to update the ColumnDataSource. This is cheaper than redrawing,
-        but still not free, so we check whether we need it and whether the scheudler
+        but still not free, so we check whether we need it and whether the scheduler
         is busy.
         """
         return (
@@ -3104,15 +3104,15 @@ class TaskGroupProgress(DashboardComponent):
                 #      (ones without any compute during the relevant dt)
                 #   3. Colors the labels appropriately.
                 formatter = CustomJSHover(
-                    code="""
-                        const colormap = %s;
+                    code=f"""
+                        const colormap = {dict(zip(stackers, colors))};
                         const divs = [];
-                        for (let k of Object.keys(source.data)) {
+                        for (let k of Object.keys(source.data)) {{
                           const val = source.data[k][value];
                           const color = colormap[k];
-                          if (k === "time" || k === "nthreads" || val < 1.e-3) {
+                          if (k === "time" || k === "nthreads" || val < 1.e-3) {{
                             continue;
-                          }
+                          }}
                           const label = k.length >= 20 ? k.slice(0, 20) + '…' : k;
 
                           // Unshift so that the ordering of the labels is the same as
@@ -3127,7 +3127,7 @@ class TaskGroupProgress(DashboardComponent):
                               + '</div>'
                           )
 
-                        }
+                        }}
                         divs.unshift(
                           '<div>'
                             + '<span style="font-weight: bold; color: darkgrey;">nthreads: </span>'
@@ -3135,10 +3135,7 @@ class TaskGroupProgress(DashboardComponent):
                             + '</div>'
                         );
                         return divs.join('\\n')
-                        """
-                    % dict(
-                        zip(stackers, colors)
-                    ),  # sneak the color mapping into the callback
+                        """,  # sneak the color mapping into the callback
                     args={"source": self.source},
                 )
                 # Add the HoverTool to the top line renderer.
@@ -3343,7 +3340,7 @@ class TaskProgress(DashboardComponent):
 
         for tp in self.scheduler.task_prefixes.values():
             states = tp.states
-            if any(states.get(s) for s in state.keys()):
+            if any(v for k, v in states.items() if k != "forgotten"):
                 state["memory"][tp.name] = states["memory"]
                 state["erred"][tp.name] = states["erred"]
                 state["released"][tp.name] = states["released"]
@@ -3378,13 +3375,13 @@ class TaskProgress(DashboardComponent):
         )
 
         self.root.title.text = (
-            "Progress -- total: %(all)s, "
-            "waiting: %(waiting)s, "
-            "queued: %(queued)s, "
-            "processing: %(processing)s, "
-            "in-memory: %(memory)s, "
-            "no-worker: %(no_worker)s, "
-            "erred: %(erred)s" % totals
+            "Progress -- total: {all}, "
+            "waiting: {waiting}, "
+            "queued: {queued}, "
+            "processing: {processing}, "
+            "in-memory: {memory}, "
+            "no-worker: {no_worker}, "
+            "erred: {erred}".format(**totals)
         )
 
 
@@ -4537,8 +4534,9 @@ class SchedulerLogs:
         else:
             logs_html = Log(
                 "\n".join(
-                    "%s - %s"
-                    % (datetime.fromtimestamp(time).strftime("%H:%M:%S.%f"), line)
+                    "{} - {}".format(
+                        datetime.fromtimestamp(time).strftime("%H:%M:%S.%f"), line
+                    )
                     for time, level, line in logs
                 )
             )._repr_html_()
@@ -4798,7 +4796,7 @@ def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwar
     add_periodic_callback(doc, fig, interval)
     doc.add_root(getattr(fig, fig_attr))
     doc.theme = BOKEH_THEME
-    doc.title = "Dask: " + funcname(cls)
+    doc.title = f"Dask: {funcname(cls)}"
 
 
 @log_errors

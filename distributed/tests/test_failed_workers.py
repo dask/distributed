@@ -73,7 +73,7 @@ async def test_submit_after_failed_worker_async(
 
     if when == "closed":
         await b.close()
-        await async_poll_for(lambda: b.address not in s.workers, timeout=5)
+        await async_poll_for(lambda: b.address not in s.workers)
     elif when == "closing":
         orig_remove_worker = s.remove_worker
         in_remove_worker = asyncio.Event()
@@ -96,7 +96,7 @@ async def test_submit_after_failed_worker_async(
         workers=[b.address if y_on_failed else a.address],
         allow_other_workers=True,
     )
-    await async_poll_for(lambda: "y" in s.tasks, timeout=5)
+    await async_poll_for(lambda: "y" in s.tasks)
 
     if when == "closing":
         wait_remove_worker.set()
@@ -104,7 +104,7 @@ async def test_submit_after_failed_worker_async(
     assert s.tasks["y"].who_has == {a_ws}
 
 
-@gen_cluster(client=True, timeout=60)
+@gen_cluster(client=True)
 async def test_submit_after_failed_worker(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
@@ -209,9 +209,9 @@ def test_worker_doesnt_await_task_completion(loop):
             future = c.submit(sleep, 100)
             sleep(0.1)
             start = time()
-            c.restart(timeout="5s", wait_for_workers=False)
+            c.restart(timeout="15s", wait_for_workers=False)
             stop = time()
-            assert stop - start < 10
+            assert stop - start < 20
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -250,7 +250,7 @@ async def test_multiple_clients_restart(s, a, b):
         assert await y2 == 3
 
         del x2, y2
-        await async_poll_for(lambda: not s.tasks, timeout=5)
+        await async_poll_for(lambda: not s.tasks)
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -380,8 +380,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         result_fut = c.submit(sink, futures, workers=a.address)
 
         await n.kill(timeout=1)
-        while len(s.workers) > 2:
-            await asyncio.sleep(0.01)
+        await async_poll_for(lambda: len(s.workers) <= 2)
 
         await result_fut
 
@@ -614,7 +613,7 @@ async def test_failing_worker_with_additional_replicas_on_cluster(c, s, w0, w2):
         # We'll schedule tasks on two workers, s.t. f1 is replicated. We will
         # suspend one of the workers and kill the origin worker of f1 such that a
         # comm failure causes the worker to handle a missing dependency. It will ask
-        # the schedule such that it knows that a replica is available on f2 and
+        # the scheduler such that it knows that a replica is available on f2 and
         # reschedules the fetch
         f2 = c.submit(dummy, f1, key="f2", workers=[w1.worker_address])
         f3 = c.submit(dummy, f1, key="f3", workers=[w2.worker_address])

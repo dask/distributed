@@ -63,7 +63,7 @@ For example, below we log start and stop times to the ``"runtimes"`` topic using
 Events for a given topic can be retrieved using the :meth:`Client.get_events` method.
 In the above example, we retrieved the logged start and stop times with
 ``client.get_events("runtimes")``. Note that ``Client.get_events`` returns a tuple for
-each logged event which contains the logged message along with a timestamp for when
+each logged event, which contains the logged message along with a timestamp for when
 the event was logged.
 
 When combined with scheduler and worker plugins, the structured events system can produce

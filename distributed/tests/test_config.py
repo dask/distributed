@@ -200,14 +200,12 @@ def test_logging_extended():
 
 
 def test_default_logging_does_not_override_basic_config():
-    code = textwrap.dedent(
-        """\
+    code = textwrap.dedent("""\
         import logging
         logging.basicConfig()
         import distributed
         logging.getLogger("distributed").warning("hello")
-        """
-    )
+        """)
     proc = subprocess.run(
         [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
     )
@@ -216,15 +214,13 @@ def test_default_logging_does_not_override_basic_config():
 
 
 def test_basic_config_does_not_override_default_logging():
-    code = textwrap.dedent(
-        """\
+    code = textwrap.dedent("""\
         import logging
         import distributed
 
         logging.basicConfig()
         logging.getLogger("distributed").warning("hello")
-        """
-    )
+        """)
     proc = subprocess.run(
         [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
     )
@@ -351,15 +347,30 @@ def test_schema_is_complete():
     test_matches(config, schema, "")
 
 
-def test_uvloop_event_loop():
+uvloop_test_script = """
+import asyncio
+
+import uvloop
+
+import distributed
+
+async def test():
+    return isinstance(asyncio.get_event_loop(), uvloop.Loop)
+
+if __name__ == "__main__":
+    with distributed.Client(processes=True, n_workers=1) as client:
+        assert client.sync(test)  # client loop
+        assert client.run_on_scheduler(test)  # also client loop
+        assert client.run(test)  # nanny loop
+"""
+
+
+def test_uvloop():
     """Check that configuring distributed to use uvloop actually sets the event loop policy"""
     pytest.importorskip("uvloop")
-    script = (
-        "import distributed, asyncio, uvloop\n"
-        "assert isinstance(asyncio.get_event_loop_policy(), uvloop.EventLoopPolicy)"
-    )
+
     subprocess.check_call(
-        [sys.executable, "-c", script],
+        [sys.executable, "-c", uvloop_test_script],
         env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
     )
 

@@ -975,7 +975,7 @@ async def test_pause_while_spilling(c, s, a):
 
     futs = [c.submit(SlowSpill, pure=False) for _ in range(N_TOTAL)]
 
-    await async_poll_for(lambda: len(a.data.slow) >= N_PAUSE, timeout=5, period=0)
+    await async_poll_for(lambda: len(a.data.slow) >= N_PAUSE, period=0)
     assert a.status == Status.paused
     # Worker should have become paused after the first `SlowSpill` was evicted, because
     # the spill to disk took longer than the memory monitor interval.
@@ -1047,50 +1047,6 @@ async def test_release_evloop_while_spilling(c, s, a):
     assert not any(v for k, v in c.items() if k >= 2.0), dict(c)
 
 
-@pytest.mark.parametrize(
-    "cls,name,value",
-    [
-        (Worker, "memory_limit", 123e9),
-        (Worker, "memory_target_fraction", 0.789),
-        (Worker, "memory_spill_fraction", 0.789),
-        (Worker, "memory_pause_fraction", 0.789),
-        (Nanny, "memory_limit", 123e9),
-        (Nanny, "memory_terminate_fraction", 0.789),
-    ],
-)
-@gen_cluster(nthreads=[])
-async def test_deprecated_attributes(s, cls, name, value):
-    async with cls(s.address) as a:
-        with pytest.warns(FutureWarning, match=name):
-            setattr(a, name, value)
-        with pytest.warns(FutureWarning, match=name):
-            assert getattr(a, name) == value
-        assert getattr(a.memory_manager, name) == value
-
-
-@gen_cluster(nthreads=[("", 1)])
-async def test_deprecated_memory_monitor_method_worker(s, a):
-    with pytest.warns(FutureWarning, match="memory_monitor"):
-        await a.memory_monitor()
-
-
-@gen_cluster(nthreads=[("", 1)], Worker=Nanny)
-async def test_deprecated_memory_monitor_method_nanny(s, a):
-    with pytest.warns(FutureWarning, match="memory_monitor"):
-        a.memory_monitor()
-
-
-@pytest.mark.parametrize(
-    "name",
-    ["memory_target_fraction", "memory_spill_fraction", "memory_pause_fraction"],
-)
-@gen_cluster(nthreads=[])
-async def test_deprecated_params(s, name):
-    with pytest.warns(FutureWarning, match=name):
-        async with Worker(s.address, **{name: 0.789}) as a:
-            assert getattr(a.memory_manager, name) == 0.789
-
-
 @gen_cluster(config={"distributed.worker.memory.monitor-interval": "10ms"})
 async def test_pause_while_idle(s, a, b):
     sa = s.workers[a.address]
@@ -1098,12 +1054,12 @@ async def test_pause_while_idle(s, a, b):
     assert sa in s.running
 
     a.monitor.get_process_memory = lambda: 2**40
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=5)
+    await async_poll_for(lambda: sa.status == Status.paused)
     assert a.address not in s.idle
     assert sa not in s.running
 
     a.monitor.get_process_memory = lambda: 0
-    await async_poll_for(lambda: sa.status == Status.running, timeout=5)
+    await async_poll_for(lambda: sa.status == Status.running)
     assert a.address in s.idle
     assert sa in s.running
 
@@ -1113,17 +1069,17 @@ async def test_pause_while_saturated(c, s, a, b):
     sa = s.workers[a.address]
     ev = Event()
     futs = c.map(lambda i, ev: ev.wait(), range(3), ev=ev, workers=[a.address])
-    await async_poll_for(lambda: len(a.state.tasks) == 3, timeout=5)
+    await async_poll_for(lambda: len(a.state.tasks) == 3)
     assert sa in s.saturated
     assert sa in s.running
 
     a.monitor.get_process_memory = lambda: 2**40
-    await async_poll_for(lambda: sa.status == Status.paused, timeout=5)
+    await async_poll_for(lambda: sa.status == Status.paused)
     assert sa not in s.saturated
     assert sa not in s.running
 
     a.monitor.get_process_memory = lambda: 0
-    await async_poll_for(lambda: sa.status == Status.running, timeout=5)
+    await async_poll_for(lambda: sa.status == Status.running)
     assert sa in s.saturated
     assert sa in s.running
 
@@ -1173,5 +1129,5 @@ async def test_delete_spilled_keys(c, s, a):
         a.data["x"]
 
     x.release()
-    await async_poll_for(lambda: not a.data, timeout=2)
+    await async_poll_for(lambda: not a.data)
     assert not a.state.tasks

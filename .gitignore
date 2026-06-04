@@ -2,10 +2,6 @@
 *.pyd
 *.py~
 
-# Cython files
-*.c
-*.so
-
 build/
 dist/
 *.egg-info
@@ -15,7 +11,9 @@ docs/build
 .coverage
 .coverage.*
 coverage.xml
-*.lock
+pytest.xml
+pytest-stdout.log
+coverage_html_report/
 .#*
 .eggs/
 .idea/
@@ -36,10 +34,12 @@ distributed/scheduler.html
 distributed/_version.py
 
 # Test reports
-reports/
 test_report*.html
 test_report*.db
 test_short_report.html
 
 # Test failures will dump the cluster state in here
 test_cluster_dump/
+# pixi environments
+.pixi/*
+!.pixi/config.toml

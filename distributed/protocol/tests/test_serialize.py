@@ -631,7 +631,7 @@ def test_serialize_lists(serializers):
         ),
     ],
 )
-def test_deser_memoryview(data_in):
+def test_deserialize_memoryview(data_in):
     header, frames = serialize(data_in)
     assert header["type"] == "memoryview"
     assert frames[0] is data_in
@@ -640,13 +640,13 @@ def test_deser_memoryview(data_in):
 
 
 @pytest.mark.skipif(np is None, reason="Test needs numpy")
-def test_ser_memoryview_object():
+def test_serialize_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
         serialize(data_in, on_error="raise")
 
 
-def test_ser_empty_1d_memoryview():
+def test_serialize_empty_1d_memoryview():
     mv = memoryview(b"")
 
     # serialize empty `memoryview`
@@ -659,7 +659,7 @@ def test_ser_empty_1d_memoryview():
     assert mv2 == mv
 
 
-def test_ser_empty_nd_memoryview():
+def test_serialize_empty_nd_memoryview():
     mv = memoryview(b"12").cast("B", (1, 2))[:0]
 
     # serialize empty `memoryview`

@@ -13,6 +13,8 @@ from collections import defaultdict
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Union
 
+from tornado.ioloop import PeriodicCallback
+
 import dask
 from dask.typing import Key
 from dask.utils import parse_timedelta
@@ -22,7 +24,6 @@ from dask.utils import parse_timedelta
 # https://github.com/agronholm/sphinx-autodoc-typehints#dealing-with-circular-imports
 from distributed import client
 from distributed import scheduler as scheduler_module
-from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils import import_term, log_errors
@@ -58,10 +59,10 @@ class ActiveMemoryManagerExtension:
     #: Run automatically every this many seconds
     interval: float
     #: Current memory (in bytes) allocated on each worker, plus/minus pending actions
-    #: This attribute only exist within the scope of self.run().
+    #: This attribute only exists within the scope of self.run().
     workers_memory: dict[scheduler_module.WorkerState, int]
     #: Pending replications and deletions for each task
-    #: This attribute only exist within the scope of self.run().
+    #: This attribute only exists within the scope of self.run().
     pending: dict[
         scheduler_module.TaskState,
         tuple[set[scheduler_module.WorkerState], set[scheduler_module.WorkerState]],
@@ -364,7 +365,7 @@ class ActiveMemoryManagerExtension:
         # 1. RetireWorker replicates in-memory tasks from worker A (very busy and being
         #    retired) to worker B (idle)
         # 2. on the next AMM iteration 2 seconds later, ReduceReplicas drops the same
-        #    tasks from B (because the replicas on A have dependants on the same worker)
+        #    tasks from B (because the replicas on A have dependents on the same worker)
         # 3. on the third AMM iteration 2 seconds later, goto 1 in an infinite loop
         #    which will last for as long as any tasks with dependencies are running on A
         if (
@@ -465,7 +466,7 @@ class ActiveMemoryManagerPolicy(abc.ABC):
 
         - ``Suggestion("replicate", <TaskState>)``
         - ``Suggestion("replicate", <TaskState>, {subset of potential workers to replicate to})``
-        - ``Suggeston("drop", <TaskState>)``
+        - ``Suggestion("drop", <TaskState>)``
         - ``Suggestion("drop", <TaskState>, {subset of potential workers to drop from})``
 
         Each element yielded indicates the desire to create or destroy a single replica

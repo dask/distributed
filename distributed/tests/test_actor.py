@@ -283,16 +283,42 @@ def test_timeout(client):
     assert future.result() is True
 
 
-@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "1s"})
+@gen_cluster(client=True)
 async def test_failed_worker(c, s, a, b):
-    future = c.submit(Counter, actor=True, workers=[a.address])
-    await wait(future)
-    counter = await future
-
+    counter = await c.submit(Counter, actor=True, workers=[a.address])
+    assert counter._future.status == "finished"
     await a.close()
+
+    # Avoid race condition tested below in test_failed_worker_before_future_update
+    while counter._future.status == "finished":
+        await asyncio.sleep(0.01)
 
     with pytest.raises(RuntimeError, match="Worker holding Actor was lost"):
         await counter.increment()
+
+
+@gen_cluster(client=True, config={"distributed.comm.timeouts.connect": "1s"})
+async def test_failed_worker_before_future_update(c, s, a, b):
+    """Test race condition where the worker failed but the information
+    has not yet reached the Client
+    """
+    counter = await c.submit(Counter, actor=True, workers=[a.address])
+    assert counter._future.status == "finished"
+    close_fut = asyncio.Task(a.close())
+
+    # Wait until the worker has already shut down its RPC channels, but
+    # the client has definitely not been notified yet.
+    while a.address in s.workers:
+        await asyncio.sleep(0)
+    assert counter._future.status == "finished"
+
+    with pytest.raises(OSError, match="Unable to contact Actor's worker"):
+        await counter.increment()
+
+    # Wait for the scheduler to send back handshakes to the worker.
+    # In parallel, the scheduler sends the notification to the client, which
+    # may or may not have arrived by the time Worker.close() finishes.
+    await close_fut
 
 
 @gen_cluster(client=True)
@@ -520,7 +546,7 @@ def test_compute_sync(client):
     assert result == 0 + 1 + 2 + 3 + 4
 
     def check(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(check).values()):
@@ -604,7 +630,7 @@ def test_worker_actor_handle_is_weakref_sync(client):
     del counter
 
     def check(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(check).values()):
@@ -625,7 +651,7 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
     final.compute(actors=counter, optimize_graph=False)
 
     def worker_tasks_running(dask_worker):
-        return len(dask_worker.data) + len(dask_worker.actors)
+        return len(dask_worker.data) + len(dask_worker.state.actors)
 
     start = time()
     while any(client.run(worker_tasks_running).values()):
@@ -749,7 +775,7 @@ def test_as_completed(client):
     assert max == 10
 
 
-@gen_cluster(client=True, timeout=3)
+@gen_cluster(client=True)
 async def test_actor_future_awaitable(client, s, a, b):
     ac = await client.submit(Counter, actor=True)
     futures = [ac.increment() for _ in range(10)]
@@ -839,7 +865,7 @@ async def test_actor_worker_host_leaves_gracefully(c, s, a):
         enter_ev = Event()
         wait_ev = Event()
 
-        def foo(couner, enter_ev, wait_ev):
+        def foo(counter, enter_ev, wait_ev):
             enter_ev.set()
             wait_ev.wait()
 
@@ -870,7 +896,7 @@ async def test_actor_worker_host_dies(c, s, a):
         enter_ev = Event()
         wait_ev = Event()
 
-        def foo(couner, enter_ev, wait_ev):
+        def foo(counter, enter_ev, wait_ev):
             enter_ev.set()
             wait_ev.wait()
 

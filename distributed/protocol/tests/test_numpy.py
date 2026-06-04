@@ -274,7 +274,7 @@ def test_serialize_writeable_array_readonly_base_object():
     # Create array which doesn't own it's own memory
     y = np.broadcast_to(x, (3, 3))
 
-    # Make y writeable and it's base object (x) read-only
+    # Make y writeable and its base object (x) read-only
     y.setflags(write=True)
     x.setflags(write=False)
 

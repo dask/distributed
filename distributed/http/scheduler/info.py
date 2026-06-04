@@ -66,7 +66,7 @@ class Worker(RequestHandler):
 
         self.render(
             "worker.html",
-            title="Worker: " + worker,
+            title=f"Worker: {worker}",
             scheduler=self.server,
             api_enabled=API_ENABLED,
             Worker=worker,
@@ -178,7 +178,7 @@ class WorkerLogs(RequestHandler):
         logs = logs[worker]
         self.render(
             "logs.html",
-            title="Logs: " + worker,
+            title=f"Logs: {worker}",
             logs=logs,
             **merge(self.extra, rel_path_statics),
         )
@@ -196,7 +196,7 @@ class WorkerCallStacks(RequestHandler):
         call_stack = await self.server.get_call_stack(keys=keys)
         self.render(
             "call-stack.html",
-            title="Call Stacks: " + worker,
+            title=f"Call Stacks: {worker}",
             call_stack=call_stack,
             **merge(self.extra, rel_path_statics),
         )
