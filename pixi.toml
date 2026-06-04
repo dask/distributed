@@ -98,7 +98,6 @@ keras = "*"
 # jupyterlab = "*"  # Temporarily in feature.optional-gil below
 netcdf4 = "*"
 numba = "*"
-nvidia-ml-py = "*"  # pynvml
 paramiko = "*"
 prometheus_client = "*"
 requests = "*"
@@ -181,6 +180,31 @@ bokeh = { git = "https://github.com/bokeh/bokeh" }
 # partd = { git = "https://github.com/dask/partd" }
 # zict = { git = "https://github.com/dask/zict" }
 
+[feature.cuda]
+system-requirements = { cuda = "12" }
+channels = ["rapidsai", "https://prefix.dev/conda-forge"]
+channel-priority = "disabled"
+platforms = ["linux-64", "linux-aarch64"]
+
+[feature.cuda.dependencies]
+python = "=3.14"
+numpy = "*"
+pandas = "*"
+pyarrow = "*"
+keras = "*"
+scipy = "*"
+
+cudf = "*"
+cupy = "*"
+# dask-cuda = "*"  # Pins exact version of dask-core
+# dask-cudf = "*"  # Pins exact version of dask-core
+numba = "*"
+nvidia-ml-py = "*"  # pynvml
+pytorch = "*"
+
+[feature.cuda.tasks]
+test-cuda = "pytest -m gpu --runslow"
+
 [feature.test.dependencies]
 coverage = "*"
 pytest = "*"
@@ -233,5 +257,6 @@ py313 = ["py313", "optional", "optional-gil", "optional-problematic", "test"]
 py314 = ["py314", "optional", "optional-gil", "test"]
 py314t = ["py314t", "optional", "test"]
 nightly = ["nightly", "test"]
+cuda = ["cuda", "test"]
 lint = { features = ["lint"], no-default-feature = true }
 build = { features = ["build"], no-default-feature = true }
