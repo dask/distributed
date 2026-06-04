@@ -66,7 +66,6 @@ lz4 = "=4.3.2"
 pyparsing = "<3.3"  # Newer versions of pyparsing break with old versions of packaging
 setuptools= "<71"  # Newer versions of setuptools break with packaging<24
                    # https://github.com/pypa/setuptools/issues/4496
-pytest = "<8.4"  # Pin due to https://github.com/pytest-dev/pytest-cov/issues/693
 
 [feature.mindeps-array.dependencies]
 numpy = "=1.24.4"
@@ -183,8 +182,8 @@ bokeh = { git = "https://github.com/bokeh/bokeh" }
 # zict = { git = "https://github.com/dask/zict" }
 
 [feature.test.dependencies]
+coverage = "*"
 pytest = "*"
-pytest-cov = "*"
 pytest-faulthandler = "*"
 pytest-repeat = "*"
 pytest-rerunfailures = "*"
@@ -193,13 +192,13 @@ pytest-timeout = "*"
 [feature.test.tasks]
 test = "pytest"
 coverage = "coverage"
-coverage-clean = "rm -f .coverage* pytest.xml"
-test-ci = "pytest --cov=distributed --cov-report=xml --junit-xml=pytest.xml --runslow --leaks=fds,processes,threads"
-parse-pytest-stdout = "python continuous_integration/scripts/parse_pytest_stdout.py"
+coverage-clean = "rm -rf .coverage coverage.xml coverage_html_report pytest-stdout.log"
+test-ci = "coverage run -m pytest --junit-xml=pytest.xml --runslow --leaks=fds,processes,threads"
+post-test-ci = "continuous_integration/scripts/post_test_ci.sh"
 
 [feature.test.tasks.test-noqueue]
 env = { DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION = "inf" }
-cmd = "pytest --cov=distributed --cov-report=xml --junit-xml=pytest.xml --runslow --leaks=fds,processes,threads"
+cmd = "coverage run pytest --runslow --junit-xml=pytest.xml --leaks=fds,processes,threads"
 
 [feature.lint.dependencies]
 python = "=3.14"

@@ -125,7 +125,6 @@ addopts = '''
 --ignore=.github
 --strict-markers
 --strict-config
---cov-config=pyproject.toml
 -p no:asyncio
 -p no:legacypath'''
 filterwarnings = [
