@@ -155,6 +155,7 @@ jobs:
 
       - name: Generate or post-process coverage.xml and pytest.xml
         if: always()
+        shell: bash -l {0}
         run: pixi run post-test-ci
 
       - name: Coverage
