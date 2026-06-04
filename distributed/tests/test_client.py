@@ -7128,8 +7128,8 @@ def test_computation_object_code_dask_compute(client):
         return comp.code[0]
 
     code = client.run_on_scheduler(fetch_comp_code)
-    assert len(code) == 1
-    assert code[0].code == test_function_code
+    assert len(code) in (1, 2)  # Depending on `coverage run -m pytest` vs. just pytest
+    assert code[-1].code == test_function_code
 
 
 def test_computation_object_code_dask_compute_no_frames_default(client):

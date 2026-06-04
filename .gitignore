@@ -12,6 +12,8 @@ docs/build
 .coverage.*
 coverage.xml
 pytest.xml
+pytest-stdout.log
+coverage_html_report/
 .#*
 .eggs/
 .idea/
@@ -32,7 +34,6 @@ distributed/scheduler.html
 distributed/_version.py
 
 # Test reports
-reports/
 test_report*.html
 test_report*.db
 test_short_report.html
