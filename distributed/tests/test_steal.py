@@ -884,13 +884,14 @@ async def test_steal_twice(c, s, a):
             ntasks = [len(ws.has_what) for ws in s.workers.values()]
             # Verify that not all tasks stayed on the original workers, and that all
             # workers had their fare share. With 120 tasks, 12 workers, and 1 thread per
-            # worker, a perfect distribution would imply 10 tasks per worker. A
-            # _reasonable_ distribution means no worker should have a disproportionately
-            # large share and no worker should be left with nothing.
-            assert min(ntasks) > 5, ntasks
-            # Note `async_poll_for(lambda: len(b.state.tasks) >= 30)`
-            # above for the no-queue use case.
-            assert max(ntasks) < 15, ntasks
+            # worker, a reasonable distribution means no worker should have a
+            # disproportionately large share and no worker should be left with nothing.
+            # ntasks is routinely observed to be in the [10, 15] range. Give it some
+            # generous margin. Note that you'll never get a perfect distribution of 10
+            # tasks per worker as a and b were started before the other workers.
+            assert min(ntasks) > 3, sorted(ntasks)
+            # Note `async_poll_for(lambda: len(b.state.tasks) >= 30)` above
+            assert max(ntasks) < 22, sorted(ntasks, reverse=True)
 
             assert a.state.in_flight_tasks_count == 0
             assert b.state.in_flight_tasks_count == 0
