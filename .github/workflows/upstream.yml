@@ -39,7 +39,7 @@ jobs:
 
       - name: Reconfigure pytest-timeout
         # No SIGALRM available on Windows
-        # Note: all changes to the source code must happen before setup-pixi
+        # Note: all changes to the source code must happen before `pixi install`
         # or we'll build the package twice
         if: ${{ matrix.os != 'windows-latest' }}
         run: sed -i.bak 's/timeout_method = "thread"/timeout_method = "signal"/' pyproject.toml
