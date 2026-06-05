@@ -32,7 +32,6 @@ from distributed.client import Future
 from distributed.compatibility import LINUX
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.system import MEMORY_LIMIT
 from distributed.utils import wait_for
 from distributed.utils_test import (
     NO_AMM,
@@ -639,23 +638,20 @@ async def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
 
 @gen_cluster(
     client=True,
-    nthreads=[("127.0.0.1", 1)] * 10,
-    worker_kwargs={"memory_limit": MEMORY_LIMIT},
+    nthreads=[("", 1)],
+    worker_kwargs={"memory_limit": "16 GiB"},
     config={
-        "distributed.scheduler.default-task-durations": {"slowidentity": 0.2},
+        # Ensure tasks with dependencies are never rootish
+        "distributed.scheduler.rootish-taskgroup": 0,
         "distributed.scheduler.work-stealing-interval": "20ms",
     },
 )
-async def test_steal_when_more_tasks(c, s, a, *rest):
-    x = c.submit(mul, b"0", 50000000, workers=a.address)  # 50 MB
-    await wait(x)
-
-    futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for i in range(20)]
-
-    start = time()
-    while not any(w.state.tasks for w in rest):
-        await asyncio.sleep(0.01)
-        assert time() < start + 1
+async def test_steal_large_dependency(c, s, a):
+    x = c.submit(mul, b"0", 50000000)  # 50 MB
+    futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for _ in range(20)]
+    await async_poll_for(lambda: len(a.state.tasks) == 21)
+    async with Worker(s.address, nthreads=1) as b:
+        await async_poll_for(lambda: b.state.tasks)
 
 
 @gen_cluster(
