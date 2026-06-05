@@ -222,7 +222,7 @@ post-test-ci = "bash continuous_integration/scripts/post_test_ci.sh"
 
 [feature.test.tasks.test-noqueue]
 env = { DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION = "inf" }
-cmd = "coverage run pytest --runslow --junit-xml=pytest.xml --leaks=fds,processes,threads"
+cmd = "coverage run -m pytest --junit-xml=pytest.xml --runslow --leaks=fds,processes,threads"
 
 [feature.lint.dependencies]
 python = "=3.14"

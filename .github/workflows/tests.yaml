@@ -149,7 +149,7 @@ jobs:
           set -o pipefail
           mkdir reports
 
-          pixi run -e ${{ matrix.environment }} test-ci \
+          pixi run -e ${{ matrix.environment }} ${{ matrix.task }} \
             -m "${{ matrix.partition }}" \
           | tee pytest-stdout.log
 
