@@ -131,19 +131,25 @@ being the following::
 This varies between Python 2 and 3 and so your client and workers must match
 their Python versions and software environments.
 
-However, the Scheduler never uses the language-specific serialization and
-instead only deals with MsgPack.  If the client sends a pickled function up to
-the scheduler the scheduler will not unpack function but will instead keep it
-as bytes.  Eventually those bytes will be sent to a worker, which will then
-unpack the bytes into a proper Python function.  Because the Scheduler never
-unpacks language-specific serialized bytes it may be in a different language.
+However, the Scheduler does not use the same language-specific serialization
+path as the client and workers. Most task payloads are wrapped in
+``Serialized`` frames; when the scheduler decodes a message with
+``deserialize=False`` it keeps those frames as bytes and forwards them without
+deserializing them into Python objects. Because the scheduler only sees the
+MsgPack envelope for that path, it may run in a different language.
+
+Control-plane fields are different. The client wraps values such as task
+definitions, annotations, and span metadata in ``ToPickle``, and the scheduler
+unpickles those frames while decoding the message. Treat access to the
+scheduler port as trusted and use network controls and TLS (see
+``distributed.comm.require-encryption``) when that trust boundary matters.
 
 **The client and workers must share the same language and software environment,
-the scheduler may differ.**
+while the scheduler may differ for forwarded task payloads.**
 
 This has a few advantages:
 
-1.  The Scheduler is protected from unpickling unsafe code
+1.  The Scheduler can forward most task payloads without deserializing them
 2.  We could conceivably implement workers and clients for other languages
     (like R or Julia) and reuse the Python scheduler.  The worker and client
     code is fairly simple and much easier to reimplement than the scheduler,
