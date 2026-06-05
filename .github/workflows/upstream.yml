@@ -37,6 +37,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Reconfigure pytest-timeout
+        # No SIGALRM available on Windows
+        # Note: all changes to the source code must happen before setup-pixi
+        # or we'll build the package twice
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: sed -i.bak 's/timeout_method = "thread"/timeout_method = "signal"/' pyproject.toml
+
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
           pixi-version: v0.70.1
@@ -54,10 +61,6 @@ jobs:
         # FIXME no SSH available on Windows
         # https://github.com/dask/distributed/issues/4509
         run: continuous_integration/scripts/setup_ssh.sh
-
-      - name: Reconfigure pytest-timeout
-        # No SIGALRM available on Windows
-        run: sed -i.bak 's/timeout_method = "thread"/timeout_method = "signal"/' pyproject.toml
 
       - name: Disable IPv6
         shell: bash -l {0}
