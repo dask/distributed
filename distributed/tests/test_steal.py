@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import itertools
 import logging
-import math
 import random
 import weakref
 from collections import defaultdict
@@ -33,7 +32,6 @@ from distributed.client import Future
 from distributed.compatibility import LINUX
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.system import MEMORY_LIMIT
 from distributed.utils import wait_for
 from distributed.utils_test import (
     NO_AMM,
@@ -112,7 +110,6 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
     assert abs(len(a.data) - len(b.data)) <= 5
 
 
-@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 1)] * 2,
@@ -227,6 +224,7 @@ async def test_stop_in_flight(c, s, a, b):
     assert len(b.state.tasks) != 0
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 2,
@@ -388,6 +386,7 @@ async def test_dont_steal_fast_tasks_blocklist(c, s, a):
                 assert ts.who_has == {ws_a}
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("", 1)],
@@ -414,6 +413,7 @@ async def test_new_worker_steals(c, s, a):
         assert b.data
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     config={"distributed.scheduler.work-stealing-interval": "100ms"},
@@ -638,23 +638,20 @@ async def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
 
 @gen_cluster(
     client=True,
-    nthreads=[("127.0.0.1", 1)] * 10,
-    worker_kwargs={"memory_limit": MEMORY_LIMIT},
+    nthreads=[("", 1)],
+    worker_kwargs={"memory_limit": "16 GiB"},
     config={
-        "distributed.scheduler.default-task-durations": {"slowidentity": 0.2},
+        # Ensure tasks with dependencies are never rootish
+        "distributed.scheduler.rootish-taskgroup": 0,
         "distributed.scheduler.work-stealing-interval": "20ms",
     },
 )
-async def test_steal_when_more_tasks(c, s, a, *rest):
-    x = c.submit(mul, b"0", 50000000, workers=a.address)  # 50 MB
-    await wait(x)
-
-    futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for i in range(20)]
-
-    start = time()
-    while not any(w.state.tasks for w in rest):
-        await asyncio.sleep(0.01)
-        assert time() < start + 1
+async def test_steal_large_dependency(c, s, a):
+    x = c.submit(mul, b"0", 50000000)  # 50 MB
+    futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for _ in range(20)]
+    await async_poll_for(lambda: len(a.state.tasks) == 21)
+    async with Worker(s.address, nthreads=1) as b:
+        await async_poll_for(lambda: b.state.tasks)
 
 
 @gen_cluster(
@@ -845,48 +842,55 @@ async def test_restart(c, s, a, b):
     assert not any(x for L in steal.stealable.values() for x in L)
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
-    config={"distributed.scheduler.work-stealing-interval": "100ms"},
+    nthreads=[("", 1)],
+    config={
+        # Ensure tasks with dependencies are never rootish
+        "distributed.scheduler.rootish-taskgroup": 0,
+        "distributed.scheduler.work-stealing-interval": "50ms",
+    },
 )
-async def test_steal_twice(c, s, a, b):
-    x = c.submit(inc, 1, workers=a.address)
+async def test_steal_twice(c, s, a):
+    x = c.submit(inc, 1)
     await wait(x)
 
-    futures = [c.submit(slowadd, x, i, delay=0.2) for i in range(100)]
+    futures = [c.submit(slowadd, x, i, delay=0.2) for i in range(120)]
 
-    while len(s.tasks) < 100:  # tasks are all allocated
-        await asyncio.sleep(0.01)
-    if math.isinf(s.WORKER_SATURATION):
+    await async_poll_for(lambda: len(s.tasks) == 121)
+    assert not s.queued  # Thanks to rootish-taskgroup: 0 in the config above
+    await async_poll_for(lambda: len(a.state.tasks) == 121)
+
+    # Add a second worker
+    async with Worker(s.address, nthreads=1) as b:
         # Wait for b to start stealing tasks
-        while len(b.state.tasks) < 30:
-            await asyncio.sleep(0.01)
-    else:
-        # Wait for b to complete some tasks
-        while len(b.data) < 8:
-            await asyncio.sleep(0.01)
+        await async_poll_for(lambda: len(b.state.tasks) >= 30)
+        # Army of new workers arrives to help
+        async with contextlib.AsyncExitStack() as stack:
+            workers = [
+                stack.enter_async_context(Worker(s.address, nthreads=1))
+                for _ in range(10)
+            ]
+            workers = await asyncio.gather(*workers)
 
-    # Army of new workers arrives to help
-    async with contextlib.AsyncExitStack() as stack:
-        # This is pretty timing sensitive
-        workers = [stack.enter_async_context(Worker(s.address)) for _ in range(10)]
-        workers = await asyncio.gather(*workers)
+            await wait(futures)
 
-        await wait(futures)
+            # Note: this includes a and b
+            ntasks = [len(ws.has_what) for ws in s.workers.values()]
+            # Verify that not all tasks stayed on the original workers, and that all
+            # workers had their fare share. With 120 tasks, 12 workers, and 1 thread per
+            # worker, a reasonable distribution means no worker should have a
+            # disproportionately large share and no worker should be left with nothing.
+            # ntasks is routinely observed to be in the [10, 15] range. Give it some
+            # generous margin. Note that you'll never get a perfect distribution of 10
+            # tasks per worker as a and b were started before the other workers.
+            assert min(ntasks) > 3, sorted(ntasks)
+            # Note `async_poll_for(lambda: len(b.state.tasks) >= 30)` above
+            assert max(ntasks) < 22, sorted(ntasks, reverse=True)
 
-        # Note: this includes a and b
-        empty_workers = [ws for ws in s.workers.values() if not ws.has_what]
-        assert (
-            len(empty_workers) < 3
-        ), f"Too many workers without keys ({len(empty_workers)} out of {len(s.workers)})"
-        # This also tests that some tasks were stolen from b
-        # (see `while len(b.state.tasks) < 30` above)
-        # If queuing is enabled, then there was nothing to steal from b,
-        # so this just tests the queue was balanced not-terribly.
-        assert max(len(ws.has_what) for ws in s.workers.values()) < 30
-
-        assert a.state.in_flight_tasks_count == 0
-        assert b.state.in_flight_tasks_count == 0
+            assert a.state.in_flight_tasks_count == 0
+            assert b.state.in_flight_tasks_count == 0
 
 
 @gen_cluster(
@@ -1052,6 +1056,7 @@ async def test_parse_stealing_interval(s, interval, expected):
         assert s.periodic_callbacks["stealing"].callback_time == expected
 
 
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     config={"distributed.scheduler.work-stealing-interval": "100ms"},
@@ -1417,7 +1422,6 @@ def test_steal_worker_state(ws_with_running_task):
     assert ws.available_resources == {"R": 1}
 
 
-@pytest.mark.slow()
 @gen_cluster(nthreads=[("", 1)] * 4, client=True)
 async def test_steal_very_fast_tasks(c, s, *workers):
     np = pytest.importorskip("numpy")
