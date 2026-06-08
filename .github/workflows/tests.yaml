@@ -161,7 +161,7 @@ jobs:
       - name: Coverage
         # Do not upload coverage reports for cron jobs
         if: always() && github.event_name != 'schedule'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           name: ${{ env.TEST_ID }}
           token: ${{ secrets.CODECOV_TOKEN }}

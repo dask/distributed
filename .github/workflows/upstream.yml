@@ -75,4 +75,4 @@ jobs:
         run: pixi run -e ${{ matrix.environment }} test-ci -m "${{ matrix.partition }}"
 
       - name: Coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
