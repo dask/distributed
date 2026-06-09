@@ -3758,9 +3758,9 @@ class SchedulerState:
 
         assert task_prefix_counts.keys() == self._task_prefix_count_global.keys()
         for name, global_count in self._task_prefix_count_global.items():
-            assert (
-                task_prefix_counts[name] == global_count
-            ), f"{name}: {task_prefix_counts[name]} (wss), {global_count} (global)"
+            assert task_prefix_counts[name] == global_count, (
+                f"{name}: {task_prefix_counts[name]} (wss), {global_count} (global)"
+            )
 
         for ws in self.running:
             assert ws.status == Status.running
@@ -5438,7 +5438,7 @@ class Scheduler(SchedulerState, ServerNode):
             ]
         elif ts.state == "erred":
             logger.debug(
-                "Received already erred task, worker: %s" ", key: %s",
+                "Received already erred task, worker: %s, key: %s",
                 worker,
                 key,
             )

@@ -663,10 +663,13 @@ def cluster(
             _run_and_close_tornado(wait_for_workers)
 
             # avoid sending processes down to function
-            yield {"address": saddr}, [
-                {"address": w["address"], "proc": weakref.ref(w["proc"])}
-                for w in workers_by_pid.values()
-            ]
+            yield (
+                {"address": saddr},
+                [
+                    {"address": w["address"], "proc": weakref.ref(w["proc"])}
+                    for w in workers_by_pid.values()
+                ],
+            )
         try:
             client = default_client()
         except ValueError:

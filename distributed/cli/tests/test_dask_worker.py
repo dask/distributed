@@ -29,7 +29,8 @@ from distributed.utils_test import (
 
 @pytest.mark.parametrize(
     # args: (worker_port, nanny_port, n_workers, nanny)
-    # Passing *args tuple instead of single args is to improve readability with black
+    # Passing *args tuple instead of single args is to improve readability
+    # with ruff format
     "args,expect",
     [
         # Single worker

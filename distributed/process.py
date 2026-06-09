@@ -347,13 +347,13 @@ class AsyncProcess:
         The function may not be a coroutine function.
         """
         # XXX should this be a property instead?
-        assert not inspect.iscoroutinefunction(
-            func
-        ), "exit callback may not be a coroutine function"
+        assert not inspect.iscoroutinefunction(func), (
+            "exit callback may not be a coroutine function"
+        )
         assert callable(func), "exit callback should be callable"
-        assert (
-            self._state.pid is None
-        ), "cannot set exit callback when process already started"
+        assert self._state.pid is None, (
+            "cannot set exit callback when process already started"
+        )
         self._exit_callback = func
 
     def is_alive(self):

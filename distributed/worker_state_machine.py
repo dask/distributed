@@ -1860,11 +1860,9 @@ class WorkerState:
     ) -> RecsInstrs:
         self._purge_state(ts)
         recs: Recs = {}
+        UNRELEASABLE = READY | PROCESSING | {"memory"}
         for dependency in ts.dependencies:
-            if (
-                not dependency.waiters
-                and dependency.state not in READY | PROCESSING | {"memory"}
-            ):
+            if not dependency.waiters and dependency.state not in UNRELEASABLE:
                 recs[dependency] = "released"
 
         ts.state = "released"
