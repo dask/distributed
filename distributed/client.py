@@ -1542,8 +1542,7 @@ class Client(SyncMethodMixin):
 
         else:
             logger.error(
-                "Failed to reconnect to scheduler after %.2f "
-                "seconds, closing client",
+                "Failed to reconnect to scheduler after %.2f seconds, closing client",
                 self._timeout,
             )
             await self._close()
@@ -3137,8 +3136,7 @@ class Client(SyncMethodMixin):
                 results[key] = exc
             elif on_error != "ignore":
                 raise ValueError(
-                    "on_error must be 'raise', 'return', or 'ignore'; "
-                    f"got {on_error!r}"
+                    f"on_error must be 'raise', 'return', or 'ignore'; got {on_error!r}"
                 )
 
         if wait:
@@ -3922,13 +3920,13 @@ class Client(SyncMethodMixin):
         name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
         worker_addrs = [name_to_addr.get(w, w) for w in workers]
 
-        out: dict[str, Literal["OK", "removed", "timed out"]] = (
-            await self.scheduler.restart_workers(
-                workers=worker_addrs,
-                timeout=timeout,
-                on_error="raise" if raise_for_error else "return",
-                stimulus_id=f"client-restart-workers-{time()}",
-            )
+        out: dict[
+            str, Literal["OK", "removed", "timed out"]
+        ] = await self.scheduler.restart_workers(
+            workers=worker_addrs,
+            timeout=timeout,
+            on_error="raise" if raise_for_error else "return",
+            stimulus_id=f"client-restart-workers-{time()}",
         )
         # Map keys back to original `workers` input names/addresses
         out = {w: out[w_addr] for w, w_addr in zip(workers, worker_addrs)}

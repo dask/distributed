@@ -895,7 +895,10 @@ def ensure_ip(hostname):
     for fam in families:
         try:
             results = socket.getaddrinfo(
-                hostname, 1234, fam, socket.SOCK_STREAM  # dummy port number
+                hostname,
+                1234,  # dummy port number
+                fam,
+                socket.SOCK_STREAM,
             )
         except socket.gaierror as e:
             exc = e

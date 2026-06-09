@@ -320,7 +320,7 @@ class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
         diff = snap_after.compare_to(snap_before, "traceback")
 
         lines = [
-            f"leaked {(bytes_after - bytes_before) / 2 ** 20:.1f} MiB "
+            f"leaked {(bytes_after - bytes_before) / 2**20:.1f} MiB "
             "of traced Python memory"
         ]
         for stat in diff[: self.NDIFF]:

@@ -394,9 +394,9 @@ def download_and_parse_artifacts(
                 # the same workflow run can be aligned according to the same trigger
                 # time.
                 html_url = jobs_df[jobs_df["suite_name"] == a["name"]].html_url.unique()
-                assert (
-                    len(html_url) == 1
-                ), f"Artifact suite name {a['name']} did not match any jobs dataframe:\n{jobs_df['suite_name'].unique()}"
+                assert len(html_url) == 1, (
+                    f"Artifact suite name {a['name']} did not match any jobs dataframe:\n{jobs_df['suite_name'].unique()}"
+                )
                 html_url = html_url[0]
                 assert html_url is not None
                 df2 = df.assign(

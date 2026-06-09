@@ -1618,9 +1618,7 @@ class Worker(BaseWorker, ServerNode):
             self.stream_comms[address] = bcomm
 
             async def batched_send_connect():
-                comm = await connect(
-                    address, **self.connection_args  # TODO, serialization
-                )
+                comm = await connect(address, **self.connection_args)
                 comm.name = "Worker->Worker"
                 await comm.write({"op": "connection_stream"})
 

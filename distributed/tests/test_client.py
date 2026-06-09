@@ -8279,7 +8279,8 @@ async def test_adjust_heartbeat(c, s):
     assert "heartbeat" in c._periodic_callbacks
     heartbeat_pc = c._periodic_callbacks["heartbeat"]
     scheduler_info_pc = c._periodic_callbacks["scheduler-info"]
-    assert 0 < (initial_value := heartbeat_pc.callback_time) < 10_000
+    initial_value = heartbeat_pc.callback_time
+    assert 0 < initial_value < 10_000
 
     clients = []
     for _ in range(20):
@@ -8288,7 +8289,8 @@ async def test_adjust_heartbeat(c, s):
 
     while initial_value == heartbeat_pc.callback_time:
         await asyncio.sleep(0.1)
-    assert (newvalue := heartbeat_pc.callback_time) > initial_value
+    newvalue = heartbeat_pc.callback_time
+    assert newvalue > initial_value
     assert heartbeat_pc.callback_time == scheduler_info_pc.callback_time
 
     await asyncio.gather(*[cc.close() for cc in clients])

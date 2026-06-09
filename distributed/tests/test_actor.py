@@ -857,7 +857,6 @@ async def test_get_worker(c, s, a, b):
 async def test_actor_worker_host_leaves_gracefully(c, s, a):
     # see also test_actor_worker_host_dies
     async with Worker(s.address, nthreads=1) as b:
-
         counter = await c.submit(
             Counter, actor=True, workers=[b.address], allow_other_workers=True
         )
@@ -888,7 +887,6 @@ async def test_actor_worker_host_leaves_gracefully(c, s, a):
 async def test_actor_worker_host_dies(c, s, a):
     # see also test_actor_worker_host_leaves_gracefully
     async with Worker(s.address, nthreads=1) as b:
-
         counter = await c.submit(
             Counter, actor=True, workers=[b.address], allow_other_workers=True
         )

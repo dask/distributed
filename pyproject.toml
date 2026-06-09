@@ -63,7 +63,7 @@ namespaces = false
 distributed = ["http/templates/*.html", "py.typed"]
 
 [tool.ruff]
-line-length = 120
+line-length = 88
 
 [tool.ruff.lint]
 extend-select = ["B", "TID", "I", "UP", "RUF"]
@@ -75,16 +75,13 @@ ignore = [
     "B905",   # `zip()` without an explicit `strict=` parameter
     "F841",   # Local variable `futures` is assigned to but never used
     "E402",   # Module level import not at top of file
-    "E714",   # Test for object identity should be `is not`
     "E721",   # Use `is` and `is not` for type comparisons, or `isinstance()` for isinstance checks
     "E741",   # Ambiguous variable name: `l`
-    "RUF001", # String contains ambiguous letter
     "RUF002", # Docstring contains ambiguous letter
     "RUF005", # Consider unpacking operator instead of concatenation
     "RUF006", # Store a reference to the return value of `asyncio.ensure_future`
     "RUF012", # Mutable class attributes should be annotated with `typing.ClassVar`
     "RUF015", # Prefer `next(iter(...))` over single element slice
-    "RUF018", # Avoid assignment expressions in `assert` statements
     "RUF021", # Parenthesize `a and b` expressions when chaining `and` and `or` together, to make the precedence clear
     "RUF022", # `__all__` is not sorted
     "RUF023", # `__slots__` is not sorted
