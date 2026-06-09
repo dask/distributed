@@ -5000,7 +5000,6 @@ class Client(SyncMethodMixin):
         plot=False,
         filename="task-stream.html",
         bokeh_resources=None,
-        start_index=None,
     ):
         """Get task stream data from scheduler
 
@@ -5071,7 +5070,6 @@ class Client(SyncMethodMixin):
             plot=plot,
             filename=filename,
             bokeh_resources=bokeh_resources,
-            start_index=start_index,
         )
 
     async def _get_task_stream(
@@ -6098,9 +6096,9 @@ class get_task_stream:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        L = self.client.get_task_stream(
+        L = self.client.sync(self.client._get_task_stream(
             start_index=self._start_index, plot=self._plot, filename=self._filename
-        )
+        ))
         if self._plot:
             L, self.figure = L
         self.data.extend(L)
@@ -6110,7 +6108,7 @@ class get_task_stream:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        L = await self.client.get_task_stream(
+        L = await self.client._get_task_stream(
             start_index=self._start_index, plot=self._plot, filename=self._filename
         )
         if self._plot:

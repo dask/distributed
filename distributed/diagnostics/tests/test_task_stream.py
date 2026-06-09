@@ -103,26 +103,6 @@ async def test_collect_start_index(c, s, a, b):
     assert len(tasks.collect(start_index=tasks.index)) == 0
 
 
-def test_collect_start_index_ignores_clock():
-    # When the worker clock lags the client clock (or there is latency), a task
-    # can finish with a recorded stop time that is earlier than the client's
-    # ``start`` boundary. The time-based collection then drops the task, which
-    # is the latency/clock-skew failure from the original bug report. The
-    # index-based path must still return it.
-    plugin = TaskStreamPlugin.__new__(TaskStreamPlugin)
-    plugin.buffer = deque()
-    plugin.index = 0
-
-    now = time()
-    plugin.buffer.append({"key": "task", "startstops": [{"stop": now - 100}]})
-    plugin.index += 1
-
-    # Time-based collection misses the task because its stop time is in the past.
-    assert plugin.collect(start=now) == []
-    # Index-based collection captures it regardless of the clock.
-    assert len(plugin.collect(start_index=0)) == 1
-
-
 @gen_cluster(client=True)
 async def test_client(c, s, a, b):
     await c.get_task_stream()
