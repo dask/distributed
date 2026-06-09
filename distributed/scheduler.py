@@ -151,6 +151,8 @@ if TYPE_CHECKING:
 
     from dask._expr import Expr
 
+    from distributed.diagnostics.task_stream import TaskStreamPlugin
+
     FuncT = TypeVar("FuncT", bound=Callable[..., Any])
 
 # Not to be confused with distributed.worker_state_machine.TaskStateState
@@ -4179,6 +4181,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
+            "get_task_stream_index": self.get_task_stream_index,
             "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "unregister_scheduler_plugin": self.unregister_scheduler_plugin,
@@ -8075,20 +8078,34 @@ class Scheduler(SchedulerState, ServerNode):
             key: (self.tasks[key].state if key in self.tasks else None) for key in keys
         }
 
-    def get_task_stream(
-        self,
-        start: str | float | None = None,
-        stop: str | float | None = None,
-        count: int | None = None,
-    ) -> list:
+    def _task_stream_plugin(self) -> TaskStreamPlugin:
         from distributed.diagnostics.task_stream import TaskStreamPlugin
 
         if TaskStreamPlugin.name not in self.plugins:
             self.add_plugin(TaskStreamPlugin(self))
 
-        plugin = cast(TaskStreamPlugin, self.plugins[TaskStreamPlugin.name])
+        return cast(TaskStreamPlugin, self.plugins[TaskStreamPlugin.name])
 
-        return plugin.collect(start=start, stop=stop, count=count)
+    def get_task_stream(
+        self,
+        start: str | float | None = None,
+        stop: str | float | None = None,
+        count: int | None = None,
+        start_index: int | None = None,
+    ) -> list:
+        plugin = self._task_stream_plugin()
+        return plugin.collect(
+            start=start, stop=stop, count=count, start_index=start_index
+        )
+
+    def get_task_stream_index(self) -> int:
+        """Return the number of tasks recorded by the task stream so far.
+
+        Used as an opaque cursor by the ``get_task_stream`` context manager so
+        that it can collect exactly the tasks that ran during the block without
+        relying on (latency- and clock-sensitive) wall-clock boundaries.
+        """
+        return self._task_stream_plugin().index
 
     def start_task_metadata(self, name: str) -> None:
         plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
