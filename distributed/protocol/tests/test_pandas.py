@@ -68,7 +68,7 @@ dfs = [
     pd.Series(
         np.random.randn(10), name="a", index=pd.date_range("2000", periods=10, freq="B")
     ),
-    pd.Index(["סשםקה7ךשץא", "8טלכז6לרפל"]),
+    pd.Index(["סשםקה7ךשץא", "8טלכז6לרפל"]),  # noqa: RUF001
 ]
 
 
