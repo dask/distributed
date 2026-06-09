@@ -6096,9 +6096,12 @@ class get_task_stream:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        L = self.client.sync(self.client._get_task_stream(
-            start_index=self._start_index, plot=self._plot, filename=self._filename
-        ))
+        L = self.client.sync(
+            self.client._get_task_stream,
+            start_index=self._start_index,
+            plot=self._plot,
+            filename=self._filename,
+        )
         if self._plot:
             L, self.figure = L
         self.data.extend(L)

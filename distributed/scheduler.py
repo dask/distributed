@@ -151,6 +151,8 @@ if TYPE_CHECKING:
 
     from dask._expr import Expr
 
+    from distributed.diagnostics.task_stream import TaskStreamPlugin
+
     FuncT = TypeVar("FuncT", bound=Callable[..., Any])
 
 # Not to be confused with distributed.worker_state_machine.TaskStateState
