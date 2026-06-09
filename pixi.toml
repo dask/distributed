@@ -2,7 +2,7 @@
 # to generate a conda package of distributed from git tip
 [workspace]
 channels = ["https://prefix.dev/conda-forge"]
-platforms = ["linux-64", "osx-arm64", "win-64"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64", "win-64"]
 preview = ["pixi-build"]
 
 [package]
@@ -31,3 +31,232 @@ sortedcontainers = ">=2.0.5"
 tblib = ">=1.6.0,!=3.2.0,!=3.2.1"
 tornado = ">=6.2.0"
 zict = ">=3.0.0"
+
+[dependencies]
+dask-core = { git = "https://github.com/dask/dask" }
+distributed = { path = "." }
+
+[tasks]
+host-info = "python continuous_integration/scripts/host_info.py"
+
+[feature.mindeps.dependencies]
+python = "=3.10"
+# dask/dask dependenncies
+click = "=8.1"
+cloudpickle = "=3.0.0"
+fsspec = "=2021.9.0"
+packaging = "=20.0"
+partd = "=1.4.0"
+pyyaml = "=5.4.1"
+toolz = "=0.12.0"
+importlib-metadata = "=4.13.0"
+# dask/distributed extra dependencies
+jinja2 = "=2.10.3"
+locket = "=1.0.0"
+msgpack-python = "=1.0.2"
+psutil = "=5.8.0"
+sortedcontainers = "=2.0.5"
+tblib = "=1.6.0"
+tornado = "=6.2.0"
+zict = "=3.0.0"
+# Optional dependencies
+cytoolz = "=0.11.2"
+lz4 = "=4.3.2"
+# Hacks
+pyparsing = "<3.3"  # Newer versions of pyparsing break with old versions of packaging
+setuptools= "<71"  # Newer versions of setuptools break with packaging<24
+                   # https://github.com/pypa/setuptools/issues/4496
+
+[feature.mindeps-array.dependencies]
+numpy = "=1.24.4"
+
+[feature.mindeps-dataframe.dependencies]
+numpy = "=1.24.4"
+pandas = "=2.0"
+pyarrow = "=16.0"
+
+[feature.optional.dependencies]
+# Key optional dependencies
+numpy = "*"
+pandas = "*"
+pyarrow = "*"
+
+# Compression
+lz4 = "*"
+# python-snappy = "*"  # Temporarily in feature.optional-gil below
+zstandard = "*"
+
+# Other opotional dependencies
+asyncssh = "*"
+bokeh = "*"
+h5py = "*"
+# ipykernel = "*"  # Temporarily in feature.optional-gil below
+ipywidgets = "*"
+jupyter_events = "*"
+keras = "*"
+# jupyter-server-proxy = "*"  # Temporarily in feature.optional-gil below
+# jupyterlab = "*"  # Temporarily in feature.optional-gil below
+netcdf4 = "*"
+numba = "*"
+paramiko = "*"
+prometheus_client = "*"
+requests = "*"
+scikit-learn = "*"
+scipy = "*"
+sparse = "*"
+setproctitle = "*"
+# stacktrace = "*"  # FIXME long-forgotten dependency, must investigate
+# uvloop = "*"  # Temporarily in feature.optional-problematic below
+
+# Optional dependencies that don't work yet in free-threading
+[feature.optional-gil.dependencies]
+gilknocker = "*"  # Makes no sense in free-threading
+ipykernel = "*"  # No 3.14t build for Windows yet
+jupyter-server-proxy = "*"  # Depends on ipykernel
+jupyterlab = "*"    # Depends on ipykernel
+python-snappy = "*"  # Dependency cramjam does not release the GIL
+
+[feature.optional-problematic.target.linux-64.dependencies]
+crick = "*"  # Not available for 3.14, 3.14t, and linux-aarch64
+memray = "*"   # Not available on Windows
+uvloop = "*"  # Not available on Windows
+
+[feature.optional-problematic.target.linux-aarch64.dependencies]
+memray = "*"   # Not available on Windows
+uvloop = "*"  # Not available on Windows
+
+[feature.optional-problematic.target.win-64.dependencies]
+crick = "*"  # Not available for 3.14, 3.14t, and linux-aarch64
+
+[feature.optional-problematic.target.osx-arm64.dependencies]
+crick = "*"  # Not available for 3.14, 3.14t, and linux-aarch64
+memray = "*"   # Not available on Windows
+uvloop = "*"  # Not available on Windows
+
+[feature.py310.dependencies]
+python = "=3.10"
+importlib_metadata = "*"
+# Only installed here due to its size
+torchvision = "*"
+
+[feature.py311.dependencies]
+python = "=3.11"
+importlib_metadata = "*"
+
+[feature.py312.dependencies]
+python = "=3.12"
+
+[feature.py313.dependencies]
+python = "=3.13"
+
+[feature.py314.dependencies]
+python = "=3.14"
+
+[feature.py314t.dependencies]
+python-freethreading = "=3.14"
+# See ../dask/continuous_integration/pixi-recipes/README.md
+brotli-python = { git = "https://github.com/dask/dask", subdirectory = "continuous_integration/pixi-recipes/brotli" }
+msgpack-python = { git = "https://github.com/dask/dask", subdirectory = "continuous_integration/pixi-recipes/msgpack" }
+
+[feature.nightly.dependencies]
+python = "=3.14"
+# Need nodejs to build bokeh from sources.
+# Can't use bokeh nightlies from the bokeh/label/dev channel because it would downgrade
+# NumPy to the latest release (and building NumPy from sources takes longer than
+# building Bokeh).
+nodejs = "*"
+# See ../dask/continuous_integration/pixi-recipes/README.md
+fsspec = { git = "https://github.com/dask/dask", subdirectory = "continuous_integration/pixi-recipes/fsspec" }
+s3fs = { git = "https://github.com/dask/dask", subdirectory = "continuous_integration/pixi-recipes/s3fs" }
+
+[feature.nightly.pypi-dependencies]
+numpy = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
+pandas = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
+pyarrow = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
+scipy = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
+h5py = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
+bokeh = { git = "https://github.com/bokeh/bokeh" }
+# FIXME can't override distributed's conda dependencies with pip dependencies
+# partd = { git = "https://github.com/dask/partd" }
+# zict = { git = "https://github.com/dask/zict" }
+
+[feature.cuda]
+system-requirements = { cuda = "12" }
+channels = ["rapidsai", "https://prefix.dev/conda-forge"]
+channel-priority = "disabled"
+platforms = ["linux-64", "linux-aarch64"]
+
+[feature.cuda.dependencies]
+python = "=3.14"
+numpy = "*"
+pandas = "*"
+pyarrow = "*"
+keras = "*"
+scipy = "*"
+
+cudf = "*"
+cupy = "*"
+# dask-cuda = "*"  # Pins exact version of dask-core
+# dask-cudf = "*"  # Pins exact version of dask-core
+numba = "*"
+nvidia-ml-py = "*"  # pynvml
+pytorch = "*"
+
+[feature.cuda.tasks]
+test-cuda = "pytest -m gpu --runslow"
+
+[feature.test.dependencies]
+coverage = "*"
+pytest = "*"
+pytest-faulthandler = "*"
+pytest-repeat = "*"
+pytest-rerunfailures = "*"
+pytest-timeout = "*"
+
+[feature.test.tasks]
+test = "pytest"
+coverage = "coverage"
+coverage-clean = "rm -rf .coverage coverage.xml coverage_html_report pytest-stdout.log"
+test-ci = "coverage run -m pytest --junit-xml=pytest.xml --runslow --leaks=fds,processes,threads"
+post-test-ci = "bash continuous_integration/scripts/post_test_ci.sh"
+
+[feature.test.tasks.test-noqueue]
+env = { DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION = "inf" }
+cmd = "coverage run -m pytest --junit-xml=pytest.xml --runslow --leaks=fds,processes,threads"
+
+[feature.lint.dependencies]
+python = "=3.14"
+pre-commit = "*"
+
+[feature.lint.tasks]
+lint = "pre-commit run --all-files"
+
+[feature.build.dependencies]
+python = "=3.14"
+conda = "*"
+conda-build = "*"
+anaconda-client = "*"
+
+[feature.build.tasks]
+conda-build = "bash continuous_integration/scripts/conda_build.sh"
+
+[feature.build.tasks.conda-upload]
+cwd = "dist/conda"
+cmd = "anaconda upload --label dev noarch/*.conda"
+description = "Upload to anaconda.org. Requires ANACONDA_API_TOKEN env variable to be set."
+
+[environments]
+default = ["py314", "optional", "optional-gil", "test"]  # Same as py314
+mindeps = ["mindeps", "test"]
+mindeps-array = ["mindeps", "mindeps-array", "test"]
+mindeps-dataframe = ["mindeps", "mindeps-dataframe", "test"]
+py310 = ["py310", "optional", "optional-gil", "optional-problematic", "test"]
+py311 = ["py311", "optional", "optional-gil", "optional-problematic", "test"]
+py312 = ["py312", "optional", "optional-gil", "optional-problematic", "test"]
+py313 = ["py313", "optional", "optional-gil", "optional-problematic", "test"]
+py314 = ["py314", "optional", "optional-gil", "test"]
+py314t = ["py314t", "optional", "test"]
+nightly = ["nightly", "test"]
+cuda = ["cuda", "test"]
+lint = { features = ["lint"], no-default-feature = true }
+build = { features = ["build"], no-default-feature = true }
