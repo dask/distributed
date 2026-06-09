@@ -213,20 +213,20 @@ async def _get_task_stream_impl(
     msgs = await client.scheduler.get_task_stream(
         start=start, stop=stop, count=count, start_index=start_index
     )
-    if plot:
-        from distributed.dashboard.components.scheduler import task_stream_figure
-
-        rects = rectangles(msgs)
-        source, figure = task_stream_figure(sizing_mode="stretch_both")
-        source.data.update(rects)
-        if plot == "save":
-            from bokeh.plotting import output_file, save
-
-            output_file(filename=filename, title="Dask Task Stream")
-            save(figure, filename=filename, resources=bokeh_resources)
-        return (msgs, figure)
-    else:
+    if not plot:
         return msgs
+
+    from distributed.dashboard.components.scheduler import task_stream_figure
+
+    rects = rectangles(msgs)
+    source, figure = task_stream_figure(sizing_mode="stretch_both")
+    source.data.update(rects)
+    if plot == "save":
+        from bokeh.plotting import output_file, save
+
+        output_file(filename=filename, title="Dask Task Stream")
+        save(figure, filename=filename, resources=bokeh_resources)
+    return (msgs, figure)
 
 
 class get_task_stream:
