@@ -14,7 +14,7 @@ from distributed import Client, Scheduler
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.utils import open_port
-from distributed.utils_test import gen_test, popen
+from distributed.utils_test import gen_test, get_dashboard_port, popen
 
 pytest.importorskip("jupyter_server")
 
@@ -47,6 +47,7 @@ def test_jupyter_cli(loop, requires_default_ports):
     requests = pytest.importorskip("requests")
 
     port = open_port()
+
     with popen(
         [
             sys.executable,
@@ -54,15 +55,19 @@ def test_jupyter_cli(loop, requires_default_ports):
             "dask",
             "scheduler",
             "--jupyter",
-            "--no-dashboard",
+            "--dashboard-address",
+            "127.0.0.1:0",
             "--host",
             f"127.0.0.1:{port}",
         ],
         terminate_timeout=120,
         kill_timeout=60,
     ):
-        with Client(f"127.0.0.1:{port}", loop=loop):
-            response = requests.get("http://127.0.0.1:8787/jupyter/api/status")
+        with Client(f"127.0.0.1:{port}", loop=loop) as c:
+            dashboard_port = get_dashboard_port(c)
+            response = requests.get(
+                f"http://127.0.0.1:{dashboard_port}/jupyter/api/status"
+            )
             assert response.status_code == 200
 
 
@@ -129,7 +134,8 @@ def test_shutdowns_cleanly(requires_default_ports):
                 "dask",
                 "scheduler",
                 "--jupyter",
-                "--no-dashboard",
+                "--dashboard-address",
+                "127.0.0.1:0",
                 "--host",
                 f"127.0.0.1:{port}",
             ],
@@ -140,13 +146,15 @@ def test_shutdowns_cleanly(requires_default_ports):
         )
 
         # wait until scheduler is running
-        with Client(f"127.0.0.1:{port}"):
-            pass
+        with Client(f"127.0.0.1:{port}") as c:
+            dashboard_port = get_dashboard_port(c)
 
         with requests.Session() as session:
-            session.get("http://127.0.0.1:8787/jupyter/lab").raise_for_status()
+            session.get(
+                f"http://127.0.0.1:{dashboard_port}/jupyter/lab"
+            ).raise_for_status()
             session.post(
-                "http://127.0.0.1:8787/jupyter/api/shutdown",
+                f"http://127.0.0.1:{dashboard_port}/jupyter/api/shutdown",
                 headers={"X-XSRFToken": session.cookies["_xsrf"]},
             ).raise_for_status()
 

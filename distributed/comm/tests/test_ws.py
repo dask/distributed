@@ -15,6 +15,7 @@ from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tests.test_comms import check_tls_extra
 from distributed.security import Security
+from distributed.utils import open_port
 from distributed.utils_test import (
     gen_cluster,
     gen_test,
@@ -105,9 +106,12 @@ async def test_expect_scheduler_ssl_when_sharing_server(tmp_path):
         "distributed.scheduler.dashboard.tls.key": key_path,
         "distributed.scheduler.dashboard.tls.cert": cert_path,
     }
+    port = open_port()
     with dask.config.set(c):
         with pytest.raises(RuntimeError):
-            async with Scheduler(protocol="ws://", dashboard=True, port=8787):
+            async with Scheduler(
+                protocol="ws://", port=port, dashboard_address=f":{port}"
+            ):
                 pass
 
 

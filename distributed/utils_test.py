@@ -11,6 +11,7 @@ import io
 import logging
 import multiprocessing
 import os
+import re
 import signal
 import socket
 import ssl
@@ -2578,3 +2579,9 @@ async def padded_time(before=0.05, after=0.05):
     t = time()
     await asyncio.sleep(after)
     return t
+
+
+def get_dashboard_port(client: Client) -> int:
+    match = re.search(r":(\d+)\/status", client.dashboard_link)
+    assert match
+    return int(match.group(1))
