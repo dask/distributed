@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from typing import Literal
 
 import dask
 from dask.utils import format_time, key_split, parse_timedelta
 
+from distributed.client import Client, default_client
 from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
@@ -193,3 +195,128 @@ prefix = {
     "deserialize": "deserialize-",
     "compute": "",
 }
+
+
+async def _get_task_stream_impl(
+    client,
+    start=None,
+    stop=None,
+    count=None,
+    plot=False,
+    filename="task-stream.html",
+    bokeh_resources=None,
+    start_index=None,
+):
+    """Asynchronous implementation of Client.get_task_stream and of the
+    get_task_stream context manager
+    """
+    msgs = await client.scheduler.get_task_stream(
+        start=start, stop=stop, count=count, start_index=start_index
+    )
+    if plot:
+        from distributed.dashboard.components.scheduler import task_stream_figure
+
+        rects = rectangles(msgs)
+        source, figure = task_stream_figure(sizing_mode="stretch_both")
+        source.data.update(rects)
+        if plot == "save":
+            from bokeh.plotting import output_file, save
+
+            output_file(filename=filename, title="Dask Task Stream")
+            save(figure, filename=filename, resources=bokeh_resources)
+        return (msgs, figure)
+    else:
+        return msgs
+
+
+class get_task_stream:
+    """
+    Collect task stream within a context block
+
+    This provides diagnostic information about every task that was run during
+    the time when this block was active.
+
+    This must be used as a context manager.
+
+    Parameters
+    ----------
+    plot: boolean, str
+        If true then also return a Bokeh figure
+        If plot == 'save' then save the figure to a file
+    filename: str (optional)
+        The filename to save to if you set ``plot='save'``
+
+    Examples
+    --------
+    >>> with get_task_stream() as ts:
+    ...     x.compute()
+    >>> ts.data
+    [...]
+
+    Get back a Bokeh figure and optionally save to a file
+
+    >>> with get_task_stream(plot='save', filename='task-stream.html') as ts:
+    ...    x.compute()
+    >>> ts.figure
+    <Bokeh Figure>
+
+    To share this file with others you may wish to upload and serve it online.
+    A common way to do this is to upload the file as a gist, and then serve it
+    on https://raw.githack.com ::
+
+       $ python -m pip install gist
+       $ gist task-stream.html
+       https://gist.github.com/8a5b3c74b10b413f612bb5e250856ceb
+
+    You can then navigate to that site, click the "Raw" button to the right of
+    the ``task-stream.html`` file, and then provide that URL to
+    https://raw.githack.com .  This process should provide a sharable link that
+    others can use to see your task stream plot.
+
+    See Also
+    --------
+    Client.get_task_stream: Function version of this context manager
+    """
+
+    data: list[dict]
+
+    def __init__(
+        self,
+        client: Client | None = None,
+        plot: bool | Literal["save"] = False,
+        filename: str = "task-stream.html",
+    ):
+        self.data = []
+        self._plot = plot
+        self._filename = filename
+        self.figure = None
+        self.client = client or default_client()
+        self._start_index = None
+
+    def __enter__(self):
+        return self.client.sync(self.__aenter__)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self.client.sync(self.__aexit__, exc_type, exc_value, traceback)
+
+    async def __aenter__(self):
+        """Record the scheduler's task-stream cursor on entry and collect
+        everything appended after it on exit. Using the monotonic index
+        instead of a wall-clock boundary avoids dropping tasks when there is
+        latency or clock skew between the client and the workers.
+        """
+        self._start_index = await self.client.scheduler.get_task_stream_index()
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        res = await _get_task_stream_impl(
+            self.client,
+            start_index=self._start_index,
+            plot=self._plot,
+            filename=self._filename,
+        )
+        if self._plot:
+            data, self.figure = res
+        else:
+            data = res
+        self.data.extend(data)
