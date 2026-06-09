@@ -5062,8 +5062,11 @@ class Client(SyncMethodMixin):
         --------
         get_task_stream : a context manager version of this method
         """
+        from distributed.diagnostics.task_stream import _get_task_stream_impl
+
         return self.sync(
-            self._get_task_stream,
+            _get_task_stream_impl,
+            self,
             start=start,
             stop=stop,
             count=count,
@@ -5071,36 +5074,6 @@ class Client(SyncMethodMixin):
             filename=filename,
             bokeh_resources=bokeh_resources,
         )
-
-    async def _get_task_stream(
-        self,
-        start=None,
-        stop=None,
-        count=None,
-        plot=False,
-        filename="task-stream.html",
-        bokeh_resources=None,
-        start_index=None,
-    ):
-        msgs = await self.scheduler.get_task_stream(
-            start=start, stop=stop, count=count, start_index=start_index
-        )
-        if plot:
-            from distributed.diagnostics.task_stream import rectangles
-
-            rects = rectangles(msgs)
-            from distributed.dashboard.components.scheduler import task_stream_figure
-
-            source, figure = task_stream_figure(sizing_mode="stretch_both")
-            source.data.update(rects)
-            if plot == "save":
-                from bokeh.plotting import output_file, save
-
-                output_file(filename=filename, title="Dask Task Stream")
-                save(figure, filename=filename, resources=bokeh_resources)
-            return (msgs, figure)
-        else:
-            return msgs
 
     def register_plugin(
         self,
@@ -6028,97 +6001,6 @@ def fire_and_forget(obj):
         )
 
 
-class get_task_stream:
-    """
-    Collect task stream within a context block
-
-    This provides diagnostic information about every task that was run during
-    the time when this block was active.
-
-    This must be used as a context manager.
-
-    Parameters
-    ----------
-    plot: boolean, str
-        If true then also return a Bokeh figure
-        If plot == 'save' then save the figure to a file
-    filename: str (optional)
-        The filename to save to if you set ``plot='save'``
-
-    Examples
-    --------
-    >>> with get_task_stream() as ts:
-    ...     x.compute()
-    >>> ts.data
-    [...]
-
-    Get back a Bokeh figure and optionally save to a file
-
-    >>> with get_task_stream(plot='save', filename='task-stream.html') as ts:
-    ...    x.compute()
-    >>> ts.figure
-    <Bokeh Figure>
-
-    To share this file with others you may wish to upload and serve it online.
-    A common way to do this is to upload the file as a gist, and then serve it
-    on https://raw.githack.com ::
-
-       $ python -m pip install gist
-       $ gist task-stream.html
-       https://gist.github.com/8a5b3c74b10b413f612bb5e250856ceb
-
-    You can then navigate to that site, click the "Raw" button to the right of
-    the ``task-stream.html`` file, and then provide that URL to
-    https://raw.githack.com .  This process should provide a sharable link that
-    others can use to see your task stream plot.
-
-    See Also
-    --------
-    Client.get_task_stream: Function version of this context manager
-    """
-
-    def __init__(self, client=None, plot=False, filename="task-stream.html"):
-        self.data = []
-        self._plot = plot
-        self._filename = filename
-        self.figure = None
-        self.client = client or default_client()
-        self._start_index = None
-
-    def __enter__(self):
-        # Record the scheduler's task-stream cursor on entry and collect
-        # everything appended after it on exit. Using the monotonic index
-        # instead of a wall-clock boundary avoids dropping tasks when there is
-        # latency or clock skew between the client and the workers.
-        self._start_index = self.client.sync(
-            self.client.scheduler.get_task_stream_index
-        )
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        L = self.client.sync(
-            self.client._get_task_stream,
-            start_index=self._start_index,
-            plot=self._plot,
-            filename=self._filename,
-        )
-        if self._plot:
-            L, self.figure = L
-        self.data.extend(L)
-
-    async def __aenter__(self):
-        self._start_index = await self.client.scheduler.get_task_stream_index()
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        L = await self.client._get_task_stream(
-            start_index=self._start_index, plot=self._plot, filename=self._filename
-        )
-        if self._plot:
-            L, self.figure = L
-        self.data.extend(L)
-
-
 class performance_report:
     """Gather performance report
 
@@ -6161,10 +6043,11 @@ class performance_report:
 
     async def __aenter__(self):
         self.start = time()
-        self.last_count = await get_client().run_on_scheduler(
+        client = get_client()
+        self.last_count = await client.run_on_scheduler(
             lambda dask_scheduler: dask_scheduler.monitor.count
         )
-        await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
+        await client.get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, exc_type, exc_value, traceback, code=None):
         import fsspec

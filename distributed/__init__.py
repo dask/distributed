@@ -29,7 +29,6 @@ from distributed.client import (
     fire_and_forget,
     futures_of,
     get_task_metadata,
-    get_task_stream,
     performance_report,
     wait,
 )
@@ -53,6 +52,7 @@ from distributed.diagnostics.plugin import (
     WorkerPlugin,
 )
 from distributed.diagnostics.progressbar import progress
+from distributed.diagnostics.task_stream import get_task_stream
 from distributed.event import Event
 from distributed.lock import Lock
 from distributed.multi_lock import MultiLock
