@@ -2566,9 +2566,15 @@ class Client(SyncMethodMixin):
         unpack = False
         if isinstance(data, Iterator):
             data = list(data)
-        if isinstance(data, (set, frozenset)):
+        if type(data) in (set, frozenset):
             data = list(data)
-        if not isinstance(data, (dict, list, tuple, set, frozenset)):
+        if type(data) not in (dict, list, tuple, set, frozenset):
+            # Note: exact-type checks (not isinstance) so that subclasses of
+            # builtin collections (e.g. a namedtuple, or scikit-learn's Bunch)
+            # are scattered as a single opaque value rather than being unpacked
+            # into their items. This preserves their exact type on the worker;
+            # an isinstance check would silently downgrade a dict subclass to a
+            # plain dict (and similarly for list/set/tuple subclasses).
             unpack = True
             data = [data]
         if isinstance(data, (list, tuple)):
@@ -2640,7 +2646,7 @@ class Client(SyncMethodMixin):
             n = None if broadcast is True else broadcast
             await self._replicate(list(out.values()), workers=workers, n=n)
 
-        if issubclass(input_type, (list, tuple, set, frozenset)):
+        if input_type in (list, tuple, set, frozenset):
             out = input_type(out[k] for k in names)
 
         if unpack:

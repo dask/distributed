@@ -1125,6 +1125,47 @@ async def test_scatter_types(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_scatter_collection_subclass(c, s, a, b):
+    # Subclasses of builtin collections must be scattered as a single opaque
+    # value (one Future) with their exact type preserved on the worker, rather
+    # than being unpacked into their items like the exact builtin collections
+    # are. Otherwise a dict subclass would silently arrive as a plain dict.
+    # See https://github.com/scikit-learn/scikit-learn/issues/34005
+    class Bunch(dict):
+        def __getattr__(self, key):
+            try:
+                return self[key]
+            except KeyError:
+                raise AttributeError(key)
+
+    class MyList(list):
+        pass
+
+    class MySet(set):
+        pass
+
+    Point = namedtuple("Point", ["x", "y"])
+
+    for obj in [
+        Bunch(a=1, b=2),
+        MyList([1, 2, 3]),
+        MySet({1, 2, 3}),
+        Point(1, 2),
+    ]:
+        future = await c.scatter(obj)
+        assert isinstance(future, Future)
+        result = await future
+        assert type(result) is type(obj)
+        assert result == obj
+        s.validate_state()
+
+    # Attribute access (the scikit-learn metadata-routing failure mode) keeps
+    # working after a round-trip through a worker.
+    future = await c.scatter(Bunch(transform=10))
+    assert (await c.submit(lambda b: b.transform, future)) == 10
+
+
+@gen_cluster(client=True)
 async def test_scatter_non_list(c, s, a, b):
     x = await c.scatter(1)
     assert isinstance(x, Future)
