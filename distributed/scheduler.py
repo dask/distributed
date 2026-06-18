@@ -5968,13 +5968,12 @@ class Scheduler(SchedulerState, ServerNode):
     def remove_client(self, client: str, stimulus_id: str | None = None) -> None:
         """Remove client from network"""
         stimulus_id = stimulus_id or f"remove-client-{time()}"
-        client_state = self.clients.get(client)
-        client_address = client_state.address if client_state is not None else None
         if self.status == Status.running:
-            if client_address is not None:
-                logger.info("Remove client %s at %s", client, client_address)
-            else:
-                logger.info("Remove client %s", client)
+            try:
+                client_address = self.clients[client].address
+            except KeyError:
+                client_address = "<no address>"  # pragma: nocover
+            logger.info("Remove client %s at %s", client, client_address)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
         try:
             cs: ClientState = self.clients[client]

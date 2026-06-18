@@ -883,11 +883,13 @@ async def test_client_connection_logs_include_address(s):
     with captured_logger("distributed.scheduler", level=logging.INFO) as caplog:
         async with Client(s.address, asynchronous=True) as c:
             client_id = c.id
+            client_address = s.clients[client_id].address
 
     logs = caplog.getvalue()
-    assert f"Receive client connection: {client_id} at " in logs
-    assert f"Remove client {client_id} at " in logs
-    assert f"Close client connection: {client_id} at " in logs
+    assert client_address is not None
+    assert f"Receive client connection: {client_id} at {client_address}" in logs
+    assert f"Remove client {client_id} at {client_address}" in logs
+    assert f"Close client connection: {client_id} at {client_address}" in logs
 
 
 @gen_cluster(client=True, nthreads=[])
