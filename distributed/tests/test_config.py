@@ -53,9 +53,17 @@ def test_logging_default(caplog, config):
             dfc.info("8: ignore me")
             dfc.warning("9: important")
 
-        # default logging sets propagate=False so caplog does not capture
-        # distributed log records
-        assert caplog.record_tuples == [
+        # default logging sets propagate=False on the distributed loggers
+        assert d.propagate is False
+        assert dfc.propagate is False
+        # caplog attaches its handler to the root logger and (since pytest 9.1)
+        # also to non-propagating loggers, so whether distributed records show
+        # up in caplog is pytest-version dependent. Only assert on records from
+        # foreign libraries, which propagate to the root logger on all versions.
+        foreign_records = [
+            r for r in caplog.record_tuples if not r[0].startswith("distributed")
+        ]
+        assert foreign_records == [
             # Info logs of foreign libraries are not logged because default is
             # WARNING
             ("foo.bar", logging.ERROR, "5: error"),
