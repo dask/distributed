@@ -156,7 +156,6 @@ python = "=3.14"
 python-freethreading = "=3.14"
 # See ../dask/continuous_integration/pixi-recipes/README.md
 brotli-python = { git = "https://github.com/dask/dask", subdirectory = "continuous_integration/pixi-recipes/brotli" }
-msgpack-python = { git = "https://github.com/dask/dask", subdirectory = "continuous_integration/pixi-recipes/msgpack" }
 
 [feature.nightly.dependencies]
 python = "=3.14"
