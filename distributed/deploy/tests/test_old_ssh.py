@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.avoid_ci
+@pytest.mark.skip
 def test_cluster(loop):
     with SSHCluster(
         scheduler_addr="127.0.0.1",

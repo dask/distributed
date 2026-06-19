@@ -1139,9 +1139,9 @@ async def test_proxy_to_workers(s, a, b):
         proxy_url = f"http://localhost:{dashboard_port}/proxy/1234/{unsafe_host}/status"
         response = await http_client.fetch(proxy_url, raise_error=False)
         assert response.code == 400
-        assert (
-            unsafe_host not in response.body.decode()
-        ), "Unsafe characters should be escaped"
+        assert unsafe_host not in response.body.decode(), (
+            "Unsafe characters should be escaped"
+        )
 
 
 @gen_cluster(

@@ -11,6 +11,7 @@ import io
 import logging
 import multiprocessing
 import os
+import re
 import signal
 import socket
 import ssl
@@ -663,10 +664,13 @@ def cluster(
             _run_and_close_tornado(wait_for_workers)
 
             # avoid sending processes down to function
-            yield {"address": saddr}, [
-                {"address": w["address"], "proc": weakref.ref(w["proc"])}
-                for w in workers_by_pid.values()
-            ]
+            yield (
+                {"address": saddr},
+                [
+                    {"address": w["address"], "proc": weakref.ref(w["proc"])}
+                    for w in workers_by_pid.values()
+                ],
+            )
         try:
             client = default_client()
         except ValueError:
@@ -2575,3 +2579,9 @@ async def padded_time(before=0.05, after=0.05):
     t = time()
     await asyncio.sleep(after)
     return t
+
+
+def get_dashboard_port(client: Client) -> int:
+    match = re.search(r":(\d+)\/status", client.dashboard_link)
+    assert match
+    return int(match.group(1))

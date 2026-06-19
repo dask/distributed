@@ -12,7 +12,9 @@ from distributed.diagnostics.memray import memray_scheduler, memray_workers
 
 def test_all_workers(tmp_path, loop):
     n_workers = 7
-    with LocalCluster(n_workers=n_workers, loop=loop) as cluster:
+    with LocalCluster(
+        n_workers=n_workers, loop=loop, dashboard_address=":0"
+    ) as cluster:
         with Client(cluster, loop=loop) as client:
             with memray_workers(tmp_path):
                 pass

@@ -83,6 +83,25 @@ async def test_collect(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_collect_start_index(c, s, a, b):
+    tasks = TaskStreamPlugin(s)
+    s.add_plugin(tasks)
+
+    futures = c.map(slowinc, range(5), delay=0.05)
+    await wait(futures)
+    midpoint = tasks.index
+
+    futures = c.map(slowinc, range(5, 10), delay=0.05)
+    await wait(futures)
+
+    # ``start_index`` selects by append position, not wall-clock time, so it
+    # returns exactly the records appended at or after the given index.
+    assert len(tasks.collect(start_index=0)) == 10
+    assert len(tasks.collect(start_index=midpoint)) == 5
+    assert len(tasks.collect(start_index=tasks.index)) == 0
+
+
+@gen_cluster(client=True)
 async def test_client(c, s, a, b):
     await c.get_task_stream()
 

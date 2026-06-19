@@ -29,7 +29,8 @@ from distributed.utils_test import (
 
 @pytest.mark.parametrize(
     # args: (worker_port, nanny_port, n_workers, nanny)
-    # Passing *args tuple instead of single args is to improve readability with black
+    # Passing *args tuple instead of single args is to improve readability
+    # with ruff format
     "args,expect",
     [
         # Single worker
@@ -612,6 +613,29 @@ def test_version_option():
     assert result.exit_code == 0
 
 
+def test_unknown_option_reports_no_such_option():
+    # Regression: dash-prefixed unknown tokens should still surface as
+    # click's "No such option" error rather than the catch-all preload
+    # message (see GH#9094).
+    runner = CliRunner()
+    result = runner.invoke(main, ["tcp://127.0.0.1:8786", "--nprocs", "1"])
+    assert result.exit_code == 2
+    assert "No such option" in result.output
+    assert "--nprocs" in result.output
+
+
+def test_stray_positional_hints_at_help_and_preload():
+    # GH#9094: stray positional arguments (which Click otherwise lets
+    # leak through into preload_argv) should produce a message that
+    # points the user at --help and explains the --preload ordering rule.
+    runner = CliRunner()
+    result = runner.invoke(main, ["tcp://127.0.0.1:8786", "foo", "bar"])
+    assert result.exit_code == 2
+    assert "unexpected extra argument" in result.output
+    assert "--help" in result.output
+    assert "--preload" in result.output
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("no_nanny", [True, False])
 def test_worker_timeout(no_nanny):
@@ -811,3 +835,29 @@ def test_error_during_startup(monkeypatch, nanny, loop):
                 ],
             ) as worker:
                 assert worker.wait(10) == 1
+
+
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@gen_cluster(client=True, nthreads=[])
+async def test_uvloop(c, s, nanny):
+    uvloop = pytest.importorskip("uvloop")
+
+    def check():
+        return isinstance(asyncio.get_event_loop(), uvloop.Loop)
+
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "worker",
+            s.address,
+            nanny,
+            "--no-dashboard",
+        ],
+        env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
+    ):
+        await c.wait_for_workers(1)
+        assert all((await c.run(check)).values())
+        if nanny == "--nanny":
+            assert all((await c.run(check, nanny=True)).values())

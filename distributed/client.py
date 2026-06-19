@@ -1542,8 +1542,7 @@ class Client(SyncMethodMixin):
 
         else:
             logger.error(
-                "Failed to reconnect to scheduler after %.2f "
-                "seconds, closing client",
+                "Failed to reconnect to scheduler after %.2f seconds, closing client",
                 self._timeout,
             )
             await self._close()
@@ -3137,8 +3136,7 @@ class Client(SyncMethodMixin):
                 results[key] = exc
             elif on_error != "ignore":
                 raise ValueError(
-                    "on_error must be 'raise', 'return', or 'ignore'; "
-                    f"got {on_error!r}"
+                    f"on_error must be 'raise', 'return', or 'ignore'; got {on_error!r}"
                 )
 
         if wait:
@@ -3922,13 +3920,13 @@ class Client(SyncMethodMixin):
         name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
         worker_addrs = [name_to_addr.get(w, w) for w in workers]
 
-        out: dict[str, Literal["OK", "removed", "timed out"]] = (
-            await self.scheduler.restart_workers(
-                workers=worker_addrs,
-                timeout=timeout,
-                on_error="raise" if raise_for_error else "return",
-                stimulus_id=f"client-restart-workers-{time()}",
-            )
+        out: dict[
+            str, Literal["OK", "removed", "timed out"]
+        ] = await self.scheduler.restart_workers(
+            workers=worker_addrs,
+            timeout=timeout,
+            on_error="raise" if raise_for_error else "return",
+            stimulus_id=f"client-restart-workers-{time()}",
         )
         # Map keys back to original `workers` input names/addresses
         out = {w: out[w_addr] for w, w_addr in zip(workers, worker_addrs)}
@@ -5062,8 +5060,11 @@ class Client(SyncMethodMixin):
         --------
         get_task_stream : a context manager version of this method
         """
+        from distributed.diagnostics.task_stream import _get_task_stream_impl
+
         return self.sync(
-            self._get_task_stream,
+            _get_task_stream_impl,
+            self,
             start=start,
             stop=stop,
             count=count,
@@ -5071,33 +5072,6 @@ class Client(SyncMethodMixin):
             filename=filename,
             bokeh_resources=bokeh_resources,
         )
-
-    async def _get_task_stream(
-        self,
-        start=None,
-        stop=None,
-        count=None,
-        plot=False,
-        filename="task-stream.html",
-        bokeh_resources=None,
-    ):
-        msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
-        if plot:
-            from distributed.diagnostics.task_stream import rectangles
-
-            rects = rectangles(msgs)
-            from distributed.dashboard.components.scheduler import task_stream_figure
-
-            source, figure = task_stream_figure(sizing_mode="stretch_both")
-            source.data.update(rects)
-            if plot == "save":
-                from bokeh.plotting import output_file, save
-
-                output_file(filename=filename, title="Dask Task Stream")
-                save(figure, filename=filename, resources=bokeh_resources)
-            return (msgs, figure)
-        else:
-            return msgs
 
     def register_plugin(
         self,
@@ -6025,100 +5999,6 @@ def fire_and_forget(obj):
         )
 
 
-class get_task_stream:
-    """
-    Collect task stream within a context block
-
-    This provides diagnostic information about every task that was run during
-    the time when this block was active.
-
-    This must be used as a context manager.
-
-    Parameters
-    ----------
-    plot: boolean, str
-        If true then also return a Bokeh figure
-        If plot == 'save' then save the figure to a file
-    filename: str (optional)
-        The filename to save to if you set ``plot='save'``
-
-    Examples
-    --------
-    >>> with get_task_stream() as ts:
-    ...     x.compute()
-    >>> ts.data
-    [...]
-
-    Get back a Bokeh figure and optionally save to a file
-
-    >>> with get_task_stream(plot='save', filename='task-stream.html') as ts:
-    ...    x.compute()
-    >>> ts.figure
-    <Bokeh Figure>
-
-    To share this file with others you may wish to upload and serve it online.
-    A common way to do this is to upload the file as a gist, and then serve it
-    on https://raw.githack.com ::
-
-       $ python -m pip install gist
-       $ gist task-stream.html
-       https://gist.github.com/8a5b3c74b10b413f612bb5e250856ceb
-
-    You can then navigate to that site, click the "Raw" button to the right of
-    the ``task-stream.html`` file, and then provide that URL to
-    https://raw.githack.com .  This process should provide a sharable link that
-    others can use to see your task stream plot.
-
-    See Also
-    --------
-    Client.get_task_stream: Function version of this context manager
-    """
-
-    def __init__(self, client=None, plot=False, filename="task-stream.html"):
-        self.data = []
-        self._plot = plot
-        self._filename = filename
-        self.figure = None
-        self.client = client or default_client()
-        self._init = False
-
-    def __enter__(self):
-        if not self._init:
-            self.client.get_task_stream(start=0, stop=0)  # ensure plugin
-            self._init = True
-
-        # Smooth over time differences of client vs. workers
-        # FIXME this is very crude. We should query TaskStreamPlugin.index instead.
-        self.start = time() - 0.1
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        L = self.client.get_task_stream(
-            start=self.start, plot=self._plot, filename=self._filename
-        )
-        if self._plot:
-            L, self.figure = L
-        self.data.extend(L)
-
-    async def __aenter__(self):
-        if not self._init:
-            await self.client.get_task_stream(start=0, stop=0)  # ensure plugin
-            self._init = True
-
-        # Smooth over time differences of client vs. workers
-        # FIXME this is very crude. We should query TaskStreamPlugin.index instead.
-        self.start = time() - 0.1
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        L = await self.client.get_task_stream(
-            start=self.start, plot=self._plot, filename=self._filename
-        )
-        if self._plot:
-            L, self.figure = L
-        self.data.extend(L)
-
-
 class performance_report:
     """Gather performance report
 
@@ -6161,10 +6041,11 @@ class performance_report:
 
     async def __aenter__(self):
         self.start = time()
-        self.last_count = await get_client().run_on_scheduler(
+        client = get_client()
+        self.last_count = await client.run_on_scheduler(
             lambda dask_scheduler: dask_scheduler.monitor.count
         )
-        await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
+        await client.get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, exc_type, exc_value, traceback, code=None):
         import fsspec

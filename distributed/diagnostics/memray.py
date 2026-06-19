@@ -58,9 +58,9 @@ def _fetch_memray_profile(
     if not report_args[0] == "memray":
         report_args = ["memray"] + list(report_args)
     assert "-f" not in report_args, "Cannot provide filename for report generation"
-    assert (
-        "-o" not in report_args
-    ), "Cannot provide output filename for report generation"
+    assert "-o" not in report_args, (
+        "Cannot provide output filename for report generation"
+    )
     report_args = list(report_args) + ["-f", str(path), "-o", str(report_filename)]
     subprocess.run(report_args)
     with open(report_filename, "rb") as fd:

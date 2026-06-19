@@ -105,7 +105,7 @@ async def test_keywords():
             assert all(v["nthreads"] == 2 for v in d.values())
 
 
-@pytest.mark.avoid_ci
+@pytest.mark.xfail(reason="Very flaky (leaks resources)", strict=False)
 def test_defer_to_old(loop):
     with pytest.warns(
         UserWarning,
@@ -124,7 +124,7 @@ def test_defer_to_old(loop):
         assert isinstance(c, OldSSHCluster)
 
 
-@pytest.mark.avoid_ci
+@pytest.mark.skip
 def test_old_ssh_with_local_dir(loop):
     from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
 

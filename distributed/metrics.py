@@ -195,7 +195,8 @@ class ContextMeter:
 
     def __init__(self):
         self._callbacks = ContextVar(
-            f"MetricHook<{id(self)}>._callbacks", default={}  # noqa: B039
+            f"MetricHook<{id(self)}>._callbacks",
+            default={},  # noqa: B039
         )
 
     def __reduce__(self):

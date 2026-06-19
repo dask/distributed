@@ -29,7 +29,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 3.0.0",
-    "dask >=2026.3.0,<2026.3.1",
+    "dask >=2026.6.0,<2026.6.1",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.2",
@@ -40,7 +40,6 @@ dependencies = [
     "tblib >= 1.6.0,!=3.2.0,!=3.2.1",
     "toolz >= 0.12.0",
     "tornado >= 6.2.0",
-    "urllib3 >= 1.26.5",
     "zict >= 3.0.0",
 ]
 dynamic = ["version"]
@@ -64,7 +63,7 @@ namespaces = false
 distributed = ["http/templates/*.html", "py.typed"]
 
 [tool.ruff]
-line-length = 120
+line-length = 88
 
 [tool.ruff.lint]
 extend-select = ["B", "TID", "I", "UP", "RUF"]
@@ -76,16 +75,13 @@ ignore = [
     "B905",   # `zip()` without an explicit `strict=` parameter
     "F841",   # Local variable `futures` is assigned to but never used
     "E402",   # Module level import not at top of file
-    "E714",   # Test for object identity should be `is not`
     "E721",   # Use `is` and `is not` for type comparisons, or `isinstance()` for isinstance checks
     "E741",   # Ambiguous variable name: `l`
-    "RUF001", # String contains ambiguous letter
     "RUF002", # Docstring contains ambiguous letter
     "RUF005", # Consider unpacking operator instead of concatenation
     "RUF006", # Store a reference to the return value of `asyncio.ensure_future`
     "RUF012", # Mutable class attributes should be annotated with `typing.ClassVar`
     "RUF015", # Prefer `next(iter(...))` over single element slice
-    "RUF018", # Avoid assignment expressions in `assert` statements
     "RUF021", # Parenthesize `a and b` expressions when chaining `and` and `or` together, to make the precedence clear
     "RUF022", # `__all__` is not sorted
     "RUF023", # `__slots__` is not sorted
@@ -126,7 +122,6 @@ addopts = '''
 --ignore=.github
 --strict-markers
 --strict-config
---cov-config=pyproject.toml
 -p no:asyncio
 -p no:legacypath'''
 filterwarnings = [
@@ -181,7 +176,6 @@ markers = [
     "ci1: marks tests as belonging to 1 out of 2 partitions to run on CI ('-m \"not ci1\"' for second partition)",
     "memray: marks tests that require memray to run (available on Linux/MacOS only)",
     "slow: marks tests as slow (deselected by default; select with '--runslow')",
-    "avoid_ci: marks tests as flaky or broken on CI on all OSs",
     "ipython: marks tests as exercising IPython",
     "gpu: marks tests we want to run on GPUs",
     "leaking: ignore leaked resources",  # see pytest_resourceleaks.py for usage

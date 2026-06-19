@@ -1,14 +1,11 @@
 name: Conda build
+
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    tags: ["*"]
   pull_request:
-    paths:
-      - setup.py
-      - continuous_integration/recipes/**
-      - .github/workflows/conda.yml
-      - pyproject.toml
+  workflow_dispatch:
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
@@ -16,55 +13,32 @@ concurrency:
   group: conda-${{ github.ref }}
   cancel-in-progress: true
 
-# Required shell entrypoint to have properly activated conda environments
-defaults:
-  run:
-    shell: bash -l {0}
-
 jobs:
   conda:
     name: Build (and upload)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
-      - name: Set up Python
-        uses: conda-incubator/setup-miniconda@v4.0.1
+
+      - uses: prefix-dev/setup-pixi@v0.9.6
         with:
-          miniforge-version: latest
-          use-mamba: true
-          python-version: 3.9
-          channel-priority: strict
-      - name: Install dependencies
-        run: |
-          mamba install -c conda-forge boa conda-verify
+          pixi-version: v0.70.1
+          environments: build
+          cache: true
+          locked: true
 
-          which python
-          pip list
-          mamba list
-      - name: Build conda packages
-        run: |
-          # suffix for pre-release package versions
-          export VERSION_SUFFIX=a`date +%y%m%d`
+      - name: Build conda package
+        run: pixi r conda-build
 
-          # conda search for the latest dask-core pre-release
-          dask_core_arr=($(conda search --override-channels -c dask/label/dev dask-core | tail -n 1))
+      - name: Upload conda build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: conda-channel
+          path: dist/conda
+          if-no-files-found: error
 
-          # extract dask-core pre-release version
-          export DASK_CORE_VERSION=${dask_core_arr[1]}
-
-          # distributed pre-release build
-          conda mambabuild continuous_integration/recipes/distributed \
-                           --channel dask/label/dev \
-                           --no-anaconda-upload \
-                           --output-folder .
-
-          # dask pre-release build
-          conda mambabuild continuous_integration/recipes/dask \
-                           --channel dask/label/dev \
-                           --no-anaconda-upload \
-                           --output-folder .
       - name: Upload conda packages
         if: |
           github.event_name == 'push'
@@ -72,8 +46,4 @@ jobs:
           && github.repository == 'dask/distributed'
         env:
           ANACONDA_API_TOKEN: ${{ secrets.DASK_CONDA_TOKEN }}
-        run: |
-          # install anaconda for upload
-          mamba install -c conda-forge anaconda-client
-
-          anaconda upload --label dev noarch/*.tar.bz2
+        run: pixi r conda-upload

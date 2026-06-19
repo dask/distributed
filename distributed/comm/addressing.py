@@ -200,8 +200,7 @@ def uri_from_host_port(
     # Note `port = 0` means "choose a random port"
     if port != 0 and port_arg and port != int(port_arg):
         raise ValueError(
-            "port number given twice in options: "
-            f"host {host_arg} and port {port_arg}"
+            f"port number given twice in options: host {host_arg} and port {port_arg}"
         )
 
     loc = unparse_host_port(host, port)

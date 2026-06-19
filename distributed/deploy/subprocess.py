@@ -100,24 +100,30 @@ class SubprocessScheduler(Subprocess):
         )
 
         scheduler_file = Path(self.scheduler_kwargs["scheduler_file"])
-        while not (
-            deadline.expired
-            or scheduler_file.exists()
-            or self.process.returncode is not None
-        ):
-            await asyncio.sleep(0.1)
-        if deadline.expired or self.process.returncode is not None:
+
+        while not deadline.expired and self.process.returncode is None:
+            try:
+                with scheduler_file.open(mode="r") as f:
+                    identity = json.load(f)
+                self.address = identity["address"]
+                break
+            # The scheduler_file may not yet exist or may not have
+            # finished writing to disk.
+            # Use OSError defensively instead of FileNotFounderror
+            # to cover potential concurrent access failures on Windows
+            except (OSError, json.JSONDecodeError):
+                await asyncio.sleep(0.1)
+
+        else:
             assert self.process.stderr
             logger.error((await self.process.stderr.read()).decode())
             if deadline.expired:
                 raise RuntimeError(f"Scheduler failed to start within {self.timeout}s")
             raise RuntimeError(
-                f"Scheduler failed to start and exited with code {self.process.returncode}"
+                "Scheduler failed to start and exited with code "
+                f"{self.process.returncode}"
             )
 
-        with scheduler_file.open(mode="r") as f:
-            identity = json.load(f)
-            self.address = identity["address"]
         logger.info("Scheduler at %r", self.address)
 
 

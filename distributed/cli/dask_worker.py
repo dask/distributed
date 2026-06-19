@@ -381,8 +381,8 @@ def main(  # type: ignore[no-untyped-def]
         and dask.config.get("scheduler-address", None) is None
     ):
         raise ValueError(
-            "Need to provide scheduler address like\n"
-            "dask worker SCHEDULER_ADDRESS:8786"
+            "Need to provide scheduler address like "
+            "`dask worker SCHEDULER_ADDRESS:8786`"
         )
 
     with suppress(TypeError, ValueError):

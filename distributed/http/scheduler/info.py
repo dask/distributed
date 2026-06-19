@@ -246,8 +246,7 @@ class IndividualPlots(RequestHandler):
                 uri.strip("/")
                 .replace(".html", "")
                 .replace("-", " ")
-                .title(): "/statics/"
-                + uri
+                .title(): f"/statics/{uri}"
                 for uri in os.listdir(
                     os.path.join(os.path.dirname(__file__), "..", "static")
                 )

@@ -417,7 +417,8 @@ class MultiProgressWidget(MultiProgressBar):
             )
             self.bars[k].value = ndone / ntasks if ntasks else 1.0
             self.bar_texts[k].value = (
-                f'<div style="padding: 0px 10px 0px 10px; text-align: right">{ndone} / {ntasks}</div>'
+                f'<div style="padding: 0px 10px 0px 10px; text-align: right">'
+                f"{ndone} / {ntasks}</div>"
             )
 
 
