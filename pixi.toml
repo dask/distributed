@@ -170,7 +170,7 @@ s3fs = { git = "https://github.com/dask/dask", subdirectory = "continuous_integr
 
 [feature.nightly.pypi-dependencies]
 numpy = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
-pandas = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
+pandas = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple", version = ">=3.1.0.dev0" }
 pyarrow = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
 scipy = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
 h5py = { index = "https://pypi.anaconda.org/scientific-python-nightly-wheels/simple" }
