@@ -185,6 +185,7 @@ DEFAULT_DATA_SIZE = parse_bytes(
     dask.config.get("distributed.scheduler.default-data-size")
 )
 STIMULUS_ID_UNSET = "<stimulus_id unset>"
+INTERNAL_CLIENT_ADDRESS = "<internal>"
 
 DEFAULT_EXTENSIONS = {
     "multi_locks": MultiLockExtension,
@@ -226,7 +227,8 @@ class ClientState:
     versions: dict[str, Any]
 
     #: Remote address of the client connection as seen by the scheduler.
-    address: str | None
+    #: Scheduler-owned synthetic clients use ``<internal>`` instead.
+    address: str
 
     __slots__ = tuple(__annotations__)
 
@@ -235,7 +237,7 @@ class ClientState:
         client: str,
         *,
         versions: dict[str, Any] | None = None,
-        address: str | None = None,
+        address: str = INTERNAL_CLIENT_ADDRESS,
     ):
         self.client_key = client
         self._hash = hash(client)
@@ -5972,11 +5974,7 @@ class Scheduler(SchedulerState, ServerNode):
         """Remove client from network"""
         stimulus_id = stimulus_id or f"remove-client-{time()}"
         if self.status == Status.running:
-            try:
-                client_address = self.clients[client].address
-            except KeyError:
-                client_address = "<no address>"  # pragma: nocover
-            logger.info("Remove client %s at %s", client, client_address)
+            logger.info("Remove client %s at %s", client, self.clients[client].address)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
         try:
             cs: ClientState = self.clients[client]
