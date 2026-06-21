@@ -4,7 +4,6 @@
 import ctypes
 import logging
 from collections import namedtuple
-from ctypes import wintypes
 
 logger = logging.getLogger("distributed.system_monitor")
 
@@ -103,6 +102,8 @@ import sys
 
 # Setup Windows API calls
 if sys.platform == "win32":
+    from ctypes import wintypes
+
     iphlpapi = ctypes.windll.iphlpapi
 
     GetAdaptersAddresses = iphlpapi.GetAdaptersAddresses
