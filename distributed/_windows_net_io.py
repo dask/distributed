@@ -3,7 +3,11 @@
 
 import ctypes
 import logging
+import sys
 from collections import namedtuple
+
+if sys.platform == "win32":
+    from ctypes import wintypes
 
 logger = logging.getLogger("distributed.system_monitor")
 
@@ -98,12 +102,8 @@ class MIB_IF_ROW2(ctypes.Structure):
     ]
 
 
-import sys
-
 # Setup Windows API calls
 if sys.platform == "win32":
-    from ctypes import wintypes
-
     iphlpapi = ctypes.windll.iphlpapi
 
     GetAdaptersAddresses = iphlpapi.GetAdaptersAddresses
