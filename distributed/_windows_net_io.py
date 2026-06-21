@@ -132,7 +132,7 @@ _ADAPTER_ADDRESSES_BUF_SIZE = 16384
 def _fast_net_io_counters() -> win_net_io_counters:
     """Low-overhead Windows-only network I/O stats querying using Win32 API."""
     global _ADAPTER_ADDRESSES_BUF_SIZE
-    size = wintypes.ULONG(_ADAPTER_ADDRESSES_BUF_SIZE)
+    size = wintypes.ULONG(_ADAPTER_ADDRESSES_BUF_SIZE)  # type: ignore[name-defined]
     buf = ctypes.create_string_buffer(size.value)
 
     flags = (
@@ -142,7 +142,7 @@ def _fast_net_io_counters() -> win_net_io_counters:
         | GAA_FLAG_SKIP_DNS_SERVER
     )
 
-    ret = GetAdaptersAddresses(
+    ret = GetAdaptersAddresses(  # type: ignore[misc]
         0,  # AF_UNSPEC
         flags,
         None,
@@ -154,7 +154,7 @@ def _fast_net_io_counters() -> win_net_io_counters:
     if ret == 111:  # ERROR_BUFFER_OVERFLOW
         _ADAPTER_ADDRESSES_BUF_SIZE = size.value
         buf = ctypes.create_string_buffer(size.value)
-        ret = GetAdaptersAddresses(
+        ret = GetAdaptersAddresses(  # type: ignore[misc]
             0,
             flags,
             None,
@@ -183,7 +183,7 @@ def _fast_net_io_counters() -> win_net_io_counters:
         row = MIB_IF_ROW2()
         row.InterfaceIndex = ifIndex
 
-        status = GetIfEntry2(ctypes.byref(row))
+        status = GetIfEntry2(ctypes.byref(row))  # type: ignore[misc]
         if status == 0:
             bytes_recv += row.InOctets
             bytes_sent += row.OutOctets
