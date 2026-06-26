@@ -2112,10 +2112,12 @@ def test_repr(loop, func):
         *workers,
     ):
         with Client(s["address"], loop=loop) as c:
-            # NOTE: Intentionally testing when we have more workers than the default
-            # in `client.scheduler_info()` (xref https://github.com/dask/distributed/issues/9065)
+            # NOTE: Intentionally testing the repr with more workers than the repr
+            # itself displays (the HTML view caps the worker table at 5).
+            # ``scheduler_info()`` returns all workers by default
+            # (xref https://github.com/dask/distributed/issues/9065).
             info = c.scheduler_info()
-            assert len(info["workers"]) < nworkers
+            assert len(info["workers"]) == nworkers
 
             text = func(c)
             assert c.scheduler.address in text
@@ -3948,12 +3950,15 @@ async def test_idempotence(s, a, b):
 
 
 def test_scheduler_info(c):
+    # By default all workers are returned
     info = c.scheduler_info()
     assert isinstance(info, dict)
     assert len(info["workers"]) == 2
     assert isinstance(info["started"], float)
+    # A positive ``n_workers`` truncates the worker list
     info = c.scheduler_info(n_workers=1)
     assert len(info["workers"]) == 1
+    # ``-1`` is equivalent to the default and returns all workers
     info = c.scheduler_info(n_workers=-1)
     assert len(info["workers"]) == 2
 
@@ -4766,6 +4771,21 @@ async def test_restart_workers_no_nanny_raises(c, s, a, b):
     msg = str(excinfo.value).lower()
     assert "restarting workers requires a nanny" in msg
     assert a.address in msg
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 7)
+async def test_restart_workers_no_nanny_raises_many_workers(c, s, *workers):
+    # Regression test: the nanny check must consider all workers, not just the
+    # truncated set that ``scheduler_info`` used to return by default
+    # (xref https://github.com/dask/distributed/issues/9065). Target a worker
+    # beyond the historical 5-worker truncation cap.
+    assert len(s.workers) == 7
+    target = list(s.workers)[-1]
+    with pytest.raises(ValueError) as excinfo:
+        await c.restart_workers(workers=[target])
+    msg = str(excinfo.value).lower()
+    assert "restarting workers requires a nanny" in msg
+    assert target in msg
 
 
 @pytest.mark.slow

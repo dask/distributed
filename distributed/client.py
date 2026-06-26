@@ -3916,8 +3916,19 @@ class Client(SyncMethodMixin):
             timeout = self._timeout * 4
         timeout = parse_timedelta(cast("str|int|float", timeout), "s")
 
-        info = self.scheduler_info()
-        name_to_addr = {meta["name"]: addr for addr, meta in info["workers"].items()}
+        # Fetch info for all workers (not the truncated cache from
+        # ``scheduler_info``) so that name resolution and the nanny check below
+        # are correct on clusters with many workers.
+        workers_info = (await self.scheduler.identity(n_workers=-1))["workers"]
+
+        for addr, meta in workers_info.items():
+            if (addr in workers or meta["name"] in workers) and meta["nanny"] is None:
+                raise ValueError(
+                    f"Restarting workers requires a nanny to be used. Worker "
+                    f"{addr} has type {meta['type']}."
+                )
+
+        name_to_addr = {meta["name"]: addr for addr, meta in workers_info.items()}
         worker_addrs = [name_to_addr.get(w, w) for w in workers]
 
         out: dict[
@@ -3989,14 +4000,6 @@ class Client(SyncMethodMixin):
         --------
         Client.restart
         """
-        info = self.scheduler_info()
-
-        for worker, meta in info["workers"].items():
-            if (worker in workers or meta["name"] in workers) and meta["nanny"] is None:
-                raise ValueError(
-                    f"Restarting workers requires a nanny to be used. Worker "
-                    f"{worker} has type {info['workers'][worker]['type']}."
-                )
         return self.sync(
             self._restart_workers,
             workers=workers,
@@ -4475,14 +4478,21 @@ class Client(SyncMethodMixin):
         else:
             return state
 
-    def scheduler_info(self, n_workers: int = 5, **kwargs: Any) -> SchedulerInfo:
+    def scheduler_info(self, n_workers: int = -1, **kwargs: Any) -> SchedulerInfo:
         """Basic information about the workers in the cluster
 
         Parameters
         ----------
         n_workers: int
-            The number of workers for which to fetch information. To fetch all,
-            use -1.
+            The number of workers for which to fetch information. Defaults to
+            ``-1``, which fetches all workers. Pass a positive integer to limit
+            the number of workers returned.
+
+            Note: this argument is only honored for synchronous clients. For
+            asynchronous clients this method returns the most recently cached
+            value (refreshed periodically) without a fresh fetch; use
+            ``await client.scheduler.identity(n_workers=-1)`` to fetch all
+            workers on demand.
         **kwargs : dict
             Optional keyword arguments for the remote function
 
