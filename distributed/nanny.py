@@ -535,6 +535,7 @@ class Nanny(ServerNode):
 
         try:
             if self.status not in (
+                Status.init,
                 Status.closing,
                 Status.closed,
                 Status.closing_gracefully,
@@ -733,9 +734,17 @@ class WorkerProcess:
             try:
                 msg = await self._wait_until_connected(uid)
             except Exception:
-                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
-                await self.process.terminate()
-                self.status = Status.failed
+                # The worker subprocess is already shutting down on its own after
+                # reporting the failure. Don't send it a SIGTERM: doing so races
+                # against its graceful exit and, if it is killed while holding a
+                # multiprocessing queue lock, deadlocks the parent-side queue
+                # feeder thread. Any lingering process is reaped by the following
+                # Nanny.close() -> WorkerProcess.kill().
+                # Guard the status transition: a concurrent mark_stopped() (fired
+                # by the process-exit callback) may already have moved us to
+                # Status.stopped and released resources; don't clobber that.
+                if self.status == Status.starting:
+                    self.status = Status.failed
                 raise
         finally:
             self.running.set()
