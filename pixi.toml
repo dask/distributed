@@ -2,7 +2,14 @@
 # to generate a conda package of distributed from git tip
 [workspace]
 channels = ["https://prefix.dev/conda-forge"]
-platforms = ["linux-64", "linux-aarch64", "osx-arm64", "win-64"]
+platforms = [
+    { name = "linux-64-cpu", platform = "linux-64" },
+    { name = "linux-aarch64-cpu", platform = "linux-aarch64" },
+    { name = "osx-arm64-cpu", platform = "osx-arm64" },
+    { name = "win-64-cpu", platform = "win-64" },
+    { name = "linux-64-cuda", platform = "linux-64", cuda = "12" },
+    { name = "linux-aarch64-cuda", platform = "linux-aarch64", cuda = "12" },
+]
 preview = ["pixi-build"]
 
 [package]
@@ -179,11 +186,13 @@ bokeh = { git = "https://github.com/bokeh/bokeh" }
 # partd = { git = "https://github.com/dask/partd" }
 # zict = { git = "https://github.com/dask/zict" }
 
+[feature.cpu]
+platforms = ["linux-64-cpu", "linux-aarch64-cpu", "osx-arm64-cpu", "win-64-cpu"]
+
 [feature.cuda]
-system-requirements = { cuda = "12" }
 channels = ["rapidsai", "https://prefix.dev/conda-forge"]
 channel-priority = "disabled"
-platforms = ["linux-64", "linux-aarch64"]
+platforms = ["linux-64-cuda", "linux-aarch64-cuda"]
 
 [feature.cuda.dependencies]
 python = "=3.14"
@@ -245,17 +254,17 @@ cmd = "anaconda upload --label dev noarch/*.conda"
 description = "Upload to anaconda.org. Requires ANACONDA_API_TOKEN env variable to be set."
 
 [environments]
-default = ["py314", "optional", "optional-gil", "test"]  # Same as py314
-mindeps = ["mindeps", "test"]
-mindeps-array = ["mindeps", "mindeps-array", "test"]
-mindeps-dataframe = ["mindeps", "mindeps-dataframe", "test"]
-py310 = ["py310", "optional", "optional-gil", "optional-problematic", "test"]
-py311 = ["py311", "optional", "optional-gil", "optional-problematic", "test"]
-py312 = ["py312", "optional", "optional-gil", "optional-problematic", "test"]
-py313 = ["py313", "optional", "optional-gil", "optional-problematic", "test"]
-py314 = ["py314", "optional", "optional-gil", "test"]
-py314t = ["py314t", "optional", "test"]
-nightly = ["nightly", "test"]
+default = ["cpu", "py314", "optional", "optional-gil", "test"]  # Same as py314
+mindeps = ["cpu", "mindeps", "test"]
+mindeps-array = ["cpu", "mindeps", "mindeps-array", "test"]
+mindeps-dataframe = ["cpu", "mindeps", "mindeps-dataframe", "test"]
+py310 = ["cpu", "py310", "optional", "optional-gil", "optional-problematic", "test"]
+py311 = ["cpu", "py311", "optional", "optional-gil", "optional-problematic", "test"]
+py312 = ["cpu", "py312", "optional", "optional-gil", "optional-problematic", "test"]
+py313 = ["cpu", "py313", "optional", "optional-gil", "optional-problematic", "test"]
+py314 = ["cpu", "py314", "optional", "optional-gil", "test"]
+py314t = ["cpu", "py314t", "optional", "test"]
+nightly = ["cpu", "nightly", "test"]
 cuda = ["cuda", "test"]
-lint = { features = ["lint"], no-default-feature = true }
-build = { features = ["build"], no-default-feature = true }
+lint = { features = ["cpu", "lint"], no-default-feature = true }
+build = { features = ["cpu", "build"], no-default-feature = true }
