@@ -2566,11 +2566,17 @@ class Client(SyncMethodMixin):
         unpack = False
         if isinstance(data, Iterator):
             data = list(data)
+        # namedtuples get a dedicated path: they are scattered like a plain
+        # tuple (one Future per item) but reconstructed with their own type via
+        # ._make(), so idioms like
+        #     arr, idx = client.scatter(np.unique(x, return_index=True))
+        # keep working while preserving the namedtuple type.
+        is_namedtuple = isinstance(data, tuple) and hasattr(data, "_fields")
         if type(data) in (set, frozenset):
             data = list(data)
-        if type(data) not in (dict, list, tuple, set, frozenset):
-            # Note: exact-type checks (not isinstance) so that subclasses of
-            # builtin collections (e.g. a namedtuple, or scikit-learn's Bunch)
+        if type(data) not in (dict, list, tuple, set, frozenset) and not is_namedtuple:
+            # Exact-type checks (not isinstance) so that other subclasses of
+            # builtin collections (e.g. scikit-learn's Bunch, a dict subclass)
             # are scattered as a single opaque value rather than being unpacked
             # into their items. This preserves their exact type on the worker;
             # an isinstance check would silently downgrade a dict subclass to a
@@ -2648,6 +2654,8 @@ class Client(SyncMethodMixin):
 
         if input_type in (list, tuple, set, frozenset):
             out = input_type(out[k] for k in names)
+        elif is_namedtuple:
+            out = input_type._make(out[k] for k in names)
 
         if unpack:
             assert len(out) == 1
