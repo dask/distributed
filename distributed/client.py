@@ -2583,7 +2583,7 @@ class Client(SyncMethodMixin):
             # plain dict (and similarly for list/set/tuple subclasses).
             unpack = True
             data = [data]
-        if isinstance(data, (list, tuple)):
+        if type(data) in (list, tuple):
             if hash:
                 names = [f"{type(x).__name__}-{tokenize(x)}" for x in data]
             else:
