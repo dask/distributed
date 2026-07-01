@@ -18,7 +18,7 @@ jobs:
       run:
         shell: bash -l {0}
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Setup Conda Environment
         uses: conda-incubator/setup-miniconda@v4.0.1
@@ -34,7 +34,7 @@ jobs:
       - name: conda list
         run: conda list
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         id: cache
         with:
           # Suffix is depending on the backend / OS. Let's be agnostic here
