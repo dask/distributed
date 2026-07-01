@@ -31,7 +31,7 @@ repos:
           - types-setuptools
           # Typed libraries
           - click
-          - numpy
+          - numpy<2.5  # type stubs for NumPy 2.5 contain Python >=3.12 syntax
           - pytest
           - tornado
           - pyarrow
