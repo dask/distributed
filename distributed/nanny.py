@@ -738,7 +738,7 @@ class WorkerProcess:
             try:
                 msg = await self._wait_until_connected(uid)
             except Exception:
-                logger.exception("Worker failed to connect (status=%s)", self.status)
+                logger.error("Worker failed to connect (status=%s)", self.status)
                 # NOTE: doesn't wait for process to terminate, just for terminate signal
                 # to be sent
                 await self.process.terminate()
