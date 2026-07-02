@@ -1382,7 +1382,7 @@ async def test_ReduceReplicas_stress(c, s, *workers):
     },
     scheduler_kwargs={"transition_counter_max": 500_000},
     worker_kwargs={"transition_counter_max": 500_000},
-    timeout=180,  # Normally runs in ~5s, but occasionally takes much longer
+    timeout=180,  # Normally runs in ~5s, but has been observed to take up to 48s
 )
 async def test_RetireWorker_stress(c, s, *workers, use_ReduceReplicas):
     """It is safe to retire the best part of a cluster in the middle of a computation"""
