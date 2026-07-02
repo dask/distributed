@@ -1,6 +1,6 @@
 ---
 name: shakedown-flaky-test
-description: Shake down a flaky test (or subset of flaky tests) in dask-distributed. Reproduce locally with pytest-repeat, then either fix-and-verify locally or drive the `torture-test` GitHub Action via `gh` until CI is green. Use when the user says things like "debug flaky test <test name>", "fix intermittent failures in test <test name>", "torture test <test name>", "track down a flaky test", "reproduce a flaky failure", "fix intermittent test failures", or otherwise asks to shake out / harden a test that fails only sometimes.
+description: Shake down a flaky test (or subset of flaky tests) in dask/distributed. Reproduce locally with pytest-repeat, then either fix-and-verify locally or drive the `torture-test` GitHub Action via `gh` until CI is green. Use when the user says things like "debug flaky test <test name>", "fix intermittent failures in test <test name>", "torture test <test name>", "track down a flaky test", "reproduce a flaky failure", "fix intermittent test failures", or otherwise asks to shake out / harden a test that fails only sometimes.
 ---
 
 # Shakedown a flaky test
