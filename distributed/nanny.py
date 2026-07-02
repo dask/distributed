@@ -734,6 +734,7 @@ class WorkerProcess:
                 # to be sent
                 await self.process.terminate()
                 self.status = Status.failed
+
             try:
                 msg = await self._wait_until_connected(uid)
             except Exception:
@@ -743,14 +744,15 @@ class WorkerProcess:
                 await self.process.terminate()
                 self.status = Status.failed
                 raise
+
         finally:
             self.running.set()
-        if not msg:
-            return self.status
-        self.worker_address = msg["address"]
-        self.worker_dir = msg["dir"]
-        assert self.worker_address
-        self.status = Status.running
+
+        if msg:
+            self.worker_address = msg["address"]
+            self.worker_dir = msg["dir"]
+            assert self.worker_address
+            self.status = Status.running
 
         return self.status
 
