@@ -727,9 +727,7 @@ class WorkerProcess:
             except OSError:
                 # This can only happen if the actual process creation failed, e.g.
                 # multiprocessing.Process.start failed. This is not tested!
-                logger.exception(
-                    "Nanny failed to start process (status=%s)", self.status
-                )
+                logger.exception("Nanny failed to start process")
                 # NOTE: doesn't wait for process to terminate, just for terminate signal
                 # to be sent
                 await self.process.terminate()
@@ -738,7 +736,7 @@ class WorkerProcess:
             try:
                 msg = await self._wait_until_connected(uid)
             except Exception:
-                logger.error("Worker failed to connect (status=%s)", self.status)
+                logger.error("Worker failed to connect")
                 # The process may have already exited and been released by
                 # mark_stopped() (fired by the process exit callback), in which
                 # case there's nothing left to terminate.
