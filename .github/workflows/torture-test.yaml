@@ -1,0 +1,116 @@
+# Run a single test or a subset of tests tens to a few thousands of times. This workflow
+# is only triggered manually. Use sparingly, as it can potentially take away from CI
+# host availability for the whole dask organization.
+name: Torture test
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'pytest-repeat reruns'
+        default: 10
+        type: number
+      pixi-task:
+        description: 'pixi task to run'
+        default: test-ci
+        type: string
+      pixi-args:
+        description: 'parameters for pixi task (pytest by default) e.g. test name(s) or -k filter)'
+        default: ''
+        type: string
+
+jobs:
+  test:
+    name: ${{ matrix.os }} ${{ matrix.environment }} 
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Note: after adding/removing builds here, update
+        # codecov.yml to match.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest]
+        environment: [py310, py311, py312, py313, py314]
+        include:
+          # MacOS CI does not have many hosts available; run it on 3.14 only
+          - os: macos-latest
+            environment: py314
+
+          # Minimum dependencies
+          - os: ubuntu-latest
+            environment: mindeps
+
+          - os: ubuntu-latest
+            environment: mindeps-array
+
+          - os: ubuntu-latest
+            environment: mindeps-dataframe
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Reconfigure pytest-timeout
+        # No SIGALRM available on Windows
+        # Note: all changes to the source code must happen before setup-pixi
+        # or we'll build the package twice
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: sed -i.bak 's/timeout_method = "thread"/timeout_method = "signal"/' pyproject.toml
+
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          pixi-version: v0.72.0
+          environments: ${{ matrix.environment }}
+          cache: true
+          locked: true
+
+      - name: Set $TEST_ID
+        shell: bash -l {0}
+        run: |
+          PARTITION_LABEL=$( echo "${{ matrix.partition }}" | sed "s/ //" )
+          export TEST_ID="${{ matrix.os }}-${{ matrix.environment }}-${{ matrix.task }}-$PARTITION_LABEL"
+          echo "TEST_ID: $TEST_ID"
+          echo "TEST_ID=$TEST_ID" >> $GITHUB_ENV
+
+      - name: Setup SSH
+        # FIXME no SSH available on Windows
+        # https://github.com/dask/distributed/issues/4509
+        if: matrix.os != 'windows-latest'
+        run: continuous_integration/scripts/setup_ssh.sh
+
+      - name: Disable IPv6
+        shell: bash -l {0}
+        # FIXME ipv6-related failures on Ubuntu and MacOS github actions CI
+        # https://github.com/dask/distributed/issues/4514
+        if: matrix.os  != 'windows-latest'
+        run: echo "DISABLE_IPV6=1" >> $GITHUB_ENV
+
+      - name: Print host info
+        run: pixi run -e ${{ matrix.environment }} host-info
+
+      - name: Test
+        id: run_tests
+        shell: bash -l {0}
+        run: |
+          source continuous_integration/scripts/set_ulimit.sh
+          set -o pipefail
+          mkdir reports
+
+          pixi run -e ${{ matrix.environment }} ${{ inputs.pixi-task }} ${{ inputs.pixi-args }} \
+          --count ${{ inputs.runs }} | tee pytest-stdout.log
+
+      - name: Upload gen_cluster dumps for failed tests
+        # ensure this runs even if pytest fails
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.os }}-${{ matrix.environment }}_cluster_dumps
+          path: test_cluster_dump
+          if-no-files-found: ignore
+
+      # - name: Debug with tmate on failure
+      #   if: failure()
+      #   uses: mxschmitt/action-tmate@v3
