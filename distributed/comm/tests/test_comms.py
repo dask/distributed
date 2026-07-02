@@ -989,6 +989,26 @@ async def test_handshake_slow_comm(tcp, monkeypatch):
         listener.stop()
 
 
+@gen_test()
+async def test_stop_listener_during_handle_stream(tcp):
+    """The listener is stopped after a connection has been accepted, but before the
+    server could start handling it. The accepted stream must be closed, so that the
+    client fails fast instead of hanging forever in the comm handshake, which is
+    deliberately not subject to the connect timeout (see test_handshake_slow_comm).
+    """
+    listener = await listen("tcp://127.0.0.1", echo)
+    orig_handle_stream = listener._handle_stream
+
+    async def stop_then_handle_stream(stream, address):
+        listener.stop()
+        await orig_handle_stream(stream, address)
+
+    listener.tcp_server.handle_stream = stop_then_handle_stream
+
+    with pytest.raises(CommClosedError):
+        await wait_for(connect(listener.contact_address), timeout=5)
+
+
 async def check_connect_timeout(addr):
     t1 = time()
     with pytest.raises(IOError):
