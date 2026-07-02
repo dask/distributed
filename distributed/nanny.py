@@ -433,7 +433,7 @@ class Nanny(ServerNode):
             try:
                 result = await self.process.start()
             except Exception:
-                logger.error("Failed to start process", exc_info=True)
+                logger.exception("Failed to start process")
                 await self.close(reason="nanny-instantiate-failed")
                 raise
         return result
@@ -529,9 +529,7 @@ class Nanny(ServerNode):
             try:
                 await self._unregister()
             except OSError:
-                logger.exception(
-                    "Failed to unregister (status=%s)", self.status, exc_info=True
-                )
+                logger.exception("Failed to unregister (status=%s)", self.status)
                 if not self.reconnect:
                     await self.close(reason="nanny-unregister-failed")
                     return
@@ -551,9 +549,7 @@ class Nanny(ServerNode):
                 await self.close(reason="nanny-close-gracefully")
 
         except Exception:
-            logger.error(
-                "Failed to restart worker after its process exited", exc_info=True
-            )
+            logger.exception("Failed to restart worker after its process exited")
 
     @property
     def pid(self):
@@ -732,20 +728,18 @@ class WorkerProcess:
                 # This can only happen if the actual process creation failed, e.g.
                 # multiprocessing.Process.start failed. This is not tested!
                 logger.exception(
-                    "Nanny failed to start process (status=%s)",
-                    self.status,
-                    exc_info=True,
+                    "Nanny failed to start process (status=%s)", self.status
                 )
-                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+                # NOTE: doesn't wait for process to terminate, just for terminate signal
+                # to be sent
                 await self.process.terminate()
                 self.status = Status.failed
             try:
                 msg = await self._wait_until_connected(uid)
             except Exception:
-                logger.exception(
-                    "Worker failed to connect (status=%s)", self.status, exc_info=True
-                )
-                # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
+                logger.exception("Worker failed to connect (status=%s)", self.status)
+                # NOTE: doesn't wait for process to terminate, just for terminate signal
+                # to be sent
                 await self.process.terminate()
                 self.status = Status.failed
                 raise
@@ -926,7 +920,7 @@ class WorkerProcess:
             try:
                 msg = child_stop_q.get()
             except (TypeError, OSError, EOFError):
-                logger.error("Worker process died unexpectedly")
+                logger.exception("Worker process died unexpectedly")
                 msg = {"op": "stop"}
             finally:
                 child_stop_q.close()
