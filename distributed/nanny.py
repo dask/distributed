@@ -739,10 +739,22 @@ class WorkerProcess:
                 msg = await self._wait_until_connected(uid)
             except Exception:
                 logger.error("Worker failed to connect (status=%s)", self.status)
-                # NOTE: doesn't wait for process to terminate, just for terminate signal
-                # to be sent
-                await self.process.terminate()
-                self.status = Status.failed
+                # The process may have already exited and been released by
+                # mark_stopped() (fired by the process exit callback), in which
+                # case there's nothing left to terminate.
+                if self.process is not None:
+                    # NOTE: doesn't wait for process to terminate, just for terminate
+                    # signal to be sent
+                    await self.process.terminate()
+                # mark_stopped() may have run while we were awaiting terminate();
+                # it set the status to Status.stopped and released init_result_q,
+                # child_stop_q and process. Don't overwrite it with Status.failed:
+                # the following Nanny.close() -> WorkerProcess.kill() would skip
+                # its Status.stopped early exit, crash on the released queues, and
+                # leave the Nanny stuck in Status.closing, hanging every later
+                # close() call forever.
+                if self.status == Status.starting:
+                    self.status = Status.failed
                 raise
 
         finally:
