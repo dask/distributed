@@ -525,10 +525,13 @@ class Nanny(ServerNode):
             Status.closing_gracefully,
             Status.failed,
         ):
+            logger.info("Unregistering worker (status=%s)", self.status)
             try:
                 await self._unregister()
             except OSError:
-                logger.exception("Failed to unregister")
+                logger.exception(
+                    "Failed to unregister (status=%s)", self.status, exc_info=True
+                )
                 if not self.reconnect:
                     await self.close(reason="nanny-unregister-failed")
                     return
@@ -542,7 +545,7 @@ class Nanny(ServerNode):
                 Status.closing_gracefully,
                 Status.failed,
             ):
-                logger.warning("Restarting worker")
+                logger.warning("Restarting worker (status=%s)", self.status)
                 await self.instantiate()
             elif self.status == Status.closing_gracefully:
                 await self.close(reason="nanny-close-gracefully")
@@ -728,13 +731,20 @@ class WorkerProcess:
             except OSError:
                 # This can only happen if the actual process creation failed, e.g.
                 # multiprocessing.Process.start failed. This is not tested!
-                logger.exception("Nanny failed to start process", exc_info=True)
+                logger.exception(
+                    "Nanny failed to start process (status=%s)",
+                    self.status,
+                    exc_info=True,
+                )
                 # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
                 await self.process.terminate()
                 self.status = Status.failed
             try:
                 msg = await self._wait_until_connected(uid)
             except Exception:
+                logger.exception(
+                    "Worker failed to connect (status=%s)", self.status, exc_info=True
+                )
                 # NOTE: doesn't wait for process to terminate, just for terminate signal to be sent
                 await self.process.terminate()
                 self.status = Status.failed
