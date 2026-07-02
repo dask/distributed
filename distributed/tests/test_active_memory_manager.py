@@ -1296,9 +1296,19 @@ async def tensordot_stress(c, s):
             break
     else:
         raise RuntimeError("Expected 'update_graph' event not found")
-    # Test that we didn't recompute any tasks during the stress test
+    # Test that we didn't recompute any tasks during the stress test.
+    # Exception: when a worker is retired, any tasks that completed on it between the
+    # moment the AMM RetireWorker policy measured that no unique keys were left on it
+    # and the moment the worker was actually removed are lost and will be recomputed
+    # elsewhere (see RetireWorker.done).
     await async_poll_for(lambda: not s.tasks)
-    assert sum(t.start == "memory" for t in s.transition_log) == expected_tasks
+    lost = sum(
+        len(msg["lost-computed-tasks"])
+        for _, msg in await c.get_events("all")
+        if msg["action"] == "remove-worker" and msg["expected"]
+    )
+    actual = sum(t.start == "memory" for t in s.transition_log)
+    assert expected_tasks <= actual <= expected_tasks + lost
 
 
 @pytest.mark.slow
@@ -1372,6 +1382,7 @@ async def test_ReduceReplicas_stress(c, s, *workers):
     },
     scheduler_kwargs={"transition_counter_max": 500_000},
     worker_kwargs={"transition_counter_max": 500_000},
+    timeout=180,  # Normally runs in ~5s, but has been observed to take up to 48s
 )
 async def test_RetireWorker_stress(c, s, *workers, use_ReduceReplicas):
     """It is safe to retire the best part of a cluster in the middle of a computation"""
