@@ -4020,6 +4020,18 @@ def test_scheduler_info(c):
     assert len(info["workers"]) == 2
 
 
+@gen_cluster(client=True)
+async def test_scheduler_info_async(c, s, a, b):
+    # For async clients scheduler_info() returns the periodically cached
+    # identity, which carries cluster-wide totals but no per-worker detail.
+    info = c.scheduler_info()
+    assert info["n_workers"] == 2
+    assert info["workers"] == {}
+    # Worker information is available on demand via the scheduler directly
+    info = await c.scheduler.identity(n_workers=-1)
+    assert len(info["workers"]) == 2
+
+
 def test_write_scheduler_file(c, loop):
     info = c.scheduler_info()
     with tmpfile("json") as scheduler_file:

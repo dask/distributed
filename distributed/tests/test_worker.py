@@ -1431,7 +1431,7 @@ async def test_interface_async(Worker):
             assert w.address.startswith("tcp://127.0.0.1")
             assert w.ip == "127.0.0.1"
             async with Client(s.address, asynchronous=True) as c:
-                info = c.scheduler_info()
+                info = await c.scheduler.identity(n_workers=-1)
                 assert "tcp://127.0.0.1" in info["address"]
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 

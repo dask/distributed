@@ -1605,7 +1605,7 @@ class Client(SyncMethodMixin):
 
         logger.debug("Started scheduling coroutines. Synchronized")
 
-    async def _update_scheduler_info(self, n_workers=5):
+    async def _update_scheduler_info(self, n_workers=0):
         if self.status not in ("running", "connecting") or self.scheduler is None:
             return
         try:
@@ -4504,9 +4504,10 @@ class Client(SyncMethodMixin):
 
             Note: this argument is only honored for synchronous clients. For
             asynchronous clients this method returns the most recently cached
-            value (refreshed periodically) without a fresh fetch; use
-            ``await client.scheduler.identity(n_workers=-1)`` to fetch all
-            workers on demand.
+            value without a fresh fetch. That cache carries only cluster-wide
+            totals and no per-worker information (``"workers"`` is empty); use
+            ``await client.scheduler.identity(n_workers=-1)`` to fetch worker
+            information on demand.
         **kwargs : dict
             Optional keyword arguments for the remote function
 
