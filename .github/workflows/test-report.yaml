@@ -52,16 +52,14 @@ jobs:
           mv test_report.html test_short_report.html deploy/
 
       - name: Upload report as workflow artifact
-        # Downloaded by the deploy job; also for debugging purposes on PRs
+        # Downloaded by the deploy job; also for debugging purposes
         uses: actions/upload-artifact@v7
         with:
           name: test-report
           path: deploy
 
       - name: Upload databases as workflow artifact
-        # For debugging purposes on PRs; scheduled runs persist them through
-        # actions/cache above
-        if: github.event_name == 'pull_request'
+        # For debugging purposes
         uses: actions/upload-artifact@v7
         with:
           name: test-report-db
