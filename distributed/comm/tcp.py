@@ -658,6 +658,14 @@ class BaseTCPListener(BaseListener, RequireEncryptionMixin):
         if stream is None:
             # Preparation failed
             return
+        if self.tcp_server is None:
+            # stop() was called after the connection was accepted, but before this
+            # method could run. abort_handshaking_comms() has already run and won't
+            # take care of this comm; if we left the stream dangling, the client
+            # would hang forever in the comm handshake, which is deliberately not
+            # subject to timeouts (see distributed.comm.core.connect()).
+            stream.close()
+            return
         logger.debug("Incoming connection from %r to %r", address, self.contact_address)
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)

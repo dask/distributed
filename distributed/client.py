@@ -2566,12 +2566,24 @@ class Client(SyncMethodMixin):
         unpack = False
         if isinstance(data, Iterator):
             data = list(data)
-        if isinstance(data, (set, frozenset)):
+        # namedtuples get a dedicated path: they are scattered like a plain
+        # tuple (one Future per item) but reconstructed with their own type via
+        # ._make(), so idioms like
+        #     arr, idx = client.scatter(np.unique(x, return_index=True))
+        # keep working while preserving the namedtuple type.
+        is_namedtuple = isinstance(data, tuple) and hasattr(data, "_fields")
+        if type(data) in (set, frozenset):
             data = list(data)
-        if not isinstance(data, (dict, list, tuple, set, frozenset)):
+        if type(data) not in (dict, list, tuple, set, frozenset) and not is_namedtuple:
+            # Exact-type checks (not isinstance) so that other subclasses of
+            # builtin collections (e.g. scikit-learn's Bunch, a dict subclass)
+            # are scattered as a single opaque value rather than being unpacked
+            # into their items. This preserves their exact type on the worker;
+            # an isinstance check would silently downgrade a dict subclass to a
+            # plain dict (and similarly for list/set/tuple subclasses).
             unpack = True
             data = [data]
-        if isinstance(data, (list, tuple)):
+        if type(data) in (list, tuple) or is_namedtuple:
             if hash:
                 names = [f"{type(x).__name__}-{tokenize(x)}" for x in data]
             else:
@@ -2640,8 +2652,10 @@ class Client(SyncMethodMixin):
             n = None if broadcast is True else broadcast
             await self._replicate(list(out.values()), workers=workers, n=n)
 
-        if issubclass(input_type, (list, tuple, set, frozenset)):
+        if input_type in (list, tuple, set, frozenset):
             out = input_type(out[k] for k in names)
+        elif is_namedtuple:
+            out = input_type(*(out[k] for k in names))
 
         if unpack:
             assert len(out) == 1
