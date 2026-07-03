@@ -55,8 +55,8 @@ def get_token() -> str:
 
 
 def cache_name(prefix: str, repo: str) -> str:
-    """Name of the local cache database, e.g. test_report_dask__distributed"""
-    return f"{prefix}_{repo.replace('/', '__')}"
+    """Name of the local cache database, e.g. test_report.dask__distributed.db"""
+    return f"{prefix}.{repo.replace('/', '__')}.db"
 
 
 @contextlib.contextmanager
