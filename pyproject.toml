@@ -170,6 +170,8 @@ filterwarnings = [
     '''ignore:datetime\.datetime\.utc(fromtimestamp|now)\(\) is deprecated and scheduled for removal in a future version.*:DeprecationWarning:dateutil''',
     '''ignore:the matrix subclass is not the recommended way''',
     '''ignore:The current Dask DataFrame implementation is deprecated.*:DeprecationWarning''',
+    # This is only an issue in mindeps
+    '''ignore:distutils Version classes are deprecated:DeprecationWarning''',
 ]
 minversion = "6"
 markers = [
