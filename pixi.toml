@@ -239,6 +239,22 @@ pre-commit = "*"
 [feature.lint.tasks]
 lint = "pre-commit run --all-files"
 
+[feature.test-report.dependencies]
+python = "=3.13"
+altair = ">=6"
+junitparser = "*"
+pandas = "*"
+requests = "*"
+urllib3 = "*"
+
+[feature.test-report.tasks.test-report]
+args = [{ arg = "repo" }]
+cmd = """
+python continuous_integration/scripts/test_report.py --repo '{{ repo }}' --max-days 90 --max-runs 30 --nfails 1 -o test_report.html &&
+python continuous_integration/scripts/test_report.py --repo '{{ repo }}' --max-days 7 --max-runs 30 --nfails 2 -o test_short_report.html --title 'Test Short Report'
+"""
+description = "Generate HTML reports of the flaky tests in the CI of the given repo, e.g. `pixi run test-report dask/distributed`"
+
 [feature.build.dependencies]
 python = "=3.14"
 conda = "*"
@@ -268,3 +284,4 @@ nightly = ["cpu", "nightly", "test"]
 cuda = ["cuda", "test"]
 lint = { features = ["cpu", "lint"], no-default-feature = true }
 build = { features = ["cpu", "build"], no-default-feature = true }
+test-report = { features = ["cpu", "test-report"], no-default-feature = true }

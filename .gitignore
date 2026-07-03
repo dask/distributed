@@ -35,7 +35,7 @@ distributed/_version.py
 
 # Test reports
 test_report*.html
-test_report*.db
+test_report_*
 test_short_report.html
 
 # Test failures will dump the cluster state in here
