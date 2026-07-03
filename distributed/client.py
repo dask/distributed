@@ -2583,7 +2583,7 @@ class Client(SyncMethodMixin):
             # plain dict (and similarly for list/set/tuple subclasses).
             unpack = True
             data = [data]
-        if type(data) in (list, tuple):
+        if type(data) in (list, tuple) or is_namedtuple:
             if hash:
                 names = [f"{type(x).__name__}-{tokenize(x)}" for x in data]
             else:
@@ -2655,7 +2655,7 @@ class Client(SyncMethodMixin):
         if input_type in (list, tuple, set, frozenset):
             out = input_type(out[k] for k in names)
         elif is_namedtuple:
-            out = input_type._make(out[k] for k in names)
+            out = input_type(*(out[k] for k in names))
 
         if unpack:
             assert len(out) == 1

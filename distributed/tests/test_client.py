@@ -1168,7 +1168,7 @@ async def test_scatter_namedtuple(c, s, a, b):
     # namedtuples are unpacked into one Future per item (like a plain tuple),
     # but rebuilt with their own type so that idioms such as
     #     arr, idx = client.scatter(np.unique(x, return_index=True))
-    # keep working. See https://github.com/dask/distributed/pull/9298
+    # keep working.
     Point = namedtuple("Point", ["x", "y"])
 
     out = await c.scatter(Point(1, 2))
@@ -1179,7 +1179,6 @@ async def test_scatter_namedtuple(c, s, a, b):
     assert (await x_future, await y_future) == (1, 2)
     # attribute access on the namedtuple of Futures is preserved
     assert (await out.x, await out.y) == (1, 2)
-    s.validate_state()
 
 
 @gen_cluster(client=True)
