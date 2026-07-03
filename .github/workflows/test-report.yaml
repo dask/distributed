@@ -9,6 +9,9 @@ on:
     types: [labeled, opened, reopened, synchronize]
 
 permissions:
+  # Read the artifacts of the tests.yaml runs
+  actions: read
+  # Deploy to GitHub Pages
   contents: write
 
 jobs:
