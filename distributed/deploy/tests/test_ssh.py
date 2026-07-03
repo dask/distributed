@@ -101,7 +101,9 @@ async def test_keywords():
                     lambda dask_scheduler: dask_scheduler.idle_timeout
                 )
             ) == 10
-            d = client.scheduler_info()["workers"]
+            # scheduler_info() carries no per-worker detail for async clients
+            d = (await client.scheduler.identity(n_workers=-1))["workers"]
+            assert d
             assert all(v["nthreads"] == 2 for v in d.values())
 
 

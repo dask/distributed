@@ -465,7 +465,8 @@ async def test_full_collections(c, s, a, b):
 
 @gen_cluster(config={"distributed.worker.resources.my_resources": 1}, client=True)
 async def test_resources_from_config(c, s, a, b):
-    info = c.scheduler_info()
+    # scheduler_info() carries no per-worker detail for async clients; fetch it
+    info = await c.scheduler.identity(n_workers=-1)
     for worker in [a, b]:
         assert info["workers"][worker.address]["resources"] == {"my_resources": 1}
 
@@ -476,7 +477,8 @@ async def test_resources_from_config(c, s, a, b):
     client=True,
 )
 async def test_resources_from_python_override_config(c, s, a, b):
-    info = c.scheduler_info()
+    # scheduler_info() carries no per-worker detail for async clients; fetch it
+    info = await c.scheduler.identity(n_workers=-1)
     for worker in [a, b]:
         assert info["workers"][worker.address]["resources"] == {"my_resources": 10}
 
