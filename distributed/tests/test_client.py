@@ -1125,6 +1125,63 @@ async def test_scatter_types(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_scatter_collection_subclass(c, s, a, b):
+    # Subclasses of builtin collections (other than namedtuples) must be
+    # scattered as a single opaque value (one Future) with their exact type
+    # preserved on the worker, rather than being unpacked into their items like
+    # the exact builtin collections are. Otherwise a dict subclass would
+    # silently arrive as a plain dict.
+    # See https://github.com/scikit-learn/scikit-learn/issues/34005
+    class Bunch(dict):
+        def __getattr__(self, key):
+            try:
+                return self[key]
+            except KeyError:
+                raise AttributeError(key)
+
+    class MyList(list):
+        pass
+
+    class MySet(set):
+        pass
+
+    for obj in [
+        Bunch(a=1, b=2),
+        MyList([1, 2, 3]),
+        MySet({1, 2, 3}),
+    ]:
+        future = await c.scatter(obj)
+        assert isinstance(future, Future)
+        result = await future
+        assert type(result) is type(obj)
+        assert result == obj
+        s.validate_state()
+
+    # Attribute access (the scikit-learn metadata-routing failure mode) keeps
+    # working after a round-trip through a worker.
+    future = await c.scatter(Bunch(transform=10))
+    assert (await c.submit(lambda b: b.transform, future)) == 10
+
+
+@gen_cluster(client=True)
+async def test_scatter_namedtuple(c, s, a, b):
+    # namedtuples are unpacked into one Future per item (like a plain tuple),
+    # but rebuilt with their own type so that idioms such as
+    #     arr, idx = client.scatter(np.unique(x, return_index=True))
+    # keep working.
+    Point = namedtuple("Point", ["x", "y"])
+
+    out = await c.scatter(Point(1, 2))
+    assert type(out) is Point
+    assert all(isinstance(f, Future) for f in out)
+    # unpacking into per-item Futures works
+    x_future, y_future = out
+    assert (await x_future, await y_future) == (1, 2)
+    # attribute access on the namedtuple of Futures is preserved
+    assert (await out.x, await out.y) == (1, 2)
+
+
+@gen_cluster(client=True)
 async def test_scatter_non_list(c, s, a, b):
     x = await c.scatter(1)
     assert isinstance(x, Future)
