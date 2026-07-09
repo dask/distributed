@@ -725,6 +725,11 @@ class WorkerProcess:
         # See note in Nanny docstring.
         os.environ.update(self.pre_spawn_env)
 
+        # If the process dies, mark_stopped() (fired by the process exit callback)
+        # releases self.init_result_q. Hold a reference so that we can read the
+        # exception message that the process may have sent just before dying.
+        init_result_q = self.init_result_q
+
         try:
             try:
                 await self.process.start()
@@ -738,7 +743,7 @@ class WorkerProcess:
                 self.status = Status.failed
 
             try:
-                msg = await self._wait_until_connected(uid)
+                msg = await self._wait_until_connected(uid, init_result_q)
             except Exception:
                 logger.error("Worker failed to connect")
                 # The process may have already exited and been released by
@@ -762,7 +767,7 @@ class WorkerProcess:
         finally:
             self.running.set()
 
-        if msg:
+        if msg and self.status == Status.starting:
             self.worker_address = msg["address"]
             self.worker_dir = msg["dir"]
             assert self.worker_address
@@ -887,15 +892,23 @@ class WorkerProcess:
                 return
             raise
 
-    async def _wait_until_connected(self, uid):
+    async def _wait_until_connected(self, uid, init_result_q):
         while True:
-            if self.status != Status.starting:
-                return
+            # Read the status *before* polling the queue: if the process failed to
+            # start a worker, it sends the exception through init_result_q, flushes
+            # the queue, and terminates. If mark_stopped() (fired by the process
+            # exit callback) flipped the status away from Status.starting, the
+            # message the process may have sent while dying is guaranteed to be
+            # readable now, so one last get_nowait() will not lose it.
+            stopped = self.status != Status.starting
+
             # This is a multiprocessing queue and we'd block the event loop if
             # we simply called get
             try:
-                msg = self.init_result_q.get_nowait()
+                msg = init_result_q.get_nowait()
             except Empty:
+                if stopped:
+                    return None
                 await asyncio.sleep(self._init_msg_interval)
                 continue
 
