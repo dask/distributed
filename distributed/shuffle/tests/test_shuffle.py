@@ -1073,6 +1073,11 @@ async def test_heartbeat(c, s, a, b):
     await assert_scheduler_cleanup(s)
 
 
+# Suppress PyArrow triggering Pandas4Warning on pandas >=3.1
+@pytest.mark.filterwarnings(
+    "ignore:Series.values returning an ndarray that drops timezone information "
+    "for DatetimeTZDtype is deprecated:DeprecationWarning"
+)
 @pytest.mark.skipif("not pa", reason="Requires PyArrow")
 @pytest.mark.parametrize("drop_column", [True, False])
 def test_processing_chain(tmp_path, drop_column):
