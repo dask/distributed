@@ -23,9 +23,8 @@ from urllib3.util.retry import Retry
 
 TOKEN: str | None = None
 
-# The output format of tests.yaml changed substantially when CI was migrated to
-# pixi (dask/distributed#9276, merged 2026-06-03; dask/dask#12389, merged
-# 2026-05-21). Workflow runs older than this date cannot be parsed.
+# Latest substantial change in the output format of tests.yaml
+# Disregard workflow runs older than this date.
 CUTOFF = pandas.Timestamp("2026-06-04", tz="UTC")
 
 # Mapping between a symbol (pass, fail, skip) and a color
@@ -482,7 +481,7 @@ def main(argv: list[str] | None = None) -> None:
         total.groupby([total.file, total.test])
         .filter(lambda g: (g.status == "x").sum() >= args.nfails)
         .reset_index()
-        .assign(test=lambda df: df.file + "." + df.test)
+        .assign(test=lambda df: f"{df.file}.{df.test}")
         .groupby("test")
     )
     overall = {name: grouped.get_group(name) for name in grouped.groups}
