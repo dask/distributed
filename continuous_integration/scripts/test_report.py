@@ -404,7 +404,7 @@ def download_and_parse_artifacts(
 
                 ndownloaded += 1
                 if ndownloaded and not ndownloaded % 20:
-                    print(f"{ndownloaded}... ", end="")
+                    print(f"{ndownloaded}... ", end="", flush=True)
 
 
 def make_chart(name, df, times):
@@ -481,7 +481,7 @@ def main(argv: list[str] | None = None) -> None:
         total.groupby([total.file, total.test])
         .filter(lambda g: (g.status == "x").sum() >= args.nfails)
         .reset_index()
-        .assign(test=lambda df: f"{df.file}.{df.test}")
+        .assign(test=lambda df: df.file.str.cat(df.test, sep="."))
         .groupby("test")
     )
     overall = {name: grouped.get_group(name) for name in grouped.groups}
