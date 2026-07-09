@@ -1,6 +1,6 @@
 ---
 name: open-pr
-description: Rules for opening or updating a GitHub pull request in dask/distributed. Use whenever the user asks you to open a PR, create a pull request, update an existing PR, or push work for review. Enforces draft state, the `[AI]` title prefix, and the mandatory AI-disclaimer in the description.
+description: Rules for opening or updating a GitHub pull request in dask/distributed. Use whenever the user asks you to open a PR, create a pull request, update an existing PR, or push work for review. Enforces draft state, the `[unsupervised AI]` title prefix, and the mandatory AI disclaimer in the description.
 ---
 
 # Opening or updating a PR
