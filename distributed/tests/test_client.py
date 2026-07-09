@@ -1125,6 +1125,63 @@ async def test_scatter_types(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_scatter_collection_subclass(c, s, a, b):
+    # Subclasses of builtin collections (other than namedtuples) must be
+    # scattered as a single opaque value (one Future) with their exact type
+    # preserved on the worker, rather than being unpacked into their items like
+    # the exact builtin collections are. Otherwise a dict subclass would
+    # silently arrive as a plain dict.
+    # See https://github.com/scikit-learn/scikit-learn/issues/34005
+    class Bunch(dict):
+        def __getattr__(self, key):
+            try:
+                return self[key]
+            except KeyError:
+                raise AttributeError(key)
+
+    class MyList(list):
+        pass
+
+    class MySet(set):
+        pass
+
+    for obj in [
+        Bunch(a=1, b=2),
+        MyList([1, 2, 3]),
+        MySet({1, 2, 3}),
+    ]:
+        future = await c.scatter(obj)
+        assert isinstance(future, Future)
+        result = await future
+        assert type(result) is type(obj)
+        assert result == obj
+        s.validate_state()
+
+    # Attribute access (the scikit-learn metadata-routing failure mode) keeps
+    # working after a round-trip through a worker.
+    future = await c.scatter(Bunch(transform=10))
+    assert (await c.submit(lambda b: b.transform, future)) == 10
+
+
+@gen_cluster(client=True)
+async def test_scatter_namedtuple(c, s, a, b):
+    # namedtuples are unpacked into one Future per item (like a plain tuple),
+    # but rebuilt with their own type so that idioms such as
+    #     arr, idx = client.scatter(np.unique(x, return_index=True))
+    # keep working.
+    Point = namedtuple("Point", ["x", "y"])
+
+    out = await c.scatter(Point(1, 2))
+    assert type(out) is Point
+    assert all(isinstance(f, Future) for f in out)
+    # unpacking into per-item Futures works
+    x_future, y_future = out
+    assert (await x_future, await y_future) == (1, 2)
+    # attribute access on the namedtuple of Futures is preserved
+    assert (await out.x, await out.y) == (1, 2)
+
+
+@gen_cluster(client=True)
 async def test_scatter_non_list(c, s, a, b):
     x = await c.scatter(1)
     assert isinstance(x, Future)
@@ -2112,10 +2169,12 @@ def test_repr(loop, func):
         *workers,
     ):
         with Client(s["address"], loop=loop) as c:
-            # NOTE: Intentionally testing when we have more workers than the default
-            # in `client.scheduler_info()` (xref https://github.com/dask/distributed/issues/9065)
+            # NOTE: Intentionally testing the repr with more workers than the repr
+            # itself displays (the HTML view caps the worker table at 5).
+            # ``scheduler_info()`` returns all workers by default
+            # (xref https://github.com/dask/distributed/issues/9065).
             info = c.scheduler_info()
-            assert len(info["workers"]) < nworkers
+            assert len(info["workers"]) == nworkers
 
             text = func(c)
             assert c.scheduler.address in text
@@ -3948,13 +4007,28 @@ async def test_idempotence(s, a, b):
 
 
 def test_scheduler_info(c):
+    # By default all workers are returned
     info = c.scheduler_info()
     assert isinstance(info, dict)
     assert len(info["workers"]) == 2
     assert isinstance(info["started"], float)
+    # A positive ``n_workers`` truncates the worker list
     info = c.scheduler_info(n_workers=1)
     assert len(info["workers"]) == 1
+    # ``-1`` is equivalent to the default and returns all workers
     info = c.scheduler_info(n_workers=-1)
+    assert len(info["workers"]) == 2
+
+
+@gen_cluster(client=True)
+async def test_scheduler_info_async(c, s, a, b):
+    # For async clients scheduler_info() returns the periodically cached
+    # identity, which carries cluster-wide totals but no per-worker detail.
+    info = c.scheduler_info()
+    assert info["n_workers"] == 2
+    assert info["workers"] == {}
+    # Worker information is available on demand via the scheduler directly
+    info = await c.scheduler.identity(n_workers=-1)
     assert len(info["workers"]) == 2
 
 
@@ -4766,6 +4840,21 @@ async def test_restart_workers_no_nanny_raises(c, s, a, b):
     msg = str(excinfo.value).lower()
     assert "restarting workers requires a nanny" in msg
     assert a.address in msg
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 7)
+async def test_restart_workers_no_nanny_raises_many_workers(c, s, *workers):
+    # Regression test: the nanny check must consider all workers, not just the
+    # truncated set that ``scheduler_info`` used to return by default
+    # (xref https://github.com/dask/distributed/issues/9065). Target a worker
+    # beyond the historical 5-worker truncation cap.
+    assert len(s.workers) == 7
+    target = list(s.workers)[-1]
+    with pytest.raises(ValueError) as excinfo:
+        await c.restart_workers(workers=[target])
+    msg = str(excinfo.value).lower()
+    assert "restarting workers requires a nanny" in msg
+    assert target in msg
 
 
 @pytest.mark.slow
