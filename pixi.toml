@@ -1,12 +1,13 @@
 # This file is used by pixi-build in other projects (namely, dask/dask) 
 # to generate a conda package of distributed from git tip
 [workspace]
+requires-pixi = ">=0.72.1"
 channels = ["https://prefix.dev/conda-forge"]
 platforms = [
-    { name = "linux-64-cpu", platform = "linux-64" },
-    { name = "linux-aarch64-cpu", platform = "linux-aarch64" },
-    { name = "osx-arm64-cpu", platform = "osx-arm64" },
-    { name = "win-64-cpu", platform = "win-64" },
+    "linux-64",
+    "linux-aarch64",
+    "osx-arm64",
+    "win-64",
     { name = "linux-64-cuda", platform = "linux-64", cuda = "12" },
     { name = "linux-aarch64-cuda", platform = "linux-aarch64", cuda = "12" },
 ]
@@ -187,7 +188,7 @@ bokeh = { git = "https://github.com/bokeh/bokeh" }
 # zict = { git = "https://github.com/dask/zict" }
 
 [feature.cpu]
-platforms = ["linux-64-cpu", "linux-aarch64-cpu", "osx-arm64-cpu", "win-64-cpu"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64", "win-64"]
 
 [feature.cuda]
 channels = ["rapidsai", "https://prefix.dev/conda-forge"]
