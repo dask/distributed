@@ -586,20 +586,24 @@ class Nanny(ServerNode):
         self.status = Status.closing
         logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
 
-        await self.preloads.teardown()
+        try:
+            await self.preloads.teardown()
 
-        await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
+            await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
 
-        self.stop()
-        if self.process is not None:
-            await self.kill(timeout=timeout, reason=reason)
-
-        self.process = None
-        await self.rpc.close()
-        self.status = Status.closed
-        await super().close()
-        self.__exit_stack.__exit__(None, None, None)
-        logger.info("Nanny at %r closed.", self.address_safe)
+            self.stop()
+            if self.process is not None:
+                await self.kill(timeout=timeout, reason=reason)
+        finally:
+            # Whatever happens, e.g. a timeout while killing the worker process,
+            # the nanny must reach a terminal status; otherwise concurrent and
+            # future calls to close() would wait forever on self.finished().
+            self.process = None
+            self.status = Status.closed
+            await self.rpc.close()
+            await super().close()
+            self.__exit_stack.__exit__(None, None, None)
+            logger.info("Nanny at %r closed.", self.address_safe)
         return "OK"
 
     async def _log_event(self, topic, msg):
@@ -820,15 +824,14 @@ class WorkerProcess:
     ) -> None:
         """
         Ensure the worker process is stopped, waiting at most
-        ``timeout * 0.8`` seconds before killing it abruptly.
+        ``timeout * 0.8`` seconds before killing it abruptly; after that, wait
+        up to ``timeout`` more seconds for the killed process to be joined.
 
         When `kill` returns, the worker process has been joined.
 
-        If the worker process does not terminate within ``timeout`` seconds,
-        even after being killed, `asyncio.TimeoutError` is raised.
+        If the worker process does not terminate within ``timeout * 1.8``
+        seconds, even after being killed, `asyncio.TimeoutError` is raised.
         """
-        deadline = time() + timeout
-
         # If the process is not properly up it will not watch the closing queue
         # and we may end up leaking this process
         # Therefore wait for it to be properly started before killing it
@@ -873,7 +876,12 @@ class WorkerProcess:
                 f"Worker process still alive after {wait_timeout:.1f} seconds, killing"
             )
             await process.kill()
-            await process.join(max(0, deadline - time()))
+            # A killed process can't linger except in exceptional circumstances,
+            # e.g. it's hanging in uninterruptible I/O. However, joining it may
+            # take a substantial amount of time when the host is heavily loaded,
+            # so wait with a fresh timeout rather than with whatever is left of
+            # the original one.
+            await process.join(timeout)
         except ValueError as e:
             if "invalid operation on closed AsyncProcess" in str(e):
                 return
