@@ -586,20 +586,24 @@ class Nanny(ServerNode):
         self.status = Status.closing
         logger.info("Closing Nanny at %r. Reason: %s", self.address_safe, reason)
 
-        await self.preloads.teardown()
+        try:
+            await self.preloads.teardown()
 
-        await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
+            await asyncio.gather(*(self.plugin_remove(name) for name in self.plugins))
 
-        self.stop()
-        if self.process is not None:
-            await self.kill(timeout=timeout, reason=reason)
-
-        self.process = None
-        await self.rpc.close()
-        self.status = Status.closed
-        await super().close()
-        self.__exit_stack.__exit__(None, None, None)
-        logger.info("Nanny at %r closed.", self.address_safe)
+            self.stop()
+            if self.process is not None:
+                await self.kill(timeout=timeout, reason=reason)
+        finally:
+            # Whatever happens, e.g. a timeout while killing the worker process,
+            # the nanny must reach a terminal status; otherwise concurrent and
+            # future calls to close() would wait forever on self.finished().
+            self.process = None
+            self.status = Status.closed
+            await self.rpc.close()
+            await super().close()
+            self.__exit_stack.__exit__(None, None, None)
+            logger.info("Nanny at %r closed.", self.address_safe)
         return "OK"
 
     async def _log_event(self, topic, msg):
@@ -721,6 +725,11 @@ class WorkerProcess:
         # See note in Nanny docstring.
         os.environ.update(self.pre_spawn_env)
 
+        # If the process dies, mark_stopped() (fired by the process exit callback)
+        # releases self.init_result_q. Hold a reference so that we can read the
+        # exception message that the process may have sent just before dying.
+        init_result_q = self.init_result_q
+
         try:
             try:
                 await self.process.start()
@@ -734,7 +743,7 @@ class WorkerProcess:
                 self.status = Status.failed
 
             try:
-                msg = await self._wait_until_connected(uid)
+                msg = await self._wait_until_connected(uid, init_result_q)
             except Exception:
                 logger.error("Worker failed to connect")
                 # The process may have already exited and been released by
@@ -758,7 +767,7 @@ class WorkerProcess:
         finally:
             self.running.set()
 
-        if msg:
+        if msg and self.status == Status.starting:
             self.worker_address = msg["address"]
             self.worker_dir = msg["dir"]
             assert self.worker_address
@@ -820,15 +829,14 @@ class WorkerProcess:
     ) -> None:
         """
         Ensure the worker process is stopped, waiting at most
-        ``timeout * 0.8`` seconds before killing it abruptly.
+        ``timeout * 0.8`` seconds before killing it abruptly; after that, wait
+        up to ``timeout`` more seconds for the killed process to be joined.
 
         When `kill` returns, the worker process has been joined.
 
-        If the worker process does not terminate within ``timeout`` seconds,
-        even after being killed, `asyncio.TimeoutError` is raised.
+        If the worker process does not terminate within ``timeout * 1.8``
+        seconds, even after being killed, `asyncio.TimeoutError` is raised.
         """
-        deadline = time() + timeout
-
         # If the process is not properly up it will not watch the closing queue
         # and we may end up leaking this process
         # Therefore wait for it to be properly started before killing it
@@ -873,21 +881,34 @@ class WorkerProcess:
                 f"Worker process still alive after {wait_timeout:.1f} seconds, killing"
             )
             await process.kill()
-            await process.join(max(0, deadline - time()))
+            # A killed process can't linger except in exceptional circumstances,
+            # e.g. it's hanging in uninterruptible I/O. However, joining it may
+            # take a substantial amount of time when the host is heavily loaded,
+            # so wait with a fresh timeout rather than with whatever is left of
+            # the original one.
+            await process.join(timeout)
         except ValueError as e:
             if "invalid operation on closed AsyncProcess" in str(e):
                 return
             raise
 
-    async def _wait_until_connected(self, uid):
+    async def _wait_until_connected(self, uid, init_result_q):
         while True:
-            if self.status != Status.starting:
-                return
+            # Read the status *before* polling the queue: if the process failed to
+            # start a worker, it sends the exception through init_result_q, flushes
+            # the queue, and terminates. If mark_stopped() (fired by the process
+            # exit callback) flipped the status away from Status.starting, the
+            # message the process may have sent while dying is guaranteed to be
+            # readable now, so one last get_nowait() will not lose it.
+            stopped = self.status != Status.starting
+
             # This is a multiprocessing queue and we'd block the event loop if
             # we simply called get
             try:
-                msg = self.init_result_q.get_nowait()
+                msg = init_result_q.get_nowait()
             except Empty:
+                if stopped:
+                    return None
                 await asyncio.sleep(self._init_msg_interval)
                 continue
 

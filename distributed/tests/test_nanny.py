@@ -26,6 +26,7 @@ from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.diagnostics.plugin import NannyPlugin, WorkerPlugin
 from distributed.metrics import time
+from distributed.nanny import WorkerProcess
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
 from distributed.utils_test import (
@@ -636,6 +637,33 @@ async def test_failure_during_worker_initialization(s):
         with pytest.raises(RuntimeError):
             await Nanny(s.address, foo="bar")
     assert "Restarting worker" not in logs.getvalue()
+
+
+@gen_cluster(nthreads=[])
+async def test_worker_start_exception_after_process_exit(s, monkeypatch):
+    """If the worker fails to start, the process sends the exception to the nanny
+    through init_result_q and terminates. The exception must not be lost if the
+    nanny observes the process exit before it reads the message from the queue
+    (flaky test_local_cluster_redundant_kwarg).
+    """
+    orig_wait_until_connected = WorkerProcess._wait_until_connected
+
+    async def wait_until_connected(self, *args, **kwargs):
+        # Force mark_stopped(), fired by the process exit callback, to win the
+        # race against the polling of init_result_q
+        await self.stopped.wait()
+        return await orig_wait_until_connected(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorkerProcess, "_wait_until_connected", wait_until_connected)
+
+    with raises_with_cause(
+        RuntimeError,
+        "Nanny failed to start",
+        TypeError,
+        "unexpected keyword argument",
+    ):
+        async with Nanny(s.address, foo="bar"):
+            pass
 
 
 @gen_cluster(client=True, Worker=Nanny)

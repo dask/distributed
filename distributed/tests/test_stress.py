@@ -310,6 +310,7 @@ async def test_no_delay_during_large_transfer(c, s, w):
     client=True,
     Worker=Nanny,
     nthreads=[("", 2)] * 6,
+    timeout=120,  # Process start/stop on Windows CI can take a long time
     scheduler_kwargs={"transition_counter_max": 500_000},
     worker_kwargs={"transition_counter_max": 500_000},
 )
