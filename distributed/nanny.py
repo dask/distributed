@@ -763,10 +763,6 @@ class WorkerProcess:
         finally:
             self.running.set()
 
-        # Don't set Status.running if the process already died: mark_stopped() set
-        # the status to Status.stopped and released the queues, and overwriting it
-        # would make the next kill() crash on the released queues, leaving the
-        # Nanny stuck in Status.closing (see comment above).
         if msg and self.status == Status.starting:
             self.worker_address = msg["address"]
             self.worker_dir = msg["dir"]
