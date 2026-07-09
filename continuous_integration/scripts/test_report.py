@@ -7,6 +7,7 @@ import io
 import os
 import re
 import shelve
+import subprocess
 import sys
 import zipfile
 from collections.abc import Generator, Iterable, Iterator
@@ -14,14 +15,17 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import Any, cast
 
 import altair
-import altair_saver
 import junitparser
 import pandas
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-TOKEN = os.environ.get("GITHUB_TOKEN")
+TOKEN: str | None = None
+
+# Latest substantial change in the output format of tests.yaml
+# Disregard workflow runs older than this date.
+CUTOFF = pandas.Timestamp("2026-06-04", tz="UTC")
 
 # Mapping between a symbol (pass, fail, skip) and a color
 COLORS = {
@@ -29,6 +33,29 @@ COLORS = {
     "x": "#f2a5a5",
     "s": "#f2ef8f",
 }
+
+
+def get_token() -> str:
+    """Read the GitHub API token from the GITHUB_TOKEN environment variable,
+    falling back to the gh CLI if the variable is not set.
+    """
+    if token := os.environ.get("GITHUB_TOKEN"):
+        return token
+    try:
+        proc = subprocess.run(
+            ["gh", "auth", "token"], capture_output=True, text=True, check=True
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        raise RuntimeError(
+            "Failed to find a GitHub Token. Either set the GITHUB_TOKEN "
+            "environment variable or log into the gh CLI (`gh auth login`)."
+        ) from None
+    return proc.stdout.strip()
+
+
+def cache_name(prefix: str, repo: str) -> str:
+    """Name of the local cache database, e.g. test_report.dask__distributed.db"""
+    return f"{prefix}.{repo.replace('/', '__')}.db"
 
 
 @contextlib.contextmanager
@@ -123,7 +150,7 @@ def maybe_get_next_page_path(response: requests.Response) -> str | None:
 
 
 def get_jobs(run, session, repo):
-    with shelve.open("test_report_jobs") as cache:
+    with shelve.open(cache_name("test_report_jobs", repo)) as cache:
         url = run["jobs_url"]
         try:
             jobs = cache[url]
@@ -137,50 +164,19 @@ def get_jobs(run, session, repo):
             cache[url] = jobs
 
     df_jobs = pandas.DataFrame.from_records(jobs)
-    # Interpolate the `$TEST_ID` variable from the job name.
-    # Somehow the job ID is not part of the workflow schema and we have no other way to later join
-    # this to the JXML results.
+    df_jobs = df_jobs[df_jobs.name != "Event File"]
 
-    if repo.endswith("/dask"):
-        # example name: "test (windows-latest, 3.9)" or "test (ubuntu-latest, 3.12)"
-        df_jobs = df_jobs[~df_jobs.name.str.contains("Event File")]
-
-        def format(row):
-            return ",".join((row[1].strip(), row[2].strip(), (row[3] or "").strip()))
-
-        name_components = (
-            df_jobs[df_jobs.name.str.startswith("test")]
-            .name.str.replace("(", ",")
-            .str.replace(")", ",")
-            .str.split(",", expand=True)
-            .apply(format, axis=1)
-            .str.split(",", expand=True)
-        )
-
-        # See `Set $TEST_ID` step in `tests.yaml`
-        name_components.columns = ["OS version", "environment", "option"]
-        df_jobs["suite_name"] = name_components.iloc[:, 0].str.cat(
-            name_components.iloc[:, 1:], sep="-"
-        )
-        df_jobs["suite_name"] = df_jobs.suite_name.str.replace("--", "-")
-    else:
-        name_components = df_jobs.name.str.split("-", expand=True).dropna()
-        if len(name_components.columns) != 5:
-            raise ValueError(f"Job names must have 5 components:\n{name_components!r}")
-        name_components.columns = [
-            "OS",
-            "OS version",
-            "environment",
-            "label",
-            "partition",
-        ]
-
-        # See `Set $TEST_ID` step in `tests.yaml`
-        name_components["partition"] = name_components.partition.str.replace(" ", "")
-
-        df_jobs["suite_name"] = name_components.iloc[:, 0].str.cat(
-            name_components.iloc[:, 1:], sep="-"
-        )
+    # Reconstruct the artifact name from the job name, so that it can later be
+    # joined with the JXML results. Job names are space-separated, e.g.
+    #     ubuntu-latest py310 test-ci not ci1
+    # whereas the matching artifact is named after $TEST_ID (see the
+    # `Set $TEST_ID` step in tests.yaml), which is dash-separated and with the
+    # space removed from the partition name:
+    #     ubuntu-latest-py310-test-ci-notci1
+    # dask/dask job names are the same, minus the trailing partition.
+    df_jobs["suite_name"] = df_jobs.name.str.replace(" not ci1", " notci1").str.replace(
+        " ", "-"
+    )
     return df_jobs
 
 
@@ -191,7 +187,13 @@ def get_workflow_run_listing(
     Get a list of workflow runs from GitHub actions.
     """
     since = (pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=days)).date()
-    params = {"per_page": 100, "branch": branch, "event": event, "created": f">{since}"}
+    since = max(since, CUTOFF.date())
+    params = {
+        "per_page": 100,
+        "branch": branch,
+        "event": event,
+        "created": f">={since}",
+    }
     r = get_from_github(
         f"https://api.github.com/repos/{repo}/actions/runs",
         params=params,
@@ -229,25 +231,22 @@ def get_artifacts_for_workflow_run(
     return artifacts
 
 
-def suite_from_name(name: str, n: int | None = None) -> str:
+def suite_from_name(name: str) -> str:
     """
-    Get a test suite name from an artifact name. The artifact
-    can have matrix partitions, pytest marks, etc. Basically,
-    just lop off the front of the name to get the suite.
+    Get a test suite name from an artifact name. This is the artifact name
+    minus the trailing pytest partition (dask/distributed only), so that the
+    ci1 and notci1 partitions of the same test suite are shown on one row.
     """
-    if n is not None:
-        parts = name.split("-")
-        return "-".join(parts[:n])
-    return name
+    return re.sub(r"-(not)?ci1$", "", name)
 
 
 def download_and_parse_artifact(
-    url: str, session: requests.Session
+    url: str, repo: str, session: requests.Session
 ) -> junitparser.JUnitXml | None:
     """
     Download the artifact at the url parse it.
     """
-    with shelve.open("test_report") as cache:
+    with shelve.open(cache_name("test_report", repo)) as cache:
         try:
             xml_raw = cache[url]
         except KeyError:
@@ -257,7 +256,7 @@ def download_and_parse_artifact(
     try:
         return junitparser.JUnitXml.fromstring(xml_raw)
     except Exception:
-        # XMLs also include things like schedule which is a simple json
+        # e.g. truncated XML from a job that hit the timeout
         return None
 
 
@@ -340,6 +339,8 @@ def download_and_parse_artifacts(
             if (
                 pandas.to_datetime(r["created_at"])
                 > pandas.Timestamp.now(tz="UTC") - pandas.Timedelta(days=max_days)
+                and pandas.to_datetime(r["created_at"]) >= CUTOFF
+                and r["status"] == "completed"
                 and r["conclusion"] != "cancelled"
                 and r["name"].lower() == "tests"
             )
@@ -357,11 +358,13 @@ def download_and_parse_artifacts(
             artifacts = get_artifacts_for_workflow_run(
                 r["id"], repo=repo, session=session
             )
-            # We also upload timeout reports as artifacts, but we don't want them here.
+            # Skip artifacts that don't contain a JUnit XML report
             r["artifacts"] = [
                 a
                 for a in artifacts
-                if "timeouts" not in a["name"] and "cluster_dumps" not in a["name"]
+                if not a["expired"]
+                and a["name"] != "Event File"
+                and "cluster_dumps" not in a["name"]
             ]
 
         nartifacts = sum(len(r["artifacts"]) for r in runs)
@@ -374,20 +377,10 @@ def download_and_parse_artifacts(
             for a in r["artifacts"]:
                 url = a["archive_download_url"]
                 df: pandas.DataFrame | None
-                xml = download_and_parse_artifact(url, session=session)
+                xml = download_and_parse_artifact(url, repo=repo, session=session)
                 if xml is None:
                     continue
                 df = dataframe_from_jxml(cast(Iterable, xml))
-
-                # Needed until *-*-mindeps-numpy shows up in TEST_ID
-                a["name"] = a["name"].replace("--", "-numpy-")
-
-                # TODO: Some artifacts created w/ wrong name in dask
-                # This can be removed after ~90 days.
-                # Between time https://github.com/dask/dask/pull/10769 was merged and
-                # then https://github.com/dask/dask/pull/10781 which changed the name
-                if a["name"].startswith("test-results") and repo.endswith("/dask"):
-                    continue
 
                 # Note: we assign a column with the workflow run timestamp rather
                 # than the artifact timestamp so that artifacts triggered under
@@ -401,9 +394,7 @@ def download_and_parse_artifacts(
                 assert html_url is not None
                 df2 = df.assign(
                     name=a["name"],
-                    suite=suite_from_name(
-                        a["name"], None if repo.endswith("/dask") else 4
-                    ),
+                    suite=suite_from_name(a["name"]),
                     date=r["created_at"],
                     html_url=html_url,
                 )
@@ -413,7 +404,7 @@ def download_and_parse_artifacts(
 
                 ndownloaded += 1
                 if ndownloaded and not ndownloaded % 20:
-                    print(f"{ndownloaded}... ", end="")
+                    print(f"{ndownloaded}... ", end="", flush=True)
 
 
 def make_chart(name, df, times):
@@ -455,9 +446,10 @@ def make_chart(name, df, times):
 
 
 def main(argv: list[str] | None = None) -> None:
+    global TOKEN
+
     args = parse_args(argv)
-    if not TOKEN:
-        raise RuntimeError("Failed to find a GitHub Token")
+    TOKEN = get_token()
 
     # Note: we drop **all** tests which did not have at least <nfails> failures.
     # This is because, as nice as a block of green tests can be, there are
@@ -489,7 +481,7 @@ def main(argv: list[str] | None = None) -> None:
         total.groupby([total.file, total.test])
         .filter(lambda g: (g.status == "x").sum() >= args.nfails)
         .reset_index()
-        .assign(test=lambda df: f"{df.file}.{df.test}")
+        .assign(test=lambda df: df.file.str.cat(df.test, sep="."))
         .groupby("test")
     )
     overall = {name: grouped.get_group(name) for name in grouped.groups}
@@ -529,8 +521,7 @@ def main(argv: list[str] | None = None) -> None:
         .resolve_scale(x="shared")  # enforce aligned x axes
     )
 
-    altair_saver.save(
-        chart,
+    chart.save(
         args.output,
         embed_options={
             "renderer": "svg",  # Makes the text searchable
