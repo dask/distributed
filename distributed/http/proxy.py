@@ -97,9 +97,9 @@ except ImportError:
             self.extra = extra or {}
 
         def get(self, port, host, proxied_path):
-            worker_url = f"{host}:{port}/{proxied_path}"
+            worker_url = html.escape(f"{host}:{port}/{proxied_path}")
             msg = """
-                <p> Try navigating to <a href=http://{}>{}</a> for your worker dashboard </p>
+                <p> Try navigating to <a href="http://{}">{}</a> for your worker dashboard </p>
 
                 <p>
                 Dask tried to proxy you to that page through your
