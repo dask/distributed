@@ -3005,6 +3005,8 @@ async def test_log_remove_worker(c, s, a, b):
         "(stimulus_id='ungraceful')",
         f"Removing worker '{b.address}' caused the cluster to lose scattered "
         "data, which can't be recovered: {'z'} (stimulus_id='ungraceful')",
+        f"Worker {b.address!r} dropped unexpectedly. Interrupting 1 "
+        "processing tasks: {'y'} (stimulus_id='ungraceful')",
         "Lost all workers",
     ]
 
