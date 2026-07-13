@@ -5,16 +5,10 @@ import logging
 import pytest
 
 from distributed import Client
-from distributed.compatibility import WINDOWS
-from distributed.deploy.subprocess import (
-    SubprocessCluster,
-    SubprocessScheduler,
-    SubprocessWorker,
-)
+from distributed.deploy.subprocess import SubprocessCluster
 from distributed.utils_test import gen_test, new_config_file
 
 
-@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_basic():
     async with SubprocessCluster(
@@ -30,7 +24,6 @@ async def test_basic():
         assert "Subprocess" in repr(cluster)
 
 
-@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_n_workers():
     async with SubprocessCluster(
@@ -44,7 +37,6 @@ async def test_n_workers():
         assert "Subprocess" in repr(cluster)
 
 
-@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_scale_up_and_down():
     async with SubprocessCluster(
@@ -66,7 +58,6 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
-@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_raise_if_scheduler_fails_to_start():
     with pytest.raises(RuntimeError, match="Scheduler failed to start"):
@@ -74,7 +65,6 @@ async def test_raise_if_scheduler_fails_to_start():
             pass
 
 
-@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @pytest.mark.slow
 @gen_test()
 async def test_subprocess_cluster_does_not_depend_on_logging():
@@ -87,17 +77,3 @@ async def test_subprocess_cluster_does_not_depend_on_logging():
         ):
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
-
-
-@pytest.mark.skipif(
-    not WINDOWS, reason="Windows-specific error testing (distributed#7434)"
-)
-def test_raise_on_windows():
-    with pytest.raises(RuntimeError, match="not support Windows"):
-        SubprocessCluster()
-
-    with pytest.raises(RuntimeError, match="not support Windows"):
-        SubprocessScheduler()
-
-    with pytest.raises(RuntimeError, match="not support Windows"):
-        SubprocessWorker(scheduler="tcp://127.0.0.1:8786")

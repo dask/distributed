@@ -18,7 +18,6 @@ import toolz
 
 from dask.system import CPU_COUNT
 
-from distributed.compatibility import WINDOWS
 from distributed.deploy.spec import ProcessInterface, SpecCluster
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.utils import Deadline
@@ -31,9 +30,6 @@ class Subprocess(ProcessInterface, abc.ABC):
     process: asyncio.subprocess.Process | None
 
     def __init__(self):
-        if WINDOWS:
-            # FIXME: distributed#7434
-            raise RuntimeError("Subprocess does not support Windows.")
         self.process = None
         super().__init__()
 
@@ -233,9 +229,6 @@ def SubprocessCluster(
 
     >>> cluster.scale(3)  # doctest: +SKIP
     """
-    if WINDOWS:
-        # FIXME: distributed#7434
-        raise RuntimeError("SubprocessCluster does not support Windows.")
     if not host:
         host = "127.0.0.1"
     worker_kwargs = worker_kwargs or {}
