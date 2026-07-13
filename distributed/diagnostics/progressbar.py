@@ -337,8 +337,9 @@ class MultiProgressWidget(MultiProgressBar):
         **kwargs,
     ):
         super().__init__(keys, scheduler, **kwargs)
-        from ipywidgets import VBox
+        from ipywidgets import HTML, VBox
 
+        self.elapsed_time = HTML("")
         self.widget = VBox([])
 
     def make_widget(self, all):
