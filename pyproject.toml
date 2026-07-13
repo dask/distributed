@@ -29,7 +29,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click >= 8.0",
     "cloudpickle >= 3.0.0",
-    "dask >=2026.7.0,<2026.7.1",
+    "dask >=2026.7.1,<2026.7.2",
     "jinja2 >= 2.10.3",
     "locket >= 1.0.0",
     "msgpack >= 1.0.2",
