@@ -5188,3 +5188,138 @@ async def test_data_producers(c, s, a):
         sum([s.is_rootish(v) and v.run_spec.data_producer for v in s.tasks.values()])
         == 2
     )
+
+
+@gen_cluster(client=True)
+async def test_log_remove_worker(c, s, a, b):
+    # Computed task
+    x = c.submit(inc, 1, key="x", workers=a.address)
+    await x
+    ev = Event()
+    # Processing task
+    y = c.submit(
+        lambda ev: ev.wait(), ev, key="y", workers=a.address, allow_other_workers=True
+    )
+    await wait_for_state("y", "processing", s)
+    # Scattered task
+    z = await c.scatter({"z": 3}, workers=a.address)
+
+    s._broker.truncate()
+
+    with captured_logger("distributed.scheduler", level=logging.INFO) as log:
+        # Successful graceful shutdown
+        await s.retire_workers([a.address], stimulus_id="graceful")
+        # Refuse to retire gracefully as there's nowhere to put x and z
+        await s.retire_workers([b.address], stimulus_id="graceful_abort")
+        await asyncio.sleep(0.2)
+        # Ungraceful shutdown
+        await s.remove_worker(b.address, stimulus_id="ungraceful")
+        await asyncio.sleep(0.2)
+    await ev.set()
+
+    assert log.getvalue().splitlines() == [
+        # Successful graceful
+        f"Retire worker addresses (stimulus_id='graceful') ['{a.address}']",
+        f"Remove worker addr: {a.address} name: {a.name} (stimulus_id='graceful')",
+        f"Retired worker '{a.address}' (stimulus_id='graceful')",
+        # Aborted graceful
+        f"Retire worker addresses (stimulus_id='graceful_abort') ['{b.address}']",
+        f"Could not retire worker '{b.address}': unique data could not be "
+        "moved to any other worker (stimulus_id='graceful_abort')",
+        # Ungraceful
+        f"Remove worker addr: {b.address} name: {b.name} (stimulus_id='ungraceful')",
+        f"Removing worker '{b.address}' caused the cluster to lose already "
+        "computed task(s), which will be recomputed elsewhere: {'x'} "
+        "(stimulus_id='ungraceful')",
+        f"Removing worker '{b.address}' caused the cluster to lose scattered "
+        "data, which can't be recovered: {'z'} (stimulus_id='ungraceful')",
+        f"Worker {b.address!r} dropped unexpectedly. Interrupting 1 "
+        "processing tasks: {'y'} (stimulus_id='ungraceful')",
+        "Lost all workers",
+    ]
+
+    events = {topic: [ev for _, ev in evs] for topic, evs in s.get_events().items()}
+    for evs in events.values():
+        for ev in evs:
+            if ev.get("action", None) == "retire-workers":
+                for k in ("retired", "could-not-retire"):
+                    ev[k] = {addr: "snip" for addr in ev[k]}
+            if "stimulus_id" in ev:  # Strip timestamp
+                ev["stimulus_id"] = ev["stimulus_id"].rsplit("-", 1)[0]
+
+    assert events == {
+        a.address: [
+            {
+                "action": "worker-status-change",
+                "prev-status": "running",
+                "status": "closing_gracefully",
+                "stimulus_id": "graceful",
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": set(),
+                "lost-scattered-tasks": set(),
+                "processing-tasks": {"y"},
+                "expected": True,
+                "stimulus_id": "graceful",
+            },
+            {"action": "retired", "stimulus_id": "graceful"},
+        ],
+        b.address: [
+            {
+                "action": "worker-status-change",
+                "prev-status": "running",
+                "status": "closing_gracefully",
+                "stimulus_id": "graceful_abort",
+            },
+            {"action": "could-not-retire", "stimulus_id": "graceful_abort"},
+            {
+                "action": "worker-status-change",
+                "prev-status": "closing_gracefully",
+                "status": "running",
+                "stimulus_id": "worker-status-change",
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": {"x"},
+                "lost-scattered-tasks": {"z"},
+                "processing-tasks": {"y"},
+                "expected": False,
+                "stimulus_id": "ungraceful",
+            },
+            {"action": "closing-worker", "reason": "scheduler-remove-worker"},
+        ],
+        "all": [
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": set(),
+                "lost-scattered-tasks": set(),
+                "processing-tasks": {"y"},
+                "expected": True,
+                "stimulus_id": "graceful",
+                "worker": a.address,
+            },
+            {
+                "action": "retire-workers",
+                "stimulus_id": "graceful",
+                "retired": {a.address: "snip"},
+                "could-not-retire": {},
+            },
+            {
+                "action": "retire-workers",
+                "stimulus_id": "graceful_abort",
+                "retired": {},
+                "could-not-retire": {b.address: "snip"},
+            },
+            {
+                "action": "remove-worker",
+                "lost-computed-tasks": {"x"},
+                "lost-scattered-tasks": {"z"},
+                "processing-tasks": {"y"},
+                "expected": False,
+                "stimulus_id": "ungraceful",
+                "worker": b.address,
+            },
+        ],
+        "worker-get-client": [{"client": c.id, "timeout": 5, "worker": b.address}],
+    }
