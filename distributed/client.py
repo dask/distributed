@@ -774,7 +774,11 @@ async def done_callback(future, callback):
     """
     while future.status == "pending":
         await future._state.wait()
-    callback(future)
+    try:
+        callback(future)
+    except RuntimeError as e:
+        if "shutdown" not in str(e) and "interpreter" not in str(e):
+            raise
 
 
 class AllExit(Exception):
