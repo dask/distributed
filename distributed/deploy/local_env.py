@@ -1,14 +1,14 @@
 import asyncio
 import logging
-from typing import List, Union
 
 import dask
 import dask.config
 
-from ..core import Status
-from ..scheduler import Scheduler as _Scheduler
-from ..utils import cli_keywords
-from ..worker import Worker as _Worker
+from distributed.core import Status
+from distributed.scheduler import Scheduler as _Scheduler
+from distributed.utils import cli_keywords
+from distributed.worker import Worker as _Worker
+
 from .spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class Process(ProcessInterface):
         await super().close()
 
     def __repr__(self):
-        return "<LocalEnv %s: status=%s>" % (type(self).__name__, self.status)
+        return f"<LocalEnv {type(self).__name__}: status={self.status}>"
 
     async def _set_env_helper(self):
         """Helper function to locate existing dask internal config for the remote
@@ -48,18 +48,14 @@ class Process(ProcessInterface):
         proc = await asyncio.create_subprocess_shell("uname", **self.connect_options)
         await proc.communicate()
         if proc.returncode == 0:
-            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                dask.config.serialize(dask.config.global_config)
-            )
+            set_env = f'env DASK_INTERNAL_INHERIT_CONFIG="{dask.config.serialize(dask.config.global_config)}"'
         else:
             proc = await asyncio.create_subprocess_shell(
                 "cmd /c ver", **self.connect_options
             )
             await proc.communicate()
             if proc.returncode == 0:
-                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    dask.config.serialize(dask.config.global_config)
-                )
+                set_env = f"set DASK_INTERNAL_INHERIT_CONFIG={dask.config.serialize(dask.config.global_config)} &&"
             else:
                 name = self.__class__.__name__
                 emsg = f"{name} failed to set DASK_INTERNAL_INHERIT_CONFIG variable"
@@ -188,9 +184,9 @@ class Scheduler(Process):
 def LocalEnvCluster(
     python_executable: str,
     n_workers: int = 1,
-    connect_options: Union[List[dict], dict] = {},
-    worker_options: dict = {},
-    scheduler_options: dict = {},
+    connect_options: list[dict] | dict | None = None,
+    worker_options: dict | None = None,
+    scheduler_options: dict | None = None,
     worker_module: str = "distributed.cli.dask_worker",
     **kwargs,
 ):
@@ -247,6 +243,12 @@ def LocalEnvCluster(
     dask.distributed.Worker
     asyncio.create_subprocess_shell
     """
+    if scheduler_options is None:
+        scheduler_options = {}
+    if worker_options is None:
+        worker_options = {}
+    if connect_options is None:
+        connect_options = {}
     scheduler = {
         "cls": Scheduler,
         "options": {

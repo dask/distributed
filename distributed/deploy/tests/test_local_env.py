@@ -1,5 +1,4 @@
 import sys
-import asyncio
 
 import pytest
 
@@ -9,6 +8,7 @@ from distributed import Client
 from distributed.core import Status
 from distributed.deploy.local_env import LocalEnvCluster
 from distributed.utils_test import gen_test
+
 
 @gen_test()
 async def test_basic():
