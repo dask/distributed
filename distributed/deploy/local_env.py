@@ -68,7 +68,7 @@ class Process(ProcessInterface):
         while True:
             line = await self.proc.stderr.readline()
             if not line.decode("ascii").strip():
-                raise Exception(f"{name} failed to start")
+                raise RuntimeError(f"{name} failed to start")
             else:
                 line = line.decode("ascii").strip()
             logger.info(line)

@@ -50,7 +50,7 @@ async def test_multiple_workers():
 
 @gen_test()
 async def test_bad_executable():
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         async with LocalEnvCluster(
             "/foo/bar/baz/python",
             asynchronous=True,
