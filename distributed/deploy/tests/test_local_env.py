@@ -1,4 +1,5 @@
 import sys
+import asyncio
 
 import pytest
 
@@ -7,9 +8,9 @@ import dask
 from distributed import Client
 from distributed.core import Status
 from distributed.deploy.local_env import LocalEnvCluster
+from distributed.utils_test import gen_test
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_basic():
     async with LocalEnvCluster(
         sys.executable,
@@ -23,8 +24,7 @@ async def test_basic():
         assert "LocalEnv" in repr(cluster)
     assert cluster.status == Status.closed
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_job_submission():
     async with LocalEnvCluster(
         sys.executable,
@@ -36,8 +36,7 @@ async def test_job_submission():
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_multiple_workers():
     n_workers = 2
     async with LocalEnvCluster(
@@ -49,8 +48,7 @@ async def test_multiple_workers():
     ) as cluster:
         assert len(cluster.workers) == n_workers
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_bad_executable():
     with pytest.raises(Exception):
         async with LocalEnvCluster(
@@ -62,8 +60,7 @@ async def test_bad_executable():
             assert cluster
         cluster.close()
 
-
-@pytest.mark.asyncio
+@gen_test()
 async def test_set_env():
     value = 100
 
