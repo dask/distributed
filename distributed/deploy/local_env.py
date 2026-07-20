@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import Any as AnyType
 
 import dask
 import dask.config
@@ -31,7 +32,10 @@ class Process(ProcessInterface):
         await super().start()
 
     async def close(self):
-        self.proc.kill()
+        try:
+            self.proc.kill()
+        except ProcessLookupError:
+            pass
         await super().close()
 
     def __repr__(self):
@@ -104,17 +108,17 @@ class Worker(Process):
         self,
         scheduler: str,
         python_executable: str,
-        connect_options: dict,
-        kwargs: dict,
-        worker_module="distributed.cli.dask_worker",
+        connect_options: dict[str, AnyType] | None = None,
+        worker_module: str = "distributed.cli.dask_worker",
         name=None,
+        kwargs: dict[str, AnyType] | None = None,
     ):
         super().__init__()
 
         self.scheduler = scheduler
         self.python_executable = python_executable
         self.connect_options = connect_options
-        self.kwargs = kwargs
+        self.kwargs = kwargs or {}
         self.worker_module = worker_module
         self.name = name
 
@@ -133,6 +137,7 @@ class Worker(Process):
             ]
             + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
         )
+
         self.proc = await asyncio.create_subprocess_shell(
             cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
         )
@@ -156,11 +161,12 @@ class Scheduler(Process):
         dask.distributed.Scheduler class
     """
 
-    def __init__(self, python_executable: str, connect_options: dict, kwargs: dict):
+    def __init__(self, python_executable: str, connect_options: dict, kwargs: dict[str, AnyType] | None = None,
+):
         super().__init__()
 
         self.python_executable = python_executable
-        self.kwargs = kwargs
+        self.kwargs = kwargs or {}
         self.connect_options = connect_options
 
     async def start(self):
@@ -172,6 +178,7 @@ class Scheduler(Process):
             [set_env, self.python_executable, "-m", "distributed.cli.dask_scheduler"]
             + cli_keywords(self.kwargs, cls=_Scheduler)
         )
+
         self.proc = await asyncio.create_subprocess_shell(
             cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
         )
