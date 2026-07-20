@@ -24,6 +24,7 @@ async def test_basic():
         assert "LocalEnv" in repr(cluster)
     assert cluster.status == Status.closed
 
+
 @gen_test()
 async def test_job_submission():
     async with LocalEnvCluster(
@@ -35,6 +36,7 @@ async def test_job_submission():
         async with Client(cluster, asynchronous=True) as client:
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
+
 
 @gen_test()
 async def test_multiple_workers():
@@ -48,6 +50,7 @@ async def test_multiple_workers():
     ) as cluster:
         assert len(cluster.workers) == n_workers
 
+
 @gen_test()
 async def test_bad_executable():
     with pytest.raises(RuntimeError):
@@ -59,6 +62,7 @@ async def test_bad_executable():
         ) as cluster:
             assert cluster
         cluster.close()
+
 
 @gen_test()
 async def test_set_env():
