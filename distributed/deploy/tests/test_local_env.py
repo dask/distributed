@@ -5,11 +5,13 @@ import pytest
 import dask
 
 from distributed import Client
+from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.deploy.local_env import LocalEnvCluster
 from distributed.utils_test import gen_test
 
 
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_basic():
     async with LocalEnvCluster(

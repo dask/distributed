@@ -5,6 +5,7 @@ from typing import Any as AnyType
 import dask
 import dask.config
 
+from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.scheduler import Scheduler as _Scheduler
 from distributed.utils import cli_keywords
@@ -15,7 +16,7 @@ from .spec import ProcessInterface, SpecCluster
 logger = logging.getLogger(__name__)
 
 
-class Process(ProcessInterface):
+class LocalEnvProcess(ProcessInterface):
     """A superclass for Workers and Nannies run by a specified Python executable
 
     See Also
@@ -25,6 +26,10 @@ class Process(ProcessInterface):
     """
 
     def __init__(self, **kwargs):
+        if WINDOWS:
+            raise RuntimeError(
+                "LocalEnvProcess relies on subprocesses, which are not supported on Windows."
+            )
         self.proc = None
         super().__init__(**kwargs)
 
@@ -84,7 +89,7 @@ class Process(ProcessInterface):
         logger.debug("%s", line)
 
 
-class Worker(Process):
+class LocalEnvWorker(LocalEnvProcess):
     """A Remote Dask Worker run by a specified Python executable
 
     Parameters
@@ -147,7 +152,7 @@ class Worker(Process):
         await super().start()
 
 
-class Scheduler(Process):
+class LocalEnvScheduler(LocalEnvProcess):
     """A Remote Dask Scheduler run by a specified Python executable
 
     Parameters
@@ -256,7 +261,7 @@ def LocalEnvCluster(
     """
 
     scheduler = {
-        "cls": Scheduler,
+        "cls": LocalEnvScheduler,
         "options": {
             "python_executable": python_executable,
             "connect_options": connect_options,
@@ -265,7 +270,7 @@ def LocalEnvCluster(
     }
     workers = {
         i: {
-            "cls": Worker,
+            "cls": LocalEnvWorker,
             "options": {
                 "python_executable": python_executable,
                 "connect_options": connect_options,
