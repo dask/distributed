@@ -110,7 +110,7 @@ class Worker(Process):
         python_executable: str,
         connect_options: dict[str, AnyType] | None = None,
         worker_module: str = "distributed.cli.dask_worker",
-        name=None,
+        name: None = None,
         kwargs: dict[str, AnyType] | None = None,
     ):
         super().__init__()
@@ -199,8 +199,8 @@ def LocalEnvCluster(
     worker_options: dict | None = None,
     scheduler_options: dict | None = None,
     worker_module: str = "distributed.cli.dask_worker",
-    **kwargs,
-):
+    **kwargs: AnyType,
+) -> SpecCluster:
     """Deploy a Dask cluster that utilises a different Python executable
 
     The LocalEnvCluster function deploys a Dask Scheduler and Workers for you on
