@@ -161,8 +161,12 @@ class Scheduler(Process):
         dask.distributed.Scheduler class
     """
 
-    def __init__(self, python_executable: str, connect_options: dict, kwargs: dict[str, AnyType] | None = None,
-):
+    def __init__(
+        self,
+        python_executable: str,
+        connect_options: dict,
+        kwargs: dict[str, AnyType] | None = None,
+    ):
         super().__init__()
 
         self.python_executable = python_executable

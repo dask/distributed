@@ -57,7 +57,11 @@ async def test_bad_executable():
         async with LocalEnvCluster(
             "/foo/bar/baz/python",
             asynchronous=True,
-            scheduler_options={"idle_timeout": "5s", "port": 0, "dashboard_address": ":0"},
+            scheduler_options={
+                "idle_timeout": "5s",
+                "port": 0,
+                "dashboard_address": ":0",
+            },
             worker_options={"death_timeout": "5s"},
         ) as cluster:
             assert cluster
@@ -75,7 +79,11 @@ async def test_set_env():
         async with LocalEnvCluster(
             sys.executable,
             asynchronous=True,
-            scheduler_options={"idle_timeout": "5s", "port": 0, "dashboard_address": ":0"},
+            scheduler_options={
+                "idle_timeout": "5s",
+                "port": 0,
+                "dashboard_address": ":0",
+            },
             worker_options={"death_timeout": "5s"},
         ) as cluster:
             async with Client(cluster, asynchronous=True) as client:
