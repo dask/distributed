@@ -117,8 +117,8 @@ class Worker(Process):
 
         self.scheduler = scheduler
         self.python_executable = python_executable
-        self.connect_options = connect_options
-        self.kwargs = kwargs or {}
+        self.connect_options = connect_options if connect_options is not None else {}
+        self.kwargs = kwargs if kwargs is not None else {}
         self.worker_module = worker_module
         self.name = name
 
@@ -170,8 +170,8 @@ class Scheduler(Process):
         super().__init__()
 
         self.python_executable = python_executable
-        self.kwargs = kwargs or {}
-        self.connect_options = connect_options
+        self.kwargs = kwargs if kwargs is not None else {}
+        self.connect_options = connect_options if connect_options is not None else {}
 
     async def start(self):
         logger.debug("Created Scheduler")
@@ -254,12 +254,7 @@ def LocalEnvCluster(
     dask.distributed.Worker
     asyncio.create_subprocess_shell
     """
-    if scheduler_options is None:
-        scheduler_options = {}
-    if worker_options is None:
-        worker_options = {}
-    if connect_options is None:
-        connect_options = {}
+
     scheduler = {
         "cls": Scheduler,
         "options": {
