@@ -142,6 +142,7 @@ filterwarnings = [
     '''ignore:unclosed transport <_SelectorSocketTransport.*:ResourceWarning''',
     '''ignore:unclosed transport <asyncio\.sslproto\..*:ResourceWarning''',
     '''ignore:unclosed cluster SSHCluster.*:ResourceWarning''',
+    '''ignore:unclosed cluster LocalEnvCluster.*:ResourceWarning''',
     '''ignore:unclosed transport <_UnixReadPipeTransport.*:ResourceWarning''',
     '''ignore:unclosed transport <_UnixSubprocessTransport.*:ResourceWarning''',
     '''ignore:Couldn't detect a suitable IP address for reaching '2001.4860.4860..8888', defaulting to hostname. \[Errno 65\] No route to host:RuntimeWarning''',
