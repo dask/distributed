@@ -59,7 +59,7 @@ def set_tcp_timeout(comm):
     """
     Set kernel-level TCP timeout on the stream.
     """
-    if comm.closed():
+    if comm.closed() or comm.socket.family is socket.AF_UNIX:
         return
 
     timeout = dask.config.get("distributed.comm.timeouts.tcp")
@@ -124,7 +124,10 @@ def get_stream_address(comm):
     if comm.closed():
         raise CommClosedError()
 
-    return unparse_host_port(*comm.socket.getsockname()[:2])
+    if comm.socket.family is socket.AF_UNIX:
+        return comm.socket.getsockname() or comm.socket.getpeername()
+    else:
+        return unparse_host_port(*comm.socket.getsockname()[:2])
 
 
 def convert_stream_closed_error(obj, exc):
@@ -567,6 +570,7 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             raise FatalCommClosedError() from err
 
         local_address = self.prefix + get_stream_address(stream)
+
         comm = self.comm_class(
             stream, local_address, self.prefix + address, deserialize
         )
