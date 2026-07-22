@@ -26,7 +26,7 @@ async def test_basic():
         assert "LocalEnv" in repr(cluster)
     assert cluster.status == Status.closed
 
-
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_job_submission():
     async with LocalEnvCluster(
@@ -39,7 +39,7 @@ async def test_job_submission():
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
 
-
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_multiple_workers():
     n_workers = 2
@@ -52,7 +52,7 @@ async def test_multiple_workers():
     ) as cluster:
         assert len(cluster.workers) == n_workers
 
-
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_bad_executable():
     with pytest.raises(RuntimeError):
@@ -69,7 +69,7 @@ async def test_bad_executable():
             assert cluster
         cluster.close()
 
-
+@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_set_env():
     value = 100
