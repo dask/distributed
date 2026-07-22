@@ -58,17 +58,8 @@ class LocalEnvProcess(ProcessInterface):
         await proc.communicate()
         if proc.returncode == 0:
             set_env = f'env DASK_INTERNAL_INHERIT_CONFIG="{dask.config.serialize(dask.config.global_config)}"'
-        else:
-            proc = await asyncio.create_subprocess_shell(
-                "cmd /c ver", **self.connect_options
-            )
-            await proc.communicate()
-            if proc.returncode == 0:
-                set_env = f"set DASK_INTERNAL_INHERIT_CONFIG={dask.config.serialize(dask.config.global_config)} &&"
-            else:
-                name = self.__class__.__name__
-                emsg = f"{name} failed to set DASK_INTERNAL_INHERIT_CONFIG variable"
-                raise Exception(emsg)
+        else: # pragma: nocover
+            raise RuntimeError(f"{self.__class__.__name__} failed to set DASK_INTERNAL_INHERIT_CONFIG variable")
         return set_env
 
     async def _get_address(self, search_str):
