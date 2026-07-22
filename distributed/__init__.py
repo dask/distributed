@@ -36,6 +36,7 @@ from distributed.core import Status, connect, rpc
 from distributed.deploy import (
     Adaptive,
     LocalCluster,
+    LocalEnvCluster,
     SpecCluster,
     SSHCluster,
     SubprocessCluster,
