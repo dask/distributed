@@ -13,7 +13,11 @@ import dask
 from dask.utils import parse_timedelta
 
 from distributed.comm import registry
-from distributed.comm.addressing import get_address_host, parse_address, resolve_address
+from distributed.comm.addressing import (
+    get_address_host,
+    parse_address,
+    resolve_address,
+)
 from distributed.metrics import time
 from distributed.protocol.compression import get_compression_settings
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
@@ -321,6 +325,7 @@ async def connect(
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
     connector = backend.get_connector()
+
     comm = None
 
     start = time()

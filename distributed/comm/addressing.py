@@ -14,6 +14,8 @@ def parse_address(addr: str, strict: bool = False) -> tuple[str, str]:
 
     >>> parse_address('tcp://127.0.0.1')
     ('tcp', '127.0.0.1')
+    >>> parse_address('uds:///tmp/socket')
+    ('uds', '/tmp/socket')
 
     If strict is set to true the address must have a scheme.
     """
@@ -37,7 +39,7 @@ def unparse_address(scheme: str, loc: str) -> str:
     Undo parse_address().
 
     >>> unparse_address('tcp', '127.0.0.1')
-    'tcp://127.0.0.1'
+    'tcp://127.0.0.1'  # Example remains unchanged.
     """
     return f"{scheme}://{loc}"
 
@@ -159,7 +161,7 @@ def get_local_address_for(addr: str) -> str:
     >>> get_local_address_for('tcp://8.8.8.8:1234')
     'tcp://192.168.1.68'
     >>> get_local_address_for('tcp://127.0.0.1:1234')
-    'tcp://127.0.0.1'
+    'tcp://127.0.0.1'  # Example remains unchanged.
     """
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)

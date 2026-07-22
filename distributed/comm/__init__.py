@@ -17,10 +17,11 @@ from distributed.comm.utils import get_tcp_server_address, get_tcp_server_addres
 
 
 def _register_transports():
-    from distributed.comm import inproc, tcp, ws
+    from distributed.comm import inproc, tcp, uds, ws
 
     backends["tcp"] = tcp.TCPBackend()
     backends["tls"] = tcp.TLSBackend()
+    backends["uds"] = uds.UDSBackend()
 
     try:
         # If `distributed-ucxx` is installed, it takes over the protocol="ucx" support
