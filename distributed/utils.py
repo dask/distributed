@@ -1524,6 +1524,9 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
     [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
     """
 
+    if isinstance(addrs, str) and os.path.isabs(addrs):  # unix socket
+        return [{"address": addrs, "port": 0}]
+
     if default_listen_ip == "0.0.0.0":
         default_listen_ip = ""  # for IPV6
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import ssl
 import warnings
 import weakref
 from contextlib import suppress
 
 import tlz
+import tornado.netutil as netutil
 from tornado.httpserver import HTTPServer
 
 import dask
@@ -160,20 +162,30 @@ class ServerNode(Server):
 
             change_port = False
             retries_left = 3
-            while True:
-                try:
-                    if not change_port:
-                        self.http_server.listen(**http_address)
-                    else:
-                        self.http_server.listen(**tlz.merge(http_address, {"port": 0}))
-                    break
-                except Exception:
-                    change_port = True
-                    retries_left = retries_left - 1
-                    if retries_left < 1:
-                        raise
 
-        bound_addresses = get_tcp_server_addresses(self.http_server)
+            if os.path.isabs(http_address["address"]):
+                dashboard_socket = netutil.bind_unix_socket(
+                    http_address["address"], mode=0o666
+                )
+                self.http_server.add_socket(dashboard_socket)
+                bound_addresses = [http_address["address"]]
+            else:
+                while True:
+                    try:
+                        if not change_port:
+                            self.http_server.listen(**http_address)
+                        else:
+                            self.http_server.listen(
+                                **tlz.merge(http_address, {"port": 0})
+                            )
+                        break
+                    except Exception:
+                        change_port = True
+                        retries_left = retries_left - 1
+                        if retries_left < 1:
+                            raise
+
+                bound_addresses = get_tcp_server_addresses(self.http_server)
 
         # If more than one address is configured we just use the first here
         # Socket addresses representation: https://docs.python.org/3/library/socket.html#socket-families
