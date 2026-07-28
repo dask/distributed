@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class UnixSocketResolver(netutil.Resolver):
-    """A resolver for Unix Domain Sockets. Always returns socket type and pathname."""
+    """A resolver for Unix Domain Sockets. This is used by tornado to lookup hostnames. For UDS, this should always return socket type and pathname (instead of a real DNS lookup)."""
 
     async def resolve(
         self, host: str, port: int, family: socket.AddressFamily = socket.AF_UNSPEC
@@ -35,6 +35,8 @@ class UnixSocketResolver(netutil.Resolver):
 
 
 class UDSListener(TCPListener):
+    """A Listener for Unix Domain Sockets, based on the TCPListener class. Ensures the address is an absolute path instead of a hostname:port string."""
+
     prefix = "unix://"
     comm_class = TCP
 
@@ -60,6 +62,9 @@ class UDSListener(TCPListener):
         return (self.bound_address, 0)  # fake port 0
 
     async def _handle_stream(self, stream, address):
+        """
+        We override the super class's _handle_stream to pass in 0 as a fake port (it will be ignored anyway).
+        """
         return await super()._handle_stream(stream, (self.bound_address, 0))
 
     async def start(self):
@@ -84,7 +89,6 @@ class UDSListener(TCPListener):
             try:
                 os.remove(self.bound_address)
             except OSError as e:
-                print(f"FAILED {e}")
                 logger.debug(
                     f"Attempted removal of socket at {self.bound_address} failed with error: {e}"
                 )
@@ -98,6 +102,8 @@ class UDSConnector(TCPConnector):
 
 
 class UDSBackend(BaseTCPBackend):
+    """A Backend for Unix Domain Sockets. It overrides the TCP class's functions for parsing addresses, since UDS does not require port numbers."""
+
     _connector_class = UDSConnector
     _listener_class = UDSListener
 
