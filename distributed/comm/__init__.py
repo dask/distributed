@@ -14,6 +14,7 @@ from distributed.comm.addressing import (
 from distributed.comm.core import Comm, CommClosedError, connect, listen
 from distributed.comm.registry import backends
 from distributed.comm.utils import get_tcp_server_address, get_tcp_server_addresses
+from distributed.compatibility import WINDOWS
 
 
 def _register_transports():
@@ -21,7 +22,8 @@ def _register_transports():
 
     backends["tcp"] = tcp.TCPBackend()
     backends["tls"] = tcp.TLSBackend()
-    backends["unix"] = uds.UDSBackend()
+    if not WINDOWS:
+        backends["unix"] = uds.UDSBackend()
 
     try:
         # If `distributed-ucxx` is installed, it takes over the protocol="ucx" support
