@@ -25,7 +25,7 @@ from distributed.comm import (
 )
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tcp import get_stream_address
-from distributed.compatibility import asyncio_run
+from distributed.compatibility import WINDOWS, asyncio_run
 from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
@@ -291,6 +291,7 @@ async def test_tcp_specific(tcp):
     assert set(l) == {1234} | set(range(N))
 
 
+@pytest.mark.skipif(WINDOWS, reason="No unix sockets on Windows")
 @gen_test()
 async def test_uds_specific(uds):
     """
