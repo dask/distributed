@@ -39,7 +39,7 @@ def unparse_address(scheme: str, loc: str) -> str:
     Undo parse_address().
 
     >>> unparse_address('tcp', '127.0.0.1')
-    'tcp://127.0.0.1'  # Example remains unchanged.
+    'tcp://127.0.0.1'
     """
     return f"{scheme}://{loc}"
 
@@ -161,7 +161,7 @@ def get_local_address_for(addr: str) -> str:
     >>> get_local_address_for('tcp://8.8.8.8:1234')
     'tcp://192.168.1.68'
     >>> get_local_address_for('tcp://127.0.0.1:1234')
-    'tcp://127.0.0.1'  # Example remains unchanged.
+    'tcp://127.0.0.1'
     """
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
