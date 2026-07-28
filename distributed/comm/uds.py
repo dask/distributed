@@ -11,7 +11,6 @@ from tornado.tcpserver import TCPServer
 
 import dask
 
-from distributed.comm.registry import backends
 from distributed.comm.tcp import (
     MAX_BUFFER_SIZE,
     TCP,
@@ -36,7 +35,7 @@ class UnixSocketResolver(netutil.Resolver):
 
 
 class UDSListener(TCPListener):
-    prefix = "uds://"
+    prefix = "unix://"
     comm_class = TCP
 
     def __init__(
@@ -94,7 +93,7 @@ class UDSListener(TCPListener):
 class UDSConnector(TCPConnector):
     client: ClassVar[TCPClient] = TCPClient(resolver=UnixSocketResolver())
 
-    prefix = "uds://"
+    prefix = "unix://"
     comm_class = TCP
 
 
@@ -107,6 +106,3 @@ class UDSBackend(BaseTCPBackend):
 
     def resolve_address(self, loc):
         return loc
-
-
-backends["uds"] = UDSBackend()

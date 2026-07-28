@@ -182,7 +182,7 @@ def test_get_address_host(tcp):
 
     assert f("tcp://127.0.0.1:123") == "127.0.0.1"
     assert f("inproc://%s/%d/123" % (get_ip(), os.getpid())) == get_ip()
-    assert f("uds://%2Ftmp%2Fdask.sock") == "%2Ftmp%2Fdask.sock"
+    assert f("unix://%2Ftmp%2Fdask.sock") == "%2Ftmp%2Fdask.sock"
 
 
 def test_resolve_address(tcp):
@@ -204,7 +204,7 @@ def test_resolve_address(tcp):
     assert f("tcp://localhost:456") == "tcp://127.0.0.1:456"
     assert f("tls://localhost:456") == "tls://127.0.0.1:456"
 
-    assert f("uds://%2Ftmp%2Fdask.sock") == "uds://%2Ftmp%2Fdask.sock"
+    assert f("unix://%2Ftmp%2Fdask.sock") == "unix://%2Ftmp%2Fdask.sock"
 
 
 def test_get_local_address_for(tcp):
@@ -298,7 +298,7 @@ async def test_uds_specific(uds):
     """
 
     async def handle_comm(comm):
-        assert comm.peer_address == (f"uds://{host}:0")
+        assert comm.peer_address == (f"unix://{host}:0")
         assert comm.extra_info == {}
         msg = await comm.read()
         msg["op"] = "pong"
@@ -315,7 +315,7 @@ async def test_uds_specific(uds):
 
     async def client_communicate(key, delay=0):
         comm = await connect(listener.contact_address)
-        assert comm.peer_address == f"uds://{host}:0"
+        assert comm.peer_address == f"unix://{host}:0"
         assert comm.extra_info == {}
         await comm.write({"op": "ping", "data": key})
         if delay:

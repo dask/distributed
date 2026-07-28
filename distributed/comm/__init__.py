@@ -21,7 +21,7 @@ def _register_transports():
 
     backends["tcp"] = tcp.TCPBackend()
     backends["tls"] = tcp.TLSBackend()
-    backends["uds"] = uds.UDSBackend()
+    backends["unix"] = uds.UDSBackend()
 
     try:
         # If `distributed-ucxx` is installed, it takes over the protocol="ucx" support
