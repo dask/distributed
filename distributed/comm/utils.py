@@ -127,9 +127,9 @@ def ensure_concrete_host(host, default_host=None):
         return host
 
 
-def get_uds_path(address: str) -> bool:
+def get_uds_path(address: str) -> str:
     if os.path.isabs(address):
-        return address
+        return str(address)
     else:
         import uuid
 
