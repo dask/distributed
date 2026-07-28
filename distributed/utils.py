@@ -1522,10 +1522,14 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
     [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
     >>> clean_dashboard_address(":8787,:8887")
     [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
+    >>> clean_dashboard_address("/tmp/dashboard.sock")
+    [{'address': '/tmp/dashboard.sock', 'port': 0}]
+    >>> clean_dashboard_address("unix://")
+    [{'address': '/tmp/<random_name>.sock', 'port': 0}]
     """
 
-    if isinstance(addrs, str) and os.path.isabs(addrs):  # unix socket
-        return [{"address": addrs, "port": 0}]
+    if isinstance(addrs, str) and (addrs.startswith("unix://") or os.path.isabs(addrs)):
+        return [{"address": get_uds_path(addrs), "port": 0}]
 
     if default_listen_ip == "0.0.0.0":
         default_listen_ip = ""  # for IPV6

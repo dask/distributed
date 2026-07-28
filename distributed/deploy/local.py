@@ -60,6 +60,8 @@ class LocalCluster(SpecCluster):
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
         Set to ``None`` to disable the dashboard.
         Use ':0' for a random port.
+        Set to an absolute filesystem path to listen on a Unix Domain Socket at that path.
+        Set to 'unix://' to listen on a Unix socket with a random name, in the location configured by dask.config['temporary-directory'] or a default temporary directory.
         When specifying only a port like ':8787', the dashboard will bind to the given interface from the ``host`` parameter.
         If ``host`` is empty, binding will occur on all interfaces '0.0.0.0'.
         To avoid firewall issues when deploying locally, set ``host`` to 'localhost'.
