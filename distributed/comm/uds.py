@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+from typing import ClassVar
 
 import tornado.netutil as netutil
 from tornado.tcpclient import TCPClient
@@ -28,7 +29,9 @@ logger = logging.getLogger(__name__)
 class UnixSocketResolver(netutil.Resolver):
     """A resolver for Unix Domain Sockets. Always returns socket type and pathname."""
 
-    async def resolve(self, host: str, port: int, *args, **kwargs) -> tuple[int, str]:
+    async def resolve(
+        self, host: str, port: int, family: socket.AddressFamily = socket.AF_UNSPEC
+    ) -> list[tuple[int, str]]:
         return [(socket.AF_UNIX, host)]
 
 
