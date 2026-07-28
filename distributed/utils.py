@@ -1923,7 +1923,6 @@ def get_uds_path(address: str | None) -> str:
             if not base_path and not MACOS:
                 base_path = tempfile.gettempdir()
             elif MACOS:  # MacOS throws `OSError: AF_UNIX path too long` with tempfile.gettempdir()
-                print("MACOS")
                 base_path = f"/tmp/dask-{os.environ.get('USER')}"
 
         os.makedirs(base_path, exist_ok=True)
