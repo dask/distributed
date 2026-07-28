@@ -52,7 +52,7 @@ import psutil
 import tblib.pickling_support
 from tornado import escape
 
-from distributed.compatibility import asyncio_run
+from distributed.compatibility import MACOS, asyncio_run
 from distributed.config import get_loop_factory
 
 try:
@@ -1918,10 +1918,15 @@ def get_uds_path(address: str | None) -> str:
         xdg_dir = os.environ.get("XDG_RUNTIME_DIR", False)
         if xdg_dir:
             base_path = f"{xdg_dir}/dask"
-            # os.makedirs(base_path, exist_ok=True)
         else:
-            base_path = dask.config.get("temporary-directory", tempfile.gettempdir())
-            # os.makedirs(base_path, exist_ok=True)
+            base_path = dask.config.get("temporary-directory")
+            if not base_path and not MACOS:
+                base_path = tempfile.gettempdir()
+            elif MACOS:  # MacOS throws `OSError: AF_UNIX path too long` with tempfile.gettempdir()
+                print("MACOS")
+                base_path = f"/tmp/dask-{os.environ.get('USER')}"
+
+        os.makedirs(base_path, exist_ok=True)
 
         import secrets  # use token_hex to generate a random filename
 
