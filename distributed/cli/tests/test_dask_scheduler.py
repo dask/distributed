@@ -352,6 +352,26 @@ def test_dashboard_port_zero(loop):
         with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
             assert get_dashboard_port(c) > 0
 
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+def test_dashboard_unix_socket(loop):
+    pytest.importorskip("bokeh")
+    port = open_port()
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
+            "--host",
+            f"127.0.0.1:{port}",
+            "--dashboard-address",
+            "unix://",
+        ],
+    ):
+        with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
+            assert get_dashboard_port(c) == 0
+            assert c.dashboard_link.startswith("unix://")
+            assert c.dashboard_link.endswith(".sock")
 
 PRELOAD_TEXT = """
 _scheduler_info = {}
