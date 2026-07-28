@@ -165,7 +165,7 @@ class ServerNode(Server):
 
             if os.path.isabs(http_address["address"]):
                 dashboard_socket = netutil.bind_unix_socket(
-                    http_address["address"], mode=0o666
+                    http_address["address"], mode=0o600
                 )
                 self.http_server.add_socket(dashboard_socket)
                 bound_addresses = [http_address["address"]]
