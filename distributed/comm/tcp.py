@@ -37,6 +37,7 @@ from distributed.comm.utils import (
     get_tcp_server_address,
     to_frames,
 )
+from distributed.compatibility import WINDOWS
 from distributed.protocol.utils import host_array, pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import ensure_ip, ensure_memoryview, get_ip, nbytes
@@ -59,7 +60,7 @@ def set_tcp_timeout(comm):
     """
     Set kernel-level TCP timeout on the stream.
     """
-    if comm.closed() or comm.socket.family is socket.AF_UNIX:
+    if comm.closed() or (not WINDOWS and comm.socket.family is socket.AF_UNIX):
         return
 
     timeout = dask.config.get("distributed.comm.timeouts.tcp")
@@ -124,7 +125,7 @@ def get_stream_address(comm):
     if comm.closed():
         raise CommClosedError()
 
-    if comm.socket.family is socket.AF_UNIX:
+    if not WINDOWS and comm.socket.family is socket.AF_UNIX:
         return comm.socket.getsockname() or comm.socket.getpeername()
     else:
         return unparse_host_port(*comm.socket.getsockname()[:2])
