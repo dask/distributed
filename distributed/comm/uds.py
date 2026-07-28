@@ -18,7 +18,7 @@ from distributed.comm.tcp import (
     TCPConnector,
     TCPListener,
 )
-from distributed.comm.utils import (
+from distributed.utils import (
     get_uds_path,
 )
 

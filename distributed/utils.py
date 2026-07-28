@@ -1897,3 +1897,28 @@ def url_escape(url, *args, **kwargs):
     Escape a URL path segment. Cache results for better performance.
     """
     return escape.url_escape(url, *args, **kwargs)
+
+
+def get_uds_path(address: str | None) -> str:
+    """
+    Take an address for a Unix Domain Socket and return an absolute path.
+    If address is already an absolute path (the user passed in a specific path), return it.
+    In all other cases, generate a random filename in one of these locations:
+    1. $XDG_RUNTIME_DIR/dask (if set; will be created)
+    2. dask.config["temporary-directory"] (if set; will be created)
+    3. tempfile.gettempdir()
+    """
+    if os.path.isabs(str(address)):
+        return str(address)
+    else:
+        xdg_dir = os.environ.get("XDG_RUNTIME_DIR", False)
+        if xdg_dir:
+            base_path = f"{xdg_dir}/dask"
+            # os.makedirs(base_path, exist_ok=True)
+        else:
+            base_path = dask.config.get("temporary-directory", tempfile.gettempdir())
+            # os.makedirs(base_path, exist_ok=True)
+
+        import secrets  # use token_hex to generate a random filename
+
+        return os.path.join(base_path, f"{secrets.token_hex()}.sock")

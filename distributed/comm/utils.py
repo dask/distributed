@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import socket
 
 import dask
@@ -125,12 +124,3 @@ def ensure_concrete_host(host, default_host=None):
         return default_host or get_ipv6()
     else:
         return host
-
-
-def get_uds_path(address: str) -> str:
-    if os.path.isabs(address):
-        return str(address)
-    else:
-        import uuid
-
-        return os.path.join("/tmp", f"{str(uuid.uuid4()).replace('-', '')}.sock")
