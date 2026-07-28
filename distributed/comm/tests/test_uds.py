@@ -4,14 +4,14 @@ from distributed.comm.uds import UDSBackend
 
 
 def test_registered():
-    assert "uds" in backends
-    backend = get_backend("uds")
+    assert "unix" in backends
+    backend = get_backend("unix")
     assert isinstance(backend, UDSBackend)
 
 
 def test_parse_uds_address():
-    addr = "uds:///tmp/dask-test.sock"
+    addr = "unix:///tmp/dask-test.sock"
     scheme, loc = parse_address(addr)
-    assert scheme == "uds"
+    assert scheme == "unix"
     assert loc == "/tmp/dask-test.sock"
     assert unparse_address(scheme, loc) == addr
