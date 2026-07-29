@@ -164,6 +164,10 @@ class ServerNode(Server):
             retries_left = 3
 
             if os.path.isabs(http_address["address"]):  # unix socket
+                try:  # remove any old sockets
+                    os.remove(http_address["address"])
+                except OSError:
+                    pass
                 dashboard_socket = netutil.bind_unix_socket(
                     http_address["address"], mode=0o600
                 )
