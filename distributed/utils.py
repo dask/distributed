@@ -1928,29 +1928,36 @@ def url_escape(url, *args, **kwargs):
     return escape.url_escape(url, *args, **kwargs)
 
 
-def get_uds_path(address: str | None) -> str:
+def get_uds_path(address: str | None, default_dir: str = "") -> str:
     """
     Take an address for a Unix Domain Socket and return an absolute path.
-    If address is already an absolute path (the user passed in a specific path), return it.
+    If address is already an absolute path (possibly prefixed by unix://), return it. Underlying directories will not be created.
     In all other cases, generate a random filename in one of these locations:
+    1. default_dir
     1. $XDG_RUNTIME_DIR/dask (if set; will be created)
     2. dask.config["temporary-directory"] (if set; will be created)
-    3. tempfile.gettempdir()
+    3. tempfile.gettempdir() (will be created)
     """
-    if os.path.isabs(str(address)):
-        return str(address)
+    addr = str(address)
+    if addr.startswith("unix://"):
+        addr = addr[7:]
+
+    if os.path.isabs(addr):
+        return addr
     else:
         xdg_dir = os.environ.get("XDG_RUNTIME_DIR", False)
         if xdg_dir:
             base_path = f"{xdg_dir}/dask"
         else:
             base_path = dask.config.get("temporary-directory")
-            if not base_path and not MACOS:
-                base_path = tempfile.gettempdir()
-            elif MACOS:  # MacOS throws `OSError: AF_UNIX path too long` with tempfile.gettempdir()
-                base_path = f"/tmp/dask-{os.environ.get('USER')}"
+            if not base_path:
+                if MACOS:
+                    # MacOS throws `OSError: AF_UNIX path too long` with tempfile.gettempdir(), so use a hardcoded path under /tmp/
+                    base_path = f"/tmp/dask-{os.environ.get('USER')}"
+                else:
+                    base_path = tempfile.gettempdir()
 
-        os.makedirs(base_path, exist_ok=True)
+        os.makedirs(base_path, mode=0o700, exist_ok=True)
 
         import secrets  # use token_hex to generate a random filename
 
