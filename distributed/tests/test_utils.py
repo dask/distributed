@@ -630,6 +630,8 @@ def test_format_dashboard_link():
     assert "host" in format_dashboard_link("host", 1234)
     assert "1234" in format_dashboard_link("host", 1234)
 
+    assert format_dashboard_link("localhost", "/tmp/dashboard.sock") == "http+unix:///tmp/dashboard.sock/status"
+
     try:
         os.environ["host"] = "hello"
         assert "hello" not in format_dashboard_link("host", 1234)

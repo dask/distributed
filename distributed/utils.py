@@ -1267,12 +1267,37 @@ def warn_on_duration(duration: str | float | timedelta, msg: str) -> Generator[N
         warnings.warn(msg.format(duration=diff), stacklevel=2)
 
 
-def format_dashboard_link(host, port):
-    template = dask.config.get("distributed.dashboard.link")
-    if dask.config.get("distributed.scheduler.dashboard.tls.cert"):
-        scheme = "https"
-    else:
-        scheme = "http"
+def format_dashboard_link(process_address: str, port_or_uri: str | int) -> str:
+    """Return a formatted link to the dashboard based on:
+    `process_address`: the address of the process (e.g. Scheduler) that is calling this.
+    `port_or_uri`: value of an entry in a Client, Cluster, or Scheduler's `services` list. Can be either a port, in which case the hostname is assumed to be the same as the hostname for `process_address`. Or can be an absolute path for a service that listens on a Unix Domain Socket.
+    """
+    if isinstance(port_or_uri, str) and (
+        port_or_uri.startswith("unix://") or os.path.isabs(port_or_uri)
+    ):  # unix socket
+        host = port_or_uri[7:] if port_or_uri.startswith("unix://") else port_or_uri
+        port = None
+        scheme = "http+unix"
+        template = "{scheme}://{host}/status"
+    else:  # no unix socket
+        port = port_or_uri
+        try:
+            protocol, rest = process_address.split("://")
+        except ValueError:  # no protocol prefix given
+            protocol, rest = "", process_address
+
+        if protocol == "inproc":
+            host = "localhost"
+        else:
+            host = rest.split(":")[0]
+
+        if dask.config.get("distributed.scheduler.dashboard.tls.cert"):
+            scheme = "https"
+        else:
+            scheme = "http"
+
+        template = dask.config.get("distributed.dashboard.link")
+
     return template.format(
         **toolz.merge(os.environ, dict(scheme=scheme, host=host, port=port))
     )

@@ -7,8 +7,6 @@ from urllib.parse import urlparse
 
 from dask.widgets import get_environment, get_template
 
-from distributed.utils import format_dashboard_link
-
 
 class HasWhat(dict):
     """A dictionary of all workers and which keys that worker has."""
@@ -35,7 +33,7 @@ class SchedulerInfo(dict):
                     if "host" in server
                     else urlparse(server["address"]).hostname
                 )
-                return format_dashboard_link(host, server["services"]["dashboard"])
+                return host, server["services"]["dashboard"]
             except KeyError:
                 return None
 
