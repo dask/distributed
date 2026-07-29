@@ -1337,16 +1337,10 @@ class Client(SyncMethodMixin):
             scheduler, info = self._get_scheduler_info(n_workers=0)
             if scheduler is None:
                 return None
-            else:
-                protocol, rest = scheduler.address.split("://")
 
-            port = info["services"]["dashboard"]
-            if protocol == "inproc":
-                host = "localhost"
-            else:
-                host = rest.split(":")[0]
-
-            return format_dashboard_link(host, port)
+            return format_dashboard_link(
+                scheduler.address, info["services"]["dashboard"]
+            )
 
     def _get_scheduler_info(self, n_workers):
         from distributed.scheduler import Scheduler

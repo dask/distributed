@@ -163,12 +163,12 @@ class ServerNode(Server):
             change_port = False
             retries_left = 3
 
-            if os.path.isabs(http_address["address"]): # unix socket
+            if os.path.isabs(http_address["address"]):  # unix socket
                 dashboard_socket = netutil.bind_unix_socket(
                     http_address["address"], mode=0o600
                 )
                 self.http_server.add_socket(dashboard_socket)
-                bound_addresses = [(f"unix://{http_address["address"]}", 0)]
+                bound_addresses = [(f"unix://{http_address['address']}", 0)]
             else:
                 while True:
                     try:
