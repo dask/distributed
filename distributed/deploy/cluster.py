@@ -123,6 +123,7 @@ class Cluster(SyncMethodMixin):
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
         comm.name = "Cluster worker status"
+        await comm.write({"op": "subscribe_worker_status"})
         self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
         self._watch_worker_status_task = asyncio.ensure_future(
@@ -360,7 +361,8 @@ class Cluster(SyncMethodMixin):
         except KeyError:
             return ""
         else:
-            return format_dashboard_link(self.scheduler_address, port)
+            host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
+            return format_dashboard_link(host, port)
 
     def _scaling_status(self):
         if self._adaptive and self._adaptive.periodic_callback:
