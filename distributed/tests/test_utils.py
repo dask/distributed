@@ -1114,28 +1114,37 @@ def test_tuple_comparable_error():
     ],
 )
 def test_get_uds_path(request, tmp_path, env_var, arg, expectation, monkeypatch):
+    if env_var != "XDG_RUNTIME_DIR":
+        # on Ubuntu this env var is always set, so we need to unset it to test the other options
+        monkeypatch.setenv("XDG_RUNTIME_DIR", "")
+
     if env_var:
         base_path = str(tmp_path)
         monkeypatch.setenv(env_var, base_path)
-        if (
-            env_var == "DASK_TEMPORARY_DIRECTORY"
-        ):  # hack: setting this env var doesn't have effect because the dask config is already loaded at this point
-            monkeypatch.setitem(dask.config.config, "temporary-directory", base_path)
-    elif MACOS:  # on MACOS we don't use tempfile.gettempdir
+    elif MACOS:
+        # on MACOS we don't use tempfile.gettempdir
         base_path = f"/tmp/dask-{os.environ.get('USER')}"
-    else:  # a path will be created using tempfile.gettempdir
-        base_path = f"/tmp/pytest/dask/{request.node.name}"
+    else:
+        # a path will be created using tempfile.gettempdir
+        base_path = f"/tmp/pytest/{request.node.name}"
         import tempfile
 
         monkeypatch.setattr(tempfile, "gettempdir", lambda: base_path)
 
-    try:
-        result = get_uds_path(arg.replace("<tmp>", base_path))
+    if env_var == "DASK_TEMPORARY_DIRECTORY":
+        # hack: setting this env var doesn't have effect within this test because the dask config is already loaded at this point
+        monkeypatch.setitem(dask.config.config, "temporary-directory", base_path)
 
-        if expectation:  # we have an explicit absolute path to check for
-            assert result == expectation.replace("<tmp>", base_path)
+    arg = arg.replace("<tmp>", base_path)
+    expectation = expectation.replace("<tmp>", base_path) if expectation else ""
+
+    try:
+        result = get_uds_path(arg)
+        if os.path.isabs(str(expectation)):
+            assert result == expectation
         else:
-            assert result.startswith(f"{base_path}/")
+            # we don't know what the socket filename is, but it should live under result_base_path
+            assert result.startswith(f"{base_path}/dask_run")
             assert result.endswith(".sock")
             assert os.path.exists(os.path.dirname(result))
     finally:
