@@ -1941,13 +1941,12 @@ def get_uds_path(address: str | None, default_dir: str = "") -> str:
     addr = str(address)
     if addr.startswith("unix://"):
         addr = addr[7:]
-
     if os.path.isabs(addr):
         return addr
     else:
         xdg_dir = os.environ.get("XDG_RUNTIME_DIR", False)
         if xdg_dir:
-            base_path = f"{xdg_dir}/dask"
+            base_path = f"{xdg_dir}"
         else:
             base_path = dask.config.get("temporary-directory")
             if not base_path:
@@ -1957,6 +1956,7 @@ def get_uds_path(address: str | None, default_dir: str = "") -> str:
                 else:
                     base_path = tempfile.gettempdir()
 
+        base_path = f"{base_path}/dask_run"
         os.makedirs(base_path, mode=0o700, exist_ok=True)
 
         import secrets  # use token_hex to generate a random filename
