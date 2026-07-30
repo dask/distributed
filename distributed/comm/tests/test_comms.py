@@ -182,7 +182,8 @@ def test_get_address_host(tcp):
 
     assert f("tcp://127.0.0.1:123") == "127.0.0.1"
     assert f("inproc://%s/%d/123" % (get_ip(), os.getpid())) == get_ip()
-    assert f("unix://%2Ftmp%2Fdask.sock") == "%2Ftmp%2Fdask.sock"
+    if not WINDOWS:
+        assert f("unix:///tmp/dask.sock") == "/tmp/dask.sock"
 
 
 def test_resolve_address(tcp):
@@ -204,7 +205,8 @@ def test_resolve_address(tcp):
     assert f("tcp://localhost:456") == "tcp://127.0.0.1:456"
     assert f("tls://localhost:456") == "tls://127.0.0.1:456"
 
-    assert f("unix://%2Ftmp%2Fdask.sock") == "unix://%2Ftmp%2Fdask.sock"
+    if not WINDOWS:
+        assert f("unix:///tmp/dask.sock") == "unix:///tmp/dask.sock"
 
 
 def test_get_local_address_for(tcp):
