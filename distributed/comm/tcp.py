@@ -37,7 +37,6 @@ from distributed.comm.utils import (
     get_tcp_server_address,
     to_frames,
 )
-from distributed.compatibility import WINDOWS
 from distributed.protocol.utils import host_array, pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import ensure_ip, ensure_memoryview, get_ip, nbytes
@@ -56,65 +55,6 @@ C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
-def set_tcp_timeout(comm):
-    """
-    Set kernel-level TCP timeout on the stream.
-    """
-    if comm.closed() or (not WINDOWS and comm.socket.family is socket.AF_UNIX):
-        return
-
-    timeout = dask.config.get("distributed.comm.timeouts.tcp")
-    timeout = int(parse_timedelta(timeout, default="seconds"))
-
-    sock = comm.socket
-
-    # Default (unsettable) value on Windows
-    # https://msdn.microsoft.com/en-us/library/windows/desktop/dd877220(v=vs.85).aspx
-    nprobes = 10
-    assert timeout >= nprobes + 1, "Timeout too low"
-
-    idle = max(2, timeout // 4)
-    interval = max(1, (timeout - idle) // nprobes)
-    idle = timeout - interval * nprobes
-    assert idle > 0
-
-    try:
-        if sys.platform.startswith("win"):
-            logger.debug("Setting TCP keepalive: idle=%d, interval=%d", idle, interval)
-            sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, idle * 1000, interval * 1000))
-        else:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            try:
-                TCP_KEEPIDLE = socket.TCP_KEEPIDLE
-                TCP_KEEPINTVL = socket.TCP_KEEPINTVL
-                TCP_KEEPCNT = socket.TCP_KEEPCNT
-            except AttributeError:
-                if sys.platform == "darwin":
-                    TCP_KEEPIDLE = 0x10  # (named "TCP_KEEPALIVE" in C)
-                    TCP_KEEPINTVL = 0x101
-                    TCP_KEEPCNT = 0x102
-                else:
-                    TCP_KEEPIDLE = None
-
-            if TCP_KEEPIDLE is not None:
-                logger.debug(
-                    "Setting TCP keepalive: nprobes=%d, idle=%d, interval=%d",
-                    nprobes,
-                    idle,
-                    interval,
-                )
-                sock.setsockopt(socket.SOL_TCP, TCP_KEEPCNT, nprobes)
-                sock.setsockopt(socket.SOL_TCP, TCP_KEEPIDLE, idle)
-                sock.setsockopt(socket.SOL_TCP, TCP_KEEPINTVL, interval)
-
-        if sys.platform.startswith("linux"):
-            logger.debug("Setting TCP user timeout: %d ms", timeout * 1000)
-            TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
-            sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
-    except OSError:
-        logger.exception("Could not set timeout on TCP stream.")
-
-
 def get_stream_address(comm):
     """
     Get a stream's local address.
@@ -125,10 +65,7 @@ def get_stream_address(comm):
     if comm.closed():
         raise CommClosedError()
 
-    if not WINDOWS and comm.socket.family is socket.AF_UNIX:
-        return comm.socket.getsockname() or comm.socket.getpeername()
-    else:
-        return unparse_host_port(*comm.socket.getsockname()[:2])
+    return unparse_host_port(*comm.socket.getsockname()[:2])
 
 
 def convert_stream_closed_error(obj, exc):
@@ -190,8 +127,68 @@ class TCP(Comm):
         stream.set_close_callback(functools.partial(_close_comm, ref))
 
         stream.set_nodelay(True)
-        set_tcp_timeout(stream)
+        self._set_tcp_timeout(stream)
         self._read_extra()
+
+    def _set_tcp_timeout(self, stream):
+        """
+        Set kernel-level TCP timeout on the stream.
+        """
+        if stream.closed():
+            return
+
+        timeout = dask.config.get("distributed.comm.timeouts.tcp")
+        timeout = int(parse_timedelta(timeout, default="seconds"))
+
+        sock = stream.socket
+
+        # Default (unsettable) value on Windows
+        # https://msdn.microsoft.com/en-us/library/windows/desktop/dd877220(v=vs.85).aspx
+        nprobes = 10
+        assert timeout >= nprobes + 1, "Timeout too low"
+
+        idle = max(2, timeout // 4)
+        interval = max(1, (timeout - idle) // nprobes)
+        idle = timeout - interval * nprobes
+        assert idle > 0
+
+        try:
+            if sys.platform.startswith("win"):
+                logger.debug(
+                    "Setting TCP keepalive: idle=%d, interval=%d", idle, interval
+                )
+                sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, idle * 1000, interval * 1000))
+            else:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                try:
+                    TCP_KEEPIDLE = socket.TCP_KEEPIDLE
+                    TCP_KEEPINTVL = socket.TCP_KEEPINTVL
+                    TCP_KEEPCNT = socket.TCP_KEEPCNT
+                except AttributeError:
+                    if sys.platform == "darwin":
+                        TCP_KEEPIDLE = 0x10  # (named "TCP_KEEPALIVE" in C)
+                        TCP_KEEPINTVL = 0x101
+                        TCP_KEEPCNT = 0x102
+                    else:
+                        TCP_KEEPIDLE = None
+
+                if TCP_KEEPIDLE is not None:
+                    logger.debug(
+                        "Setting TCP keepalive: nprobes=%d, idle=%d, interval=%d",
+                        nprobes,
+                        idle,
+                        interval,
+                    )
+                    sock.setsockopt(socket.SOL_TCP, TCP_KEEPCNT, nprobes)
+                    sock.setsockopt(socket.SOL_TCP, TCP_KEEPIDLE, idle)
+                    sock.setsockopt(socket.SOL_TCP, TCP_KEEPINTVL, interval)
+
+            if sys.platform.startswith("linux"):
+                logger.debug("Setting TCP user timeout: %d ms", timeout * 1000)
+                TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
+                sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
+        except OSError:
+            logger.exception("Could not set timeout on TCP stream.")
 
     def _read_extra(self):
         pass

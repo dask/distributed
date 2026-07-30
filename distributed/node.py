@@ -154,25 +154,29 @@ class ServerNode(Server):
 
             if http_address["address"] is None or http_address["address"] == "":
                 address = self._start_address
+
                 if isinstance(address, (list, tuple)):
                     address = address[0]
                 if address:
                     with suppress(ValueError):
-                        http_address["address"] = get_address_host(address)
+                        address = get_address_host(address)
+
+                        http_address["address"] = address
 
             change_port = False
             retries_left = 3
 
-            if os.path.isabs(http_address["address"]):  # unix socket
+            if os.path.isabs(http_address["address"]) or http_address[
+                "address"
+            ].startswith("unix://"):  # unix socket
+                address = http_address["address"].split("unix://")[-1]
                 try:  # remove any old sockets
-                    os.remove(http_address["address"])
+                    os.remove(address)
                 except OSError:
                     pass
-                dashboard_socket = netutil.bind_unix_socket(
-                    http_address["address"], mode=0o600
-                )
+                dashboard_socket = netutil.bind_unix_socket(address, mode=0o600)
                 self.http_server.add_socket(dashboard_socket)
-                bound_addresses = [(f"unix://{http_address['address']}", 0)]
+                bound_addresses = [(f"unix://{address}", 0)]
             else:
                 while True:
                     try:

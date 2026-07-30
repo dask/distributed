@@ -647,7 +647,6 @@ class Worker(BaseWorker, ServerNode):
 
         self.services = {}
         self.service_specs = services or {}
-
         self._dashboard_address = dashboard_address
         self._dashboard = dashboard
         self._http_prefix = http_prefix

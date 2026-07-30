@@ -301,7 +301,7 @@ async def test_uds_specific(uds):
     """
 
     async def handle_comm(comm):
-        assert comm.peer_address == (f"unix://{host}:0")
+        assert comm.peer_address == socket_path
         assert comm.extra_info == {}
         msg = await comm.read()
         msg["op"] = "pong"
@@ -309,16 +309,15 @@ async def test_uds_specific(uds):
         await comm.close()
 
     listener = await uds.UDSListener("localhost", handle_comm)
-    host, port = listener.get_host_port()
+    socket_path = listener.contact_address
 
-    assert host.endswith(".sock")
-    assert port == 0  # we fake port 0 when using UDS
+    assert socket_path.endswith(".sock")
 
     l = []
 
     async def client_communicate(key, delay=0):
         comm = await connect(listener.contact_address)
-        assert comm.peer_address == f"unix://{host}:0"
+        assert comm.peer_address == socket_path
         assert comm.extra_info == {}
         await comm.write({"op": "ping", "data": key})
         if delay:
@@ -337,7 +336,7 @@ async def test_uds_specific(uds):
     assert set(l) == {1234} | set(range(N))
 
     listener.stop()
-    assert not os.path.exists(host)  # assert socket deleted
+    assert not os.path.exists(socket_path)  # assert socket deleted
 
 
 @pytest.mark.parametrize("sni", [None, "localhost"])

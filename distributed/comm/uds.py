@@ -6,23 +6,49 @@ import socket
 from typing import ClassVar
 
 import tornado.netutil as netutil
+from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 import dask
 
-from distributed.comm.registry import Backend
-from distributed.comm.tcp import (
-    MAX_BUFFER_SIZE,
-    TCP,
-    TCPConnector,
-    TCPListener,
+from distributed.comm.core import (
+    BaseListener,
+    CommClosedError,
+    Connector,
 )
+from distributed.comm.registry import Backend
+from distributed.comm.tcp import TCP
+from distributed.system import MEMORY_LIMIT
 from distributed.utils import (
     get_uds_path,
 )
 
 logger = logging.getLogger(__name__)
+
+MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
+
+
+class UDS(TCP):
+    """A comm for UDS. Subclasses TCP and overrides methods that don't make sense for UDS."""
+
+    @property
+    def local_address(self) -> str:
+        if self._local_addr.startswith("unix://"):
+            return self._local_addr
+        else:
+            return f"unix://{self._local_addr}"
+
+    @property
+    def peer_address(self) -> str:
+        return self.local_address
+
+    @property
+    def same_host(self):
+        return True
+
+    def _set_tcp_timeout(self, stream):
+        return
 
 
 class UnixSocketResolver(netutil.Resolver):
@@ -34,41 +60,53 @@ class UnixSocketResolver(netutil.Resolver):
         return [(socket.AF_UNIX, host)]
 
 
-class UDSListener(TCPListener):
+class UDSListener(BaseListener):
     """A Listener for Unix Domain Sockets, based on the TCPListener class. Ensures the address is an absolute path instead of a hostname:port string."""
 
     prefix = "unix://"
-    comm_class = TCP
+    comm_class = UDS
 
     def __init__(
         self,
         address,
-        *args,
-        **kwargs,
+        comm_handler,
+        deserialize=True,
+        allow_offload=True,
+        **connection_args,
     ):
-        path = get_uds_path(address)
-        if ":" not in path:
-            path = f"{path}:0"
-        super().__init__(path, *args, **kwargs)  # fake port 0
-
-    def get_host_port(self):
-        """
-        The listening address as a tuple. Port is always 0.
-        """
-        self._check_started()
-
-        if self.bound_address is None:
-            self.bound_address = self.tcp_server._sockets[0].getsockname()
-        return (self.bound_address, 0)  # fake port 0
+        super().__init__()
+        self.address = get_uds_path(address)
+        self.comm_handler = comm_handler
+        self.deserialize = deserialize
+        self.allow_offload = allow_offload
+        self.tcp_server = None
 
     async def _handle_stream(self, stream, address):
-        """
-        We override the super class's _handle_stream to pass in 0 as a fake port (it will be ignored anyway).
-        """
-        return await super()._handle_stream(stream, (self.bound_address, 0))
+        if self.tcp_server is None:
+            # stop() was called after the connection was accepted, but before this
+            # method could run. abort_handshaking_comms() has already run and won't
+            # take care of this comm; if we left the stream dangling, the client
+            # would hang forever in the comm handshake, which is deliberately not
+            # subject to timeouts (see distributed.comm.core.connect()).
+            stream.close()
+            return
 
-    async def start(self):
-        self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE, **self.server_args)
+        # for UDS the remote address is always the same as the local address
+        logger.debug(f"Incoming connection to {self.address}")
+
+        comm = self.comm_class(stream, self.address, self.address, self.deserialize)
+        comm.allow_offload = self.allow_offload
+
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.info(f"Connection to {address} closed before handshake completed")
+            return
+
+        await self.comm_handler(comm)
+
+    async def start(self, **kwargs):
+        self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE, **kwargs)
         self.tcp_server.handle_stream = self._handle_stream
         # When shuffling data between workers, there can
         # really be O(cluster size) connection requests
@@ -76,29 +114,55 @@ class UDSListener(TCPListener):
         # is large enough not to lose any.
         backlog = int(dask.config.get("distributed.comm.socket-backlog"))
         socket = netutil.bind_unix_socket(
-            self.ip,  # self.ip is actually the path to the socket
+            self.address,
             mode=0o600,
             backlog=backlog,
         )
         self.tcp_server.add_socket(socket)
-        self.bound_address = self.ip  # ip is path to unix socket
+
+    @property
+    def listen_address(self):
+        """Return the listening address as a string."""
+        return self.prefix + self.address
+
+    @property
+    def contact_address(self):
+        """Return the contact address as a string."""
+        return self.listen_address
 
     def stop(self):
-        super().stop()
-        if os.path.exists(self.bound_address):
+        tcp_server, self.tcp_server = self.tcp_server, None
+        if tcp_server is not None:
+            tcp_server.stop()
+        if os.path.exists(self.address):
             try:
-                os.remove(self.bound_address)
+                os.remove(self.address)
             except OSError as e:
                 logger.debug(
-                    f"Attempted removal of socket at {self.bound_address} failed with error: {e}"
+                    f"Attempted removal of socket at {self.address} failed with error: {e}"
                 )
 
 
-class UDSConnector(TCPConnector):
+class UDSConnector(Connector):
     client: ClassVar[TCPClient] = TCPClient(resolver=UnixSocketResolver())
 
     prefix = "unix://"
-    comm_class = TCP
+    comm_class = UDS
+
+    async def connect(self, address, deserialize=True, **kwargs):
+        """Connect to a Unix domain socket."""
+        try:
+            stream = await self.client.connect(
+                address, port=0, max_buffer_size=MAX_BUFFER_SIZE
+            )
+        except StreamClosedError as e:
+            # The socket connect() call failed
+            raise CommClosedError(f"in {self}: {e}") from e
+
+        local_address = f"{self.prefix}{stream.socket.getpeername()}"
+        return self.comm_class(
+            stream, local_address, f"{self.prefix}{address}", deserialize
+        )
 
 
 class UDSBackend(Backend):

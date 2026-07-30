@@ -1128,6 +1128,7 @@ def test_get_uds_path(request, tmp_path, env_var, arg, expectation, monkeypatch)
         # a path will be created using tempfile.gettempdir
         base_path = f"/tmp/pytest/{request.node.name}"
         import tempfile
+
         monkeypatch.setattr(tempfile, "gettempdir", lambda: base_path)
 
     if env_var == "DASK_TEMPORARY_DIRECTORY":
