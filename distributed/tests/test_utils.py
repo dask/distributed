@@ -632,10 +632,11 @@ def test_format_dashboard_link():
     assert "host" in format_dashboard_link("host", 1234)
     assert "1234" in format_dashboard_link("host", 1234)
 
-    assert (
-        format_dashboard_link("localhost", "/tmp/dashboard.sock")
-        == "http+unix:///tmp/dashboard.sock/status"
-    )
+    if not WINDOWS:
+        assert (
+            format_dashboard_link("localhost", "/tmp/dashboard.sock")
+            == "http+unix:///tmp/dashboard.sock/status"
+        )
 
     try:
         os.environ["host"] = "hello"
@@ -1113,6 +1114,7 @@ def test_tuple_comparable_error():
         ["<tmp>/dask.sock", "<tmp>/dask.sock"],
     ],
 )
+@pytest.mark.skipif(WINDOWS, reason="No unix sockets on Windows")
 def test_get_uds_path(request, tmp_path, env_var, arg, expectation, monkeypatch):
     if env_var != "XDG_RUNTIME_DIR":
         # on Ubuntu this env var is always set, so we need to unset it to test the other options
