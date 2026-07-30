@@ -1928,13 +1928,12 @@ def url_escape(url, *args, **kwargs):
     return escape.url_escape(url, *args, **kwargs)
 
 
-def get_uds_path(address: str | None, default_dir: str = "") -> str:
+def get_uds_path(address: str | None = None) -> str:
     """
     Take an address for a Unix Domain Socket and return an absolute path.
     If address is already an absolute path (possibly prefixed by unix://), return it. Underlying directories will not be created.
-    In all other cases, generate a random filename in one of these locations:
-    1. default_dir
-    1. $XDG_RUNTIME_DIR/dask (if set; will be created)
+    In all other cases, generate a random filename in 'dask_run' under one of these locations:
+    1. $XDG_RUNTIME_DIR (set; will be created)
     2. dask.config["temporary-directory"] (if set; will be created)
     3. tempfile.gettempdir() (will be created)
     """
