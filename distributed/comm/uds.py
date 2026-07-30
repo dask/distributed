@@ -11,10 +11,10 @@ from tornado.tcpserver import TCPServer
 
 import dask
 
+from distributed.comm.registry import Backend
 from distributed.comm.tcp import (
     MAX_BUFFER_SIZE,
     TCP,
-    BaseTCPBackend,
     TCPConnector,
     TCPListener,
 )
@@ -101,14 +101,30 @@ class UDSConnector(TCPConnector):
     comm_class = TCP
 
 
-class UDSBackend(BaseTCPBackend):
+class UDSBackend(Backend):
     """A Backend for Unix Domain Sockets. It overrides the TCP class's functions for parsing addresses, since UDS does not require port numbers."""
 
     _connector_class = UDSConnector
     _listener_class = UDSListener
 
+    def get_connector(self):
+        return self._connector_class()
+
+    def get_listener(self, loc, handle_comm, deserialize, **connection_args):
+        return self._listener_class(loc, handle_comm, deserialize, **connection_args)
+
     def get_address_host(self, loc):
-        return loc.split(":")[0]
+        path = loc.split("unix://")[-1]
+        if os.path.isabs(path):
+            return path
+        else:
+            # something like `unix://127.0.0.1:0` was passed in
+            # this happens when a cluster sets protocl to 'unix', but doesn't explicitly override the default host and port
+            # in this case, return a new uds socket path
+            return get_uds_path(path)
 
     def resolve_address(self, loc):
+        return loc
+
+    def get_local_address_for(self, loc):
         return loc
