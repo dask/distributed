@@ -332,6 +332,9 @@ async def test_compute_within_worker_client(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_nested_compute_inherits_task_annotations(c, s, a, b):
+    def read_task_annotations():
+        return dask.get_annotations()
+
     @dask.delayed
     def read_annotations():
         return dask.get_annotations()
@@ -348,6 +351,17 @@ async def test_nested_compute_inherits_task_annotations(c, s, a, b):
             return expected, actual_sync, actual_async
 
     for value in (1, 2):
+        with dask.annotate(custom=value):
+            task_annotations = await c.submit(
+                read_task_annotations,
+                pure=False,
+                workers=[a.address],
+                allow_other_workers=True,
+                priority=10,
+                retries=1,
+            )
+        assert task_annotations == {"custom": value}
+
         expected, actual_sync, actual_async = await c.submit(outer, value, pure=False)
         assert actual_sync == expected
         assert actual_async == expected

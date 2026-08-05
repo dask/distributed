@@ -154,6 +154,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+_TASK_CONTROL_ANNOTATIONS = frozenset(
+    {
+        "allow_other_workers",
+        "executor",
+        "loose_restrictions",
+        "priority",
+        "resources",
+        "restrictions",
+        "retries",
+        "shuffle_original_restrictions",
+        "workers",
+    }
+)
+
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 DEFAULT_EXTENSIONS: dict[str, type] = {
@@ -2164,10 +2179,16 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             self.active_keys.add(key)
-            # Make resolved task annotations visible to user code and nested tasks.
+            # Propagate user annotations without applying the parent task's
+            # scheduling and execution controls to nested tasks.
+            annotations = {
+                key: value
+                for key, value in ts.annotations.items()
+                if key not in _TASK_CONTROL_ANNOTATIONS
+            }
             annotations_ctx = (
-                dask.annotate(**ts.annotations)
-                if ts.annotations
+                dask.annotate(**annotations)
+                if annotations
                 else contextlib.nullcontext()
             )
             annotations_ctx.__enter__()
