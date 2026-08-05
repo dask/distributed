@@ -7,9 +7,19 @@ import pytest
 import dask
 from dask import delayed
 
-from distributed import Lock, Worker
+from distributed import Event, Lock, Worker
 from distributed.client import wait
-from distributed.utils_test import NO_AMM, gen_cluster, inc, lock_inc, slowadd, slowinc
+from distributed.utils_test import (
+    NO_AMM,
+    async_poll_for,
+    block_on_event,
+    gen_cluster,
+    inc,
+    lock_inc,
+    slowadd,
+    slowinc,
+    wait_for_state,
+)
 from distributed.worker_state_machine import (
     ComputeTaskEvent,
     Execute,
@@ -557,3 +567,101 @@ def test_resumed_with_different_resources(ws_with_running_task, done_ev_cls):
 
     ws.handle_stimulus(done_ev_cls.dummy(key="x", stimulus_id="s3"))
     assert ws.available_resources == {"R": 1}
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 20, {"resources": {"A": 10}})],
+)
+async def test_resources_not_over_allocated(c, s, a):
+    """The scheduler must schedule against the resources a worker still has free,
+    not against the total it declared.
+
+    See https://github.com/dask/distributed/issues/9108
+    """
+    ev = Event()
+    futs = [
+        c.submit(block_on_event, ev, resources={"A": 3}, pure=False, key=f"x-{i}")
+        for i in range(15)
+    ]
+
+    ws = s.workers[a.address]
+    # 3 tasks * 3 A = 9 <= 10; a fourth would exceed what the worker declared.
+    await async_poll_for(lambda: len(ws.processing) == 3, timeout=5)
+    # Give the scheduler a chance to over-commit if it is going to.
+    await asyncio.sleep(0.2)
+
+    assert len(ws.processing) == 3
+    assert ws.used_resources["A"] == 9
+    assert ws.used_resources["A"] <= ws.resources["A"]
+    # The rest are waiting for the resource, not silently reported as running.
+    assert len(s.unrunnable) == 12
+
+    await ev.set()
+    await c.gather(futs)
+
+    assert ws.used_resources["A"] == 0
+    assert not s.unrunnable
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 20, {"resources": {"A": 10}})],
+)
+async def test_resource_tasks_rescheduled_when_resources_released(c, s, a):
+    """Tasks held back for want of a free resource must be picked up again once
+    running tasks release it, rather than staying in ``no-worker`` forever.
+    """
+    ev = Event()
+    blockers = [
+        c.submit(block_on_event, ev, resources={"A": 5}, pure=False, key=f"b-{i}")
+        for i in range(2)
+    ]
+    await async_poll_for(lambda: len(s.workers[a.address].processing) == 2, timeout=5)
+
+    waiter = c.submit(inc, 1, resources={"A": 5}, key="waiter")
+    await wait_for_state("waiter", "no-worker", s)
+
+    # Releasing the blockers must make the waiter runnable without any new worker
+    # joining the cluster.
+    await ev.set()
+    assert await waiter == 2
+    await c.gather(blockers)
+    assert s.workers[a.address].used_resources["A"] == 0
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 20, {"resources": {"A": 10}})],
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
+async def test_no_workers_timeout_does_not_fail_tasks_awaiting_resources(c, s, a):
+    """``no-workers-timeout`` must not fail a task whose restrictions are
+    satisfiable and which is only waiting for a busy resource to be released.
+    """
+    ev = Event()
+    blocker = c.submit(block_on_event, ev, resources={"A": 10}, key="blocker")
+    await async_poll_for(lambda: len(s.workers[a.address].processing) == 1, timeout=5)
+
+    waiter = c.submit(inc, 1, resources={"A": 10}, key="waiter")
+    await wait_for_state("waiter", "no-worker", s)
+
+    # Well past no-workers-timeout: the task must still be alive.
+    await asyncio.sleep(0.5)
+    assert s.tasks["waiter"].state == "no-worker"
+
+    await ev.set()
+    assert await waiter == 2
+    await blocker
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 20, {"resources": {"A": 10}})],
+    config={"distributed.scheduler.no-workers-timeout": "100ms"},
+)
+async def test_no_workers_timeout_still_fails_unsatisfiable_resources(c, s, a):
+    """A resource restriction that no worker can ever satisfy must still time out."""
+    fut = c.submit(inc, 1, resources={"A": 100}, key="impossible")
+    with pytest.raises(Exception, match="impossible"):
+        await fut

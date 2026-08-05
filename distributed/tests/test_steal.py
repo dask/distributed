@@ -527,13 +527,20 @@ async def test_dont_steal_resource_restrictions(c, s, a, b):
     assert len(b.state.tasks) == 0
 
 
-@gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 2}})])
+@gen_cluster(client=True, nthreads=[("", 1, {"resources": {"A": 100}})])
 async def test_steal_resource_restrictions(c, s, a):
+    # Both workers declare enough of A to hold all 100 tasks at once. Previously
+    # this test used A: 2 and A: 4 and still expected all 100 tasks to be assigned
+    # to `a`, which only held because the scheduler committed more of a resource
+    # than the worker had. The point of the test is that stealing rebalances
+    # resource-restricted tasks, so the capacities are now large enough for the
+    # assignment to be legitimate. test_dont_steal_resource_restrictions still
+    # covers a thief that cannot satisfy the restriction at all.
     futures = c.map(slowinc, range(100), delay=0.05, resources={"A": 1})
     while len(a.state.tasks) < 100:
         await asyncio.sleep(0.01)
 
-    async with Worker(s.address, nthreads=1, resources={"A": 4}) as b:
+    async with Worker(s.address, nthreads=1, resources={"A": 100}) as b:
         while s.workers[b.address].status != Status.running:
             await asyncio.sleep(0.01)
 
