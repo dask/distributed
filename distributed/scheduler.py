@@ -3215,17 +3215,20 @@ class SchedulerState:
             s = {addr for addr in ts.worker_restrictions if addr in self.workers}
 
         if ts.host_restrictions:
-            # Resolve the alias here rather than early, for the worker
-            # may not be connected when host_restrictions is populated
-            hr = [self.coerce_hostname(h) for h in ts.host_restrictions]
-            # XXX need HostState?
-            sl = []
-            for h in hr:
+            ss: set[str] = set()
+            for h in ts.host_restrictions:
+                # Resolve the alias here rather than early, for the worker may not be
+                # connected when host_restrictions is populated. An alias identifies
+                # one worker, not every worker on the same host.
+                if (addr := self.aliases.get(h)) is not None:
+                    ss.add(addr)
+                    continue
+
+                assert isinstance(h, str)
                 dh = self.host_info.get(h)
                 if dh is not None:
-                    sl.append(dh["addresses"])
+                    ss.update(dh["addresses"])
 
-            ss = set.union(*sl) if sl else set()
             if s is None:
                 s = ss
             else:
