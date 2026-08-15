@@ -43,6 +43,7 @@ from typing import (
     TypedDict,
     TypeVar,
     cast,
+    ParamSpec
 )
 
 from packaging.version import parse as parse_version
@@ -147,6 +148,7 @@ DEFAULT_EXTENSIONS: dict[str, Any] = {}
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
 _T = TypeVar("_T")
+P = ParamSpec("P")
 
 
 class FutureCancelledError(CancelledError):
@@ -2048,8 +2050,8 @@ class Client(SyncMethodMixin):
 
     def submit(
         self,
-        func: Callable[..., _T],
-        *args,
+        func: Callable[P, _T],
+        *args: P.args,
         key=None,
         workers=None,
         resources=None,
@@ -2060,7 +2062,7 @@ class Client(SyncMethodMixin):
         actor=False,
         actors=False,
         pure=True,
-        **kwargs,
+        **kwargs: P.kwargs,
     ) -> Future[_T]:
         """Submit a function application to the scheduler
 
@@ -2071,7 +2073,7 @@ class Client(SyncMethodMixin):
             coroutine, it will be run on the main event loop of a worker. Otherwise
             ``func`` will be run in a worker's task executor pool (see
             ``Worker.executors`` for more information.)
-        *args : tuple
+        *args
             Optional positional arguments
         key : str
             Unique identifier for the task.  Defaults to function-name and hash
@@ -2209,7 +2211,7 @@ class Client(SyncMethodMixin):
         actors: bool = False,
         pure: bool = True,
         batch_size=None,
-        **kwargs,
+        **kwargs: Any,
     ) -> list[Future[_T]]:
         """Map a function on a sequence of arguments
 
