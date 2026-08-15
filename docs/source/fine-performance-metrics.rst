@@ -30,7 +30,7 @@ ones are:
 ``thread-cpu``
   CPU time spent by tasks while running on workers. This is typically "good" time; in
   other words it's the same time you would have spent if you ran the workload serially
-  on a single CPU - but parallelized over however how many CPUs are available on
+  on a single CPU - but parallelized over however many CPUs are available on
   your cluster.
 ``thread-noncpu``
   Difference between wall clock time and CPU time spent by tasks while running on
@@ -47,7 +47,7 @@ ones are:
   Time spent spilling/unspilling to disk due to not having enough memory available.
   See :doc:`worker-memory`.
 ``executor``, ``offload``, ``other``
-  This is overhead from the Dask code and should be typically negligible. However,
+  This is overhead from the Dask code and should typically be negligible. However,
   it can be inflated by GIL contention and by spill/unspill activity.
 
 The grand total of the time shown should roughly add up to the end-to-end runtime of
@@ -135,8 +135,8 @@ Alternatively you may want to just label some of the time this way:
 In the above example, the function is split into an I/O intensive phase,
 ``read_from_network``, and a CPU-intensive one, ``preprocess``. The
 :meth:`distributed.metrics.context_meter.meter` context manager will log the time spent
-by ``read_from_network`` as ``I/O``, whereas the time spent by ``preprocess`` still be
-logged as a mix of ``thread-cpu`` and ``thread-noncpu`` (the latter may, for example,
+by ``read_from_network`` as ``I/O``, whereas the time spent by ``preprocess`` will still
+be logged as a mix of ``thread-cpu`` and ``thread-noncpu`` (the latter may, for example,
 highlight GIL contention).
 
 .. note::

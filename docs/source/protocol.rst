@@ -74,7 +74,7 @@ MsgPack as a base serialization format for the following reasons:
    anywhere near being a bottleneck, even under heavy use.
 *  Unlike JSON it supports bytestrings
 *  It covers the standard set of types necessary to encode most information
-*  It is widely implemented in a number of languages (see cross language
+*  It is widely implemented in a number of languages (see cross-language
    section below)
 
 However, MsgPack fails (correctly) in the following ways:
@@ -131,24 +131,30 @@ being the following::
 This varies between Python 2 and 3 and so your client and workers must match
 their Python versions and software environments.
 
-However, the Scheduler never uses the language-specific serialization and
-instead only deals with MsgPack.  If the client sends a pickled function up to
-the scheduler the scheduler will not unpack function but will instead keep it
-as bytes.  Eventually those bytes will be sent to a worker, which will then
-unpack the bytes into a proper Python function.  Because the Scheduler never
-unpacks language-specific serialized bytes it may be in a different language.
+However, the Scheduler does not use the same language-specific serialization
+path as the client and workers. Most task payloads are wrapped in
+``Serialized`` frames; when the scheduler decodes a message with
+``deserialize=False`` it keeps those frames as bytes and forwards them without
+deserializing them into Python objects. Because the scheduler only sees the
+MsgPack envelope for that path, it may run in a different language.
+
+Control-plane fields are different. The client wraps values such as task
+definitions, annotations, and span metadata in ``ToPickle``, and the scheduler
+unpickles those frames while decoding the message. Treat access to the
+scheduler port as trusted and use network controls and TLS (see
+``distributed.comm.require-encryption``) when that trust boundary matters.
 
 **The client and workers must share the same language and software environment,
-the scheduler may differ.**
+while the scheduler may differ for forwarded task payloads.**
 
 This has a few advantages:
 
-1.  The Scheduler is protected from unpickling unsafe code
+1.  The Scheduler can forward most task payloads without deserializing them
 2.  We could conceivably implement workers and clients for other languages
     (like R or Julia) and reuse the Python scheduler.  The worker and client
     code is fairly simple and much easier to reimplement than the scheduler,
     which is complex.
-3.  The scheduler might some day be rewritten in more heavily optimized C or Go
+3.  The scheduler might someday be rewritten in more heavily optimized C or Go
 
 Compression
 -----------
@@ -163,7 +169,7 @@ compression is at least a 10% improvement, we send the compressed bytes rather
 than the original payload.  We record the compression used within the header as
 a string like ``'lz4'`` or ``'snappy'``.
 
-To avoid compressing large amounts of uncompressable data we first try to
+To avoid compressing large amounts of incompressible data we first try to
 compress a sample.  We take 10kB chunks from five locations in the dataset,
 arrange them together, and try compressing the result.  If this doesn't result
 in significant compression then we don't try to compress the full result.
@@ -260,7 +266,7 @@ These frames are optional.
 Payload frames are used to send large or language-specific data.  These values
 will be inserted into the administrative message after they are decoded.  The
 header is msgpack encoded and contains encoding and compression information for
-the all subsequent payload messages.
+all subsequent payload messages.
 
 A Payload may be spread across many frames.  Each frame may be separately
 compressed.

@@ -103,7 +103,7 @@ warning in future versions.*
 We can submit tasks from other tasks.  This allows us to make decisions while
 on worker nodes.
 
-To submit new tasks from a worker that worker must first create a new client
+To submit new tasks from a worker, the worker must first create a new client
 object that connects to the scheduler. There are three options for this:
 
 1. ``dask.delayed`` and ``dask.compute``

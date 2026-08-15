@@ -64,8 +64,8 @@ function to run the asynchronous function:
    client.sync(f)
 
 
-.. note: Blocking operations like the .compute() method aren’t ok to use in
-         asynchronous mode. Instead you’ll have to use the Client.compute
+.. note: Blocking operations like the ``.compute()`` method aren't ok to use in
+         asynchronous mode. Instead you'll have to use the ``Client.compute``
          method
 
 

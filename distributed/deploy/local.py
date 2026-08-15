@@ -55,8 +55,6 @@ class LocalCluster(SpecCluster):
         Use a falsey value like False or None for no change.
     host: string
         Host address on which the scheduler will listen, defaults to only localhost
-    ip: string
-        Deprecated.  See ``host`` above.
     dashboard_address: str
         Address on which to listen for the Bokeh diagnostics server like
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
@@ -69,8 +67,6 @@ class LocalCluster(SpecCluster):
         Address on which to listen for the Bokeh worker diagnostics server like
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to None which disables the dashboard.
         Use ':0' for a random port.
-    diagnostics_port: int
-        Deprecated.  See dashboard_address.
     asynchronous: bool (False by default)
         Set to True if using this cluster within async/await functions or within
         Tornado gen.coroutines.  This should remain False for normal use.
@@ -120,14 +116,13 @@ class LocalCluster(SpecCluster):
         threads_per_worker=None,
         processes=None,
         loop=None,
-        start=None,
+        start=None,  # deprecated
         host=None,
-        ip=None,
+        ip=None,  # deprecated
         scheduler_port=0,
         silence_logs=logging.WARN,
         dashboard_address=":8787",
         worker_dashboard_address=None,
-        diagnostics_port=None,
         services=None,
         worker_services=None,
         service_kwargs=None,
@@ -142,23 +137,19 @@ class LocalCluster(SpecCluster):
         **worker_kwargs,
     ):
         if ip is not None:
-            # In the future we should warn users about this move
-            # warnings.warn("The ip keyword has been moved to host")
+            warnings.warn(
+                "The `ip` parameter has been deprecated. Please use `host` instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             host = ip
 
-        if diagnostics_port is not None:
+        if start is not None:
             warnings.warn(
-                "diagnostics_port has been deprecated. "
-                "Please use `dashboard_address=` instead"
+                "The `start` parameter has been deprecated and has no effect.",
+                DeprecationWarning,
+                stacklevel=2,
             )
-            dashboard_address = diagnostics_port
-
-        if threads_per_worker == 0:
-            warnings.warn(
-                "Setting `threads_per_worker` to 0 has been deprecated. "
-                "Please set to None or to a specific int."
-            )
-            threads_per_worker = None
 
         if "dashboard" in worker_kwargs:
             warnings.warn(

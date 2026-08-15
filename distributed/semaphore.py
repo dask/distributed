@@ -7,10 +7,11 @@ import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
+from tornado.ioloop import PeriodicCallback
+
 import dask
 from dask.utils import parse_timedelta
 
-from distributed.compatibility import PeriodicCallback
 from distributed.metrics import time
 from distributed.utils import Deadline, SyncMethodMixin, log_errors, wait_for
 from distributed.utils_comm import retry_operation
@@ -83,8 +84,7 @@ class SemaphoreExtension:
         else:
             if max_leases != self.max_leases[name]:
                 raise ValueError(
-                    "Inconsistent max leases: %s, expected: %s"
-                    % (max_leases, self.max_leases[name])
+                    f"Inconsistent max leases: {max_leases}, expected: {self.max_leases[name]}"
                 )
 
     @log_errors
@@ -334,7 +334,7 @@ class Semaphore(SyncMethodMixin):
         self._scheduler = scheduler_rpc
         self._loop = loop
 
-        self.name = name or "semaphore-" + uuid.uuid4().hex
+        self.name = name or f"semaphore-{uuid.uuid4().hex}"
         self.max_leases = max_leases
         self.id = uuid.uuid4().hex
         self._leases = deque()
@@ -437,8 +437,7 @@ class Semaphore(SyncMethodMixin):
                 self.scheduler.semaphore_refresh_leases,
                 lease_ids=list(self._leases),
                 name=self.name,
-                operation="semaphore refresh leases: id=%s, lease_ids=%s, name=%s"
-                % (self.id, list(self._leases), self.name),
+                operation=f"semaphore refresh leases: id={self.id}, lease_ids={list(self._leases)}, name={self.name}",
             )
 
     async def _acquire(self, timeout=None):
@@ -455,8 +454,7 @@ class Semaphore(SyncMethodMixin):
             name=self.name,
             timeout=timeout,
             lease_id=lease_id,
-            operation="semaphore acquire: id=%s, lease_id=%s, name=%s"
-            % (self.id, lease_id, self.name),
+            operation=f"semaphore acquire: id={self.id}, lease_id={lease_id}, name={self.name}",
         )
         if result:
             self._leases.append(lease_id)
@@ -487,14 +485,12 @@ class Semaphore(SyncMethodMixin):
                 self.scheduler.semaphore_release,
                 name=self.name,
                 lease_id=lease_id,
-                operation="semaphore release: id=%s, lease_id=%s, name=%s"
-                % (self.id, lease_id, self.name),
+                operation=f"semaphore release: id={self.id}, lease_id={lease_id}, name={self.name}",
             )
             return True
         except Exception:  # Release fails for whatever reason
             logger.error(
-                "Release failed for id=%s, lease_id=%s, name=%s. Cluster network might be unstable?"
-                % (self.id, lease_id, self.name),
+                f"Release failed for id={self.id}, lease_id={lease_id}, name={self.name}. Cluster network might be unstable?",
                 exc_info=True,
             )
             return False

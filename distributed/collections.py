@@ -174,13 +174,13 @@ class HeapSet(MutableSet[T]):
                 return value
 
     def __iter__(self) -> Iterator[T]:
-        """Iterate over all elements. This is a O(n) operation which returns the
+        """Iterate over all elements. This is an O(n) operation which returns the
         elements in pseudo-random order.
         """
         return iter(self._data)
 
     def sorted(self) -> Iterator[T]:
-        """Iterate over all elements. This is a O(n*logn) operation which returns the
+        """Iterate over all elements. This is an O(n*logn) operation which returns the
         elements in order, from smallest to largest according to the key and insertion
         order.
         """
@@ -201,7 +201,7 @@ class HeapSet(MutableSet[T]):
 
 
 def sum_mappings(ds: Iterable[Mapping[K, V] | Iterable[tuple[K, V]]], /) -> dict[K, V]:
-    """Sum the values of the given mappings, key by key"""
+    """Sum the values of the given mappings, key by key."""
     out: dict[K, V] = {}
     for d in ds:
         if isinstance(d, Mapping):

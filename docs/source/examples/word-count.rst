@@ -241,7 +241,7 @@ The complete Python script for this example is shown below:
    from distributed.diagnostics.progressbar import progress
 
    hdfs = hdfs3.HDFileSystem('NAMENODE_HOSTNAME', port=NAMENODE_PORT)
-   client = Client('SCHEDULER_IP:SCHEDULER:PORT')
+   client = Client('SCHEDULER_IP:SCHEDULER_PORT')
 
    filenames = hdfs.glob('/tmp/enron/*/*')
    print(filenames[:5])

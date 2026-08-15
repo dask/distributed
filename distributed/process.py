@@ -127,7 +127,7 @@ class AsyncProcess:
     def _start_threads(self):
         self._watch_message_thread = threading.Thread(
             target=self._watch_message_queue,
-            name="AsyncProcess %s watch message queue" % self.name,
+            name=f"AsyncProcess {self.name} watch message queue",
             args=(
                 weakref.ref(self),
                 self._process,
@@ -216,7 +216,7 @@ class AsyncProcess:
 
             thread = threading.Thread(
                 target=AsyncProcess._watch_process,
-                name="AsyncProcess %s watch process join" % name,
+                name=f"AsyncProcess {name} watch process join",
                 args=(selfref, process, state, q),
             )
             thread.daemon = True
@@ -268,7 +268,7 @@ class AsyncProcess:
         # logging may fail - defer calls to after the callback is added
         if original_exit_code is None:
             logger.warning(
-                "[%s] process %r exit status was already read will report exitcode 255",
+                "[%s] process %r exit status was already read, will report exitcode 255",
                 r,
                 state.pid,
             )
@@ -347,13 +347,13 @@ class AsyncProcess:
         The function may not be a coroutine function.
         """
         # XXX should this be a property instead?
-        assert not inspect.iscoroutinefunction(
-            func
-        ), "exit callback may not be a coroutine function"
+        assert not inspect.iscoroutinefunction(func), (
+            "exit callback may not be a coroutine function"
+        )
         assert callable(func), "exit callback should be callable"
-        assert (
-            self._state.pid is None
-        ), "cannot set exit callback when process already started"
+        assert self._state.pid is None, (
+            "cannot set exit callback when process already started"
+        )
         self._exit_callback = func
 
     def is_alive(self):

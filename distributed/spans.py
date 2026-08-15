@@ -4,7 +4,7 @@ import copy
 import uuid
 import weakref
 from collections import defaultdict
-from collections.abc import Hashable, Iterable, Iterator, Mapping
+from collections.abc import Generator, Hashable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from itertools import islice
 from typing import TYPE_CHECKING, Any, TypedDict
@@ -34,7 +34,7 @@ class SpanMetadata(TypedDict):
 
 
 @contextmanager
-def span(*tags: str) -> Iterator[str]:
+def span(*tags: str) -> Generator[str]:
     """Tag group of tasks to be part of a certain group, called a span.
 
     This context manager can be nested, thus creating sub-spans. If you close and
@@ -134,7 +134,6 @@ class Span:
     __weakref__: Any
 
     __slots__ = tuple(__annotations__)
-    _metadata_seen: set[int] = set()
 
     def __init__(
         self,
@@ -171,11 +170,7 @@ class Span:
         return None
 
     def add_metadata(self, metadata: SpanMetadata) -> None:
-        """Add metadata to the span, e.g. code snippets"""
-        id_ = id(metadata)
-        if id_ in self._metadata_seen:
-            return
-        self._metadata_seen.add(id_)
+        """Add metadata to the span, e.g. computed collections"""
         if self._metadata is None:
             self._metadata = copy.deepcopy(metadata)
         else:
@@ -522,6 +517,9 @@ class SpansSchedulerExtension:
         """
         out = {}
         default_span = None
+        # All tasks of the same graph submission share the same metadata object.
+        # Add it only once per span.
+        metadata_added: set[Span] = set()
 
         for ts in tss:
             if ts.annotations is None:
@@ -546,7 +544,8 @@ class SpansSchedulerExtension:
 
             if code:
                 span._code[code] = None
-            if span_metadata:
+            if span_metadata and span not in metadata_added:
+                metadata_added.add(span)
                 span.add_metadata(span_metadata)
 
             # The span may be completely different from the one referenced by the

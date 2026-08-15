@@ -1,25 +1,44 @@
-from __future__ import annotations
+import decimal
 
-import numpy
 import psutil
 
 from dask.utils import format_bytes
 
-from distributed.utils import get_ip, get_ipv6, time
+from distributed.metrics import monotonic
+from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import has_ipv6
 
 
-def bench() -> float:
-    t0 = time()
-    i = 0
+def bench(deadline: float = 0.1) -> float:
+    """Very crude CPU benchmark.
+    Calculate as many digits of pi as possible within deadline seconds.
+    Return how many digits were calculated per second.
+    """
+    t0 = monotonic()
+    digits = 0
+    precision = 16
     while True:
-        a = numpy.random.random((1000, 1000))
-        (a @ a.T).sum()
+        decimal.getcontext().prec = precision
+        c = decimal.Decimal(426880) * decimal.Decimal(10005).sqrt()
+        m = 1
+        l = 13591409
+        x = 1
+        k = 6
+        s = decimal.Decimal(l)
+        for i in range(1, precision // 14 + 2):
+            m = (m * (k**3 - 16 * k)) // (i**3)
+            l += 545140134
+            x *= -262537412640768000
+            s += decimal.Decimal(m * l) / x
+            k += 12
 
-        i += 1
-        t1 = time()
-        if t1 - t0 > 1:
-            return i / (t1 - t0)
+        pi = c / s
+        digits = max(digits, len(str(pi).replace(".", "")) - 1)
+
+        t1 = monotonic()
+        if t1 - t0 > deadline:
+            return digits / (t1 - t0)
+        precision += 10
 
 
 def main() -> None:

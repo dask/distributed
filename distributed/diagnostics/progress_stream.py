@@ -8,13 +8,14 @@ from dask.utils import key_split
 
 from distributed.core import coerce_to_address, connect
 from distributed.diagnostics.progress import AllProgress
+from distributed.scheduler import Scheduler
 from distributed.utils import color_of
 from distributed.worker import dumps_function
 
 logger = logging.getLogger(__name__)
 
 
-def counts(scheduler, allprogress):
+def _counts(scheduler: Scheduler, allprogress: AllProgress) -> dict:
     return merge(
         {"all": valmap(len, allprogress.all), "nbytes": allprogress.nbytes},
         {
@@ -24,10 +25,8 @@ def counts(scheduler, allprogress):
     )
 
 
-def _remove_all_progress_plugin(self, *args, **kwargs):
-    # Wrapper function around `Scheduler.remove_plugin` to avoid raising a
-    # `PicklingError` when using a cythonized scheduler
-    self.remove_plugin(name=AllProgress.name)
+def _teardown(scheduler: Scheduler, allprogress: AllProgress) -> None:
+    scheduler.remove_plugin(name=allprogress.name)
 
 
 async def progress_stream(address, interval):
@@ -54,9 +53,9 @@ async def progress_stream(address, interval):
         {
             "op": "feed",
             "setup": dumps_function(AllProgress),
-            "function": dumps_function(counts),
+            "function": dumps_function(_counts),
             "interval": interval,
-            "teardown": dumps_function(_remove_all_progress_plugin),
+            "teardown": dumps_function(_teardown),
         }
     )
     return comm
@@ -129,7 +128,7 @@ def progress_quads(msg, nrows=8, ncols=3):
         pl = width * (p + r + m + e) / a + l
         ql = width * (p + r + m + e + q) / a + l
         nwl = width * (p + r + m + e + q + nw) / a + l
-        done = "%d / %d" % (r + m + e, a)
+        done = f"{r + m + e} / {a}"
         d["released-loc"].append(rl)
         d["memory-loc"].append(ml)
         d["erred-loc"].append(el)
@@ -194,7 +193,7 @@ def task_stream_append(lists, msg, workers):
         lists["alpha"].append(alphas[startstop["action"]])
         lists["worker"].append(msg["worker"])
 
-        worker_thread = "%s-%d" % (msg["worker"], msg["thread"])
+        worker_thread = f"{msg['worker']}-{msg['thread']}"
         lists["worker_thread"].append(worker_thread)
         if worker_thread not in workers:
             workers[worker_thread] = len(workers) / 2

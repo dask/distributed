@@ -142,7 +142,7 @@ def test_gc_diagnosis_rss_win():
         gc.collect()
         lines = sio.getvalue().splitlines()
         assert len(lines) == 1
-        # Several MB released, and at least 1 reference cycles
+        # Several MB released, and at least 1 reference cycle
         assert re.match(
             r"full garbage collection released [\d\.]+ MB "
             r"from [1-9]\d* reference cycles",

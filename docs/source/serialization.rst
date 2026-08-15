@@ -16,7 +16,7 @@ situations and also to enable library developers to plug in more performant
 serialization solutions.
 
 This document first describes Dask's default solution for serialization and
-then discusses ways to control and extend that serialiation.
+then discusses ways to control and extend that serialization.
 
 Defaults
 --------

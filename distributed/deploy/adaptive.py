@@ -6,12 +6,11 @@ from datetime import timedelta
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask.config
 from dask.utils import parse_timedelta
 
-from distributed.compatibility import PeriodicCallback
 from distributed.core import Status
 from distributed.deploy.adaptive_core import AdaptiveCore
 from distributed.protocol import pickle

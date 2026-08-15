@@ -25,13 +25,13 @@ import asyncio
 import logging
 import os
 import sys
-import warnings
 from collections.abc import Callable, Container, Hashable, MutableMapping
 from contextlib import suppress
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import psutil
+from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.system import CPU_COUNT
@@ -39,7 +39,7 @@ from dask.typing import Key
 from dask.utils import format_bytes, parse_bytes, parse_timedelta
 
 from distributed import system
-from distributed.compatibility import WINDOWS, PeriodicCallback
+from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.gc import ThrottledGC
 from distributed.metrics import context_meter, monotonic
@@ -108,30 +108,15 @@ class WorkerMemoryManager:
         # This should be None most of the times, short of a power user replacing the
         # SpillBuffer with their own custom dict-like
         data: WorkerDataParameter = None,
-        # Deprecated parameters; use dask.config instead
-        memory_target_fraction: float | Literal[False] | None = None,
-        memory_spill_fraction: float | Literal[False] | None = None,
-        memory_pause_fraction: float | Literal[False] | None = None,
     ):
         self.memory_limit = parse_memory_limit(
             memory_limit, nthreads, logger=worker_logger
         )
-        self.memory_target_fraction = _parse_threshold(
-            "distributed.worker.memory.target",
-            "memory_target_fraction",
-            memory_target_fraction,
+        self.memory_target_fraction = dask.config.get(
+            "distributed.worker.memory.target"
         )
-        self.memory_spill_fraction = _parse_threshold(
-            "distributed.worker.memory.spill",
-            "memory_spill_fraction",
-            memory_spill_fraction,
-        )
-        self.memory_pause_fraction = _parse_threshold(
-            "distributed.worker.memory.pause",
-            "memory_pause_fraction",
-            memory_pause_fraction,
-        )
-
+        self.memory_spill_fraction = dask.config.get("distributed.worker.memory.spill")
+        self.memory_pause_fraction = dask.config.get("distributed.worker.memory.pause")
         max_spill = dask.config.get("distributed.worker.memory.max-spill")
         self.max_spill = False if max_spill is False else parse_bytes(max_spill)
 
@@ -497,54 +482,3 @@ def parse_memory_limit(
         return system.MEMORY_LIMIT
     else:
         return memory_limit
-
-
-def _parse_threshold(
-    config_key: str,
-    deprecated_param_name: str,
-    deprecated_param_value: float | Literal[False] | None,
-) -> float | Literal[False]:
-    if deprecated_param_value is not None:
-        warnings.warn(
-            f"Parameter {deprecated_param_name} has been deprecated and will be "
-            f"removed in a future version; please use dask config key {config_key} "
-            "instead",
-            FutureWarning,
-        )
-        return deprecated_param_value
-    return dask.config.get(config_key)
-
-
-def _warn_deprecated(w: Nanny | Worker, name: str) -> None:
-    warnings.warn(
-        f"The `{type(w).__name__}.{name}` attribute has been moved to "
-        f"`{type(w).__name__}.memory_manager.{name}",
-        FutureWarning,
-    )
-
-
-class DeprecatedMemoryManagerAttribute:
-    name: str
-
-    def __set_name__(self, owner: type, name: str) -> None:
-        self.name = name
-
-    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
-        if instance is None:
-            # This is triggered by Sphinx
-            return None  # pragma: nocover
-        _warn_deprecated(instance, self.name)
-        return getattr(instance.memory_manager, self.name)
-
-    def __set__(self, instance: Nanny | Worker, value: Any) -> None:
-        _warn_deprecated(instance, self.name)
-        setattr(instance.memory_manager, self.name, value)
-
-
-class DeprecatedMemoryMonitor:
-    def __get__(self, instance: Nanny | Worker | None, owner: type) -> Any:
-        if instance is None:
-            # This is triggered by Sphinx
-            return None  # pragma: nocover
-        _warn_deprecated(instance, "memory_monitor")
-        return partial(instance.memory_manager.memory_monitor, instance)  # type: ignore

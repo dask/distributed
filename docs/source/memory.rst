@@ -187,7 +187,7 @@ Advanced techniques
 At first the result of a task is not intentionally copied, but only persists on
 the node where it was originally computed or scattered. However, a result may be
 copied to another worker node in the course of normal computation if that
-result is required by another task that is intended to by run by a different
+result is required by another task that is intended to be run by a different
 worker. This occurs if a task requires two pieces of data on different
 machines (at least one must move) or through work stealing. In these cases it
 is the policy for the second machine to maintain its redundant copy of the data.

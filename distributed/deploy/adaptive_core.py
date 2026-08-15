@@ -71,8 +71,6 @@ class AdaptiveCore(ABC):
     wait_count: int
         The number of scale-down requests we should receive before actually
         scaling down
-    interval: str
-        The amount of time, like ``"1s"`` between checks
     """
 
     minimum: int

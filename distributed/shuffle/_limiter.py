@@ -82,7 +82,7 @@ class ResourceLimiter(Generic[_T]):
         """Decrease the internal counter by value"""
         if value > self._acquired:
             raise RuntimeError(
-                f"Cannot release more than what was acquired! release: {value} acquired: {self._acquired}"
+                f"Cannot release more than what was acquired! released: {value} acquired: {self._acquired}"
             )
         self._acquired -= value
         async with self._condition:

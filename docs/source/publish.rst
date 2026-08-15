@@ -94,7 +94,7 @@ Notes
 -----
 
 Published collections are not automatically persisted.  If you publish an
-un-persisted collection then others will still be able to get the collection
+unpersisted collection then others will still be able to get the collection
 from the scheduler, but operations on that collection will start from scratch.
 This allows you to publish views on data that do not permanently take up
 cluster memory but can be surprising if you expect "publishing" to

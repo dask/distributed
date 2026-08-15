@@ -57,7 +57,7 @@ def test_serialize_cupy_from_rmm(size):
     x_np = np.arange(size, dtype="u1")
 
     x_np_desc = x_np.__array_interface__
-    (x_np_ptr, _) = x_np_desc["data"]
+    x_np_ptr, _ = x_np_desc["data"]
     (x_np_size,) = x_np_desc["shape"]
     x = rmm.DeviceBuffer(ptr=x_np_ptr, size=x_np_size)
 

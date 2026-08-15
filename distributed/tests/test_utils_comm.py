@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from unittest import mock
 
@@ -19,7 +20,14 @@ from distributed.utils_comm import (
     subs_multiple,
     unpack_remotedata,
 )
-from distributed.utils_test import BarrierGetData, BrokenComm, gen_cluster, inc
+from distributed.utils_test import (
+    BarrierGetData,
+    BrokenComm,
+    captured_logger,
+    gen_cluster,
+    gen_test,
+    inc,
+)
 
 
 def test_pack_data():
@@ -175,7 +183,7 @@ def test_retry_no_exception(cleanup):
 
 
 def test_retry0_raises_immediately(cleanup):
-    # test that using max_reties=0 raises after 1 call
+    # test that using max_retries=0 raises after 1 call
 
     n_calls = 0
 
@@ -227,6 +235,44 @@ def test_retry_does_retry_and_sleep(cleanup):
 
     assert n_calls == 6
     assert sleep_calls == [0.0, 1.0, 3.0, 6.0, 6.0]
+
+
+@gen_test()
+@pytest.mark.parametrize("count", [1, 2])
+async def test_retry_truncates_large_coro_repr(count):
+    """Test that retry truncates excessively large string representations of coro."""
+
+    class MyEx(Exception):
+        pass
+
+    class LargeReprCallable:
+        def __repr__(self):
+            return "x" * 500
+
+        async def __call__(self):
+            raise MyEx("fail")
+
+    async def f():
+        return await retry(
+            LargeReprCallable(),
+            retry_on_exceptions=(MyEx,),
+            count=count,
+            delay_min=0,
+            delay_max=0,
+            jitter_fraction=0,
+        )
+
+    with (
+        captured_logger("distributed.utils_comm", level=logging.INFO) as caplog,
+        pytest.raises(MyEx),
+    ):
+        await f()
+
+    msg = caplog.getvalue()
+    # reprlib uses "..." to indicate truncation
+    assert "xxxxx..." in msg
+    # Verify the full 500-char repr is NOT present
+    assert 200 * count < len(msg) < 300 * count
 
 
 def test_unpack_remotedata():

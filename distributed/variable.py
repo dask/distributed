@@ -52,7 +52,7 @@ class VariableExtension:
                 await asyncio.sleep(0.01)
                 if deadline.expired:
                     raise TimeoutError(f"Task {key} unknown to scheduler.")
-            self.scheduler.client_desires_keys(keys=[key], client="variable-%s" % name)
+            self.scheduler.client_desires_keys(keys=[key], client=f"variable-{name}")
         else:
             record = {"type": "msgpack", "value": data}
         try:
@@ -72,7 +72,7 @@ class VariableExtension:
             async with self.waiting_conditions[name]:
                 await self.waiting_conditions[name].wait()
 
-        self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
+        self.scheduler.client_releases_keys(keys=[key], client=f"variable-{name}")
         del self.waiting[key, name]
 
     async def future_received_confirm(
@@ -131,7 +131,7 @@ class VariableExtension:
         with suppress(KeyError):
             del self.variables[name]
 
-        self.scheduler.remove_client("variable-%s" % name)
+        self.scheduler.remove_client(f"variable-{name}")
 
 
 class Variable:
@@ -160,8 +160,8 @@ class Variable:
     >>> from dask.distributed import Client, Variable # doctest: +SKIP
     >>> client = Client()  # doctest: +SKIP
     >>> x = Variable('x')  # doctest: +SKIP
-    >>> x.set(123)  # docttest: +SKIP
-    >>> x.get()  # docttest: +SKIP
+    >>> x.set(123)  # doctest: +SKIP
+    >>> x.get()  # doctest: +SKIP
     123
     >>> future = client.submit(f, x)  # doctest: +SKIP
     >>> x.set(future)  # doctest: +SKIP
@@ -173,7 +173,7 @@ class Variable:
 
     def __init__(self, name=None, client=None):
         self._client = client
-        self.name = name or "variable-" + uuid.uuid4().hex
+        self.name = name or f"variable-{uuid.uuid4().hex}"
 
     @property
     def client(self):

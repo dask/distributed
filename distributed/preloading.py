@@ -6,6 +6,9 @@ import logging
 import os
 import shutil
 import sys
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Iterable, Sequence
 from importlib import import_module
 from types import ModuleType
@@ -37,8 +40,11 @@ def validate_preload_argv(ctx, param, value):
         for a in unexpected_args:
             raise click.NoSuchOption(a)
         raise click.UsageError(
-            "Got unexpected extra argument%s: (%s)"
-            % ("s" if len(value) > 1 else "", " ".join(value))
+            "Got unexpected extra argument{}: ({}). If you intended these as "
+            "values for a --preload module, list --preload before them. "
+            "Otherwise check spelling -- see '--help' for valid options.".format(
+                "s" if len(value) > 1 else "", " ".join(value)
+            )
         )
 
     preload_modules = {
@@ -55,8 +61,7 @@ def validate_preload_argv(ctx, param, value):
 
     if len(preload_commands) > 1:
         raise click.UsageError(
-            "Multiple --preload modules with click-configurable setup: %s"
-            % list(preload_modules.keys())
+            f"Multiple --preload modules with click-configurable setup: {list(preload_modules.keys())}"
         )
 
     if value and not preload_commands:
@@ -129,21 +134,22 @@ def _import_module(name: str, file_dir: str | None = None) -> ModuleType:
 def _download_module(url: str) -> ModuleType:
     logger.info("Downloading preload at %s", url)
     assert is_webaddress(url)
-    # This is the only place where urrllib3 is used and it is a relatively heavy
-    # import. Do lazy import to reduce import time
-    import urllib3
 
-    with urllib3.PoolManager() as http:
-        response = http.request(
-            method="GET",
-            url=url,
-            retries=urllib3.util.Retry(
-                status_forcelist=[429, 504, 503, 502],
-                backoff_factor=0.2,
-            ),
-        )
+    retryable_codes = {429, 502, 503, 504}
+    backoff_factor = 0.2
+    max_retries = 3
 
-        source = response.data
+    for attempt in range(max_retries + 1):
+        try:
+            with urllib.request.urlopen(url) as response:
+                source = response.read()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in retryable_codes and attempt < max_retries:
+                retry_delay_seconds = backoff_factor * (2**attempt)
+                time.sleep(retry_delay_seconds)
+                continue
+            raise
 
     compiled = compile(source, url, "exec")
     module = ModuleType(url)

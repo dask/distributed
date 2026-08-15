@@ -97,7 +97,7 @@ async def test_spans(c, s, a):
     # Test that spans survive their tasks
     prev_span_ids = set(ext.spans)
     del zp
-    await async_poll_for(lambda: not s.tasks, timeout=5)
+    await async_poll_for(lambda: not s.tasks)
     assert ext.spans.keys() == prev_span_ids
 
 
@@ -233,7 +233,7 @@ async def test_task_groups(c, s, a, b, release, no_time_resync):
     if release:
         # Test that the information in the Spans survives the tasks
         finalizer.release()
-        await async_poll_for(lambda: not s.tasks, timeout=5)
+        await async_poll_for(lambda: not s.tasks)
         assert not s.task_groups
 
     sbn = s.extensions["spans"].spans_search_by_name
@@ -316,7 +316,7 @@ async def test_duplicate_task_group(c, s, a, b):
     with span("foo"):
         for _ in range(2):
             await c.submit(inc, 1, key="x")
-            await async_poll_for(lambda: not s.tasks, timeout=5)
+            await async_poll_for(lambda: not s.tasks)
     sp = s.extensions["spans"].spans_search_by_name["foo",][-1]
     assert len(sp.groups) == 2
     tg0, tg1 = sp.groups
@@ -457,7 +457,7 @@ async def test_worker_metrics(c, s, a, b):
 
             # Cleanup
             del x0, x1, x2, x3
-            await async_poll_for(lambda: not s.tasks, timeout=5)
+            await async_poll_for(lambda: not s.tasks)
 
             # Have metrics with 'y' task prefix in foo too
             await c.submit(inc, 1, key=("y", 1))
@@ -549,15 +549,15 @@ async def test_merge_by_tags(c, s, a, b):
 async def test_merge_by_tags_metrics(c, s, a, b):
     with span("foo") as foo1:
         await c.submit(slowinc, 1, delay=0.05, key="x-1")
-    await async_poll_for(lambda: not s.task_groups, timeout=5)
+    await async_poll_for(lambda: not s.task_groups)
 
     with span("foo") as foo2:
         await c.submit(slowinc, 2, delay=0.06, key="x-2")
-    await async_poll_for(lambda: not s.task_groups, timeout=5)
+    await async_poll_for(lambda: not s.task_groups)
 
     with span("bar") as bar1:
         await c.submit(slowinc, 3, delay=0.07, key="x-3")
-    await async_poll_for(lambda: not s.task_groups, timeout=5)
+    await async_poll_for(lambda: not s.task_groups)
 
     await a.heartbeat()
     await b.heartbeat()
@@ -836,6 +836,7 @@ async def test_collections_metadata(c, s, a, b):
 
     ext = s.extensions["spans"]
     span_ = ext.spans[span_id]
+    assert span_
     collections_meta = span_.metadata["collections"]
     assert isinstance(collections_meta, list)
     assert len(collections_meta) == 1

@@ -479,7 +479,7 @@ async def test_scale_needs_to_be_awaited():
             await client.gather(futures)
 
             del futures
-            await async_poll_for(lambda: not cluster.workers, 10)
+            await async_poll_for(lambda: not cluster.workers)
 
 
 @gen_test()
@@ -492,11 +492,11 @@ async def test_adaptive_stopped():
         n_workers=0, asynchronous=True, dashboard_address=":0"
     ) as cluster:
         instance = cluster.adapt(interval="10ms")
-        await async_poll_for(lambda: instance.state == "running", timeout=5)
+        await async_poll_for(lambda: instance.state == "running")
         assert instance.periodic_callback is not None
         assert instance.periodic_callback.is_running()
         pc = instance.periodic_callback
-    await async_poll_for(lambda: instance.state == "stopped", timeout=5)
+    await async_poll_for(lambda: instance.state == "stopped")
     assert not pc.is_running()
 
 
@@ -585,7 +585,7 @@ async def test_adaptive_stops_on_cluster_status_change():
     ) as cluster:
         adapt = Adaptive(cluster, interval="100 ms")
         assert adapt.state == "starting"
-        await async_poll_for(lambda: adapt.state == "running", timeout=5)
+        await async_poll_for(lambda: adapt.state == "running")
 
         assert adapt.periodic_callback
         assert adapt.periodic_callback.is_running()
@@ -593,7 +593,7 @@ async def test_adaptive_stops_on_cluster_status_change():
         try:
             cluster.status = Status.closing
 
-            await async_poll_for(lambda: adapt.state != "running", timeout=5)
+            await async_poll_for(lambda: adapt.state != "running")
             assert adapt.state == "stopped"
             assert not adapt.periodic_callback
         finally:
@@ -674,7 +674,7 @@ async def test_adapt_callback_logs_error_in_scale_down():
             Adaptive=BadAdaptive, minimum=1, maximum=4, wait_count=0, interval="10ms"
         )
         adapt._target = 2
-        await async_poll_for(lambda: adapt.state == "running", timeout=5)
+        await async_poll_for(lambda: adapt.state == "running")
         assert adapt.periodic_callback.is_running()
         await adapt.adapt()
         assert len(adapt.plan) == 2
@@ -703,7 +703,7 @@ async def test_adaptive_logs_stopping_once(wait_until_running):
         with captured_logger("distributed.deploy.adaptive") as log:
             adapt = cluster.adapt(Adaptive=MyAdaptive, interval="100ms")
             if wait_until_running:
-                await async_poll_for(lambda: adapt.state == "running", timeout=5)
+                await async_poll_for(lambda: adapt.state == "running")
                 assert adapt.periodic_callback
                 assert adapt.periodic_callback.is_running()
                 pc = adapt.periodic_callback
@@ -731,9 +731,9 @@ async def test_adapt_stop_del():
     ) as cluster:
         adapt = cluster.adapt(Adaptive=MyAdaptive, interval="100ms")
         pc = adapt.periodic_callback
-        await async_poll_for(lambda: adapt.state == "running", timeout=5)  # noqa: F821
+        await async_poll_for(lambda: adapt.state == "running")  # noqa: F821
 
         # Remove reference of adaptive object from cluster
         cluster._adaptive = None
         del adapt
-        await async_poll_for(lambda: not pc.is_running(), timeout=5)
+        await async_poll_for(lambda: not pc.is_running())

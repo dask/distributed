@@ -26,7 +26,7 @@ class MultiLockExtension:
     The approach is to maintain `self.locks` that maps a lock (unique name given to
     `MultiLock(names=, ...)` at creation) to a list of users (instances of `MultiLock`)
     that "requests" the lock. Additionally, `self.requests` maps a user to its requested
-    locks and `self.requests_left` maps a user to the number of locks still need.
+    locks and `self.requests_left` maps a user to the number of locks still needed.
 
     Every time a user `x` gets to the front in `self.locks[name] = [x, ...]` it means
     that `x` now holds the lock `name` and when it holds all the requested locks
@@ -74,20 +74,21 @@ class MultiLockExtension:
             if len(self.locks[lock]) == 1:  # The lock was free
                 self.requests_left[id] -= 1
                 if self.requests_left[id] == 0:  # Got all locks needed
-                    # Since we got all locks need, we can remove the rest of the requests
+                    # Since we got all locks needed, we can remove the rest of the requests
                     self.requests[id] -= set(locks[i + 1 :])
                     return True
         return False
 
-    def _refain_locks(self, locks, id):
-        """Cancel/release previously requested/acquired locks
+    def _retain_locks(self, locks: list[str], id: Hashable) -> None:
+        """Cancel/release previously requested/acquired locks not in the
+        given allowlist
 
         Parameters
         ----------
-        locks: List[str]
-            Names of the locks to refain.
+        locks: list[str]
+            Names of the locks to retain.
         id: Hashable
-            Identifier of the `MultiLock` instance refraining the locks.
+            Identifier of the `MultiLock` instance retaining the locks.
         """
         waiters_ready = set()
         for lock in locks:
@@ -122,7 +123,7 @@ class MultiLockExtension:
             try:
                 await future
             except TimeoutError:
-                self._refain_locks(locks, id)
+                self._retain_locks(locks, id)
                 return False
             finally:
                 del self.events[id]
@@ -132,7 +133,7 @@ class MultiLockExtension:
 
     @log_errors
     def release(self, id=None):
-        self._refain_locks(self.requests[id], id)
+        self._retain_locks(self.requests[id], id)
 
 
 class MultiLock:

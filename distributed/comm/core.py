@@ -350,9 +350,9 @@ async def connect(
         except (asyncio.TimeoutError, OSError) as exc:
             active_exception = exc
 
-            # As described above, the intermediate timeout is used to distributed
+            # As described above, the intermediate timeout is used to distribute
             # initial, bulk connect attempts homogeneously. In particular with
-            # the jitter upon retries we should not be worred about overloading
+            # the jitter upon retries we should not be worried about overloading
             # any more DNS servers
             intermediate_cap = timeout
             # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
@@ -401,9 +401,9 @@ def listen(addr, handle_comm, deserialize=True, **kwargs):
         scheme, loc = parse_address(addr, strict=True)
     except ValueError:
         if kwargs.get("ssl_context"):
-            addr = "tls://" + addr
+            addr = f"tls://{addr}"
         else:
-            addr = "tcp://" + addr
+            addr = f"tcp://{addr}"
         scheme, loc = parse_address(addr, strict=True)
 
     backend = registry.get_backend(scheme)

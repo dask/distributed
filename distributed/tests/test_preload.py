@@ -176,13 +176,13 @@ backends["foo"] = TCPBackend()
 async def test_web_preload():
     with (
         mock.patch(
-            "urllib3.PoolManager.request",
+            "urllib.request.urlopen",
             **{
-                "return_value.data": b"def dask_setup(dask_server):"
+                "return_value.__enter__.return_value.read.return_value": b"def dask_setup(dask_server):"
                 b"\n    dask_server.foo = 1"
                 b"\n"
             },
-        ) as request,
+        ) as mock_urlopen,
         captured_logger("distributed.preloading") as log,
     ):
         async with Scheduler(
@@ -200,9 +200,7 @@ async def test_web_preload():
             )
             is not None
         )
-    assert request.mock_calls == [
-        mock.call(method="GET", url="http://example.com/preload", retries=mock.ANY)
-    ]
+    assert mock_urlopen.call_args_list == [mock.call("http://example.com/preload")]
 
 
 @gen_cluster(nthreads=[])
@@ -228,22 +226,18 @@ dask.config.set(scheduler_address="{s.address}")
 @gen_test()
 async def test_web_preload_worker():
     port = open_port()
-    data = dedent(
-        f"""\
+    data = dedent(f"""\
         import dask
         dask.config.set(scheduler_address="tcp://127.0.0.1:{port}")
-        """
-    ).encode()
+        """).encode()
     with mock.patch(
-        "urllib3.PoolManager.request",
-        **{"return_value.data": data},
-    ) as request:
+        "urllib.request.urlopen",
+        **{"return_value.__enter__.return_value.read.return_value": data},
+    ) as mock_urlopen:
         async with Scheduler(port=port, host="localhost", dashboard_address=":0") as s:
             async with Nanny(preload_nanny=["http://example.com/preload"]) as nanny:
                 assert nanny.scheduler_addr == s.address
-    assert request.mock_calls == [
-        mock.call(method="GET", url="http://example.com/preload", retries=mock.ANY)
-    ]
+    assert mock_urlopen.call_args_list == [mock.call("http://example.com/preload")]
 
 
 # This test is blocked on https://github.com/dask/distributed/issues/5819
@@ -252,16 +246,14 @@ async def test_web_preload_worker():
 )
 @gen_cluster(nthreads=[])
 async def test_client_preload_text(s):
-    text = dedent(
-        """\
+    text = dedent("""\
         def dask_setup(client):
             client.foo = "setup"
 
 
         def dask_teardown(client):
             client.foo = "teardown"
-        """
-    )
+        """)
     async with Client(address=s.address, asynchronous=True, preload=text) as c:
         assert c.foo == "setup"
     assert c.foo == "teardown"
@@ -269,16 +261,14 @@ async def test_client_preload_text(s):
 
 @gen_cluster(nthreads=[])
 async def test_client_preload_config(s):
-    text = dedent(
-        """\
+    text = dedent("""\
         def dask_setup(client):
             client.foo = "setup"
 
 
         def dask_teardown(client):
             client.foo = "teardown"
-        """
-    )
+        """)
     with dask.config.set({"distributed.client.preload": [text]}):
         async with Client(address=s.address, asynchronous=True) as c:
             assert c.foo == "setup"
@@ -291,16 +281,14 @@ async def test_client_preload_config(s):
 )
 @gen_cluster(nthreads=[])
 async def test_client_preload_click(s):
-    text = dedent(
-        """\
+    text = dedent("""\
         import click
 
         @click.command()
         @click.argument("value")
         def dask_setup(client, value):
             client.foo = value
-        """
-    )
+        """)
     value = "setup"
     async with Client(
         address=s.address, asynchronous=True, preload=text, preload_argv=[[value]]
@@ -387,16 +375,14 @@ def dask_teardown(worker):
 
 @gen_cluster(nthreads=[])
 async def test_client_preload_config_click(s):
-    text = dedent(
-        """\
+    text = dedent("""\
         import click
 
         @click.command()
         @click.argument("value")
         def dask_setup(client, value):
             client.foo = value
-        """
-    )
+        """)
     value = "setup"
     with dask.config.set(
         {

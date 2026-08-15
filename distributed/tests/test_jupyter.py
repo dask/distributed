@@ -14,10 +14,7 @@ from distributed import Client, Scheduler
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.utils import open_port
-from distributed.utils_test import gen_test, popen
-
-pytest.importorskip("requests")
-import requests
+from distributed.utils_test import gen_test, get_dashboard_port, popen
 
 pytest.importorskip("jupyter_server")
 
@@ -47,7 +44,10 @@ async def test_jupyter_server():
 
 @pytest.mark.slow
 def test_jupyter_cli(loop, requires_default_ports):
+    requests = pytest.importorskip("requests")
+
     port = open_port()
+
     with popen(
         [
             sys.executable,
@@ -55,15 +55,19 @@ def test_jupyter_cli(loop, requires_default_ports):
             "dask",
             "scheduler",
             "--jupyter",
-            "--no-dashboard",
+            "--dashboard-address",
+            "127.0.0.1:0",
             "--host",
             f"127.0.0.1:{port}",
         ],
         terminate_timeout=120,
         kill_timeout=60,
     ):
-        with Client(f"127.0.0.1:{port}", loop=loop):
-            response = requests.get("http://127.0.0.1:8787/jupyter/api/status")
+        with Client(f"127.0.0.1:{port}", loop=loop) as c:
+            dashboard_port = get_dashboard_port(c)
+            response = requests.get(
+                f"http://127.0.0.1:{dashboard_port}/jupyter/api/status"
+            )
             assert response.status_code == 200
 
 
@@ -77,11 +81,11 @@ async def test_jupyter_idle_timeout():
         # time, which is used to determine idleness. Instead of a full e2e test
         # launching a kernel and running commands on it, we'll just hook into this:
         # https://github.com/jupyter-server/jupyter_server/blob/e582e555/jupyter_server/serverapp.py#L385-L387
-        extension_last_activty = web_app.settings["last_activity_times"]
+        extension_last_activity = web_app.settings["last_activity_times"]
 
         for _ in range(10):
             last = perf_counter()
-            extension_last_activty["test"] = datetime.now(timezone.utc)
+            extension_last_activity["test"] = datetime.now(timezone.utc)
 
             await asyncio.sleep(s.idle_timeout / 2)
             if (d := perf_counter() - last) >= s.idle_timeout:
@@ -99,12 +103,12 @@ async def test_jupyter_idle_timeout_returned():
     "`check_idle` should return the last Jupyter idle time. Used in dask-kubernetes."
     async with Scheduler(jupyter=True, dashboard_address=":0") as s:
         web_app = s._jupyter_server_application.web_app
-        extension_last_activty = web_app.settings["last_activity_times"]
+        extension_last_activity = web_app.settings["last_activity_times"]
 
-        extension_last_activty["test"] = datetime.now(timezone.utc)
+        extension_last_activity["test"] = datetime.now(timezone.utc)
         last_idle = s.check_idle()
         assert last_idle is not None
-        extension_last_activty["test"] = datetime.now(timezone.utc) + timedelta(
+        extension_last_activity["test"] = datetime.now(timezone.utc) + timedelta(
             seconds=1
         )
         next_idle = s.check_idle()
@@ -117,7 +121,9 @@ async def test_jupyter_idle_timeout_returned():
 @pytest.mark.slow
 @pytest.mark.xfail(WINDOWS, reason="Subprocess launching scheduler TimeoutError")
 @pytest.mark.xfail(MACOS, reason="Client fails to connect on OSX")
-def test_shutsdown_cleanly(requires_default_ports):
+def test_shutdowns_cleanly(requires_default_ports):
+    requests = pytest.importorskip("requests")
+
     port = open_port()
     with concurrent.futures.ThreadPoolExecutor() as tpe:
         subprocess_fut = tpe.submit(
@@ -128,7 +134,8 @@ def test_shutsdown_cleanly(requires_default_ports):
                 "dask",
                 "scheduler",
                 "--jupyter",
-                "--no-dashboard",
+                "--dashboard-address",
+                "127.0.0.1:0",
                 "--host",
                 f"127.0.0.1:{port}",
             ],
@@ -139,13 +146,15 @@ def test_shutsdown_cleanly(requires_default_ports):
         )
 
         # wait until scheduler is running
-        with Client(f"127.0.0.1:{port}"):
-            pass
+        with Client(f"127.0.0.1:{port}") as c:
+            dashboard_port = get_dashboard_port(c)
 
         with requests.Session() as session:
-            session.get("http://127.0.0.1:8787/jupyter/lab").raise_for_status()
+            session.get(
+                f"http://127.0.0.1:{dashboard_port}/jupyter/lab"
+            ).raise_for_status()
             session.post(
-                "http://127.0.0.1:8787/jupyter/api/shutdown",
+                f"http://127.0.0.1:{dashboard_port}/jupyter/api/shutdown",
                 headers={"X-XSRFToken": session.cookies["_xsrf"]},
             ).raise_for_status()
 

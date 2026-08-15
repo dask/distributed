@@ -56,8 +56,7 @@ class ClientExecutor(cf.Executor):
         sk = set(kwargs)
         if not sk <= self._allowed_kwargs:
             raise TypeError(
-                "unsupported arguments to ClientExecutor: %s"
-                % sorted(sk - self._allowed_kwargs)
+                f"unsupported arguments to ClientExecutor: {sorted(sk - self._allowed_kwargs)}"
             )
         self._client = client
         self._futures = weakref.WeakSet()
@@ -127,7 +126,7 @@ class ClientExecutor(cf.Executor):
             end_time = timeout + time()
         kwargs.pop("chunksize", None)
         if kwargs:
-            raise TypeError("unexpected arguments to map(): %s" % sorted(kwargs))
+            raise TypeError(f"unexpected arguments to map(): {sorted(kwargs)}")
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
 

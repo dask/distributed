@@ -201,7 +201,7 @@ def _running_process_matches(handle):
 
     Parameters
     ----------
-    handle : pyvnml.nvml.LP_struct_c_nvmlDevice_t
+    handle : pynvml.nvml.LP_struct_c_nvmlDevice_t
         NVML handle to CUDA device
 
     Returns

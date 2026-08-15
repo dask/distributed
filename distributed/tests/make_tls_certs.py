@@ -72,7 +72,7 @@ here = os.path.abspath(os.path.dirname(__file__))
 
 
 def make_cert_key(hostname, sign=False):
-    print("creating cert for " + hostname)
+    print(f"creating cert for {hostname}")
     tempnames = []
     for _ in range(3):
         with tempfile.NamedTemporaryFile(delete=False) as f:

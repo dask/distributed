@@ -169,7 +169,7 @@ async def test_cleanup(c, s, a, b):
     del x
     await asyncio.sleep(0.1)
 
-    t_future = xx = asyncio.ensure_future(vv._get())
+    t_future = asyncio.ensure_future(vv._get())
     await asyncio.sleep(0)
     asyncio.ensure_future(v.set(y))
 

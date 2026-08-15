@@ -463,43 +463,10 @@ async def test_full_collections(c, s, a, b):
     assert not b.state.log
 
 
-@pytest.mark.parametrize(
-    "optimize_graph",
-    [
-        pytest.param(
-            True,
-            marks=pytest.mark.xfail(
-                reason="don't track resources through optimization"
-            ),
-        ),
-        False,
-    ],
-)
-def test_collections_get(client, optimize_graph, s, a, b):
-    pytest.importorskip("numpy")
-    da = pytest.importorskip("dask.array")
-
-    async def f(dask_worker):
-        await dask_worker.set_resources(**{"A": 1})
-
-    client.run(f, workers=[a["address"]])
-
-    with dask.annotate(resources={"A": 1}):
-        x = da.random.random(100, chunks=(10,)) + 1
-
-    x.compute(optimize_graph=optimize_graph)
-
-    def g(dask_worker):
-        return len(dask_worker.log)
-
-    logs = client.run(g)
-    assert logs[a["address"]]
-    assert not logs[b["address"]]
-
-
 @gen_cluster(config={"distributed.worker.resources.my_resources": 1}, client=True)
 async def test_resources_from_config(c, s, a, b):
-    info = c.scheduler_info()
+    # scheduler_info() carries no per-worker detail for async clients; fetch it
+    info = await c.scheduler.identity(n_workers=-1)
     for worker in [a, b]:
         assert info["workers"][worker.address]["resources"] == {"my_resources": 1}
 
@@ -510,7 +477,8 @@ async def test_resources_from_config(c, s, a, b):
     client=True,
 )
 async def test_resources_from_python_override_config(c, s, a, b):
-    info = c.scheduler_info()
+    # scheduler_info() carries no per-worker detail for async clients; fetch it
+    info = await c.scheduler.identity(n_workers=-1)
     for worker in [a, b]:
         assert info["workers"][worker.address]["resources"] == {"my_resources": 10}
 

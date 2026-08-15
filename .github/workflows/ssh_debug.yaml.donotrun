@@ -42,5 +42,5 @@ jobs:
         run: ssh -vvv $(hostname) 'echo hello world'
 
       - name: Debug with tmate on failure
-        if: ${{ failure() }}
+        if: failure()
         uses: mxschmitt/action-tmate@v3

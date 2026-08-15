@@ -53,9 +53,17 @@ def test_logging_default(caplog, config):
             dfc.info("8: ignore me")
             dfc.warning("9: important")
 
-        # default logging sets propagate=False so caplog does not capture
-        # distributed log records
-        assert caplog.record_tuples == [
+        # default logging sets propagate=False on the distributed loggers
+        assert d.propagate is False
+        assert dfc.propagate is False
+        # caplog attaches its handler to the root logger and (since pytest 9.1)
+        # also to non-propagating loggers, so whether distributed records show
+        # up in caplog is pytest-version dependent. Only assert on records from
+        # foreign libraries, which propagate to the root logger on all versions.
+        foreign_records = [
+            r for r in caplog.record_tuples if not r[0].startswith("distributed")
+        ]
+        assert foreign_records == [
             # Info logs of foreign libraries are not logged because default is
             # WARNING
             ("foo.bar", logging.ERROR, "5: error"),
@@ -200,14 +208,12 @@ def test_logging_extended():
 
 
 def test_default_logging_does_not_override_basic_config():
-    code = textwrap.dedent(
-        """\
+    code = textwrap.dedent("""\
         import logging
         logging.basicConfig()
         import distributed
         logging.getLogger("distributed").warning("hello")
-        """
-    )
+        """)
     proc = subprocess.run(
         [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
     )
@@ -216,15 +222,13 @@ def test_default_logging_does_not_override_basic_config():
 
 
 def test_basic_config_does_not_override_default_logging():
-    code = textwrap.dedent(
-        """\
+    code = textwrap.dedent("""\
         import logging
         import distributed
 
         logging.basicConfig()
         logging.getLogger("distributed").warning("hello")
-        """
-    )
+        """)
     proc = subprocess.run(
         [sys.executable, "-c", code], check=True, capture_output=True, encoding="utf8"
     )
@@ -351,15 +355,30 @@ def test_schema_is_complete():
     test_matches(config, schema, "")
 
 
-def test_uvloop_event_loop():
+uvloop_test_script = """
+import asyncio
+
+import uvloop
+
+import distributed
+
+async def test():
+    return isinstance(asyncio.get_event_loop(), uvloop.Loop)
+
+if __name__ == "__main__":
+    with distributed.Client(processes=True, n_workers=1) as client:
+        assert client.sync(test)  # client loop
+        assert client.run_on_scheduler(test)  # also client loop
+        assert client.run(test)  # nanny loop
+"""
+
+
+def test_uvloop():
     """Check that configuring distributed to use uvloop actually sets the event loop policy"""
     pytest.importorskip("uvloop")
-    script = (
-        "import distributed, asyncio, uvloop\n"
-        "assert isinstance(asyncio.get_event_loop_policy(), uvloop.EventLoopPolicy)"
-    )
+
     subprocess.check_call(
-        [sys.executable, "-c", script],
+        [sys.executable, "-c", uvloop_test_script],
         env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
     )
 

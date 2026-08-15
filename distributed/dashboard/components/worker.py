@@ -91,7 +91,7 @@ class StateTable(DashboardComponent):
         w = self.worker
         d = {
             "Stored": [len(w.data)],
-            "Executing": ["%d / %d" % (w.state.executing_count, w.state.nthreads)],
+            "Executing": [f"{w.state.executing_count} / {w.state.nthreads}"],
             "Ready": [len(w.state.ready)],
             "Waiting": [len(w.state.waiting)],
             "Connections": [w.state.transfer_incoming_count],
@@ -411,7 +411,7 @@ class Counters(DashboardComponent):
                     if name.endswith("duration"):
                         xs *= 1000
                     self.digest_sources[name][i].data.update({"x": xs, "y": ys})
-            fig.title.text = "%s: %d" % (name, digest.size())
+            fig.title.text = f"{name}: {digest.size()}"
 
         for name, fig in self.counter_figures.items():
             counter = self.server.counters[name]
@@ -426,7 +426,7 @@ class Counters(DashboardComponent):
                     xs = [str(x) for x in xs]
                     d = {"x": xs, "y": ys, "y-center": y_centers, "counts": counts}
                     self.counter_sources[name][i].data.update(d)
-                fig.title.text = "%s: %d" % (name, counter.size())
+                fig.title.text = f"{name}: {counter.size()}"
                 fig.x_range.factors = [str(x) for x in xs]
 
 
@@ -463,7 +463,7 @@ def systemmonitor_doc(worker, extra, doc):
     doc.add_root(sysmon.root)
 
 
-@standard_doc("Dask Work Counters", active_page="counters")
+@standard_doc("Dask Worker Counters", active_page="counters")
 def counters_doc(server, extra, doc):
     counter = Counters(server, sizing_mode="stretch_both")
     add_periodic_callback(doc, counter, 500)

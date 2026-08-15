@@ -307,7 +307,7 @@ class TCP(Comm):
             self._closed = True
             convert_stream_closed_error(self, e)
         except BaseException:
-            # Some OSError or a another "low-level" exception. We do not really know
+            # Some OSError or another "low-level" exception. We do not really know
             # what was already written to the underlying socket, so it is not even safe
             # to retry here using the same stream. The only safe thing to do is to
             # abort. (See also GitHub #4133).
@@ -468,7 +468,7 @@ class RequireEncryptionMixin:
             # XXX Should we have a dedicated SecurityError class?
             raise RuntimeError(
                 "encryption required by Dask configuration, "
-                "refusing communication from/to %r" % (self.prefix + address,)
+                f"refusing communication from/to {self.prefix + address!r}"
             )
 
 
@@ -658,6 +658,14 @@ class BaseTCPListener(BaseListener, RequireEncryptionMixin):
         if stream is None:
             # Preparation failed
             return
+        if self.tcp_server is None:
+            # stop() was called after the connection was accepted, but before this
+            # method could run. abort_handshaking_comms() has already run and won't
+            # take care of this comm; if we left the stream dangling, the client
+            # would hang forever in the comm handshake, which is deliberately not
+            # subject to timeouts (see distributed.comm.core.connect()).
+            stream.close()
+            return
         logger.debug("Incoming connection from %r to %r", address, self.contact_address)
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)
@@ -679,7 +687,7 @@ class BaseTCPListener(BaseListener, RequireEncryptionMixin):
 
         if self.bound_address is None:
             self.bound_address = get_tcp_server_address(self.tcp_server)
-        # IPv6 getsockname() can return more a 4-len tuple
+        # IPv6 getsockname() can return more than a 4-element tuple
         return self.bound_address[:2]
 
     @property

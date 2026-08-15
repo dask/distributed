@@ -61,11 +61,11 @@ async def test_task_lifecycle(c, s, a, b):
         assert (await z) == "x" * 20_000 + "y" * 20_000
         # The call to Worker.get_data will terminate after the fetch of z returns
         await async_poll_for(
-            lambda: ("get-data", "network", "seconds") in a.digests_total, timeout=5
+            lambda: ("get-data", "network", "seconds") in a.digests_total
         )
 
     del x, y, z
-    await async_poll_for(lambda: not a.state.tasks, timeout=5)  # For hygiene only
+    await async_poll_for(lambda: not a.state.tasks)  # For hygiene only
 
     # Note: use set instead of list to account for rare, but harmless, race conditions
     expect = {
@@ -130,10 +130,10 @@ async def test_task_lifecycle(c, s, a, b):
 async def test_async_task(c, s, a):
     """Test that async tasks are metered"""
     await c.submit(asyncio.sleep, 0.1, key=("x-123", 0))
-    assert a.digests_total["execute", span_id(s), "x" "thread-cpu", "seconds"] == 0
-    assert (
-        0 < a.digests_total["execute", span_id(s), "x", "thread-noncpu", "seconds"] < 1
-    )
+    cpu = a.digests_total["execute", span_id(s), "x", "thread-cpu", "seconds"]
+    noncpu = a.digests_total["execute", span_id(s), "x", "thread-noncpu", "seconds"]
+    assert cpu == 0
+    assert 0 < noncpu < 1
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -194,7 +194,7 @@ async def test_cancelled_execute(c, s, a):
     del x
     await wait_for_state("x", "cancelled", a)
     await ev.set()
-    await async_poll_for(lambda: not a.state.tasks, timeout=5)
+    await async_poll_for(lambda: not a.state.tasks)
 
     assert list(get_digests(a)) == [
         ("execute", span_id(s), "x", "cancelled", "seconds")
@@ -253,9 +253,9 @@ async def test_gather_dep_no_task(c, s, w1):
 
         # Move x from w1 to w2
         s.request_acquire_replicas(w2.address, ["x"], stimulus_id="ar")
-        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2, timeout=5)
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 2)
         s.request_remove_replicas(w1.address, ["x"], stimulus_id="rr")
-        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1, timeout=5)
+        await async_poll_for(lambda: len(s.tasks["x"].who_has) == 1)
 
         w3.block_gather_dep.set()
         # 1. w1 will now answer that it does not have the key
@@ -330,7 +330,7 @@ async def test_gather_dep_network_error(c, s, a):
 async def test_memory_monitor(c, s, a):
     a.monitor.get_process_memory = lambda: 800_000_000_000 if a.data.fast else 0
     x = c.submit(inc, 1, key="x")
-    await async_poll_for(lambda: a.data.disk, timeout=5)
+    await async_poll_for(lambda: a.data.disk)
 
     assert list(get_digests(a, "memory-monitor")) == [
         ("memory-monitor", "serialize", "seconds"),

@@ -12,7 +12,7 @@ bricks.
 
 For example, to take an FFT of an n-D array, one uses a sequence of 1D
 FFTs along each axis. The implementation in dask (and indeed almost
-all distributed array frameworks) requires that 1D
+all distributed array frameworks) requires that the
 axis along which the FFT is taken is local to a single brick. So to
 perform the global FFT we need to arrange that each axis in turn is
 local to bricks.
@@ -462,12 +462,16 @@ def _calculate_prechunking(
 
     # We made sure that there are no NaNs in split_axes above
     return _concatenate_small_chunks(
-        split_axes, old_chunks, new_chunks, dtype, block_size_limit  # type: ignore[arg-type]
+        split_axes,
+        old_chunks,
+        new_chunks,
+        dtype,
+        block_size_limit,
     )
 
 
 def _concatenate_small_chunks(
-    split_axes: list[list[list[int]]],
+    split_axes: list[list[list[float]]],
     old_chunks: ChunkedAxes,
     new_chunks: ChunkedAxes,
     dtype: np.dtype,
@@ -535,7 +539,7 @@ def _concatenate_small_chunks(
 
     sorted_candidates = sorted(candidates, key=key)
 
-    concatenated_axes: list[list[int]] = [[] for i in range(ndim)]
+    concatenated_axes: list[list[float]] = [[] for i in range(ndim)]
 
     # Sim all the axes that are no candidates
     for i in range(ndim):

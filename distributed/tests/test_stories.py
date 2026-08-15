@@ -89,7 +89,7 @@ async def test_client_story(c, s, a):
     assert await f == 2
     story = await c.story(f.key)
 
-    # Every event should be prefixed with it's origin
+    # Every event should be prefixed with its origin
     # This changes the format compared to default scheduler / worker stories
     prefixes = set()
     stripped_story = list()

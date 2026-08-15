@@ -73,7 +73,7 @@ class ReadWriteLock:
     def release_read(self) -> None:
         with self._condition:
             if self._n_reads == 0:
-                raise RuntimeError("Tired releasing unlocked read lock")
+                raise RuntimeError("Tried releasing unlocked read lock")
             self._n_reads -= 1
             if self._n_reads == 0:
                 self._condition.notify_all()

@@ -56,7 +56,7 @@ Thread Pool
 
 Each worker sends computations to a thread in a
 :class:`concurrent.futures.ThreadPoolExecutor`
-for computation.  These computations occur in the same process as the Worker
+for computation.  These computations occur in the same process as the worker
 communication server so that they can access and share data efficiently between
 each other.  For the purposes of data locality all threads within a worker are
 considered the same worker.

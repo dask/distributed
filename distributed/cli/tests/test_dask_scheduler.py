@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import re
-
-import psutil
-import pytest
-
-pytest.importorskip("requests")
-
+import asyncio
 import os
 import shutil
 import signal
@@ -15,7 +9,8 @@ import sys
 import tempfile
 from time import sleep
 
-import requests
+import psutil
+import pytest
 from click.testing import CliRunner
 
 from dask.utils import tmpfile
@@ -29,14 +24,10 @@ from distributed.utils import get_ip, get_ip_interface, open_port
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
+    gen_test,
+    get_dashboard_port,
     popen,
 )
-
-
-def _get_dashboard_port(client: Client) -> int:
-    match = re.search(r":(\d+)\/status", client.dashboard_link)
-    assert match
-    return int(match.group(1))
 
 
 def test_defaults(loop, requires_default_ports):
@@ -48,9 +39,10 @@ def test_defaults(loop, requires_default_ports):
 
         with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop) as c:
             c.sync(f)
-            assert _get_dashboard_port(c) == 8787
+            assert get_dashboard_port(c) == 8787
 
 
+@pytest.mark.slow
 def test_hostport(loop):
     port = open_port()
     with popen(
@@ -75,21 +67,40 @@ def test_hostport(loop):
 
 
 def test_no_dashboard(loop, requires_default_ports):
-    with popen([sys.executable, "-m", "dask", "scheduler", "--no-dashboard"]):
-        with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
-            response = requests.get("http://127.0.0.1:8787/status/")
+    requests = pytest.importorskip("requests")
+
+    port = open_port()
+
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
+            "--host",
+            f"127.0.0.1:{port}",
+            "--dashboard-address",
+            "127.0.0.1:0",
+            "--no-dashboard",
+        ]
+    ):
+        with Client(f"127.0.0.1:{port}", loop=loop) as c:
+            dashboard_port = get_dashboard_port(c)
+            response = requests.get(f"http://127.0.0.1:{dashboard_port}/status/")
             assert response.status_code == 404
 
 
 def test_dashboard(loop):
     pytest.importorskip("bokeh")
+    requests = pytest.importorskip("requests")
+
     port = open_port()
 
     with popen(
         [sys.executable, "-m", "dask", "scheduler", "--host", f"127.0.0.1:{port}"],
     ):
         with Client(f"127.0.0.1:{port}", loop=loop) as c:
-            dashboard_port = _get_dashboard_port(c)
+            dashboard_port = get_dashboard_port(c)
 
         names = ["localhost", "127.0.0.1", get_ip()]
         start = time()
@@ -115,6 +126,8 @@ def test_dashboard(loop):
 
 def test_dashboard_non_standard_ports(loop):
     pytest.importorskip("bokeh")
+    requests = pytest.importorskip("requests")
+
     port1 = open_port()
     port2 = open_port()
     with popen(
@@ -166,10 +179,10 @@ def test_multiple_protocols(loop):
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_dashboard_allowlist(loop):
     pytest.importorskip("bokeh")
-    with pytest.raises(requests.ConnectionError):
-        requests.get("http://localhost:8787/status/").ok
+    requests = pytest.importorskip("requests")
 
     port = open_port()
+
     with popen(
         [
             sys.executable,
@@ -178,15 +191,15 @@ def test_dashboard_allowlist(loop):
             "scheduler",
             f"--port={port}",
         ]
-    ) as proc:
-        with Client(f"127.0.0.1:{port}", loop=loop) as c:
+    ):
+        with Client(f"127.0.0.1:{port}", loop=loop):
             pass
 
         start = time()
         while True:
             try:
-                for name in ["127.0.0.2", "127.0.0.3"]:
-                    response = requests.get("http://%s:8787/status/" % name)
+                for ip in ["127.0.0.2", "127.0.0.3"]:
+                    response = requests.get(f"http://{ip}:8787/status/")
                     assert response.ok
                 break
             except Exception as f:
@@ -337,8 +350,7 @@ def test_dashboard_port_zero(loop):
         ],
     ):
         with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
-            port = _get_dashboard_port(c)
-            assert port > 0
+            assert get_dashboard_port(c) > 0
 
 
 PRELOAD_TEXT = """
@@ -668,7 +680,8 @@ def test_signal_handling(loop, sig):
         [
             sys.executable,
             "-m",
-            "distributed.cli.dask_scheduler",
+            "dask",
+            "scheduler",
             f"--port={port}",
             "--dashboard-address=:0",
         ],
@@ -688,20 +701,25 @@ def test_signal_handling(loop, sig):
         assert "end scheduler" in logs
 
 
-@pytest.mark.skipif(WINDOWS, reason="POSIX only")
-def test_single_executable_deprecated(loop):
+@gen_test()
+async def test_uvloop():
+    uvloop = pytest.importorskip("uvloop")
     port = open_port()
+
+    def check():
+        return isinstance(asyncio.get_event_loop(), uvloop.Loop)
+
     with popen(
         [
-            "dask-scheduler",
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
             "--no-dashboard",
-            f"--port={port}",
+            "--host",
+            f"127.0.0.1:{port}",
         ],
-        capture_output=True,
-    ) as scheduler:
-        with Client(f"127.0.0.1:{port}", loop=loop) as c:
-            pass
-        scheduler.send_signal(signal.SIGTERM)
-        stdout, stderr = scheduler.communicate()
-        logs = stdout.decode()
-        assert "FutureWarning: dask-scheduler is deprecated" in logs
+        env={"DASK_DISTRIBUTED__ADMIN__EVENT_LOOP": "uvloop"},
+    ):
+        async with Client(f"127.0.0.1:{port}", asynchronous=True) as c:
+            assert await c.run_on_scheduler(check)

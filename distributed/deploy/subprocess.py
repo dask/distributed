@@ -100,24 +100,30 @@ class SubprocessScheduler(Subprocess):
         )
 
         scheduler_file = Path(self.scheduler_kwargs["scheduler_file"])
-        while not (
-            deadline.expired
-            or scheduler_file.exists()
-            or self.process.returncode is not None
-        ):
-            await asyncio.sleep(0.1)
-        if deadline.expired or self.process.returncode is not None:
+
+        while not deadline.expired and self.process.returncode is None:
+            try:
+                with scheduler_file.open(mode="r") as f:
+                    identity = json.load(f)
+                self.address = identity["address"]
+                break
+            # The scheduler_file may not yet exist or may not have
+            # finished writing to disk.
+            # Use OSError defensively instead of FileNotFounderror
+            # to cover potential concurrent access failures on Windows
+            except (OSError, json.JSONDecodeError):
+                await asyncio.sleep(0.1)
+
+        else:
             assert self.process.stderr
             logger.error((await self.process.stderr.read()).decode())
             if deadline.expired:
                 raise RuntimeError(f"Scheduler failed to start within {self.timeout}s")
             raise RuntimeError(
-                f"Scheduler failed to start and exited with code {self.process.returncode}"
+                "Scheduler failed to start and exited with code "
+                f"{self.process.returncode}"
             )
 
-        with scheduler_file.open(mode="r") as f:
-            identity = json.load(f)
-            self.address = identity["address"]
         logger.info("Scheduler at %r", self.address)
 
 
@@ -193,9 +199,9 @@ def SubprocessCluster(
     host:
         Host address on which the scheduler will listen, defaults to localhost
     scheduler_port:
-        Port fo the scheduler, defaults to 0 to choose a random port
+        Port for the scheduler, defaults to 0 to choose a random port
     scheduler_kwargs:
-            Keywords to pass on to scheduler
+            Keywords to pass on to the scheduler
     dashboard_address:
         Address on which to listen for the Bokeh diagnostics server like
         'localhost:8787' or '0.0.0.0:8787', defaults to ':8787'
@@ -207,7 +213,7 @@ def SubprocessCluster(
     n_workers:
         Number of workers to start
     threads:
-        Number of threads per each worker
+        Number of threads per worker
     worker_kwargs:
         Keywords to pass on to the ``Worker`` class constructor
     silence_logs:

@@ -10,7 +10,7 @@ from distributed.utils import LoopRunner
 def _check_loop_runner():
     loops_before = LoopRunner._all_loops.copy()
     yield
-    # Internal loops registry must the same as before cluster running.
+    # Internal loops registry must be the same as before cluster running.
     # This means loop runners in LocalCluster and Client correctly stopped.
     # See LoopRunner._stop_unlocked().
     assert loops_before == LoopRunner._all_loops

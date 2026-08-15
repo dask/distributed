@@ -29,7 +29,7 @@ Data Scatter
 
 When a user scatters data from their local process to the distributed network
 this data is distributed in a round-robin fashion grouping by number of cores.
-So for example If we have two workers ``Alice`` and ``Bob``, each with two
+So for example, if we have two workers ``Alice`` and ``Bob``, each with two
 cores and we scatter out the list ``range(10)`` as follows:
 
 .. code-block:: python
@@ -87,7 +87,7 @@ data.
 
 Valid arguments for ``workers=`` include the following:
 
-*  A single IP addresses, IP/Port pair, or hostname like the following::
+*  A single IP address, IP/Port pair, or hostname like the following::
 
       192.168.1.100, 192.168.1.100:8989, alice, alice:8989
 
@@ -101,7 +101,7 @@ creation.::
 
     $ dask worker scheduler_address:8786 --name worker_1
 
-And then use this name when specifying workers instead.
+and then use this name when specifying workers instead.
 
 .. code-block:: python
 

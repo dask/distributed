@@ -13,7 +13,7 @@ try:
     class GlobalProxyHandler(ProxyHandler):
         """
         A tornado request handler that proxies HTTP and websockets
-        from a port to any valid endpoint'.
+        from a port to any valid endpoint.
         """
 
         def initialize(self, dask_server=None, extra=None):
@@ -43,10 +43,10 @@ try:
                 self.host_allowlist.append(self.host)
 
             # slash is removed during regex in handler
-            proxied_path = "/%s" % proxied_path
+            proxied_path = f"/{proxied_path}"
 
             worker = f"{self.host}:{port}"
-            if not check_worker_dashboard_exits(self.scheduler, worker):
+            if not check_worker_dashboard_exists(self.scheduler, worker):
                 msg = f"Worker &lt;{html.escape(worker)}&gt; does not exist"
                 self.set_status(400)
                 self.finish(msg)
@@ -97,9 +97,9 @@ except ImportError:
             self.extra = extra or {}
 
         def get(self, port, host, proxied_path):
-            worker_url = f"{host}:{port}/{proxied_path}"
+            worker_url = html.escape(f"{host}:{port}/{proxied_path}")
             msg = f"""
-                <p> Try navigating to <a href=http://{worker_url}>{worker_url}</a> for your worker dashboard </p>
+                <p> Try navigating to <a href="http://{worker_url}">{worker_url}</a> for your worker dashboard </p>
 
                 <p>
                 Dask tried to proxy you to that page through your
@@ -121,7 +121,7 @@ except ImportError:
             self.write(msg)
 
 
-def check_worker_dashboard_exits(scheduler, worker):
+def check_worker_dashboard_exists(scheduler, worker):
     """Check addr:port exists as a worker in scheduler list
 
     Parameters

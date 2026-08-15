@@ -161,7 +161,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     with other run instances using `rpc`.
 
     The user of this needs to guarantee that only `DataFrameShuffleRun`s of the
-    same unique `ShuffleID` and `run_id` interact.
+    same unique `ShuffleId` and `run_id` interact.
 
     Parameters
     ----------
@@ -170,7 +170,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     column:
         The data column we split the input partition by.
     id:
-        A unique `ShuffleID` this belongs to.
+        A unique `ShuffleId` this belongs to.
     run_id:
         A unique identifier of the specific execution of the shuffle this belongs to.
     span_id:
@@ -190,7 +190,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
     scheduler:
         A PooledRPCCall to contact the scheduler.
     memory_limiter_disk:
-    memory_limiter_comm:
+    memory_limiter_comms:
         A ``ResourceLimiter`` limiting the total amount of memory used in either
         buffer.
     """

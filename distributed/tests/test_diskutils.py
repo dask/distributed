@@ -122,9 +122,7 @@ def test_workspace_process_crash(tmp_path):
         sys.stdout.flush()
 
         time.sleep(100)
-        """ % dict(
-        base_dir=base_dir
-    )
+        """ % dict(base_dir=base_dir)
 
     p = subprocess.Popen(
         [sys.executable, "-c", code],

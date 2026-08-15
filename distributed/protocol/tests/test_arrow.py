@@ -53,7 +53,7 @@ def test_dump_fileinfo():
 
     finfo = FileInfo(path="path", size=1, mtime_ns=2)
     dtfinfo = deserialize(*serialize(finfo))
-    # Does not implement __equal__
+    # Does not implement __eq__
     assert type(dtfinfo) == FileInfo
     assert dtfinfo.path == finfo.path
     assert dtfinfo.size == finfo.size

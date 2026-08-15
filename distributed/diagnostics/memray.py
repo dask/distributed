@@ -6,7 +6,7 @@ import pathlib
 import subprocess
 import time
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -58,9 +58,9 @@ def _fetch_memray_profile(
     if not report_args[0] == "memray":
         report_args = ["memray"] + list(report_args)
     assert "-f" not in report_args, "Cannot provide filename for report generation"
-    assert (
-        "-o" not in report_args
-    ), "Cannot provide output filename for report generation"
+    assert "-o" not in report_args, (
+        "Cannot provide output filename for report generation"
+    )
     report_args = list(report_args) + ["-f", str(path), "-o", str(report_filename)]
     subprocess.run(report_args)
     with open(report_filename, "rb") as fd:
@@ -78,7 +78,7 @@ def memray_workers(
     ),
     fetch_reports_parallel: bool | int = True,
     **memray_kwargs: Any,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Generate a Memray profile on the workers and download the generated report.
 
     Example::
@@ -192,7 +192,7 @@ def memray_scheduler(
         "--leaks",
     ),
     **memray_kwargs: Any,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Generate a Memray profile on the Scheduler and download the generated report.
 
     Example::

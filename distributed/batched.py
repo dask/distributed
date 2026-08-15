@@ -72,7 +72,7 @@ class BatchedSend:
         if self.closed():
             return "<BatchedSend: closed>"
         else:
-            return "<BatchedSend: %d in buffer>" % len(self.buffer)
+            return f"<BatchedSend: {len(self.buffer)} in buffer>"
 
     __str__ = __repr__
 
@@ -105,7 +105,7 @@ class BatchedSend:
                 # will not actually have been awaited, and it will remain sitting around
                 # for someone to retrieve it. At interpreter exit, this will warn
                 # something like `RuntimeWarning: coroutine 'TCP.write' was never
-                # awaited`. By using the `closing` contextmanager, the `write` coroutine
+                # awaited`. By using the `closing` context manager, the `write` coroutine
                 # object is always cleaned up, even if `yield` raises `GeneratorExit`.
                 with contextlib.closing(
                     self.comm.write(
@@ -141,7 +141,7 @@ class BatchedSend:
         # there was an exception when using `comm`.
         # We can't close gracefully via `.close()` since we can't send messages.
         # So we just abort.
-        # This means that any messages in our buffer our lost.
+        # This means that any messages in our buffer are lost.
         # To propagate exceptions, we rely on subsequent `BatchedSend.send`
         # calls to raise CommClosedErrors.
         self.stopped.set()

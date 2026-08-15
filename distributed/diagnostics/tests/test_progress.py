@@ -40,14 +40,17 @@ def h(*args):
 
 
 @nodebug
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_many_Progress(c, s, a, b):
     x = c.submit(f, 1)
     y = c.submit(g, x)
     z = c.submit(h, y)
 
-    bars = [Progress(keys=[z], scheduler=s) for _ in range(10)]
+    # Give each bar a unique name; otherwise they all tokenize to the same
+    # plugin name and clobber each other in Scheduler.plugins. If z is still
+    # processing when setup() runs (e.g. on slow CI), the second bar's
+    # add_plugin() would then warn "overwriting", which is raised as an error.
+    bars = [Progress(keys=[z], scheduler=s, name=f"progress-{i}") for i in range(10)]
     await asyncio.gather(*(bar.setup() for bar in bars))
     await z
 
@@ -117,12 +120,6 @@ async def test_multiprogress_with_prefix(c, s, a, b):
     await p.setup()
     group_names = {k for k in p.all_keys}
     assert group_names == {"inc"}
-
-
-def test_multiprogress_warns():
-    with pytest.warns(DeprecationWarning, match="func` is deprecated, use `group_by"):
-        p = MultiProgress([], complete=True, func="spans")
-        assert p.group_by == "spans"
 
 
 @gen_cluster(client=True)

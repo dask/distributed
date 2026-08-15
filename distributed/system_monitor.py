@@ -100,7 +100,7 @@ class SystemMonitor:
             self._last_host_cpu_counters = hostcpu_c = psutil.cpu_times()
             # This is a namedtuple whose fields change based on OS and kernel version
             for k in hostcpu_c._fields:
-                self.quantities["host_cpu." + k] = deque(maxlen=maxlen)
+                self.quantities[f"host_cpu.{k}"] = deque(maxlen=maxlen)
 
         if monitor_gil_contention is None:
             monitor_gil_contention = dask.config.get(
@@ -193,7 +193,7 @@ class SystemMonitor:
             for k in host_cpu._fields:
                 delta = getattr(host_cpu, k) - getattr(last_cpu, k)
                 # cpu_times() has a precision of 2 decimals; suppress noise
-                result["host_cpu." + k] = round(delta / duration, 2)
+                result[f"host_cpu.{k}"] = round(delta / duration, 2)
             self._last_host_cpu_counters = host_cpu
 
         if self.monitor_gil_contention:
@@ -219,7 +219,7 @@ class SystemMonitor:
         return result
 
     def __repr__(self) -> str:
-        return "<SystemMonitor: cpu: %d memory: %d MB fds: %s>" % (
+        return "<SystemMonitor: cpu: {} memory: {} MB fds: {}>".format(
             self.quantities["cpu"][-1],
             self.quantities["memory"][-1] / 1e6,
             "N/A" if WINDOWS else self.quantities["num_fds"][-1],

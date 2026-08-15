@@ -60,7 +60,7 @@ def get_versions(
 def get_system_info() -> dict[str, Any]:
     uname = platform.uname()
     return {
-        "python": "%d.%d.%d.%s.%s" % sys.version_info,
+        "python": "%d.%d.%d.%s.%s" % sys.version_info,  # noqa: UP031
         "python-bits": struct.calcsize("P") * 8,
         "OS": uname.system,
         "OS-release": uname.release,

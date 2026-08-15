@@ -29,7 +29,7 @@ Scheduler HTTP
 Pages and JSON endpoints served by the scheduler
 
 - ``/health``: check server is alive
-- ``/info/main/workers.html`` basic info about workers and links to their dashboards and logs
+- ``/info/main/workers.html``: basic info about workers and links to their dashboards and logs
 - ``info/worker/(worker).html``: more detail about given worker, keyed by TCP address; links to tasks
 - ``info/task/(task).html``: details about a task on the cluster, by dask key; links to worker,
   related tasks, and client
@@ -38,7 +38,7 @@ Pages and JSON endpoints served by the scheduler
 - ``/info/main/logs.html``: scheduler logs
 - ``/info/logs/(worker).html``: logs of given worker
 - ``/individual-plots.json``: map of path to description for available individual
-  (i.e,. one-pane, non-dashboard) plots
+  (i.e., one-pane, non-dashboard) plots
 - ``/eventstream``: scheduler events on a websocket
 - ``/proxy/(port)/(address)/(path)``: proxy to worker HTTP locations (if you have jupyter-server-proxy)
 - ``/metrics``: prometheus endpoint
@@ -54,7 +54,7 @@ Scheduler API
 
 Scheduler methods exposed by the API with an example of the request body they take
 
-- ``/api/v1/retire_workers`` : retire certain workers on the scheduler
+- ``/api/v1/retire_workers``: retire certain workers on the scheduler
 
 .. code-block:: json
 
@@ -62,8 +62,8 @@ Scheduler methods exposed by the API with an example of the request body they ta
         "workers":["tcp://127.0.0.1:53741", "tcp://127.0.0.1:53669"]
     }
 
-- ``/api/v1/get_workers`` : get all workers on the scheduler
-- ``/api/v1/adaptive_target`` : get the target number of workers based on the scheduler's load 
+- ``/api/v1/get_workers``: get all workers on the scheduler
+- ``/api/v1/adaptive_target``: get the target number of workers based on the scheduler's load
 
 Individual bokeh plots
 ----------------------

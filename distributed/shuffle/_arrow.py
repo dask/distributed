@@ -4,8 +4,6 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from packaging.version import parse
-
 from dask.utils import parse_bytes
 
 if TYPE_CHECKING:
@@ -29,24 +27,6 @@ def check_dtype_support(meta_input: pd.DataFrame) -> None:
         # FIXME: PyArrow does not support sparse data: https://issues.apache.org/jira/browse/ARROW-8679
         if isinstance(column.dtype, pd.SparseDtype):
             raise TypeError("p2p does not support sparse data found in column '{name}'")
-
-
-def check_minimal_arrow_version() -> None:
-    """Verify that the the correct version of pyarrow is installed to support
-    the P2P extension.
-
-    Raises a ModuleNotFoundError if pyarrow is not installed or an
-    ImportError if the installed version is not recent enough.
-    """
-    minversion = "14.0.1"
-    try:
-        import pyarrow as pa
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError(f"P2P shuffling requires pyarrow>={minversion}")
-    if parse(pa.__version__) < parse(minversion):
-        raise ImportError(
-            f"P2P shuffling requires pyarrow>={minversion} but only found {pa.__version__}"
-        )
 
 
 def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:

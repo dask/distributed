@@ -26,6 +26,7 @@ from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.diagnostics.plugin import NannyPlugin, WorkerPlugin
 from distributed.metrics import time
+from distributed.nanny import WorkerProcess
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, get_mp_context, parse_ports
 from distributed.utils_test import (
@@ -61,15 +62,14 @@ async def test_nanny_process_failure(c, s):
             await c.run(os._exit, 0, workers=[n.worker_address])
 
         # Wait while process dies
-        await async_poll_for(lambda: n.pid != pid, timeout=5)
+        await async_poll_for(lambda: n.pid != pid)
         # Wait while process comes back
-        await async_poll_for(lambda: n.is_alive(), timeout=5)
+        await async_poll_for(lambda: n.is_alive())
 
         # assert n.worker_address != original_address  # most likely
 
         await async_poll_for(
-            lambda: n.worker_address in s.workers and n.worker_dir is not None,
-            timeout=5,
+            lambda: n.worker_address in s.workers and n.worker_dir is not None
         )
 
         second_dir = n.worker_dir
@@ -639,6 +639,33 @@ async def test_failure_during_worker_initialization(s):
     assert "Restarting worker" not in logs.getvalue()
 
 
+@gen_cluster(nthreads=[])
+async def test_worker_start_exception_after_process_exit(s, monkeypatch):
+    """If the worker fails to start, the process sends the exception to the nanny
+    through init_result_q and terminates. The exception must not be lost if the
+    nanny observes the process exit before it reads the message from the queue
+    (flaky test_local_cluster_redundant_kwarg).
+    """
+    orig_wait_until_connected = WorkerProcess._wait_until_connected
+
+    async def wait_until_connected(self, *args, **kwargs):
+        # Force mark_stopped(), fired by the process exit callback, to win the
+        # race against the polling of init_result_q
+        await self.stopped.wait()
+        return await orig_wait_until_connected(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorkerProcess, "_wait_until_connected", wait_until_connected)
+
+    with raises_with_cause(
+        RuntimeError,
+        "Nanny failed to start",
+        TypeError,
+        "unexpected keyword argument",
+    ):
+        async with Nanny(s.address, foo="bar"):
+            pass
+
+
 @gen_cluster(client=True, Worker=Nanny)
 async def test_environ_plugin(c, s, a, b):
     from dask.distributed import Environ
@@ -802,7 +829,7 @@ async def test_malloc_trim_threshold(c, s, a):
     arr = c.persist(arr)
     await wait(arr)
     # Wait for heartbeat
-    await async_poll_for(lambda: s.memory.process > 2**29, timeout=5)
+    await async_poll_for(lambda: s.memory.process > 2**29)
     del arr
 
     # This is the delicate bit, as it relies on
@@ -815,7 +842,7 @@ async def test_malloc_trim_threshold(c, s, a):
     # - 156~210[1] MiB at the end of this test, with MALLOC_TRIM_THRESHOLD_=65536
     # - 620~670[1] MiB at the end of this test, without MALLOC_TRIM_THRESHOLD_
     # [1] depends on distributed.scheduler.worker-saturation
-    await async_poll_for(lambda: s.memory.process < 300 * 2**20, timeout=5)
+    await async_poll_for(lambda: s.memory.process < 300 * 2**20)
 
 
 @gen_cluster(client=True, nthreads=[])

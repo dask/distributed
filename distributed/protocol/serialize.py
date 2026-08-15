@@ -3,7 +3,6 @@ from __future__ import annotations
 import codecs
 import importlib
 import traceback
-import warnings
 from array import array
 from enum import Enum
 from functools import partial
@@ -445,8 +444,8 @@ def deserialize(header, frames, deserializers=None):
     name = header.get("serializer")
     if deserializers is not None and name not in deserializers:
         raise TypeError(
-            "Data serialized with %s but only able to deserialize "
-            "data with %s" % (name, str(list(deserializers)))
+            f"Data serialized with {name} but only able to deserialize "
+            f"data with {list(deserializers)!s}"
         )
     dumps, loads, wants_context = families[name]
     return loads(header, frames)
@@ -594,7 +593,7 @@ class ToPickle(Generic[T]):
         self.data = data
 
     def __repr__(self) -> str:
-        return "<ToPickle: %s>" % str(self.data)
+        return f"<ToPickle: {self.data!s}>"
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and other.data == self.data
@@ -624,21 +623,13 @@ class Pickled:
         return not (self == other)
 
 
-def nested_deserialize(x):
-    warnings.warn(
-        "nested_deserialize is deprecated and will be removed in a future release.",
-        DeprecationWarning,
-    )
-    return _nested_deserialize(x, emulate_deserialize=True)
-
-
 def _nested_deserialize(x, emulate_deserialize=True):
     """
     Replace all Serialize and Serialized values nested in *x*
     with the original values.  Returns a copy of *x*.
 
     >>> msg = {'op': 'update', 'data': to_serialize(123)}
-    >>> nested_deserialize(msg)
+    >>> _nested_deserialize(msg)
     {'op': 'update', 'data': 123}
     """
 

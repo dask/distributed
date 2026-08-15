@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 async def wait_for_signals() -> int:
-    """Wait for sigint or sigterm by setting global signal handlers"""
+    """Wait for SIGINT or SIGTERM by setting global signal handlers"""
     signals = (signal.SIGINT, signal.SIGTERM)
     loop = asyncio.get_running_loop()
     event = asyncio.Event()

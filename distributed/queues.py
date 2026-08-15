@@ -64,7 +64,7 @@ class QueueExtension:
             del self.queues[name]
             keys = [d["value"] for d in futures if d["type"] == "Future"]
             if keys:
-                self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
+                self.scheduler.client_releases_keys(keys=keys, client=f"queue-{name}")
 
     async def put(self, name=None, key=None, data=None, client=None, timeout=None):
         deadline = Deadline.after(timeout)
@@ -76,7 +76,7 @@ class QueueExtension:
 
             record = {"type": "Future", "value": key}
             self.future_refcount[name, key] += 1
-            self.scheduler.client_desires_keys(keys=[key], client="queue-%s" % name)
+            self.scheduler.client_desires_keys(keys=[key], client=f"queue-{name}")
         else:
             record = {"type": "msgpack", "value": data}
         await wait_for(self.queues[name].put(record), timeout=deadline.remaining)
@@ -85,7 +85,7 @@ class QueueExtension:
         self.scheduler.client_desires_keys(keys=[key], client=client)
         self.future_refcount[name, key] -= 1
         if self.future_refcount[name, key] == 0:
-            self.scheduler.client_releases_keys(keys=[key], client="queue-%s" % name)
+            self.scheduler.client_releases_keys(keys=[key], client=f"queue-{name}")
             del self.future_refcount[name, key]
 
     async def get(self, name=None, client=None, timeout=None, batch=False):
@@ -175,7 +175,7 @@ class Queue:
 
     def __init__(self, name=None, client=None, maxsize=0):
         self._client = client
-        self.name = name or "queue-" + uuid.uuid4().hex
+        self.name = name or f"queue-{uuid.uuid4().hex}"
         self.maxsize = maxsize
         self._maybe_start()
 

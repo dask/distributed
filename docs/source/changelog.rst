@@ -63,7 +63,7 @@ Reduce memory footprint of P2P shuffling
 """"""""""""""""""""""""""""""""""""""""
 Significantly reduced the peak and average memory used by P2P shuffling
 (up to a factor of 2x reduction). This change also increases the P2P
-minimum supported verions of ``pyarrow`` to ``pyarrow=12``.
+minimum supported versions of ``pyarrow`` to ``pyarrow=12``.
 
 See :pr:`8157` from `Hendrik Makait`_ for details.
 
@@ -71,7 +71,7 @@ Improved plugin API
 """""""""""""""""""
 
 Two plugin changes have been introduced to provide a more consistent
-and convienent plugin UX:
+and convenient plugin UX:
 
 .. currentmodule:: distributed
 

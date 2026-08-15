@@ -35,7 +35,6 @@ async def test_prometheus(c, s, a):
         a.http_server.port, prefix="dask_worker_"
     )
     expected_metrics = {
-        "dask_worker_concurrent_fetch_requests",
         "dask_worker_latency_seconds",
         "dask_worker_memory_bytes",
         "dask_worker_spill_bytes_total",
@@ -119,7 +118,7 @@ async def test_prometheus_collect_task_states(c, s, a):
 
     # submit a task which should show up in the prometheus scraping
     fut1 = c.submit(ev.wait)
-    await async_poll_for(lambda: a.state.executing, timeout=5)
+    await async_poll_for(lambda: a.state.executing)
 
     await assert_metrics(executing=1)
 
@@ -140,7 +139,7 @@ async def test_prometheus_collect_task_states(c, s, a):
     fut1.release()
     fut2.release()
 
-    await async_poll_for(lambda: not a.state.tasks, timeout=5)
+    await async_poll_for(lambda: not a.state.tasks)
     await assert_metrics()
 
 

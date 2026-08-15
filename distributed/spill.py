@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Callable, Hashable, Iterator, Mapping, MutableMapping, Sized
+from collections.abc import (
+    Callable,
+    Generator,
+    Hashable,
+    Mapping,
+    MutableMapping,
+    Sized,
+)
 from contextlib import contextmanager
 from functools import partial
 from typing import Literal, NamedTuple, Protocol, cast
@@ -101,7 +108,7 @@ class SpillBuffer(zict.Buffer[Key, object]):
         self.cumulative_metrics = defaultdict(float)
 
     @contextmanager
-    def _capture_metrics(self) -> Iterator[None]:
+    def _capture_metrics(self) -> Generator[None]:
         """Capture metrics re. disk read/write, serialize/deserialize, and
         compress/decompress.
 
@@ -119,7 +126,7 @@ class SpillBuffer(zict.Buffer[Key, object]):
             yield
 
     @contextmanager
-    def _handle_errors(self, key: Key | None) -> Iterator[None]:
+    def _handle_errors(self, key: Key | None) -> Generator[None]:
         try:
             yield
         except MaxSpillExceeded as e:

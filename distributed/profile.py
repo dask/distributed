@@ -105,7 +105,7 @@ def repr_frame(frame: FrameType) -> str:
     f_lineno = _f_lineno(frame)
     text = f'  File "{co.co_filename}", line {f_lineno}, in {co.co_name}'
     line = linecache.getline(co.co_filename, f_lineno, frame.f_globals).lstrip()
-    return text + "\n\t" + line
+    return f"{text}\n\t{line}"
 
 
 def info_frame(frame: FrameType) -> dict[str, Any]:
