@@ -41,7 +41,6 @@ from typing import (
     Generic,
     Literal,
     NamedTuple,
-    ParamSpec,
     TypedDict,
     TypeVar,
     cast,
@@ -149,7 +148,6 @@ DEFAULT_EXTENSIONS: dict[str, Any] = {}
 TOPIC_PREFIX_FORWARDED_LOG_RECORD = "forwarded-log-record"
 
 _T = TypeVar("_T")
-P = ParamSpec("P")
 
 
 class FutureCancelledError(CancelledError):
@@ -2019,8 +2017,8 @@ class Client(SyncMethodMixin):
 
     def submit(
         self,
-        func: Callable[P, _T],
-        *args: P.args,
+        func: Callable[..., _T],
+        *args,
         key=None,
         workers=None,
         resources=None,
@@ -2031,7 +2029,7 @@ class Client(SyncMethodMixin):
         actor=False,
         actors=False,
         pure=True,
-        **kwargs: P.kwargs,
+        **kwargs,
     ) -> Future[_T]:
         """Submit a function application to the scheduler
 
