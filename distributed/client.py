@@ -2178,7 +2178,7 @@ class Client(SyncMethodMixin):
         actors: bool = False,
         pure: bool = True,
         batch_size=None,
-        **kwargs: Any,
+        **kwargs,
     ) -> list[Future[_T]]:
         """Map a function on a sequence of arguments
 
