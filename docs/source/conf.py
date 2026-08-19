@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from inspect import signature
 from pathlib import Path
 
 from docutils.parsers.rst import directives
@@ -7,23 +8,19 @@ from docutils.parsers.rst import directives
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693
 # See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
-from sphinx.ext.autodoc import DataDocumenter
+from sphinx.ext import autosummary as sphinx_autosummary
 from sphinx.ext.autosummary import Autosummary
 from sphinx.util.inspect import safe_getattr
 
 import distributed
 
 
-def get_documenter(app, obj, parent):
-    """Return the highest-priority autodoc documenter for an object."""
-    documenters = [
-        documenter
-        for documenter in app.registry.documenters.values()
-        if documenter.can_document_member(obj, "", False, parent)
-    ]
-    return max(
-        documenters, key=lambda documenter: documenter.priority, default=DataDocumenter
-    )
+def get_documenter_objtype(app, obj, parent):
+    """Return the Sphinx autodoc object type for an object."""
+    get_documenter = sphinx_autosummary._get_documenter
+    if "registry" in signature(get_documenter).parameters:
+        return get_documenter(obj, parent, registry=app.registry).objtype
+    return get_documenter(obj, parent)
 
 
 #
@@ -472,10 +469,10 @@ class AutoAutoSummary(Autosummary):
         items = []
         for name in sorted(obj.__dict__.keys()):
             try:
-                documenter = get_documenter(app, safe_getattr(obj, name), obj)
+                objtype = get_documenter_objtype(app, safe_getattr(obj, name), obj)
             except AttributeError:
                 continue
-            if documenter.objtype in typ:
+            if objtype in typ:
                 items.append(name)
         public = [x for x in items if x in include_public or not x.startswith("_")]
         return public, items
