@@ -7,10 +7,24 @@ from docutils.parsers.rst import directives
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693
 # See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
-from sphinx.ext.autosummary import Autosummary, get_documenter
+from sphinx.ext.autodoc import DataDocumenter
+from sphinx.ext.autosummary import Autosummary
 from sphinx.util.inspect import safe_getattr
 
 import distributed
+
+
+def get_documenter(app, obj, parent):
+    """Return the highest-priority autodoc documenter for an object."""
+    documenters = [
+        documenter
+        for documenter in app.registry.documenters.values()
+        if documenter.can_document_member(obj, "", False, parent)
+    ]
+    return max(
+        documenters, key=lambda documenter: documenter.priority, default=DataDocumenter
+    )
+
 
 #
 # Dask.distributed documentation build configuration file, created by
