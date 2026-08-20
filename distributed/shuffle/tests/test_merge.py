@@ -24,7 +24,7 @@ from distributed import get_client
 try:
     import pyarrow as pa
 except ImportError:
-    pa = None  # type: ignore[assignment]
+    pa = None
 
 pytestmark = pytest.mark.ci1
 
