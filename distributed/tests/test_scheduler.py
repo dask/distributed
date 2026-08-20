@@ -2716,6 +2716,7 @@ def test_stop_services():
     loop_runner.start()
     try:
         s = loop_runner.run_sync(Scheduler, dashboard_address=":0")
+        # The public synchronous API must be called outside the scheduler loop.
         s.stop_services()
         loop_runner.run_sync(s.close)
     finally:
