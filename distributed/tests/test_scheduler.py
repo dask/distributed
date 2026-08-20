@@ -55,7 +55,7 @@ from distributed.scheduler import (
     Scheduler,
     WorkerState,
 )
-from distributed.utils import TimeoutError, wait_for
+from distributed.utils import LoopRunner, TimeoutError, wait_for
 from distributed.utils_test import (
     NO_AMM,
     BlockedGatherDep,
@@ -2708,6 +2708,19 @@ async def test_dashboard_address():
 
     async with Scheduler(dashboard_address=[8901, 8902]) as s:
         assert s.services["dashboard"].port == 8901
+
+
+def test_stop_services():
+    pytest.importorskip("bokeh")
+    loop_runner = LoopRunner()
+    loop_runner.start()
+    try:
+        s = loop_runner.run_sync(Scheduler, dashboard_address=":0")
+        # The public synchronous API must be called outside the scheduler loop.
+        s.stop_services()
+        loop_runner.run_sync(s.close)
+    finally:
+        loop_runner.stop()
 
 
 @gen_cluster(client=True)

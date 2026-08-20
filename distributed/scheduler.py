@@ -4510,7 +4510,7 @@ class Scheduler(SchedulerState, ServerNode):
             pc.stop()
         self.periodic_callbacks.clear()
 
-        self.stop_services()
+        await self._stop_services()
 
         for ext in self.extensions.values():
             with suppress(AttributeError):
