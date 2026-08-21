@@ -8,6 +8,7 @@ from docutils.parsers.rst import directives
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693
 # See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
+from sphinx import addnodes
 from sphinx.ext import autosummary as sphinx_autosummary
 from sphinx.ext.autosummary import Autosummary
 from sphinx.util.inspect import safe_getattr
@@ -21,6 +22,17 @@ def get_documenter_objtype(app, obj, parent):
     if "registry" in signature(get_documenter).parameters:
         return get_documenter(obj, parent, registry=app.registry).objtype
     return get_documenter(obj, parent)
+
+
+def qualify_builtin_type_xrefs(_app, doctree):
+    """Disambiguate ``type`` annotations from documented ``type`` attributes."""
+    for node in doctree.findall(addnodes.pending_xref):
+        if (
+            node.get("refdomain") == "py"
+            and node.get("reftype") == "class"
+            and node.get("reftarget") == "type"
+        ):
+            node["reftarget"] = "builtins.type"
 
 
 #
@@ -500,4 +512,5 @@ class AutoAutoSummary(Autosummary):
 
 def setup(app):
     app.add_directive("autoautosummary", AutoAutoSummary)
+    app.connect("doctree-read", qualify_builtin_type_xrefs)
     app.connect("build-finished", copy_legacy_redirects)
