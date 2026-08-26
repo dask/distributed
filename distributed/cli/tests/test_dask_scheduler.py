@@ -4,6 +4,7 @@ import asyncio
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -351,6 +352,46 @@ def test_dashboard_port_zero(loop):
     ):
         with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
             assert get_dashboard_port(c) > 0
+
+
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
+def test_dashboard_unix_socket(loop):
+    pytest.importorskip("bokeh")
+    port = open_port()
+
+    def _connect_unix_socket(path):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.connect(path)
+        except Exception:
+            return False
+        else:
+            return True
+        finally:
+            s.close()
+
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "dask",
+            "scheduler",
+            "--host",
+            f"127.0.0.1:{port}",
+            "--dashboard-address",
+            "unix://",
+        ],
+    ):
+        with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
+            proto, rest = c.dashboard_link.split("://")
+            assert proto == "http+unix"
+            assert rest.endswith(".sock/status")
+            assert ":" not in rest  # no port
+
+            path = rest.split("/status")[0]
+            assert os.path.isabs(path)
+            assert os.path.exists(path)
+            assert _connect_unix_socket(path)
 
 
 PRELOAD_TEXT = """

@@ -14,6 +14,8 @@ def parse_address(addr: str, strict: bool = False) -> tuple[str, str]:
 
     >>> parse_address('tcp://127.0.0.1')
     ('tcp', '127.0.0.1')
+    >>> parse_address('unix:///tmp/socket')
+    ('unix', '/tmp/socket')
 
     If strict is set to true the address must have a scheme.
     """

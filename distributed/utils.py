@@ -52,7 +52,7 @@ import psutil
 import tblib.pickling_support
 from tornado import escape
 
-from distributed.compatibility import asyncio_run
+from distributed.compatibility import MACOS, asyncio_run
 from distributed.config import get_loop_factory
 
 try:
@@ -1267,12 +1267,37 @@ def warn_on_duration(duration: str | float | timedelta, msg: str) -> Generator[N
         warnings.warn(msg.format(duration=diff), stacklevel=2)
 
 
-def format_dashboard_link(host, port):
-    template = dask.config.get("distributed.dashboard.link")
-    if dask.config.get("distributed.scheduler.dashboard.tls.cert"):
-        scheme = "https"
-    else:
-        scheme = "http"
+def format_dashboard_link(process_address: str, port_or_uri: str | int) -> str:
+    """Return a formatted link to the dashboard based on:
+    `process_address`: the address of the process (e.g. Scheduler) that is calling this.
+    `port_or_uri`: value of an entry in a Client, Cluster, or Scheduler's `services` list. Can be either a port, in which case the hostname is assumed to be the same as the hostname for `process_address`. Or can be an absolute path for a service that listens on a Unix Domain Socket.
+    """
+    if isinstance(port_or_uri, str) and (
+        port_or_uri.startswith("unix://") or os.path.isabs(port_or_uri)
+    ):  # unix socket
+        host = port_or_uri[7:] if port_or_uri.startswith("unix://") else port_or_uri
+        port = None
+        scheme = "http+unix"
+        template = "{scheme}://{host}/status"
+    else:  # no unix socket
+        port = port_or_uri
+        try:
+            protocol, rest = process_address.split("://")
+        except ValueError:  # no protocol prefix given
+            protocol, rest = "", process_address
+
+        if protocol == "inproc":
+            host = "localhost"
+        else:
+            host = rest.split(":")[0]
+
+        if dask.config.get("distributed.scheduler.dashboard.tls.cert"):
+            scheme = "https"
+        else:
+            scheme = "http"
+
+        template = dask.config.get("distributed.dashboard.link")
+
     return template.format(
         **toolz.merge(os.environ, dict(scheme=scheme, host=host, port=port))
     )
@@ -1522,7 +1547,14 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list
     [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
     >>> clean_dashboard_address(":8787,:8887")
     [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
+    >>> clean_dashboard_address("/tmp/dashboard.sock")
+    [{'address': '/tmp/dashboard.sock', 'port': 0}]
+    >>> clean_dashboard_address("unix://")
+    [{'address': '/tmp/<random_name>.sock', 'port': 0}]
     """
+
+    if isinstance(addrs, str) and (addrs.startswith("unix://") or os.path.isabs(addrs)):
+        return [{"address": get_uds_path(addrs), "port": 0}]
 
     if default_listen_ip == "0.0.0.0":
         default_listen_ip = ""  # for IPV6
@@ -1894,3 +1926,38 @@ def url_escape(url, *args, **kwargs):
     Escape a URL path segment. Cache results for better performance.
     """
     return escape.url_escape(url, *args, **kwargs)
+
+
+def get_uds_path(address: str | None = None) -> str:
+    """
+    Take an address for a Unix Domain Socket and return an absolute path.
+    If address is already an absolute path (possibly prefixed by unix://), return it. Underlying directories will not be created.
+    In all other cases, generate a random filename in 'dask_run' under one of these locations:
+    1. $XDG_RUNTIME_DIR (set; will be created)
+    2. dask.config["temporary-directory"] (if set; will be created)
+    3. tempfile.gettempdir() (will be created)
+    """
+    addr = str(address)
+    if addr.startswith("unix://"):
+        addr = addr[7:]
+    if os.path.isabs(addr):
+        return addr
+    else:
+        xdg_dir = os.environ.get("XDG_RUNTIME_DIR", False)
+        if xdg_dir:
+            base_path = f"{xdg_dir}"
+        else:
+            base_path = dask.config.get("temporary-directory")
+            if not base_path:
+                if MACOS:
+                    # MacOS throws `OSError: AF_UNIX path too long` with tempfile.gettempdir(), so use a hardcoded path under /tmp/
+                    base_path = f"/tmp/dask-{os.environ.get('USER')}"
+                else:
+                    base_path = tempfile.gettempdir()
+
+        base_path = f"{base_path}/dask_run"
+        os.makedirs(base_path, mode=0o700, exist_ok=True)
+
+        import secrets  # use token_hex to generate a random filename
+
+        return os.path.join(base_path, f"{secrets.token_hex()}.sock")

@@ -25,7 +25,7 @@ from distributed.comm import (
 )
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tcp import get_stream_address
-from distributed.compatibility import asyncio_run
+from distributed.compatibility import WINDOWS, asyncio_run
 from distributed.config import get_loop_factory
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
@@ -53,6 +53,17 @@ def tcp(monkeypatch, request):
     monkeypatch.setitem(backends, "tcp", tcp.TCPBackend())
     monkeypatch.setitem(backends, "tls", tcp.TLSBackend())
     return tcp
+
+
+@pytest.fixture(params=["tornado"])
+def uds(monkeypatch, request):
+    """Set the TCP backend to either tornado or asyncio"""
+    if request.param == "tornado":
+        import distributed.comm.uds as uds
+    else:
+        raise NotImplementedError()
+    monkeypatch.setitem(backends, "uds", uds.UDSBackend())
+    return uds
 
 
 ca_file = get_cert("tls-ca-cert.pem")
@@ -171,6 +182,8 @@ def test_get_address_host(tcp):
 
     assert f("tcp://127.0.0.1:123") == "127.0.0.1"
     assert f("inproc://%s/%d/123" % (get_ip(), os.getpid())) == get_ip()
+    if not WINDOWS:
+        assert f("unix:///tmp/dask.sock") == "/tmp/dask.sock"
 
 
 def test_resolve_address(tcp):
@@ -191,6 +204,9 @@ def test_resolve_address(tcp):
     assert f("localhost:123") == "tcp://127.0.0.1:123"
     assert f("tcp://localhost:456") == "tcp://127.0.0.1:456"
     assert f("tls://localhost:456") == "tls://127.0.0.1:456"
+
+    if not WINDOWS:
+        assert f("unix:///tmp/dask.sock") == "unix:///tmp/dask.sock"
 
 
 def test_get_local_address_for(tcp):
@@ -275,6 +291,53 @@ async def test_tcp_specific(tcp):
     futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
     await asyncio.gather(*futures)
     assert set(l) == {1234} | set(range(N))
+
+
+@pytest.mark.skipif(WINDOWS, reason="No unix sockets on Windows")
+@gen_test()
+async def test_uds_specific(uds):
+    """
+    Test concrete UDS API.
+    """
+
+    async def handle_comm(comm):
+        assert comm.peer_address == (f"unix://{host}:0")
+        assert comm.extra_info == {}
+        msg = await comm.read()
+        msg["op"] = "pong"
+        await comm.write(msg)
+        await comm.close()
+
+    listener = await uds.UDSListener("localhost", handle_comm)
+    host, port = listener.get_host_port()
+
+    assert host.endswith(".sock")
+    assert port == 0  # we fake port 0 when using UDS
+
+    l = []
+
+    async def client_communicate(key, delay=0):
+        comm = await connect(listener.contact_address)
+        assert comm.peer_address == f"unix://{host}:0"
+        assert comm.extra_info == {}
+        await comm.write({"op": "ping", "data": key})
+        if delay:
+            await asyncio.sleep(delay)
+        msg = await comm.read()
+        assert msg == {"op": "pong", "data": key}
+        l.append(key)
+        await comm.close()
+
+    await client_communicate(key=1234)
+
+    # Many clients at once
+    N = 100
+    futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
+    await asyncio.gather(*futures)
+    assert set(l) == {1234} | set(range(N))
+
+    listener.stop()
+    assert not os.path.exists(host)  # assert socket deleted
 
 
 @pytest.mark.parametrize("sni", [None, "localhost"])

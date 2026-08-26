@@ -8,6 +8,7 @@ import logging
 import multiprocessing
 import os
 import queue
+import shutil
 import socket
 import sys
 import traceback
@@ -42,6 +43,7 @@ from distributed.utils import (
     get_ip_interface,
     get_mp_context,
     get_traceback,
+    get_uds_path,
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
@@ -630,6 +632,12 @@ def test_format_dashboard_link():
     assert "host" in format_dashboard_link("host", 1234)
     assert "1234" in format_dashboard_link("host", 1234)
 
+    if not WINDOWS:
+        assert (
+            format_dashboard_link("localhost", "/tmp/dashboard.sock")
+            == "http+unix:///tmp/dashboard.sock/status"
+        )
+
     try:
         os.environ["host"] = "hello"
         assert "hello" not in format_dashboard_link("host", 1234)
@@ -1086,3 +1094,60 @@ def test_tuple_comparable_eq(obj1, obj2, expected):
 def test_tuple_comparable_error():
     with pytest.raises(ValueError):
         TupleComparable("string")
+
+
+@pytest.mark.parametrize(
+    "env_var",
+    [
+        "XDG_RUNTIME_DIR",
+        "DASK_TEMPORARY_DIRECTORY",
+        None,
+    ],
+)
+@pytest.mark.parametrize(
+    "arg,expectation",
+    [
+        ["", None],
+        ["localhost", None],
+        ["unix://", None],
+        ["unix://<tmp>/dask.sock", "<tmp>/dask.sock"],
+        ["<tmp>/dask.sock", "<tmp>/dask.sock"],
+    ],
+)
+@pytest.mark.skipif(WINDOWS, reason="No unix sockets on Windows")
+def test_get_uds_path(request, tmp_path, env_var, arg, expectation, monkeypatch):
+    if env_var != "XDG_RUNTIME_DIR":
+        # on Ubuntu this env var is always set, so we need to unset it to test the other options
+        monkeypatch.setenv("XDG_RUNTIME_DIR", "")
+
+    if env_var:
+        base_path = str(tmp_path)
+        monkeypatch.setenv(env_var, base_path)
+    elif MACOS:
+        # on MACOS we don't use tempfile.gettempdir
+        base_path = f"/tmp/dask-{os.environ.get('USER')}"
+    else:
+        # a path will be created using tempfile.gettempdir
+        base_path = f"/tmp/pytest/{request.node.name}"
+        import tempfile
+
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: base_path)
+
+    if env_var == "DASK_TEMPORARY_DIRECTORY":
+        # hack: setting this env var doesn't have effect within this test because the dask config is already loaded at this point
+        monkeypatch.setitem(dask.config.config, "temporary-directory", base_path)
+
+    arg = arg.replace("<tmp>", base_path)
+    expectation = expectation.replace("<tmp>", base_path) if expectation else ""
+
+    try:
+        result = get_uds_path(arg)
+        if os.path.isabs(str(expectation)):
+            assert result == expectation
+        else:
+            # we don't know what the socket filename is, but it should live under result_base_path
+            assert result.startswith(f"{base_path}/dask_run")
+            assert result.endswith(".sock")
+            assert os.path.exists(os.path.dirname(result))
+    finally:
+        shutil.rmtree(base_path, ignore_errors=True)
