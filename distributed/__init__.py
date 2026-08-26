@@ -32,6 +32,7 @@ from distributed.client import (
     performance_report,
     wait,
 )
+from distributed.condition import Condition
 from distributed.core import Status, connect, rpc
 from distributed.deploy import (
     Adaptive,
@@ -94,6 +95,7 @@ __all__ = [
     "Client",
     "CompatibleExecutor",
     "CondaInstall",
+    "Condition",
     "Environ",
     "Event",
     "Future",
