@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from operator import mul
 from time import sleep
+from unittest.mock import patch
 
 import pytest
 from tlz import merge, sliding_window
@@ -1452,8 +1453,10 @@ async def test_steal_very_fast_tasks(c, s, *workers):
     "cost, ntasks, expect_steal",
     [
         pytest.param(10, 10, False, id="not enough work to steal"),
-        pytest.param(10, 12, True, id="enough work to steal"),
-        pytest.param(20, 12, False, id="not enough work for increased cost"),
+        # The 50% margin heuristic raises the minimum backlog needed to justify
+        # stealing these expensive tasks; 12 was enough before, 17 is enough now.
+        pytest.param(10, 17, True, id="enough work to steal"),
+        pytest.param(20, 17, False, id="not enough work for increased cost"),
     ],
 )
 def test_balance_expensive_tasks(cost, ntasks, expect_steal):
@@ -2012,6 +2015,61 @@ async def test_stealing_objective_accounts_for_in_flight(c, s, a):
                 await block_event.set()
     finally:
         await block_event.set()
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 2,
+    config={
+        "distributed.scheduler.work-stealing-interval": "100ms",
+        "distributed.scheduler.default-task-durations": {"slowidentity": 0.021},
+        **NO_AMM,
+    },
+)
+async def test_reject_count_margin_metric(c, s, a, b):
+    """
+    Verify that the margin heuristic increments reject_count_margin_total
+    when a steal is suppressed that old logic would have permitted.
+    """
+    steal = s.extensions["stealing"]
+    await steal.stop()
+
+    # Use enough short tasks to satisfy Scheduler.check_idle_saturated() for a
+    # single busy worker while still keeping the steal in the margin-rejection
+    # window once get_comm_cost() is patched below.
+    futures = c.map(
+        slowidentity,
+        range(21),
+        workers=a.address,
+        allow_other_workers=True,
+        delay=0.021,
+    )
+
+    while len(s.tasks) < 21:
+        await asyncio.sleep(0.01)
+
+    while len(a.state.tasks) < 21:
+        await asyncio.sleep(0.01)
+
+    for ws in s.workers.values():
+        s.check_idle_saturated(ws)
+
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+    assert a_ws in s.saturated, (
+        f"Worker A not saturated: occupancy={a_ws.occupancy:.3f}, "
+        f"nthreads={a_ws.nthreads}, processing={len(a_ws.processing)}"
+    )
+    assert (
+        b_ws in s.idle.values()
+    ), f"Worker B not idle: processing={len(b_ws.processing)}"
+
+    with patch.object(
+        s, "get_comm_cost", side_effect=lambda ts, ws: 0.3 if ws == b_ws else 0.0
+    ):
+        steal.balance()
+
+    assert sum(steal.metrics["reject_count_margin_total"].values()) >= 1
 
 
 @gen_cluster(
