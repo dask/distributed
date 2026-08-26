@@ -2040,7 +2040,7 @@ class Client(SyncMethodMixin):
             coroutine, it will be run on the main event loop of a worker. Otherwise
             ``func`` will be run in a worker's task executor pool (see
             ``Worker.executors`` for more information.)
-        *args : tuple
+        *args
             Optional positional arguments
         key : str
             Unique identifier for the task.  Defaults to function-name and hash
