@@ -154,6 +154,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+_TASK_CONTROL_ANNOTATIONS = frozenset(
+    {
+        "allow_other_workers",
+        "executor",
+        "loose_restrictions",
+        "priority",
+        "resources",
+        "restrictions",
+        "retries",
+        "shuffle_original_restrictions",
+        "workers",
+    }
+)
+
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 DEFAULT_EXTENSIONS: dict[str, type] = {
@@ -2164,14 +2179,19 @@ class Worker(BaseWorker, ServerNode):
                 )
 
             self.active_keys.add(key)
-            # Propagate span (see distributed.spans). This is useful when spawning
-            # more tasks using worker_client() and for logging.
-            span_ctx = (
-                dask.annotate(span=ts.annotations["span"])
-                if "span" in ts.annotations
+            # Propagate user annotations without applying the parent task's
+            # scheduling and execution controls to nested tasks.
+            annotations = {
+                key: value
+                for key, value in ts.annotations.items()
+                if key not in _TASK_CONTROL_ANNOTATIONS
+            }
+            annotations_ctx = (
+                dask.annotate(**annotations)
+                if annotations
                 else contextlib.nullcontext()
             )
-            span_ctx.__enter__()
+            annotations_ctx.__enter__()
             run_spec = ts.run_spec
             try:
                 ts.start_time = time()
@@ -2219,7 +2239,7 @@ class Worker(BaseWorker, ServerNode):
                         )
             finally:
                 self.active_keys.discard(key)
-                span_ctx.__exit__(None, None, None)
+                annotations_ctx.__exit__(None, None, None)
 
             self.threads[key] = result["thread"]
 
