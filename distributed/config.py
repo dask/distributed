@@ -190,6 +190,7 @@ def initialize_logging(config: dict[Any, Any]) -> None:
 
 def get_loop_factory() -> Callable[[], asyncio.AbstractEventLoop] | None:
     event_loop = dask.config.get("distributed.admin.event-loop")
+
     if event_loop == "uvloop":
         uvloop = import_required(
             "uvloop",
@@ -201,13 +202,10 @@ def get_loop_factory() -> Callable[[], asyncio.AbstractEventLoop] | None:
             "    pip install uvloop",
         )
         return uvloop.new_event_loop
+
     if event_loop in {"asyncio", "tornado"}:
-        if sys.platform == "win32":
-            # ProactorEventLoop is not compatible with tornado 6
-            # fallback to the pre-3.8 default of Selector
-            # https://github.com/tornadoweb/tornado/issues/2608
-            return asyncio.SelectorEventLoop
         return None
+
     raise ValueError(
         "Expected distributed.admin.event-loop to be in "
         f"('asyncio', 'tornado', 'uvloop'), got {event_loop}"

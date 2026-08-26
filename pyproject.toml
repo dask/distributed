@@ -135,7 +135,7 @@ filterwarnings = [
     '''ignore:elementwise comparison failed. this will raise an error in the future:DeprecationWarning''',
     '''ignore:unclosed <socket\.socket.*:ResourceWarning''',
     '''ignore:unclosed context <zmq\.asyncio\.Context\(\).*:ResourceWarning''',
-    '''ignore:unclosed event loop <_(Unix|Windows)SelectorEventLoop.*:ResourceWarning''',
+    '''ignore:unclosed event loop <(_UnixSelector|Proactor)EventLoop.*:ResourceWarning''',
     '''ignore:unclosed file <_io.BufferedWriter.*:ResourceWarning''',
     '''ignore:unclosed file <_io.TextIOWrapper.*:ResourceWarning''',
     '''ignore:unclosed transport <_SelectorSocketTransport.*:ResourceWarning''',
