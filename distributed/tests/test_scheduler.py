@@ -878,6 +878,33 @@ async def test_clear_events_client_removal(c, s, a, b):
         assert time() < start + 2
 
 
+@gen_cluster(nthreads=[])
+async def test_client_connection_logs_include_address(s):
+    with captured_logger("distributed.scheduler", level=logging.INFO) as caplog:
+        async with Client(s.address, asynchronous=True) as c:
+            client_id = c.id
+            client_address = s.clients[client_id].address
+
+    logs = caplog.getvalue()
+    assert f"Receive client connection: {client_id} at {client_address}" in logs
+    assert f"Remove client {client_id} at {client_address}" in logs
+    assert f"Close client connection: {client_id} at {client_address}" in logs
+
+
+@gen_cluster(client=True)
+async def test_synthetic_client_logs_internal_address(c, s, a, b):
+    future = c.submit(inc, 1)
+    await future
+
+    s.client_desires_keys(keys=[future.key], client="queue-x")
+    assert s.clients["queue-x"].address == "<internal>"
+
+    with captured_logger("distributed.scheduler", level=logging.INFO) as caplog:
+        s.remove_client("queue-x")
+
+    assert "Remove client queue-x at <internal>" in caplog.getvalue()
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_add_worker(c, s):
     x = c.submit(inc, 1, key="x")
