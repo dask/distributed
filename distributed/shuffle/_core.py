@@ -444,7 +444,7 @@ class ShuffleType(Enum):
     ARRAY_RECHUNK = "ArrayRechunk"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ShuffleRunSpec(Generic[_T_partition_id]):
     run_id: int = field(init=False, default_factory=partial(next, itertools.count(1)))
     spec: ShuffleSpec
@@ -456,7 +456,7 @@ class ShuffleRunSpec(Generic[_T_partition_id]):
         return self.spec.id
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
     id: ShuffleId
     disk: bool
@@ -491,7 +491,7 @@ class ShuffleSpec(abc.ABC, Generic[_T_partition_id]):
         """Create the new shuffle run on the worker."""
 
 
-@dataclass(eq=False)
+@dataclass(eq=False, slots=True)
 class SchedulerShuffleState(Generic[_T_partition_id]):
     run_spec: ShuffleRunSpec
     participating_workers: set[str]
