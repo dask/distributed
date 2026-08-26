@@ -129,3 +129,51 @@ def test_gil_contention():
         sm = SystemMonitor()
         a = sm.update()
         assert "gil_contention" not in a
+
+
+def test_windows_fast_net_io_counters():
+    import sys
+
+    if sys.platform != "win32":
+        pytest.skip("Windows only test")
+
+    from distributed._windows_net_io import _fast_net_io_counters
+
+    res1 = _fast_net_io_counters()
+    assert hasattr(res1, "bytes_recv")
+    assert hasattr(res1, "bytes_sent")
+    assert isinstance(res1.bytes_recv, int)
+    assert isinstance(res1.bytes_sent, int)
+    assert res1.bytes_recv >= 0
+    assert res1.bytes_sent >= 0
+
+    res2 = _fast_net_io_counters()
+    assert res2.bytes_recv >= res1.bytes_recv
+    assert res2.bytes_sent >= res1.bytes_sent
+
+
+def test_windows_fast_net_io_counters_fallback(monkeypatch):
+    import sys
+
+    if sys.platform != "win32":
+        pytest.skip("Windows only test")
+
+    import distributed._windows_net_io
+    from distributed._windows_net_io import fast_net_io_counters
+
+    def mock_fast_net_io_counters():
+        raise RuntimeError("Simulated ctypes error")
+
+    monkeypatch.setattr(
+        distributed._windows_net_io, "_fast_net_io_counters", mock_fast_net_io_counters
+    )
+
+    # Calling fast_net_io_counters should fall back to psutil without raising
+    import psutil
+
+    expected = psutil.net_io_counters()
+    res = fast_net_io_counters()
+
+    # Check that it returns a valid net_io_counters namedtuple or similar from psutil
+    assert hasattr(res, "bytes_recv")
+    assert hasattr(res, "bytes_sent")

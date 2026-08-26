@@ -14,6 +14,12 @@ from distributed.compatibility import WINDOWS
 from distributed.diagnostics import nvml
 from distributed.metrics import monotonic, time
 
+if sys.platform == "win32":
+    # Win32 fast path for Issue #9161
+    from distributed._windows_net_io import fast_net_io_counters
+else:
+    fast_net_io_counters = psutil.net_io_counters
+
 
 class SystemMonitor:
     proc: psutil.Process
@@ -63,7 +69,7 @@ class SystemMonitor:
         }
 
         try:
-            self._last_net_io_counters = psutil.net_io_counters()
+            self._last_net_io_counters = fast_net_io_counters()
         except Exception:
             # FIXME is this possible?
             self.monitor_net_io = False  # pragma: nocover
@@ -165,7 +171,7 @@ class SystemMonitor:
             }
 
         if self.monitor_net_io:
-            net_ioc = psutil.net_io_counters()
+            net_ioc = fast_net_io_counters()
             last = self._last_net_io_counters
             result["host_net_io.read_bps"] = (
                 net_ioc.bytes_recv - last.bytes_recv
