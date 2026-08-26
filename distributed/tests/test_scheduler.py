@@ -707,6 +707,30 @@ async def test_no_valid_workers(client, s, a, b, c):
         await wait_for(x, 0.05)
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_valid_workers_with_late_worker_alias(client, s):
+    async with (
+        Worker(s.address, name="a-0") as a0,
+        Worker(s.address, name="a-1"),
+    ):
+        x = client.submit(inc, 1, workers=["a-0", "b-0"])
+        assert await x == 2
+
+        ts = s.tasks[x.key]
+        assert ts.worker_restrictions == {a0.address}
+        assert ts.host_restrictions == {"b-0"}
+
+        async with Worker(s.address, name="b-0") as b0:
+            await async_poll_for(
+                lambda: s.workers[b0.address].status == Status.running,
+                timeout=1,
+            )
+            assert s.valid_workers(ts) == {
+                s.workers[a0.address],
+                s.workers[b0.address],
+            }
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_no_valid_workers_loose_restrictions(client, s, a, b, c):
     x = client.submit(inc, 1, workers="127.0.0.5:9999", allow_other_workers=True)
