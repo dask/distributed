@@ -3196,7 +3196,9 @@ class SchedulerState:
         nbytes = sum(dts.get_nbytes() for dts in deps)
         return nbytes / self.bandwidth
 
-    def valid_workers(self, ts: TaskState) -> set[WorkerState] | None:
+    def valid_workers(
+        self, ts: TaskState, *, only_available: bool = True
+    ) -> set[WorkerState] | None:
         """Return set of currently valid workers for key
 
         If all workers are valid then this returns ``None``, in which case
@@ -3208,6 +3210,15 @@ class SchedulerState:
         *  worker_restrictions
         *  host_restrictions
         *  resource_restrictions
+
+        Parameters
+        ----------
+        only_available
+            If True (default), a worker only counts for a resource restriction when
+            it has enough of the resource *unused*, so the returned workers can run
+            the task right now. If False, the worker's declared total is used
+            instead, which answers whether the restrictions are satisfiable at all
+            regardless of what is running.
         """
         s: set[str] | None = None
 
@@ -3240,7 +3251,16 @@ class SchedulerState:
 
                 sw = set()
                 for addr, supplied in dr.items():
-                    if supplied >= required:
+                    available = supplied
+                    if only_available:
+                        # Comparing against the declared total lets the scheduler
+                        # commit more of a resource than the worker has, so
+                        # ws.used_resources overshoots ws.resources while the worker
+                        # holds the surplus tasks back anyway.
+                        ws = self.workers.get(addr)
+                        if ws is not None:
+                            available -= ws.used_resources.get(resource, 0)
+                    if available >= required:
                         sw.add(addr)
 
                 dw[resource] = sw
@@ -4777,6 +4797,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.bulk_schedule_unrunnable_after_adding_worker(ws), stimulus_id
             )
             self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+            self.stimulus_resources_maybe_released(stimulus_id=stimulus_id)
 
         logger.info("Register worker addr: %s name: %s", ws.address, ws.name)
 
@@ -5400,6 +5421,42 @@ class Scheduler(SchedulerState, ServerNode):
                 assert qts.state == "processing"
                 assert not self.queued or self.queued.peek() != qts
 
+    def stimulus_resources_maybe_released(self, *, stimulus_id: str) -> None:
+        """Respond to an event which may have released resources on workers
+
+        Transitions ``no-worker`` tasks whose resource restrictions can now be
+        satisfied to ``processing``.
+
+        A resource is only freed when a task holding it leaves ``processing``, so
+        tasks that `Scheduler.valid_workers` held back for want of a free resource
+        have to be reconsidered at that point. Without this they would stay
+        unrunnable until a new worker joined, which is the only other event that
+        revisits ``no-worker`` tasks.
+
+        Notes
+        -----
+        Tasks are transitioned one at a time so that each one takes its resources
+        before the next is considered; recommending them in bulk would let tasks
+        that no longer fit bounce straight back to ``no-worker``.
+
+        Other transitions related to this stimulus should be fully processed
+        beforehand, for the same reason as in
+        `Scheduler.stimulus_queue_slots_maybe_opened`.
+        """
+        if not self.unrunnable:
+            return
+
+        # Snapshot first: transitioning mutates self.unrunnable
+        candidates = [ts for ts in self.unrunnable if ts.resource_restrictions]
+        if not candidates:
+            return
+
+        candidates.sort(key=operator.attrgetter("priority"))
+        for ts in candidates:
+            if not self.valid_workers(ts):
+                continue
+            self.transitions({ts.key: "processing"}, stimulus_id)
+
     def stimulus_task_finished(
         self,
         worker: str,
@@ -5835,6 +5892,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.transitions(recommendations, stimulus_id)
 
         self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+        self.stimulus_resources_maybe_released(stimulus_id=stimulus_id)
 
     def client_heartbeat(self, client: str) -> None:
         """Handle heartbeats from Client"""
@@ -6021,6 +6079,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
         self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+        self.stimulus_resources_maybe_released(stimulus_id=stimulus_id)
 
     def handle_task_erred(self, key: Key, stimulus_id: str, **msg: Any) -> None:
         r: tuple = self.stimulus_task_erred(key=key, stimulus_id=stimulus_id, **msg)
@@ -6029,6 +6088,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
         self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+        self.stimulus_resources_maybe_released(stimulus_id=stimulus_id)
 
     def release_worker_data(self, key: Key, worker: str, stimulus_id: str) -> None:
         ts = self.tasks.get(key)
@@ -6093,6 +6153,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.check_idle_saturated(ws)
 
         self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+        self.stimulus_resources_maybe_released(stimulus_id=stimulus_id)
 
     def handle_worker_status_change(
         self, status: str | Status, worker: str | WorkerState, stimulus_id: str
@@ -6123,6 +6184,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.bulk_schedule_unrunnable_after_adding_worker(ws), stimulus_id
             )
             self.stimulus_queue_slots_maybe_opened(stimulus_id=stimulus_id)
+            self.stimulus_resources_maybe_released(stimulus_id=stimulus_id)
         else:
             self.running.discard(ws)
             self.idle.pop(ws.address, None)
@@ -8735,6 +8797,21 @@ class Scheduler(SchedulerState, ServerNode):
                 {"action": "no-workers-timeout-exceeded", "keys": affected},
             )
 
+    def _waiting_for_busy_resources(self, ts: TaskState) -> bool:
+        """Whether *ts* is unrunnable only because the resources it asks for are
+        currently held by other tasks
+
+        Such a task is not waiting on unsatisfiable restrictions: some worker
+        declares enough of the resource, and the task becomes runnable as soon as
+        that resource is released.
+        """
+        if not ts.resource_restrictions:
+            return False
+        if self.valid_workers(ts):
+            # A worker can take it right now, so it is not blocked on resources.
+            return False
+        return bool(self.valid_workers(ts, only_available=False))
+
     def _check_unrunnable_task_timeouts(
         self, timestamp: float, recommendations: Recs, stimulus_id: str
     ) -> set[Key]:
@@ -8746,6 +8823,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # unrunnable is insertion-ordered, which means that unrunnable_since will
                 # be monotonically increasing in this loop.
                 break
+            if self._waiting_for_busy_resources(ts):
+                # The restrictions can be satisfied; the task is only waiting for
+                # other tasks to release the resources it needs. Failing it here
+                # would kill work that is about to become runnable.
+                continue
             if (
                 self._no_workers_since is None
                 or self._no_workers_since >= unrunnable_since
