@@ -170,7 +170,7 @@ def test_get_address_host(tcp):
     f = get_address_host
 
     assert f("tcp://127.0.0.1:123") == "127.0.0.1"
-    assert f("inproc://%s/%d/123" % (get_ip(), os.getpid())) == get_ip()
+    assert f("inproc://127.0.0.1/%d/123" % os.getpid()) == "127.0.0.1"
 
 
 def test_resolve_address(tcp):
@@ -201,7 +201,7 @@ def test_get_local_address_for(tcp):
     if has_ipv6():
         assert f("tcp://[::1]:123") == "tcp://[::1]"
 
-    inproc_arg = "inproc://%s/%d/444" % (get_ip(), os.getpid())
+    inproc_arg = "inproc://127.0.0.1/%d/444" % os.getpid()
     inproc_res = f(inproc_arg)
     assert inproc_res.startswith("inproc://")
     assert inproc_res != inproc_arg
@@ -586,12 +586,11 @@ tls_eq = tcp_eq
 
 
 def inproc_check():
-    expected_ip = get_ip()
     expected_pid = os.getpid()
 
     def checker(loc):
         ip, pid, suffix = loc.split("/")
-        assert ip == expected_ip
+        assert ip == "127.0.0.1"
         assert int(pid) == expected_pid
 
     return checker

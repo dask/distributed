@@ -281,12 +281,12 @@ async def test_server_listen():
 
     async with listen_on(Server, "inproc://") as server:
         inproc_addr1 = server.address
-        assert inproc_addr1.startswith("inproc://%s/%d/" % (get_ip(), os.getpid()))
+        assert inproc_addr1.startswith("inproc://127.0.0.1/%d/" % os.getpid())
         await assert_can_connect(inproc_addr1)
 
         async with listen_on(Server, "inproc://") as server2:
             inproc_addr2 = server2.address
-            assert inproc_addr2.startswith("inproc://%s/%d/" % (get_ip(), os.getpid()))
+            assert inproc_addr2.startswith("inproc://127.0.0.1/%d/" % os.getpid())
             await assert_can_connect(inproc_addr2)
 
         await assert_can_connect(inproc_addr1)
