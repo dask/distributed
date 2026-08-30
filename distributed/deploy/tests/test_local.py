@@ -151,6 +151,28 @@ def test_transports_inproc(loop):
             assert e.submit(inc, 4).result() == 5
 
 
+def test_transports_inproc_does_not_discover_external_ip(loop):
+    import distributed.comm.inproc
+
+    distributed.comm.inproc.global_manager._ip = None
+    with (
+        mock.patch(
+            "distributed.comm.inproc.get_ip",
+            side_effect=AssertionError("inproc should not discover an external IP"),
+            create=True,
+        ),
+        LocalCluster(
+            n_workers=1,
+            processes=False,
+            silence_logs=False,
+            dashboard_address=":0",
+            loop=loop,
+        ) as c,
+    ):
+        assert c.scheduler_address.startswith("inproc://127.0.0.1/")
+        assert c.workers[0].address.startswith("inproc://127.0.0.1/")
+
+
 def test_transports_tcp(loop):
     # Have nannies => need TCP
     with LocalCluster(
