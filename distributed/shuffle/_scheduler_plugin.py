@@ -277,7 +277,9 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
         barrier = self.scheduler.tasks[barrier_key(shuffle_id)]
 
         if barrier.worker_restrictions:
-            workers = list(barrier.worker_restrictions)
+            workers = list(
+                self.scheduler._resolve_worker_restrictions(barrier.worker_restrictions)
+            )
         else:
             workers = list(self.scheduler.workers)
 
