@@ -4,19 +4,87 @@ import pytest
 
 pytest.importorskip("asyncssh")
 
+import asyncio
 import sys
 
 import dask
 
 from distributed import Client
 from distributed.compatibility import MACOS, WINDOWS
-from distributed.deploy.ssh import SSHCluster
+from distributed.deploy.ssh import Scheduler, SSHCluster
 from distributed.utils_test import gen_test
 
 pytestmark = [
     pytest.mark.xfail(MACOS, reason="very high flakiness; see distributed/issues/4543"),
     pytest.mark.skipif(WINDOWS, reason="no CI support; see distributed/issues/4509"),
 ]
+
+
+# asyncssh.create_server leaks 2 fds on its own, independently of anything under test
+@pytest.mark.leaking("fds")
+@gen_test()
+async def test_remote_process_not_blocked_by_unread_output():
+    """The remote process must keep running once its startup banner has been read.
+
+    ``Scheduler.start`` reads stderr only until the remote announces its address and
+    never reads stdout at all. If nothing drains those streams afterwards, the SSH
+    receive window fills up and the remote process blocks forever the next time it
+    logs. See https://github.com/dask/distributed/issues/9033.
+
+    This drives the real ``ssh.Scheduler`` against an in-process asyncssh server, so
+    it exercises genuine SSH flow control without needing a reachable sshd.
+    """
+    import asyncssh
+
+    # Enough to overflow asyncssh's 2 MiB default channel window several times over.
+    chunk = "distributed.core - INFO - " + "x" * 4000 + "\n"
+    n_chunks = 1500
+    finished = asyncio.Event()
+
+    async def handle_process(process):
+        if process.command == "uname":
+            process.stdout.write("Linux\n")
+            process.exit(0)
+            return
+        process.stderr.write(
+            "distributed.scheduler - INFO - Scheduler at: tcp://127.0.0.1:8786\n"
+        )
+        await process.stderr.drain()
+        for _ in range(n_chunks):
+            process.stderr.write(chunk)
+            await process.stderr.drain()  # blocks once the peer window is exhausted
+        finished.set()
+        process.exit(0)
+
+    class _Server(asyncssh.SSHServer):
+        def begin_auth(self, username):
+            return False  # the test server does not authenticate
+
+    server = await asyncssh.create_server(
+        _Server,
+        "127.0.0.1",
+        0,
+        server_host_keys=[asyncssh.generate_private_key("ssh-ed25519")],
+        process_factory=handle_process,
+    )
+    try:
+        port = next(iter(server.sockets)).getsockname()[1]
+        scheduler = Scheduler(
+            address="127.0.0.1",
+            connect_options={"port": port, "known_hosts": None, "username": "test"},
+            kwargs={},
+        )
+        await scheduler.start()
+        connection = scheduler.connection
+        try:
+            assert scheduler.address == "tcp://127.0.0.1:8786"
+            await asyncio.wait_for(finished.wait(), timeout=30)
+        finally:
+            await scheduler.close()
+            await connection.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 def test_ssh_hosts_None():
