@@ -5,6 +5,7 @@ from dataclasses import asdict
 import pytest
 
 from distributed._submission_permits import (
+    _HEAP_SLACK,
     AbortedPermitError,
     ClosedPermitError,
     ExpiredPermitError,
@@ -175,3 +176,126 @@ def test_rejects_invalid_durations(
     permits, _, epoch = registry
     with pytest.raises(ValueError):
         permits.acquire("client", epoch, 1, duration)  # type: ignore[arg-type]
+
+
+def assert_heap_bound(permits: SubmissionPermitRegistry) -> None:
+    assert len(permits._deadlines) <= 2 * permits._pending + _HEAP_SLACK
+    assert all(len(entry) == 4 for entry in permits._deadlines)
+
+
+def test_deadline_heap_stays_bounded_through_long_terminal_churn() -> None:
+    clock = Clock()
+    permits = SubmissionPermitRegistry(100, 1, 2, 8, clock)
+    epoch = permits.register("client")
+    for sequence in range(1, 20_001):
+        permits.acquire("client", epoch, sequence, 50)
+        if sequence % 2:
+            assert permits.transfer("client", epoch, sequence)
+        else:
+            assert permits.abort("client", epoch, sequence).state == "aborted"
+        assert_heap_bound(permits)
+
+    generation = permits._generations["client"]
+    assert permits._pending == 0
+    assert not generation.active
+    assert len(generation.outcomes) == 8
+    assert generation.high_watermark == 20_000
+
+
+def test_deadline_heap_ignores_replaced_and_unregistered_epochs() -> None:
+    clock = Clock()
+    permits = SubmissionPermitRegistry(100, 1, 10, 4, clock)
+    old_epoch = permits.register("client")
+    permits.acquire("client", old_epoch, 1, 1)
+    replacement = permits.register("client")
+    permits.acquire("client", replacement, 1, 50)
+    transient = permits.register("transient")
+    permits.acquire("transient", transient, 1, 1)
+    assert permits.unregister("transient", transient)
+
+    clock.now = 1
+    assert permits.status("client", replacement, 1).state == "pending"
+    assert permits._pending == 1
+    assert_heap_bound(permits)
+    assert all(entry[2] == replacement for entry in permits._deadlines)
+
+
+def test_deadline_heap_mixed_live_and_churn_has_one_live_entry_per_permit() -> None:
+    clock = Clock()
+    permits = SubmissionPermitRegistry(100, 1, 32, 4, clock)
+    live = []
+    for index in range(20):
+        client = f"live-{index}"
+        epoch = permits.register(client)
+        permits.acquire(client, epoch, 1, 50)
+        live.append((client, epoch))
+
+    churn_epoch = permits.register("churn")
+    for sequence in range(1, 20_001):
+        permits.acquire("churn", churn_epoch, sequence, 50)
+        permits.abort("churn", churn_epoch, sequence)
+    assert permits._pending == len(live)
+    assert_heap_bound(permits)
+    live_entries = [
+        entry for entry in permits._deadlines if permits._is_live_entry(entry)
+    ]
+    assert len(live_entries) == len(live)
+    assert {(client, epoch, 1) for _, client, epoch, _ in live_entries} == {
+        (client, epoch, 1) for client, epoch in live
+    }
+
+
+def test_deadline_heap_long_reregister_and_unregister_churn_ignores_old_epochs() -> (
+    None
+):
+    clock = Clock()
+    permits = SubmissionPermitRegistry(100, 1, 3, 4, clock)
+    anchor_epoch = permits.register("anchor")
+    permits.acquire("anchor", anchor_epoch, 1, 50)
+    for _ in range(20_000):
+        old_epoch = permits.register("churn")
+        permits.acquire("churn", old_epoch, 1, 1)
+        replacement_epoch = permits.register("churn")
+        permits.acquire("churn", replacement_epoch, 1, 1)
+        assert permits.unregister("churn", replacement_epoch)
+        current_epoch = permits.register("churn")
+        permits.acquire("churn", current_epoch, 1, 1)
+        assert_heap_bound(permits)
+
+    due_epoch = permits.register("due")
+    permits.acquire("due", due_epoch, 1, 1)
+    clock.now = 1
+    assert permits.status("anchor", anchor_epoch, 1).state == "pending"
+    assert permits.status("due", due_epoch, 1).state == "expired"
+    assert permits._pending == 1
+    assert_heap_bound(permits)
+
+
+def test_pending_retry_does_not_add_heap_entry_and_close_clears_heap() -> None:
+    clock = Clock()
+    permits = SubmissionPermitRegistry(10, 1, 1, 2, clock)
+    epoch = permits.register("client")
+    permits.acquire("client", epoch, 1, 5)
+    before = list(permits._deadlines)
+    permits.acquire("client", epoch, 1, 5)
+    assert permits._deadlines == before
+    permits.close()
+    assert not permits._deadlines
+    assert permits._pending == 0
+
+
+def test_equal_deadlines_expire_together_after_capacity_rejection() -> None:
+    clock = Clock()
+    permits = SubmissionPermitRegistry(10, 1, 2, 2, clock)
+    first = permits.register("first")
+    second = permits.register("second")
+    third = permits.register("third")
+    permits.acquire("first", first, 1, 1)
+    permits.acquire("second", second, 1, 1)
+    with pytest.raises(PermitCapacityError):
+        permits.acquire("third", third, 1, 1)
+    clock.now = 1
+    assert not permits.has_pending()
+    assert permits.status("first", first, 1).state == "expired"
+    assert permits.status("second", second, 1).state == "expired"
+    assert not permits._deadlines

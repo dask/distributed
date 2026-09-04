@@ -9,9 +9,12 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from heapq import heapify, heappop, heappush
 from math import isfinite
 from time import monotonic
 from uuid import uuid4
+
+_HEAP_SLACK = 64
 
 
 class SubmissionPermitError(ValueError):
@@ -110,6 +113,10 @@ class SubmissionPermitRegistry:
         self.max_outcomes_per_client = max_outcomes_per_client
         self._clock = clock
         self._generations: dict[str, _Generation] = {}
+        # Entries deliberately contain only scalar identity data.  Finished,
+        # unregistered, and replaced generations leave stale entries behind;
+        # _expire and _compact_heap validate them against active state.
+        self._deadlines: list[tuple[float, str, str, int]] = []
         self._pending = 0
         self._closed = False
 
@@ -123,6 +130,7 @@ class SubmissionPermitRegistry:
             self._pending -= len(old.active)
         epoch = uuid4().hex
         self._generations[client] = _Generation(epoch)
+        self._compact_heap()
         return epoch
 
     def is_current(self, client: str, epoch: str) -> bool:
@@ -139,6 +147,7 @@ class SubmissionPermitRegistry:
             return False
         self._pending -= len(generation.active)
         del self._generations[client]
+        self._compact_heap()
         return True
 
     def acquire(
@@ -163,6 +172,8 @@ class SubmissionPermitRegistry:
         generation.active[sequence] = permit
         generation.high_watermark = sequence
         self._pending += 1
+        heappush(self._deadlines, (permit.deadline, client, epoch, sequence))
+        self._compact_heap()
         return self._snapshot(permit, now)
 
     def status(self, client: str, epoch: str, sequence: int) -> PermitSnapshot:
@@ -190,6 +201,7 @@ class SubmissionPermitRegistry:
             return self.status(client, epoch, sequence)
         if permit.state == "pending":
             self._finish(generation, permit, "aborted")
+        self._compact_heap()
         return self._snapshot(permit, now)
 
     def transfer(self, client: str, epoch: str, sequence: int) -> bool:
@@ -208,6 +220,7 @@ class SubmissionPermitRegistry:
         if permit.state == "aborted":
             raise AbortedPermitError(f"submission permit {sequence} was aborted")
         self._finish(generation, permit, "accepted")
+        self._compact_heap()
         return True
 
     def has_pending(self) -> bool:
@@ -221,6 +234,7 @@ class SubmissionPermitRegistry:
         for generation in self._generations.values():
             for permit in list(generation.active.values()):
                 self._finish(generation, permit, "aborted")
+        self._deadlines.clear()
 
     def _current_generation(self, client: str, epoch: str) -> _Generation:
         self._validate_client(client)
@@ -231,10 +245,31 @@ class SubmissionPermitRegistry:
         return generation
 
     def _expire(self, now: float) -> None:
-        for generation in self._generations.values():
-            for permit in list(generation.active.values()):
-                if permit.deadline <= now:
-                    self._finish(generation, permit, "expired")
+        while self._deadlines and self._deadlines[0][0] <= now:
+            deadline, client, epoch, sequence = heappop(self._deadlines)
+            generation = self._generations.get(client)
+            if generation is None or generation.epoch != epoch:
+                continue
+            permit = generation.active.get(sequence)
+            if permit is not None and permit.deadline == deadline:
+                self._finish(generation, permit, "expired")
+        self._compact_heap()
+
+    def _compact_heap(self) -> None:
+        if len(self._deadlines) <= 2 * self._pending + _HEAP_SLACK:
+            return
+        self._deadlines = [
+            entry for entry in self._deadlines if self._is_live_entry(entry)
+        ]
+        heapify(self._deadlines)
+
+    def _is_live_entry(self, entry: tuple[float, str, str, int]) -> bool:
+        deadline, client, epoch, sequence = entry
+        generation = self._generations.get(client)
+        if generation is None or generation.epoch != epoch:
+            return False
+        permit = generation.active.get(sequence)
+        return permit is not None and permit.deadline == deadline
 
     def _finish(self, generation: _Generation, permit: _Permit, state: str) -> None:
         del generation.active[permit.sequence]
