@@ -1132,6 +1132,7 @@ class Client(SyncMethodMixin):
 
         # Communication
         self.scheduler_comm = None
+        self._submission_permit_capabilities: dict[str, Any] | None = None
 
         if address is None:
             address = dask.config.get("scheduler-address", None)
@@ -1515,6 +1516,7 @@ class Client(SyncMethodMixin):
 
         self.status = "connecting"
         self.scheduler_comm = None
+        self._submission_permit_capabilities = None
 
         for st in self.futures.values():
             st.cancel(
@@ -1588,6 +1590,7 @@ class Client(SyncMethodMixin):
             msg = await comm.read()
         assert len(msg) == 1
         assert msg[0]["op"] == "stream-start"
+        self._submission_permit_capabilities = msg[0].get("submission-permits")
 
         if msg[0].get("error"):
             raise ImportError(msg[0]["error"])

@@ -65,7 +65,7 @@ import dask
 from dask._expr import LLGExpr
 from dask._task_spec import GraphNode, convert_legacy_graph
 from dask.core import istask, validate_key
-from dask.typing import Key, no_default
+from dask.typing import Key, NoDefault, no_default
 from dask.utils import (
     format_bytes,
     format_time,
@@ -151,6 +151,7 @@ if TYPE_CHECKING:
 
     from dask._expr import Expr
 
+    from distributed._submission_permit_extension import SubmissionPermitExtension
     from distributed.diagnostics.task_stream import TaskStreamPlugin
 
     FuncT = TypeVar("FuncT", bound=Callable[..., Any])
@@ -5008,13 +5009,58 @@ class Scheduler(SchedulerState, ServerNode):
         code: tuple[SourceCode, ...] = (),
         annotations: dict | None = None,
         stimulus_id: str | None = None,
+        submission_epoch: str | None | NoDefault = no_default,
+        submission_sequence: int | None | NoDefault = no_default,
     ) -> None:
         start = time()
         stimulus_id = stimulus_id or f"update-graph-{start}"
         self._active_graph_updates += 1
         evt_msg: dict[str, Any]
+        tagged = (
+            submission_epoch is not no_default or submission_sequence is not no_default
+        )
+        permit_ext: SubmissionPermitExtension | None = self.extensions.get(
+            "submission-permits"
+        )
+        submission_comm = self.client_comms.get(client)
 
         try:
+            if tagged:
+                admission: dict[str, Any] = {
+                    "op": "submission-permit-admission",
+                    "epoch": None
+                    if submission_epoch is no_default
+                    else submission_epoch,
+                    "sequence": (
+                        None
+                        if submission_sequence is no_default
+                        else submission_sequence
+                    ),
+                    "status": "rejected",
+                }
+                try:
+                    if (
+                        permit_ext is None
+                        or not isinstance(submission_epoch, str)
+                        or not isinstance(submission_sequence, int)
+                    ):
+                        raise ValueError("invalid or unsupported submission permit tag")
+                    if permit_ext.transfer(
+                        client, submission_epoch, submission_sequence
+                    ):
+                        admission["status"] = "accepted"
+                    else:
+                        admission["reason"] = "sequence-already-consumed"
+                except ValueError as e:
+                    admission["reason"] = type(e).__name__
+                    admission["detail"] = str(e)
+                self.client_send(client, admission)
+                if admission["status"] != "accepted":
+                    # Admission failure is per submission, never per task key.
+                    # A key-wide error could corrupt another existing Future.
+                    return
+                # Acceptance means entry to this guarded handler, not successful
+                # graph preparation, TaskState creation, or computation.
             logger.debug("Received new graph. Deserializing...")
             try:
                 expr = deserialize(expr_ser.header, expr_ser.frames)
@@ -5057,6 +5103,17 @@ class Scheduler(SchedulerState, ServerNode):
             # Everything that compares the submitted graph to the current state
             # has to happen in the same event loop.
             # *************************************
+
+            if tagged and (
+                self.status != Status.running
+                or submission_comm is None
+                or submission_comm.closed()
+                or self.client_comms.get(client) is not submission_comm
+                or permit_ext is None
+                or not isinstance(submission_epoch, str)
+                or not permit_ext.registry.is_current(client, submission_epoch)
+            ):
+                return
 
             if self._find_lost_dependencies(dsk, keys):
                 self.report(
@@ -5116,6 +5173,16 @@ class Scheduler(SchedulerState, ServerNode):
             self.log_event(["scheduler", client], evt_msg)
             logger.debug("Task state created. %i new tasks", len(self.tasks) - before)
         except Exception as e:
+            if tagged and (
+                self.status != Status.running
+                or submission_comm is None
+                or submission_comm.closed()
+                or self.client_comms.get(client) is not submission_comm
+                or permit_ext is None
+                or not isinstance(submission_epoch, str)
+                or not permit_ext.registry.is_current(client, submission_epoch)
+            ):
+                return
             evt_msg = {
                 "action": "update-graph",
                 "stimulus_id": stimulus_id,
@@ -5909,6 +5976,24 @@ class Scheduler(SchedulerState, ServerNode):
         We listen to all future messages from this Comm.
         """
         assert client is not None
+        permit_ext: SubmissionPermitExtension | None = self.extensions.get(
+            "submission-permits"
+        )
+        submission_epoch = None
+        if permit_ext is not None:
+            # The old stream may still be awaiting graph preparation or cleanup.
+            # Preserve its ClientState and ownership until that lifetime ends.
+            # Closing just the new comm lets Client._reconnect retry normally.
+            if client in self.client_comms:
+                await comm.close()
+                return
+            from distributed._submission_permits import ClosedPermitError
+
+            try:
+                submission_epoch = permit_ext.register_client(client)
+            except ClosedPermitError:
+                await comm.close()
+                return
         comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
@@ -5925,7 +6010,10 @@ class Scheduler(SchedulerState, ServerNode):
             bcomm = BatchedSend(interval="2ms", loop=self.loop)
             bcomm.start(comm)
             self.client_comms[client] = bcomm
-            msg = {"op": "stream-start"}
+            msg: dict[str, Any] = {"op": "stream-start"}
+            if permit_ext is not None:
+                assert submission_epoch is not None
+                msg["submission-permits"] = permit_ext.capabilities(submission_epoch)
             version_warning = version_module.error_message(
                 version_module.get_versions(),
                 {w: ws.versions for w, ws in self.workers.items()},
@@ -5937,19 +6025,24 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 await self.handle_stream(comm=comm, extra={"client": client})
             finally:
+                if permit_ext is not None:
+                    assert submission_epoch is not None
+                    permit_ext.unregister_client(client, submission_epoch)
                 self.remove_client(client=client, stimulus_id=f"remove-client-{time()}")
                 logger.debug("Finished handling client %s", client)
         finally:
             if not comm.closed():
-                self.client_comms[client].send({"op": "stream-closed"})
+                bcomm.send({"op": "stream-closed"})
             try:
                 if not self._is_finalizing():
-                    await self.client_comms[client].close()
-                    del self.client_comms[client]
+                    await bcomm.close()
                     if self.status == Status.running:
                         logger.info("Close client connection: %s", client)
             except TypeError:  # comm becomes None during GC
                 pass
+            finally:
+                if self.client_comms.get(client) is bcomm:
+                    del self.client_comms[client]
 
     def remove_client(self, client: str, stimulus_id: str | None = None) -> None:
         """Remove client from network"""
@@ -8673,6 +8766,13 @@ class Scheduler(SchedulerState, ServerNode):
             self.idle_since = None
             return None
 
+        permit_ext: SubmissionPermitExtension | None = self.extensions.get(
+            "submission-permits"
+        )
+        if permit_ext is not None and permit_ext.has_pending():
+            self.idle_since = None
+            return None
+
         if (
             self.queued
             or self.unrunnable
@@ -8696,6 +8796,8 @@ class Scheduler(SchedulerState, ServerNode):
         if self.idle_timeout:
             if time() > self.idle_since + self.idle_timeout:
                 assert self.idle_since
+                if permit_ext is not None:
+                    permit_ext.commit_idle_shutdown()
                 logger.info(
                     "Scheduler closing after being idle for %s",
                     format_time(self.idle_timeout),
