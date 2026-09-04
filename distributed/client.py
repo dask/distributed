@@ -1133,6 +1133,12 @@ class Client(SyncMethodMixin):
         # Communication
         self.scheduler_comm = None
         self._submission_permit_capabilities: dict[str, Any] | None = None
+        self._submission_permit_pending: dict[
+            tuple[str, int], asyncio.Future[dict[str, Any]]
+        ] = {}
+        self._submission_permit_sequence = 0
+        self._submission_permit_acquire_lock = asyncio.Lock()
+        self._submission_permit_changed = asyncio.Event()
 
         if address is None:
             address = dask.config.get("scheduler-address", None)
@@ -1222,6 +1228,7 @@ class Client(SyncMethodMixin):
             "error": self._handle_error,
             "event": self._handle_event,
             "adjust-heartbeat-interval": self._adjust_heartbeat_intervals,
+            "submission-permit-admission": self._handle_submission_permit_admission,
         }
 
         self._state_handlers = {
@@ -1514,6 +1521,7 @@ class Client(SyncMethodMixin):
     async def _reconnect(self):
         assert self.scheduler_comm.comm.closed()
 
+        self._fail_submission_permits("scheduler connection lost")
         self.status = "connecting"
         self.scheduler_comm = None
         self._submission_permit_capabilities = None
@@ -1716,6 +1724,35 @@ class Client(SyncMethodMixin):
         with self._refcount_lock:
             self.refcount[key] += 1
 
+    def _handle_submission_permit_admission(
+        self, epoch=None, sequence=None, status=None, reason=None, detail=None
+    ):
+        if (
+            not isinstance(epoch, str)
+            or not isinstance(sequence, int)
+            or isinstance(sequence, bool)
+        ):
+            return
+        pending = self._submission_permit_pending.get((epoch, sequence))
+        if pending is not None and not pending.done():
+            pending.set_result(
+                {
+                    "epoch": epoch,
+                    "sequence": sequence,
+                    "status": status,
+                    "reason": reason,
+                    "detail": detail,
+                }
+            )
+
+    def _fail_submission_permits(self, reason):
+        self._submission_permit_changed.set()
+        self._submission_permit_changed = asyncio.Event()
+        for pending in self._submission_permit_pending.values():
+            if not pending.done():
+                pending.set_exception(CommClosedError(reason))
+        self._submission_permit_pending.clear()
+
     def _dec_ref(self, key):
         with self._refcount_lock:
             self.refcount[key] -= 1
@@ -1827,6 +1864,7 @@ class Client(SyncMethodMixin):
             state.set_error(exception, traceback)
 
     def _handle_restart(self):
+        self._fail_submission_permits("scheduler restarted")
         logger.info("Receive restart signal from scheduler")
         for state in self.futures.values():
             state.cancel(
@@ -1875,6 +1913,8 @@ class Client(SyncMethodMixin):
             return
 
         self.status = "closing"
+
+        self._fail_submission_permits("client closing")
 
         await self.preloads.teardown()
 
@@ -3387,6 +3427,11 @@ class Client(SyncMethodMixin):
         fifo_timeout=0,
         actors=None,
     ):
+        from distributed._submission_permit_client import _current_submission
+
+        submission = _current_submission.get()
+        if submission is not None:
+            submission.begin_graph(self)
         with self._refcount_lock:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
@@ -3418,7 +3463,14 @@ class Client(SyncMethodMixin):
                 validate_key(key)
 
             # Create futures before sending graph (helps avoid contention)
-            futures = {key: Future(key, self) for key in keyset}
+            if submission is None:
+                futures = {key: Future(key, self) for key in keyset}
+            else:
+                futures = {}
+                for key in keyset:
+                    future = Future(key, self)
+                    submission.own(future)
+                    futures[key] = future
 
             # This is done manually here to get better exception messages on
             # scheduler side and be able to produce the below warning about
@@ -3440,20 +3492,22 @@ class Client(SyncMethodMixin):
             computations = self._get_computation_code(
                 nframes=dask.config.get("distributed.diagnostics.computations.nframes")
             )
-            self._send_to_scheduler(
-                {
-                    "op": "update-graph",
-                    "expr_ser": expr_ser,
-                    "keys": set(keys),
-                    "internal_priority": internal_priority,
-                    "submitting_task": getattr(thread_state, "key", None),
-                    "fifo_timeout": fifo_timeout,
-                    "actors": actors,
-                    "code": ToPickle(computations),
-                    "annotations": ToPickle(annotations),
-                    "span_metadata": ToPickle(span_metadata),
-                }
-            )
+            message = {
+                "op": "update-graph",
+                "expr_ser": expr_ser,
+                "keys": set(keys),
+                "internal_priority": internal_priority,
+                "submitting_task": getattr(thread_state, "key", None),
+                "fifo_timeout": fifo_timeout,
+                "actors": actors,
+                "code": ToPickle(computations),
+                "annotations": ToPickle(annotations),
+                "span_metadata": ToPickle(span_metadata),
+            }
+            if submission is None:
+                self._send_to_scheduler(message)
+            else:
+                submission.capture(message)
             return futures
 
     def get(
