@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import pytest
 
@@ -11,6 +12,7 @@ from distributed._submission_permit_client import (
     SubmissionPermitUnsupportedError,
     _operation,
 )
+from distributed.client import Client as DaskClient
 
 
 class Clock:
@@ -22,27 +24,27 @@ class Clock:
 
 
 class RPC:
-    async def submission_permit_acquire(self, **kwargs):
+    async def submission_permit_acquire(self, **kwargs: Any) -> dict[str, Any]:
         return {
             "sequence": kwargs["sequence"],
             "state": "pending",
             "duration": kwargs["duration"],
         }
 
-    async def submission_permit_abort(self, **kwargs):
+    async def submission_permit_abort(self, **kwargs: Any) -> dict[str, Any]:
         return {"state": "aborted", **kwargs}
 
 
 class Carrier:
-    def __init__(self, client) -> None:
+    def __init__(self, client: FakeClient) -> None:
         self.client = client
-        self.messages = []
+        self.messages: list[dict[str, Any]] = []
         self.is_closed = False
 
-    def closed(self):
+    def closed(self) -> bool:
         return self.is_closed
 
-    def send(self, message):
+    def send(self, message: dict[str, Any]) -> None:
         self.messages.append(message)
 
         def admit() -> None:
@@ -54,14 +56,14 @@ class Carrier:
         asyncio.get_running_loop().call_soon(admit)
 
 
-class Client:
-    asynchronous = True
-    generation = 4
-    status = "running"
-    id = "unit-client"
+class FakeClient:
+    asynchronous: bool = True
+    generation: int = 4
+    status: str = "running"
+    id: str = "unit-client"
 
     def __init__(self) -> None:
-        self._submission_permit_capabilities = {
+        self._submission_permit_capabilities: dict[str, Any] | None = {
             "version": 1,
             "epoch": "epoch",
             "max_duration": 10,
@@ -69,15 +71,23 @@ class Client:
         self._submission_permit_sequence = 0
         self._submission_permit_acquire_lock = asyncio.Lock()
         self._submission_permit_changed = asyncio.Event()
-        self._submission_permit_pending = {}
-        self.scheduler = RPC()
-        self.scheduler_comm = Carrier(self)
+        self._submission_permit_pending: dict[
+            tuple[str, int], asyncio.Future[dict[str, Any]]
+        ] = {}
+        self.scheduler: RPC = RPC()
+        self.scheduler_comm: Carrier = Carrier(self)
+
+
+def as_dask_client(client: FakeClient) -> DaskClient:
+    """Limit the real Client type boundary to these lightweight unit doubles."""
+    return cast(DaskClient, client)
 
 
 def test_operation_tags_only_its_captured_carrier_message():
     async def run() -> None:
         clock = Clock()
-        client = Client()
+        client = FakeClient()
+        dask_client = as_dask_client(client)
         operation = SubmissionPermitOperation(
             duration=5,
             timeout=1,
@@ -85,10 +95,10 @@ def test_operation_tags_only_its_captured_carrier_message():
             clock_margin=0,
             clock=clock,
         )
-        await operation.acquire(client)
-        operation.begin_graph(client)
+        await operation.acquire(dask_client)
+        operation.begin_graph(dask_client)
         operation.capture({"op": "update-graph", "keys": {"x"}})
-        await operation.commit(client)
+        await operation.commit(dask_client)
 
         assert client.scheduler_comm.messages == [
             {
@@ -106,7 +116,8 @@ def test_operation_tags_only_its_captured_carrier_message():
 def test_expiry_before_commit_does_not_send_graph():
     async def run() -> None:
         clock = Clock()
-        client = Client()
+        client = FakeClient()
+        dask_client = as_dask_client(client)
         operation = SubmissionPermitOperation(
             duration=2,
             timeout=1,
@@ -114,13 +125,13 @@ def test_expiry_before_commit_does_not_send_graph():
             clock_margin=0,
             clock=clock,
         )
-        await operation.acquire(client)
-        operation.begin_graph(client)
+        await operation.acquire(dask_client)
+        operation.begin_graph(dask_client)
         operation.capture({"op": "update-graph"})
         clock.now = 2
 
         with pytest.raises(SubmissionPermitExpiredError):
-            await operation.commit(client)
+            await operation.commit(dask_client)
         assert not client.scheduler_comm.messages
 
     asyncio.run(run())
@@ -128,12 +139,13 @@ def test_expiry_before_commit_does_not_send_graph():
 
 def test_mismatched_acquire_reply_is_rejected_and_aborted():
     class BadRPC(RPC):
-        async def submission_permit_acquire(self, **kwargs):
+        async def submission_permit_acquire(self, **kwargs: Any) -> dict[str, Any]:
             return {"sequence": kwargs["sequence"], "state": "accepted", "duration": 1}
 
     async def run() -> None:
         clock = Clock()
-        client = Client()
+        client = FakeClient()
+        dask_client = as_dask_client(client)
         client.scheduler = BadRPC()
         operation = SubmissionPermitOperation(
             duration=1,
@@ -144,7 +156,7 @@ def test_mismatched_acquire_reply_is_rejected_and_aborted():
         )
 
         with pytest.raises(SubmissionPermitRejectedError):
-            await operation.acquire(client)
+            await operation.acquire(dask_client)
 
     asyncio.run(run())
 
@@ -166,12 +178,12 @@ def test_argument_validation_and_unsupported_capability():
         clock_margin=0,
         clock=Clock(),
     )
-    client = Client()
+    client = FakeClient()
     client._submission_permit_capabilities = None
 
     async def acquire() -> None:
         with pytest.raises(SubmissionPermitUnsupportedError):
-            await operation.acquire(client)
+            await operation.acquire(as_dask_client(client))
 
     asyncio.run(acquire())
 
@@ -179,7 +191,8 @@ def test_argument_validation_and_unsupported_capability():
 def test_acquire_snapshot_rejects_a_reconnected_client_before_graph_work():
     async def run() -> None:
         clock = Clock()
-        client = Client()
+        client = FakeClient()
+        dask_client = as_dask_client(client)
         operation = SubmissionPermitOperation(
             duration=1,
             timeout=1,
@@ -187,7 +200,7 @@ def test_acquire_snapshot_rejects_a_reconnected_client_before_graph_work():
             clock_margin=0,
             clock=clock,
         )
-        await operation.acquire(client)
+        await operation.acquire(dask_client)
         client.generation += 1
         client.scheduler_comm = Carrier(client)
         client._submission_permit_capabilities = {
@@ -197,9 +210,9 @@ def test_acquire_snapshot_rejects_a_reconnected_client_before_graph_work():
         }
 
         with pytest.raises(SubmissionPermitRejectedError, match="connection changed"):
-            operation.ensure_origin(client)
+            operation.ensure_origin(dask_client)
         with pytest.raises(RuntimeError, match="exactly one graph"):
-            operation.begin_graph(Client())
+            operation.begin_graph(as_dask_client(FakeClient()))
 
     asyncio.run(run())
 
@@ -207,7 +220,8 @@ def test_acquire_snapshot_rejects_a_reconnected_client_before_graph_work():
 def test_clock_must_not_move_backwards_or_exceed_granted_interval():
     async def run() -> None:
         clock = Clock()
-        client = Client()
+        client = FakeClient()
+        dask_client = as_dask_client(client)
         operation = SubmissionPermitOperation(
             duration=2,
             timeout=1,
@@ -215,7 +229,7 @@ def test_clock_must_not_move_backwards_or_exceed_granted_interval():
             clock_margin=0,
             clock=clock,
         )
-        await operation.acquire(client)
+        await operation.acquire(dask_client)
         clock.now = -1
         with pytest.raises(SubmissionPermitRejectedError, match="backwards"):
             operation.ensure_valid()

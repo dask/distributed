@@ -6,7 +6,7 @@ from functools import partial
 import pytest
 
 from distributed._submission_permit_extension import SubmissionPermitExtension
-from distributed.comm.core import CommClosedError, connect
+from distributed.comm.core import Comm, CommClosedError, connect
 from distributed.scheduler import DEFAULT_EXTENSIONS
 from distributed.utils import wait_for
 from distributed.utils_test import async_poll_for, gen_cluster
@@ -26,7 +26,7 @@ PERMIT_EXTENSIONS = {
 }
 
 
-async def _register(comm, client: str) -> dict:
+async def _register(comm: Comm, client: str) -> dict:
     await comm.write(
         {
             "op": "register-client",
@@ -40,7 +40,7 @@ async def _register(comm, client: str) -> dict:
     return msg[0]["submission-permits"]
 
 
-async def _assert_registration_is_refused(comm, client: str) -> None:
+async def _assert_registration_is_refused(comm: Comm, client: str) -> None:
     await comm.write(
         {
             "op": "register-client",
@@ -84,7 +84,7 @@ async def test_submission_permits_reject_overlapping_client_registration(s):
             await allow_close.wait()
             await original_close()
 
-        old_bcomm.close = delayed_close  # type: ignore[method-assign]
+        old_bcomm.close = delayed_close
         await first_comm.close()
         await wait_for(close_started.wait(), 1)
 
@@ -133,7 +133,7 @@ async def test_submission_permits_client_reconnect_waits_for_old_comm_cleanup(c,
         await allow_close.wait()
         await original_close()
 
-    old_bcomm.close = delayed_close  # type: ignore[method-assign]
+    old_bcomm.close = delayed_close
     try:
         await c.scheduler_comm.comm.close()
         await wait_for(close_started.wait(), 1)
