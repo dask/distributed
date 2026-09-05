@@ -91,7 +91,7 @@ def enable_gc_diagnosis_and_log(diag, level="INFO"):
 
 # @pytest.mark.slow
 def test_gc_diagnosis_cpu_time():
-    diag = GCDiagnosis(info_over_frac=0.75)
+    diag = GCDiagnosis(info_over_frac=0.75, info_over_rss_win=float("inf"))
     diag.N_SAMPLES = 3  # shorten tests
 
     with enable_gc_diagnosis_and_log(diag, level="INFO") as sio:
