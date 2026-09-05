@@ -22,6 +22,7 @@ from distributed._submission_permit_client import (
 )
 from distributed._submission_permit_extension import SubmissionPermitExtension
 from distributed.core import CommClosedError
+from distributed.metrics import time
 from distributed.scheduler import DEFAULT_EXTENSIONS
 from distributed.utils_test import async_poll_for, cluster, gen_cluster, inc
 
@@ -44,6 +45,20 @@ class ClockedExtension(SubmissionPermitExtension):
             max_outcomes_per_client=10,
             clock=self.clock,
         )
+
+
+class IdleTimeoutAfterPermit(SubmissionPermitExtension):
+    def acquire(
+        self, client: str, epoch: str, sequence: int, duration: float
+    ) -> dict[str, int | float | str]:
+        result = super().acquire(client, epoch, sequence, duration)
+        if result["state"] == "pending":
+            # Arm the timeout atomically with the grant. Client startup and
+            # acquisition latency are outside the interval protected by a permit.
+            self.scheduler.idle_timeout = 0.05
+            self.scheduler._idle_transition_counter = self.scheduler.transition_counter
+            self.scheduler.idle_since = time() - 1
+        return result
 
 
 SCHEDULER_KWARGS = {
@@ -313,7 +328,7 @@ def test_sync_client_preserves_preparation_thread_and_survives_idle_timeout(
     extensions = {
         **DEFAULT_EXTENSIONS,
         "submission-permits": partial(
-            SubmissionPermitExtension,
+            IdleTimeoutAfterPermit,
             max_duration=10,
             max_pending_per_client=5,
             max_pending=10,
@@ -335,15 +350,6 @@ def test_sync_client_preserves_preparation_thread_and_survives_idle_timeout(
 
             monkeypatch.setattr(c, "compute", slow_preparation)
 
-            def set_idle_timeout(dask_scheduler):
-                dask_scheduler.idle_timeout = 0.05
-                # Establish idle now, so normal periodic detection would close
-                # the cluster during the following 400ms preparation delay.
-                dask_scheduler.check_idle()
-                dask_scheduler.check_idle()
-                assert dask_scheduler.idle_since is not None
-
-            c.run_on_scheduler(set_idle_timeout)
             future = protected_compute(c, delayed(inc)(1), **OPTIONS)
             assert future.result() == 2
             assert not c._submission_permit_pending
