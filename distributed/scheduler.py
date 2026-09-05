@@ -6031,18 +6031,32 @@ class Scheduler(SchedulerState, ServerNode):
                 self.remove_client(client=client, stimulus_id=f"remove-client-{time()}")
                 logger.debug("Finished handling client %s", client)
         finally:
-            if not comm.closed():
-                bcomm.send({"op": "stream-closed"})
-            try:
-                if not self._is_finalizing():
-                    await bcomm.close()
-                    if self.status == Status.running:
-                        logger.info("Close client connection: %s", client)
-            except TypeError:  # comm becomes None during GC
-                pass
-            finally:
-                if self.client_comms.get(client) is bcomm:
-                    del self.client_comms[client]
+            if permit_ext is None:
+                # Preserve legacy same-ID overlap behavior. Only the optional
+                # permit path serializes stream ownership before registration.
+                if not comm.closed():
+                    self.client_comms[client].send({"op": "stream-closed"})
+                try:
+                    if not self._is_finalizing():
+                        await self.client_comms[client].close()
+                        del self.client_comms[client]
+                        if self.status == Status.running:
+                            logger.info("Close client connection: %s", client)
+                except TypeError:  # comm becomes None during GC
+                    pass
+            else:
+                if not comm.closed():
+                    bcomm.send({"op": "stream-closed"})
+                try:
+                    if not self._is_finalizing():
+                        await bcomm.close()
+                        if self.status == Status.running:
+                            logger.info("Close client connection: %s", client)
+                except TypeError:  # comm becomes None during GC
+                    pass
+                finally:
+                    if self.client_comms.get(client) is bcomm:
+                        del self.client_comms[client]
 
     def remove_client(self, client: str, stimulus_id: str | None = None) -> None:
         """Remove client from network"""

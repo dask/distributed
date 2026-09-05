@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from functools import partial
+from typing import Any
 
 import pytest
 
@@ -24,6 +25,63 @@ PERMIT_EXTENSIONS = {
         max_outcomes_per_client=2,
     ),
 }
+
+
+@gen_cluster(nthreads=[])
+async def test_legacy_overlapping_client_cleanup_still_closes_replacement(
+    s, monkeypatch
+):
+    client = "legacy-same-client"
+    first = await connect(s.address)
+    second = await connect(s.address)
+    replacement = None
+    finished = {
+        first.local_address: asyncio.Event(),
+        second.local_address: asyncio.Event(),
+    }
+    add_client = s.handlers["register-client"]
+
+    async def track_client(comm: Comm, client: str, versions: dict[str, Any]) -> None:
+        peer = comm.peer_address
+        try:
+            await add_client(comm=comm, client=client, versions=versions)
+        finally:
+            if peer in finished:
+                finished[peer].set()
+
+    async def register(comm: Comm) -> None:
+        await comm.write(
+            {"op": "register-client", "client": client, "reply": False, "versions": {}}
+        )
+        messages = await wait_for(comm.read(), 1)
+        assert messages[0]["op"] == "stream-start"
+        assert "submission-permits" not in messages[0]
+
+    monkeypatch.setitem(s.handlers, "register-client", track_client)
+    try:
+        await register(first)
+        await register(second)
+        await first.close()
+        await wait_for(finished[first.local_address].wait(), 1)
+        assert client not in s.client_comms
+        with pytest.raises(CommClosedError):
+            await wait_for(second.read(), 1)
+        # Both finalizers must finish before a third registration can race them.
+        await wait_for(
+            asyncio.gather(*(event.wait() for event in finished.values())), 1
+        )
+        assert client not in s.clients
+        assert client not in s.client_comms
+
+        replacement = await connect(s.address)
+        await register(replacement)
+        assert client in s.clients
+        assert client in s.client_comms
+        assert not s.client_comms[client].closed()
+    finally:
+        for comm in (replacement, second, first):
+            if comm is not None and not comm.closed():
+                await comm.close()
 
 
 async def _register(comm: Comm, client: str) -> dict:
