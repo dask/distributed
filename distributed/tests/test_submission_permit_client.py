@@ -79,6 +79,10 @@ def watch_graph_sends(c, monkeypatch):
     return messages
 
 
+def scheduler_has_pending_permit(dask_scheduler=None):
+    return dask_scheduler.extensions["submission-permits"].has_pending()
+
+
 @gen_cluster(
     client=True, nthreads=[("127.0.0.1", 1)], scheduler_kwargs=SCHEDULER_KWARGS
 )
@@ -354,6 +358,65 @@ def test_sync_client_preserves_preparation_thread_and_survives_idle_timeout(
             assert future.result() == 2
             assert not c._submission_permit_pending
             assert _current_submission.get() is None
+
+
+def test_sync_serialization_error_releases_owned_futures(monkeypatch):
+    class SerializationFailure(RuntimeError):
+        pass
+
+    with cluster(nworkers=0, scheduler_kwargs=SCHEDULER_KWARGS) as (s, workers):
+        with Client(s["address"]) as c:
+
+            def fail(*args, **kwargs):
+                assert c.refcount
+                raise SerializationFailure("original serialization error")
+
+            messages = watch_graph_sends(c, monkeypatch)
+            monkeypatch.setattr(client_module, "serialize", fail)
+            with pytest.raises(
+                SerializationFailure, match="original serialization error"
+            ):
+                protected_compute(c, delayed(inc)(1), **OPTIONS)
+            assert not messages
+            assert not c.refcount
+            assert not c.futures
+            assert not c._submission_permit_pending
+            assert not c.run_on_scheduler(scheduler_has_pending_permit)
+            assert _current_submission.get() is None
+
+
+@pytest.mark.parametrize(
+    "options,exception",
+    [
+        ({"duration": 0}, ValueError),
+        ({"timeout": float("inf")}, ValueError),
+        ({"max_clock_rate": 0}, ValueError),
+        ({"clock_margin": -1}, ValueError),
+        ({"clock": None}, TypeError),
+    ],
+)
+def test_sync_invalid_options_never_acquire_permit(options, exception):
+    with cluster(nworkers=0, scheduler_kwargs=SCHEDULER_KWARGS) as (s, workers):
+        with Client(s["address"]) as c:
+            with pytest.raises(exception):
+                protected_compute(c, delayed(inc)(1), **(OPTIONS | options))
+            assert not c._submission_permit_pending
+            assert not c.run_on_scheduler(scheduler_has_pending_permit)
+
+
+def test_sync_rejects_invalid_or_nested_submission_before_acquiring_permit():
+    with cluster(nworkers=0, scheduler_kwargs=SCHEDULER_KWARGS) as (s, workers):
+        with Client(s["address"]) as c:
+            with pytest.raises(TypeError, match="one Dask collection"):
+                protected_compute(c, object(), **OPTIONS)
+            token = _current_submission.set(object())
+            try:
+                with pytest.raises(RuntimeError, match="nested protected submissions"):
+                    protected_compute(c, delayed(inc)(1), **OPTIONS)
+            finally:
+                _current_submission.reset(token)
+            assert not c._submission_permit_pending
+            assert not c.run_on_scheduler(scheduler_has_pending_permit)
 
 
 @gen_cluster(client=True, nthreads=[], scheduler_kwargs=SCHEDULER_KWARGS)
