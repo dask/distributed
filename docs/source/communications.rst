@@ -39,6 +39,8 @@ source tree:
   communication between endpoints as long as they are situated in the
   same process.
 
+* ``unix`` is a transport using Unix Domain Sockets. Unix sockets bypass the system's network layer and are therefore more efficient than TCP sockets. Moreover, they do not use ports but instead listen at filesystem paths, and can be secured using normal file permissions. This makes them a safe choice in multi-user environments, without needing TLS. (Not available on Windows.)
+
 Some URIs may be valid for listening but not for connecting.
 For example, the URI ``tcp://`` will listen on all IPv4 and IPv6 addresses
 and on an arbitrary port, but you cannot connect to that address.
