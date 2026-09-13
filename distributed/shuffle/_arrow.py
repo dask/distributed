@@ -32,7 +32,31 @@ def check_dtype_support(meta_input: pd.DataFrame) -> None:
 def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
     import pyarrow as pa
 
-    return pa.concat_tables(tables, promote_options="permissive")
+    table = pa.concat_tables(tables, promote_options="permissive")
+    for i, column in enumerate(table.columns):
+        dtype = column.type
+        if not pa.types.is_dictionary(dtype) or column.num_chunks < 2:
+            continue
+        # Schema promotion alone does not account for the union of dictionaries.
+        # Bound its size without discovering categories across the dataframe.
+        category_count = sum(len(chunk.dictionary) for chunk in column.chunks)
+        if category_count < 2 ** (dtype.index_type.bit_width - 1):
+            continue
+        if all(
+            chunk.dictionary.equals(column.chunk(0).dictionary)
+            for chunk in column.chunks[1:]
+        ):
+            continue
+        index_type = next(
+            index_type
+            for index_type in (pa.int16(), pa.int32(), pa.int64())
+            if category_count < 2 ** (index_type.bit_width - 1)
+        )
+        widened = pa.dictionary(index_type, dtype.value_type, ordered=dtype.ordered)
+        table = table.set_column(
+            i, table.schema.field(i).with_type(widened), column.cast(widened)
+        )
+    return table
 
 
 def convert_shards(
