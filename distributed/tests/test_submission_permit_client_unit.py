@@ -219,6 +219,120 @@ def test_commit_does_not_replace_an_existing_admission_waiter():
     asyncio.run(run())
 
 
+def test_acquire_rejects_changed_capabilities_before_permit_rpc():
+    class UnexpectedRPC(RPC):
+        async def submission_permit_acquire(self, **kwargs: Any) -> dict[str, Any]:
+            pytest.fail("a changed connection acquired a permit")
+
+    async def run() -> None:
+        client = FakeClient()
+        client.scheduler = UnexpectedRPC()
+        await client._submission_permit_acquire_lock.acquire()
+        operation = SubmissionPermitOperation(
+            duration=1,
+            timeout=1,
+            max_clock_rate=1,
+            clock_margin=0,
+            clock=Clock(),
+        )
+        task = asyncio.create_task(operation.acquire(as_dask_client(client)))
+        await asyncio.sleep(0)
+        client._submission_permit_capabilities = {
+            "version": 1,
+            "epoch": "replacement",
+            "max_duration": 10,
+        }
+        client._submission_permit_acquire_lock.release()
+
+        with pytest.raises(SubmissionPermitRejectedError, match="during acquire"):
+            await task
+        assert client._submission_permit_sequence == 0
+
+        bad_clock_client = FakeClient()
+        bad_clock_client.scheduler = UnexpectedRPC()
+        bad_clock = Clock()
+        bad_clock.now = float("nan")
+        invalid_clock_operation = SubmissionPermitOperation(
+            duration=1,
+            timeout=1,
+            max_clock_rate=1,
+            clock_margin=0,
+            clock=bad_clock,
+        )
+        with pytest.raises(SubmissionPermitRejectedError, match="non-finite"):
+            await invalid_clock_operation.acquire(as_dask_client(bad_clock_client))
+        assert bad_clock_client._submission_permit_sequence == 1
+
+    asyncio.run(run())
+
+
+def test_capture_requires_exactly_one_graph_and_commit_requires_capture():
+    async def run() -> None:
+        client = FakeClient()
+        dask_client = as_dask_client(client)
+        uncaptured = SubmissionPermitOperation(
+            duration=1,
+            timeout=1,
+            max_clock_rate=1,
+            clock_margin=0,
+            clock=Clock(),
+        )
+        await uncaptured.acquire(dask_client)
+        with pytest.raises(SubmissionPermitRejectedError, match="not captured"):
+            await uncaptured.commit(dask_client)
+        assert not client.scheduler_comm.messages
+        assert not client._submission_permit_pending
+
+        operation = SubmissionPermitOperation(
+            duration=1,
+            timeout=1,
+            max_clock_rate=1,
+            clock_margin=0,
+            clock=Clock(),
+        )
+        await operation.acquire(dask_client)
+        operation.begin_graph(dask_client)
+        message = {"op": "update-graph", "keys": {"x"}}
+        operation.capture(message)
+        with pytest.raises(RuntimeError, match="exactly one graph"):
+            operation.capture({"op": "update-graph", "keys": {"y"}})
+        assert operation.message is message
+        assert not client.scheduler_comm.messages
+
+    asyncio.run(run())
+
+
+def test_release_owned_continues_after_a_future_release_failure():
+    class Future:
+        def __init__(self, error: BaseException | None = None) -> None:
+            self.error = error
+            self.released = False
+
+        def release(self) -> None:
+            self.released = True
+            if self.error is not None:
+                raise self.error
+
+    operation = SubmissionPermitOperation(
+        duration=1,
+        timeout=1,
+        max_clock_rate=1,
+        clock_margin=0,
+        clock=Clock(),
+    )
+    broken = Future(RuntimeError("release failed"))
+    remaining = Future()
+    operation.futures = [cast(Any, broken), cast(Any, remaining)]
+    operation.message = {"op": "update-graph"}
+
+    operation.release_owned()
+
+    assert broken.released
+    assert remaining.released
+    assert not operation.futures
+    assert operation.message is None
+
+
 def test_argument_validation_and_unsupported_capability():
     with pytest.raises(ValueError, match="duration"):
         _operation(
