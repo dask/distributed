@@ -161,6 +161,64 @@ def test_mismatched_acquire_reply_is_rejected_and_aborted():
     asyncio.run(run())
 
 
+def test_acquire_refuses_an_unsupported_duration_and_reusing_an_operation():
+    async def run() -> None:
+        client = FakeClient()
+        dask_client = as_dask_client(client)
+        too_long = SubmissionPermitOperation(
+            duration=11,
+            timeout=1,
+            max_clock_rate=1,
+            clock_margin=0,
+            clock=Clock(),
+        )
+        with pytest.raises(SubmissionPermitUnsupportedError, match="duration"):
+            await too_long.acquire(dask_client)
+        assert client._submission_permit_sequence == 0
+
+        operation = SubmissionPermitOperation(
+            duration=1,
+            timeout=1,
+            max_clock_rate=1,
+            clock_margin=0,
+            clock=Clock(),
+        )
+        await operation.acquire(dask_client)
+        with pytest.raises(RuntimeError, match="another permit"):
+            await operation.acquire(dask_client)
+        assert client._submission_permit_sequence == 1
+
+    asyncio.run(run())
+
+
+def test_commit_does_not_replace_an_existing_admission_waiter():
+    async def run() -> None:
+        client = FakeClient()
+        dask_client = as_dask_client(client)
+        operation = SubmissionPermitOperation(
+            duration=1,
+            timeout=1,
+            max_clock_rate=1,
+            clock_margin=0,
+            clock=Clock(),
+        )
+        await operation.acquire(dask_client)
+        operation.begin_graph(dask_client)
+        operation.capture({"op": "update-graph"})
+        key = (operation.epoch, operation.sequence)
+        assert key == ("epoch", 1)
+        existing_waiter = asyncio.get_running_loop().create_future()
+        client._submission_permit_pending[key] = existing_waiter
+
+        with pytest.raises(RuntimeError, match="duplicate"):
+            await operation.commit(dask_client)
+        assert client._submission_permit_pending[key] is existing_waiter
+        assert not client.scheduler_comm.messages
+        assert not operation.dispatch_started
+
+    asyncio.run(run())
+
+
 def test_argument_validation_and_unsupported_capability():
     with pytest.raises(ValueError, match="duration"):
         _operation(
