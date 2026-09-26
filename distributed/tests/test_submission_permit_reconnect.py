@@ -119,26 +119,34 @@ async def _assert_registration_is_refused(comm: Comm, client: str) -> None:
 def test_add_client_finalizer_handles_legacy_and_permit_streams(
     monkeypatch, permits, close_error
 ):
+    events = []
+
     class Comm:
         def closed(self):
             return False
 
     class BatchedSend:
+        instances = []
+
         def __init__(self, interval, loop):
             self.messages = []
+            self.__class__.instances.append(self)
 
         def start(self, comm):
-            pass
+            events.append("start")
 
         def send(self, msg):
             self.messages.append(msg)
+            events.append(msg["op"])
 
         async def close(self):
+            events.append("close")
             if close_error:
                 raise TypeError("comm became None")
 
     class PermitExtension:
         def register_client(self, client):
+            events.append("register")
             return "epoch"
 
         def capabilities(self, epoch):
@@ -146,6 +154,7 @@ def test_add_client_finalizer_handles_legacy_and_permit_streams(
 
         def unregister_client(self, client, epoch):
             assert epoch == "epoch"
+            events.append("unregister")
 
     class Scheduler:
         def __init__(self):
@@ -165,10 +174,10 @@ def test_add_client_finalizer_handles_legacy_and_permit_streams(
             pass
 
         async def handle_stream(self, **kwargs):
-            pass
+            events.append("handle-stream")
 
         def remove_client(self, **kwargs):
-            pass
+            events.append("remove-client")
 
         def _is_finalizing(self):
             return False
@@ -182,8 +191,33 @@ def test_add_client_finalizer_handles_legacy_and_permit_streams(
 
     monkeypatch.setattr(scheduler_module, "BatchedSend", BatchedSend)
     scheduler = asyncio.run(run())
-    if not close_error:
+    bcomm = BatchedSend.instances[0]
+    assert [msg["op"] for msg in bcomm.messages] == ["stream-start", "stream-closed"]
+    assert ("submission-permits" in bcomm.messages[0]) is permits
+    if permits:
+        assert events == [
+            "register",
+            "start",
+            "stream-start",
+            "handle-stream",
+            "unregister",
+            "remove-client",
+            "stream-closed",
+            "close",
+        ]
+    else:
+        assert events == [
+            "start",
+            "stream-start",
+            "handle-stream",
+            "remove-client",
+            "stream-closed",
+            "close",
+        ]
+    if permits or not close_error:
         assert scheduler.client_comms == {}
+    else:
+        assert scheduler.client_comms == {"client": bcomm}
 
 
 @gen_cluster(nthreads=[], scheduler_kwargs={"extensions": PERMIT_EXTENSIONS})
