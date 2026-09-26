@@ -112,6 +112,29 @@ async def test_rpc_rejects_unknown_or_stale_connection(c, s):
     assert not s.extensions["submission-permits"].has_pending()
 
 
+def test_transfer_rejects_a_closed_client_comm() -> None:
+    class Comm:
+        def closed(self) -> bool:
+            return True
+
+    class Scheduler:
+        status = Status.running
+        handlers = {}
+        client_comms = {"client": Comm()}
+
+    ext = SubmissionPermitExtension(
+        Scheduler(),
+        max_duration=1,
+        max_pending_per_client=1,
+        max_pending=1,
+        max_outcomes_per_client=1,
+    )
+    epoch = ext.register_client("client")
+
+    with pytest.raises(ClosedPermitError, match="connection"):
+        ext.transfer("client", epoch, 1)
+
+
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)],

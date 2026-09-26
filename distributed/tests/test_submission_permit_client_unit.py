@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
+import dask
 import pytest
 
+import distributed._submission_permit_client as permit_client
 from distributed._submission_permit_client import (
     SubmissionPermitExpiredError,
     SubmissionPermitOperation,
@@ -407,3 +409,100 @@ def test_clock_must_not_move_backwards_or_exceed_granted_interval():
             operation.ensure_valid()
 
     asyncio.run(run())
+
+
+def test_remaining_requires_an_acquired_permit():
+    operation = SubmissionPermitOperation(
+        duration=1,
+        timeout=1,
+        max_clock_rate=1,
+        clock_margin=0,
+        clock=Clock(),
+    )
+
+    with pytest.raises(RuntimeError, match="not acquired"):
+        operation.remaining()
+
+
+def test_invalid_admission_identity_is_ignored():
+    client = FakeClient()
+
+    DaskClient._handle_submission_permit_admission(
+        as_dask_client(client), epoch="epoch", sequence=True, status="accepted"
+    )
+
+    assert not client._submission_permit_pending
+
+
+def test_async_failure_cleanup_preserves_the_original_error():
+    class OriginalError(Exception):
+        pass
+
+    class CleanupError(Exception):
+        pass
+
+    class Operation:
+        dispatch_started = False
+
+        async def acquire(self, client: DaskClient) -> None:
+            raise OriginalError
+
+        def release_owned(self) -> None:
+            raise CleanupError
+
+        async def abort(self, client: DaskClient) -> None:
+            raise CleanupError
+
+        async def cleanup(self, client: DaskClient) -> None:
+            raise CleanupError
+
+    async def run() -> None:
+        with pytest.raises(OriginalError):
+            await permit_client._run(
+                cast(DaskClient, object()), cast(Any, Operation()), None, False, {}
+            )
+
+    asyncio.run(run())
+
+
+def test_sync_failure_cleanup_preserves_the_original_error(monkeypatch):
+    class OriginalError(Exception):
+        pass
+
+    class CleanupError(Exception):
+        pass
+
+    class Operation:
+        dispatch_started = False
+
+        async def acquire(self, client: DaskClient) -> None:
+            raise OriginalError
+
+        def release_owned(self) -> None:
+            raise CleanupError
+
+        async def abort(self, client: DaskClient) -> None:
+            raise CleanupError
+
+        async def cleanup(self, client: DaskClient) -> None:
+            raise CleanupError
+
+    class Client:
+        asynchronous = False
+
+        def sync(self, func: Any, *args: Any) -> Any:
+            return asyncio.run(func(*args))
+
+    monkeypatch.setattr(permit_client, "_operation", lambda **kwargs: Operation())
+    with pytest.raises(OriginalError):
+        permit_client._protected(
+            cast(DaskClient, Client()),
+            dask.delayed(lambda: None)(),
+            persist=False,
+            duration=1,
+            timeout=1,
+            max_clock_rate=1,
+            clock_margin=0,
+            clock=Clock(),
+            kwargs={},
+        )

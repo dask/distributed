@@ -66,6 +66,22 @@ def test_overlap_abort_and_expiry(
         permits.transfer("client", epoch, 2)
 
 
+def test_abort_unknown_sequence_and_reject_invalid_registry_identities(
+    registry: tuple[SubmissionPermitRegistry, Clock, str],
+) -> None:
+    permits, _, epoch = registry
+
+    assert permits.abort("client", epoch, 1).state == "unknown"
+    for client, invalid_epoch in (
+        ("", epoch),
+        ("client", ""),
+        (True, epoch),
+        ("client", True),
+    ):
+        with pytest.raises(ValueError):
+            permits.status(client, invalid_epoch, 1)  # type: ignore[arg-type]
+
+
 def test_terminal_outcome_eviction_retires_old_sequences(
     registry: tuple[SubmissionPermitRegistry, Clock, str],
 ) -> None:
