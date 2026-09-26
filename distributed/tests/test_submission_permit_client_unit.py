@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
-import dask
 import pytest
+
+import dask
 
 import distributed._submission_permit_client as permit_client
 from distributed._submission_permit_client import (

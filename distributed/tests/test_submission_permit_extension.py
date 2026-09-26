@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import pytest
 
@@ -119,11 +120,11 @@ def test_transfer_rejects_a_closed_client_comm() -> None:
 
     class Scheduler:
         status = Status.running
-        handlers = {}
+        handlers: dict[str, Any] = {}
         client_comms = {"client": Comm()}
 
     ext = SubmissionPermitExtension(
-        Scheduler(),
+        cast(Any, Scheduler()),
         max_duration=1,
         max_pending_per_client=1,
         max_pending=1,
@@ -417,3 +418,38 @@ async def test_admission_precedes_materialization_and_checks_connection_afterwar
         assert results.empty()
     finally:
         release.set()
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)],
+    scheduler_kwargs=SCHEDULER_KWARGS,
+)
+async def test_disconnected_tagged_graph_suppresses_materialization_error(
+    c, s, a, monkeypatch
+):
+    ext = s.extensions["submission-permits"]
+    epoch = c._submission_permit_capabilities["epoch"]
+    await acquire(c)
+    offload = scheduler_module.offload
+    messages = []
+
+    def capture(msg):
+        if msg["op"] == "update-graph":
+            messages.append(msg.copy())
+
+    monkeypatch.setattr(c, "_send_to_scheduler", capture)
+
+    async def fail_after_disconnect(func, *args, **kwargs):
+        if func is scheduler_module._materialize_graph:
+            s.client_comms[c.id].comm.abort()
+            raise RuntimeError("materialization failed after disconnect")
+        return await offload(func, *args, **kwargs)
+
+    monkeypatch.setattr(scheduler_module, "offload", fail_after_disconnect)
+    c.submit(inc, 1, key="disconnected-graph")
+    message = dict(messages[0], submission_epoch=epoch, submission_sequence=1)
+    del message["op"]
+    await s.update_graph(client=c.id, **message)
+    assert ext.registry.status(c.id, epoch, 1).state == "accepted"
+    assert "disconnected-graph" not in s.tasks

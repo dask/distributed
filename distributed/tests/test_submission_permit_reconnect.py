@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+import distributed.scheduler as scheduler_module
 from distributed._submission_permit_extension import SubmissionPermitExtension
 from distributed.comm.core import Comm, CommClosedError, connect
+from distributed.core import Status
 from distributed.scheduler import DEFAULT_EXTENSIONS
 from distributed.utils import wait_for
 from distributed.utils_test import async_poll_for, gen_cluster
@@ -109,6 +111,79 @@ async def _assert_registration_is_refused(comm: Comm, client: str) -> None:
     )
     with pytest.raises(CommClosedError):
         await wait_for(comm.read(), 1)
+
+
+@pytest.mark.parametrize(
+    "permits,close_error", [(False, False), (False, True), (True, False), (True, True)]
+)
+def test_add_client_finalizer_handles_legacy_and_permit_streams(
+    monkeypatch, permits, close_error
+):
+    class Comm:
+        def closed(self):
+            return False
+
+    class BatchedSend:
+        def __init__(self, interval, loop):
+            self.messages = []
+
+        def start(self, comm):
+            pass
+
+        def send(self, msg):
+            self.messages.append(msg)
+
+        async def close(self):
+            if close_error:
+                raise TypeError("comm became None")
+
+    class PermitExtension:
+        def register_client(self, client):
+            return "epoch"
+
+        def capabilities(self, epoch):
+            return {}
+
+        def unregister_client(self, client, epoch):
+            assert epoch == "epoch"
+
+    class Scheduler:
+        def __init__(self):
+            self.status = Status.running
+            self.extensions = (
+                {"submission-permits": PermitExtension()} if permits else {}
+            )
+            self.handlers: dict[str, Any] = {}
+            self.client_comms = {}
+            self.clients = {}
+            self.workers = {}
+            self.plugins = {}
+            self.loop = None
+            self._client_connections_added_total = 0
+
+        def log_event(self, *args):
+            pass
+
+        async def handle_stream(self, **kwargs):
+            pass
+
+        def remove_client(self, **kwargs):
+            pass
+
+        def _is_finalizing(self):
+            return False
+
+    async def run():
+        scheduler = Scheduler()
+        await scheduler_module.Scheduler.add_client(
+            cast(Any, scheduler), Comm(), "client", {}
+        )
+        return scheduler
+
+    monkeypatch.setattr(scheduler_module, "BatchedSend", BatchedSend)
+    scheduler = asyncio.run(run())
+    if not close_error:
+        assert scheduler.client_comms == {}
 
 
 @gen_cluster(nthreads=[], scheduler_kwargs={"extensions": PERMIT_EXTENSIONS})
