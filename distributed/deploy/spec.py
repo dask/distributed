@@ -355,7 +355,10 @@ class SpecCluster(Cluster):
 
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
-                if self.scheduler.status == Status.running:
+                if (
+                    self.scheduler.status == Status.running
+                    and self.status != Status.closing
+                ):
                     await self.scheduler_comm.retire_workers(workers=list(to_close))
                 tasks = [
                     asyncio.create_task(self.workers[w].close())
