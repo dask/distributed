@@ -4185,6 +4185,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_task_prefix_states": self.get_task_prefix_states,
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "unregister_scheduler_plugin": self.unregister_scheduler_plugin,
+            "has_scheduler_plugin": self.has_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
             "register_nanny_plugin": self.register_nanny_plugin,
@@ -6267,6 +6268,31 @@ class Scheduler(SchedulerState, ServerNode):
     async def unregister_scheduler_plugin(self, name: str) -> None:
         """Unregister a plugin on the scheduler."""
         self.remove_plugin(name)
+
+    def has_scheduler_plugin(self, name: str) -> bool:
+        """Check if a scheduler plugin is registered.
+
+        Parameters
+        ----------
+        name : str
+            Name of the plugin to check.
+
+        Returns
+        -------
+        bool
+            True if a plugin with the given name is registered, False otherwise.
+
+        Examples
+        --------
+        >>> s.has_scheduler_plugin("my-plugin")  # doctest: +SKIP
+        True
+
+        See Also
+        --------
+        add_plugin
+        remove_plugin
+        """
+        return name in self.plugins
 
     def worker_send(self, worker: str, msg: dict[str, Any]) -> None:
         """Send message to worker
