@@ -573,6 +573,7 @@ async def test_register_non_idempotent_plugins_directly(s):
 @gen_cluster(client=True)
 async def test_has_scheduler_plugin(c, s, a, b):
     """Test has_scheduler_plugin method on Client and Scheduler."""
+
     class MyPlugin(SchedulerPlugin):
         name = "test-plugin"
 
@@ -582,14 +583,18 @@ async def test_has_scheduler_plugin(c, s, a, b):
 
     # Register the plugin
     plugin = MyPlugin()
-    await c._register_scheduler_plugin(plugin=plugin, name="test-plugin", idempotent=False)
+    await c._register_scheduler_plugin(
+        plugin=plugin, name="test-plugin", idempotent=False
+    )
 
     # Now it should be registered
     assert s.has_scheduler_plugin("test-plugin")
     assert await c.scheduler.has_scheduler_plugin(name="test-plugin")
 
     # Check with explicit name
-    await c._register_scheduler_plugin(plugin=MyPlugin(), name="another-plugin", idempotent=False)
+    await c._register_scheduler_plugin(
+        plugin=MyPlugin(), name="another-plugin", idempotent=False
+    )
     assert s.has_scheduler_plugin("another-plugin")
     assert await c.scheduler.has_scheduler_plugin(name="another-plugin")
 
