@@ -5217,6 +5217,38 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self.scheduler.unregister_scheduler_plugin, name=name)
 
+    def has_scheduler_plugin(self, name: str) -> bool:
+        """Check if a scheduler plugin is registered.
+
+        Parameters
+        ----------
+        name : str
+            Name of the plugin to check.
+
+        Returns
+        -------
+        bool
+            True if a plugin with the given name is registered, False otherwise.
+
+        Examples
+        --------
+        >>> class MyPlugin(SchedulerPlugin):
+        ...     pass
+
+        >>> plugin = MyPlugin()
+        >>> client.register_plugin(plugin, name="my-plugin")
+        >>> client.has_scheduler_plugin("my-plugin")
+        True
+        >>> client.has_scheduler_plugin("nonexistent")
+        False
+
+        See Also
+        --------
+        register_scheduler_plugin
+        unregister_scheduler_plugin
+        """
+        return self.sync(self.scheduler.has_scheduler_plugin, name=name)
+
     def register_worker_callbacks(self, setup=None):
         """
         Registers a setup callback function for all current and future workers.
