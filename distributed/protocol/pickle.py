@@ -41,9 +41,15 @@ class _DaskCloudPickler(cloudpickle.Pickler):
             try:
                 serialize = dask_serialize.dispatch(type(obj))
                 deserialize = dask_deserialize.dispatch(type(obj))
-                return deserialize, serialize(obj)
+                header, frames = serialize(obj)
             except TypeError:
                 pass
+            else:
+                # Serializers for buffer-like objects (e.g. ``memoryview``)
+                # return the object itself in ``frames``, which would recurse
+                # forever here. Native pickling handles those as buffers.
+                if not any(obj is frame for frame in frames):
+                    return deserialize, (header, frames)
         return super().reducer_override(obj)
 
 
