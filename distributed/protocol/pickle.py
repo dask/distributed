@@ -28,6 +28,37 @@ class _DaskPickler(pickle.Pickler):
             return NotImplemented
 
 
+class _DaskCloudPickler(cloudpickle.Pickler):
+    """cloudpickle with the same ``dask_serialize`` reducers as ``_DaskPickler``
+
+    Objects that plain pickle can't handle, such as h5py datasets, would otherwise
+    fail as soon as the same graph also holds something that needs cloudpickle, e.g.
+    a function defined in ``__main__``.
+    """
+
+    def reducer_override(self, obj):
+        if not _always_use_pickle_for(obj):
+            try:
+                serialize = dask_serialize.dispatch(type(obj))
+                deserialize = dask_deserialize.dispatch(type(obj))
+                header, frames = serialize(obj)
+            except TypeError:
+                pass
+            else:
+                # Serializers for buffer-like objects (e.g. ``memoryview``)
+                # return the object itself in ``frames``, which would recurse
+                # forever here. Native pickling handles those as buffers.
+                if not any(obj is frame for frame in frames):
+                    return deserialize, (header, frames)
+        return super().reducer_override(obj)
+
+
+def _cloudpickle_dumps(x, **dump_kwargs):
+    f = io.BytesIO()
+    _DaskCloudPickler(f, **dump_kwargs).dump(x)
+    return f.getvalue()
+
+
 def _always_use_pickle_for(x):
     try:
         mod, _, _ = x.__class__.__module__.partition(".")
@@ -73,11 +104,11 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
         ):
             if len(result) < 1000 or not _always_use_pickle_for(x):
                 buffers.clear()
-                result = cloudpickle.dumps(x, **dump_kwargs)
+                result = _cloudpickle_dumps(x, **dump_kwargs)
     except Exception:
         try:
             buffers.clear()
-            result = cloudpickle.dumps(x, **dump_kwargs)
+            result = _cloudpickle_dumps(x, **dump_kwargs)
         except Exception:
             logger.exception("Failed to serialize %s.", x)
             raise

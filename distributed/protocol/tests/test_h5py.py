@@ -119,3 +119,25 @@ async def test_h5py_serialize_2(c, s, a, b):
             y = c.compute(x.sum())
             y = await y
             assert y == (1 + 2 + 3 + 4) * 3
+
+
+@silence_h5py_issue775
+def test_pickle_dataset_next_to_object_needing_cloudpickle():
+    # https://github.com/dask/distributed/issues/9013
+    # A local function can only be pickled by cloudpickle, which used to ignore the
+    # dask_serialize reducers for h5py objects.
+    from distributed.protocol import pickle
+
+    def func(x):
+        return x**2
+
+    with tmpfile() as fn:
+        with h5py.File(fn, mode="a") as f:
+            f.create_dataset("/group/x", data=[1, 2, 3, 4])
+        with h5py.File(fn, mode="r") as f:
+            dset = f["/group/x"]
+            func2, dset2 = pickle.loads(pickle.dumps((func, dset)))
+            assert func2(3) == 9
+            assert isinstance(dset2, h5py.Dataset)
+            assert dset2.name == dset.name
+            assert (dset2[:] == dset[:]).all()
