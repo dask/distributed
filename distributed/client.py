@@ -4497,7 +4497,7 @@ class Client(SyncMethodMixin):
 
         Parameters
         ----------
-        n_workers: int
+        n_workers : int
             The number of workers for which to fetch information. Defaults to
             ``-1``, which fetches all workers. Pass a positive integer to limit
             the number of workers returned.
@@ -4511,18 +4511,75 @@ class Client(SyncMethodMixin):
         **kwargs : dict
             Optional keyword arguments for the remote function
 
+        Returns
+        -------
+        SchedulerInfo
+            A dict-like object with these keys:
+
+            - ``type``: class name of the scheduler, usually ``"Scheduler"``
+            - ``id``: unique identifier of the scheduler
+            - ``address``: address the scheduler listens on
+            - ``services``: mapping of service name (e.g. ``"dashboard"``) to
+              port
+            - ``started``: time the scheduler started, in seconds since the
+              epoch
+            - ``n_workers``: number of workers connected to the scheduler.
+              This counts all workers even when ``n_workers`` limits the
+              ``workers`` entry.
+            - ``total_threads``: sum of ``nthreads`` over all workers
+            - ``total_memory``: sum of ``memory_limit`` over all workers, in
+              bytes
+            - ``workers``: mapping of worker address to a dict describing that
+              worker
+
+            Each worker dict contains:
+
+            - ``type``: always ``"Worker"``
+            - ``id``, ``name``: the worker name; defaults to the address
+            - ``host``: hostname or IP address of the worker
+            - ``resources``: abstract resources the worker provides, see
+              :doc:`resources`
+            - ``local_directory``: scratch directory on the worker's machine
+            - ``nthreads``: number of threads that run tasks
+            - ``memory_limit``: memory limit in bytes, or 0 for no limit
+            - ``last_seen``: time of the last heartbeat the scheduler received
+              from the worker, in seconds since the epoch
+            - ``services``: mapping of service name to port on the worker
+            - ``metrics``: latest metrics from the worker's heartbeat, such as
+              ``"cpu"``, ``"memory"`` (process memory in bytes),
+              ``"task_counts"``, ``"spilled_bytes"`` and ``"transfer"``
+            - ``status``: worker status, e.g. ``"running"`` or
+              ``"closing_gracefully"``
+            - ``nanny``: address of the worker's nanny, or ``None``
+
+            A worker created with ``startup_information`` also reports the
+            result of each of those callables under its own key.
+
         Examples
         --------
         >>> c.scheduler_info()  # doctest: +SKIP
-        {'id': '2de2b6da-69ee-11e6-ab6a-e82aea155996',
-         'services': {},
-         'type': 'Scheduler',
-         'workers': {'127.0.0.1:40575': {'active': 0,
-                                         'last-seen': 1472038237.4845693,
-                                         'name': '127.0.0.1:40575',
-                                         'services': {},
-                                         'stored': 0,
-                                         'time-delay': 0.0061032772064208984}}}
+        {'type': 'Scheduler',
+         'id': 'Scheduler-0f5ac0e4-c8e1-4a55-a5b3-31b5d7a49e8a',
+         'address': 'tcp://127.0.0.1:8786',
+         'services': {'dashboard': 8787},
+         'started': 1717171717.123,
+         'n_workers': 1,
+         'total_threads': 4,
+         'total_memory': 8589934592,
+         'workers': {'tcp://127.0.0.1:40575': {
+             'type': 'Worker',
+             'id': 0,
+             'host': '127.0.0.1',
+             'resources': {},
+             'local_directory': '/tmp/dask-scratch-space/worker-x1y2z3',
+             'name': 0,
+             'nthreads': 4,
+             'memory_limit': 8589934592,
+             'last_seen': 1717171720.456,
+             'services': {'dashboard': 40576},
+             'metrics': {'cpu': 2.0, 'memory': 104857600, ...},
+             'status': 'running',
+             'nanny': 'tcp://127.0.0.1:40571'}}}
         """
         if not self.asynchronous:
             self.sync(self._update_scheduler_info, n_workers=n_workers)
