@@ -22,10 +22,44 @@ from distributed.utils import log_errors
 
 if TYPE_CHECKING:
     from distributed import Scheduler
+    from distributed.scheduler import WorkerState
+
+#: Row colors in the worker table for workers that have not sent a heartbeat for a
+#: while, as (fraction of the worker TTL, color) in decreasing order of fraction.
+WORKER_TTL_COLORS = [(0.5, "#ffcdd2"), (0.25, "#ffe0b2")]
+#: Threshold in seconds used when ``distributed.scheduler.worker-ttl`` is disabled
+WORKER_NO_TTL_THRESHOLD = 60
+
+
+def worker_row_color(scheduler: Scheduler, ws: WorkerState) -> str | None:
+    """Background color for a worker in the worker table, or None.
+
+    The thresholds scale with the timeout after which the scheduler removes a
+    worker that stopped sending heartbeats (``distributed.scheduler.worker-ttl``),
+    so that the table flags a worker before the scheduler gives up on it.
+    """
+    from distributed.scheduler import heartbeat_interval
+
+    since = time() - ws.last_seen
+    if not scheduler.worker_ttl:
+        return WORKER_TTL_COLORS[0][1] if since > WORKER_NO_TTL_THRESHOLD else None
+    # Same effective TTL as Scheduler.check_worker_ttl
+    ttl = max(scheduler.worker_ttl, 10 * heartbeat_interval(len(scheduler.workers)))
+    for fraction, color in WORKER_TTL_COLORS:
+        if since > fraction * ttl:
+            return color
+    return None
+
 
 ns = {
     func.__name__: func
-    for func in [format_bytes, format_time, datetime.fromtimestamp, time]
+    for func in [
+        format_bytes,
+        format_time,
+        datetime.fromtimestamp,
+        time,
+        worker_row_color,
+    ]
 }
 
 rel_path_statics = {"rel_path_statics": "../../.."}
