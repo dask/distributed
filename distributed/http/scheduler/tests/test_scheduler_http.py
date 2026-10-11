@@ -15,6 +15,7 @@ from dask.sizeof import sizeof
 from distributed import Event, Lock, Scheduler
 from distributed.client import Client, wait
 from distributed.core import Status
+from distributed.metrics import time
 from distributed.utils import is_valid_xml, url_escape
 from distributed.utils_test import (
     async_poll_for,
@@ -65,6 +66,48 @@ async def test_connect(c, s, a, b):
             else:
                 assert is_valid_xml(body)
                 assert not re.search("href=./", body)  # no absolute links
+
+
+async def _worker_table_colors(s):
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(
+        f"http://localhost:{s.http_server.port}/info/main/workers.html"
+    )
+    body = response.body.decode()
+    colors = {}
+    for row in re.findall(r"<tr[^>]*>\s*<td><a href=[^>]*>[^<]*</a>", body):
+        addr = re.search(r">([^<]*)</a>$", row).group(1)
+        color = re.search(r"background-color:(#[0-9a-f]+)", row)
+        colors[addr] = color.group(1) if color else None
+    return colors
+
+
+@gen_cluster(
+    nthreads=[("", 1)] * 3,
+    worker_kwargs={"heartbeat_interval": "100s"},
+    config={"distributed.scheduler.worker-ttl": "100s"},
+)
+async def test_worker_table_color_scales_with_worker_ttl(s, a, b, c):
+    s.workers[b.address].last_seen = time() - 30
+    s.workers[c.address].last_seen = time() - 70
+    colors = await _worker_table_colors(s)
+    assert colors == {
+        a.address: None,
+        b.address: "#ffe0b2",
+        c.address: "#ffcdd2",
+    }
+
+
+@gen_cluster(
+    nthreads=[("", 1)] * 2,
+    worker_kwargs={"heartbeat_interval": "100s"},
+    config={"distributed.scheduler.worker-ttl": None},
+)
+async def test_worker_table_color_without_worker_ttl(s, a, b):
+    s.workers[a.address].last_seen = time() - 30
+    s.workers[b.address].last_seen = time() - 70
+    colors = await _worker_table_colors(s)
+    assert colors == {a.address: None, b.address: "#ffcdd2"}
 
 
 @gen_cluster(client=True, nthreads=[])
