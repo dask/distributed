@@ -31,6 +31,21 @@ To install distributed from source, clone the repository from `github
     python -m pip install .
 
 
+Optional dependencies
+---------------------
+
+Dask.distributed runs without these packages but uses them when they are
+installed:
+
+- `cytoolz <https://github.com/pytoolz/cytoolz>`_ ``>=0.11.2``: a Cython
+  implementation of ``toolz``. Dask.distributed imports ``toolz`` functions
+  through ``tlz``, which picks ``cytoolz`` when it is installed and falls
+  back to ``toolz`` otherwise.
+
+Install it with ``conda install cytoolz -c conda-forge`` or
+``python -m pip install cytoolz``.
+
+
 Notes
 -----
 
