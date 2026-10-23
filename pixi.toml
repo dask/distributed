@@ -1,7 +1,7 @@
 # This file is used by pixi-build in other projects (namely, dask/dask) 
 # to generate a conda package of distributed from git tip
 [workspace]
-requires-pixi = ">=0.72.1"
+requires-pixi = ">=0.82.1"
 channels = ["https://prefix.dev/conda-forge"]
 platforms = [
     "linux-64",
