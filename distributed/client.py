@@ -5744,7 +5744,7 @@ class as_completed:
         iterator.
         """
         with self.lock:
-            return len(self.futures) + len(self.queue.queue)
+            return sum(self.futures.values()) + len(self.queue.queue)
 
     def __repr__(self):
         return (
