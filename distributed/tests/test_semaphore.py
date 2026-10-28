@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import pickle
 import signal
+import weakref
 from datetime import timedelta
 from time import sleep
 
@@ -64,6 +66,39 @@ async def test_serializable(c, s, a, b):
     res = await sem2.acquire(timeout=0.025)
 
     assert not res
+
+
+@pytest.mark.parametrize("start_callbacks", [False, True])
+@gen_cluster(client=True)
+async def test_deserialized_semaphores_are_collected(c, s, a, b, start_callbacks):
+    sem = Semaphore(name="unused-task-argument")
+    serialized = pickle.dumps(sem)
+    copies = [pickle.loads(serialized) for _ in range(20)]
+    refs = [weakref.ref(copy) for copy in copies]
+    callbacks = [copy.refresh_callback for copy in copies]
+    if start_callbacks:
+        for copy in copies:
+            await copy
+        del copy
+        assert all(callback.is_running() for callback in callbacks)
+    del copies
+    gc.collect()
+    await asyncio.sleep(0)
+    assert all(ref() is None for ref in refs)
+    assert all(not callback.is_running() for callback in callbacks)
+    assert s.extensions["semaphores"]._semaphore_exists(sem.name) == start_callbacks
+
+
+@gen_cluster(client=True)
+async def test_unused_deserialized_semaphores_do_not_start_refresh(c, s, a, b):
+    sem = Semaphore(name="unused-task-argument")
+    copies = [pickle.loads(pickle.dumps(sem)) for _ in range(20)]
+    await asyncio.sleep(0)
+    assert not sem.refresh_callback.is_running()
+    assert all(not copy.refresh_callback.is_running() for copy in copies)
+    await copies[0].acquire()
+    assert copies[0].refresh_callback.is_running()
+    await copies[0].release()
 
 
 @gen_cluster(client=True)
