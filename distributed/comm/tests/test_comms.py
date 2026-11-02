@@ -1216,6 +1216,26 @@ async def test_inproc_deserialize():
     await check_deserialize("inproc://")
 
 
+@pytest.mark.parametrize("should_deserialize", [True, False])
+@gen_test()
+async def test_inproc_shared_serialized_dict(should_deserialize):
+    data = {"payload": {"inner": b"abc"}}
+    serialized = Serialized(*serialize(data))
+    message = {"left": serialized, "right": [serialized]}
+    writer, reader = await get_inproc_comm_pair(deserialize=should_deserialize)
+    try:
+        for _ in range(2):
+            await writer.write(message)
+            result = await wait_for(reader.read(), 2)
+            if should_deserialize:
+                assert result == {"left": data, "right": [data]}
+            else:
+                assert result["left"] is result["right"][0] is serialized
+    finally:
+        await writer.close()
+        await reader.close()
+
+
 async def check_deserialize_roundtrip(addr):
     """
     Sanity check round-tripping with "deserialize" on and off.

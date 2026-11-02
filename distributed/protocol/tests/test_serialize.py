@@ -161,6 +161,44 @@ def test_Serialized():
     assert not (s == t)
 
 
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"payload": b"abc"},
+        {"payload": {"inner": bytearray(b"xyz")}},
+        {"payload": [{"inner": b"abc"}]},
+    ],
+)
+def test_deserialize_dict_preserves_header(data):
+    header, frames = serialize(data)
+    original_header = copy.deepcopy(header)
+    for _ in range(2):
+        assert deserialize(header, frames) == data
+        assert header == original_header
+
+
+def test_nested_deserialize_shared_serialized_dict():
+    data = {"payload": {"inner": b"abc"}}
+    serialized = Serialized(*serialize(data))
+    original_header = copy.deepcopy(serialized.header)
+    message = {"left": serialized, "right": [serialized]}
+    assert _nested_deserialize(message) == {"left": data, "right": [data]}
+    assert serialized.header == original_header
+    assert message["left"] is message["right"][0] is serialized
+
+
+def test_serialize_dict_shared_serialized_header():
+    data = {"inner": b"abc"}
+    serialized = Serialized(*serialize(data))
+    original_header = copy.deepcopy(serialized.header)
+    header, frames = serialize(
+        {"left": serialized, "right": serialized}, iterate_collection=True
+    )
+    for _ in range(2):
+        assert deserialize(header, frames) == {"left": data, "right": data}
+    assert serialized.header == original_header
+
+
 def test_nested_deserialize():
     x = {
         "op": "update",
