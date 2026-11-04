@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from typing import Any
 from unittest import mock
 
@@ -9,8 +10,19 @@ import pytest
 from dask.typing import Key
 
 from distributed import Worker
+from distributed.exceptions import Reschedule
 from distributed.shuffle._core import ShuffleId, id_from_key
-from distributed.shuffle._worker_plugin import ShuffleRun, _ShuffleRunManager
+from distributed.shuffle._exceptions import (
+    P2PConsistencyError,
+    P2POutOfDiskError,
+    ShuffleClosedError,
+)
+from distributed.shuffle._merge import merge_unpack
+from distributed.shuffle._worker_plugin import (
+    ShuffleRun,
+    ShuffleWorkerPlugin,
+    _ShuffleRunManager,
+)
 from distributed.utils_test import gen_cluster
 
 pd = pytest.importorskip("pandas")
@@ -27,6 +39,122 @@ except ImportError:
     pa = None
 
 pytestmark = pytest.mark.ci1
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize(
+    "error_type, expected_type",
+    [
+        (ShuffleClosedError, Reschedule),
+        (Reschedule, Reschedule),
+        (P2PConsistencyError, P2PConsistencyError),
+        (P2POutOfDiskError, P2POutOfDiskError),
+        (ValueError, RuntimeError),
+    ],
+)
+def test_merge_unpack_fetch_errors(side, error_type, expected_type):
+    error = error_type("fetch failed")
+    plugin = mock.Mock()
+    plugin.get_output_partition.side_effect = (
+        [error] if side == "left" else [pd.DataFrame(), error]
+    )
+    with mock.patch(
+        "distributed.shuffle._merge.get_worker_plugin", return_value=plugin
+    ):
+        with pytest.raises(expected_type) as exc:
+            merge_unpack(
+                ShuffleId("left"),
+                ShuffleId("right"),
+                0,
+                1,
+                2,
+                how="inner",
+                left_on="key",
+                right_on="key",
+                result_meta=pd.DataFrame(),
+                suffixes=("_x", "_y"),
+                left_index=False,
+                right_index=False,
+            )
+    if error_type is ValueError:
+        assert str(exc.value) == f"P2P {side} failed during unpack phase"
+        assert exc.value.__cause__ is error
+    elif error_type is not ShuffleClosedError:
+        assert exc.value is error
+
+
+@pytest.mark.parametrize("left_on", ["key", "missing"])
+def test_merge_unpack_merge_chunk(left_on):
+    left = pd.DataFrame({"key": [1, 2], "value": [3, 4]})
+    right = pd.DataFrame({"key": [2, 3], "value": [5, 6]})
+    plugin = mock.Mock()
+    plugin.get_output_partition.side_effect = [left, right]
+    with mock.patch(
+        "distributed.shuffle._merge.get_worker_plugin", return_value=plugin
+    ):
+        with (
+            pytest.raises(KeyError, match="missing")
+            if left_on == "missing"
+            else nullcontext()
+        ):
+            result = merge_unpack(
+                ShuffleId("left"),
+                ShuffleId("right"),
+                0,
+                1,
+                2,
+                how="inner",
+                left_on=left_on,
+                right_on="key",
+                result_meta=left.merge(right, on="key").iloc[:0],
+                suffixes=("_x", "_y"),
+                left_index=False,
+                right_index=False,
+            )
+        if left_on == "key":
+            assert_eq(result, left.merge(right, on="key"))
+    assert plugin.get_output_partition.call_args_list == [
+        mock.call("left", 1, 0),
+        mock.call("right", 2, 0),
+    ]
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_merge_unpack_closed_shuffle_reschedules(c, s, a, side):
+    left = pd.DataFrame({"key": [1, 2, 2, 3], "left": [4, 5, 6, 7]})
+    right = pd.DataFrame({"key": [2, 2, 3, 4], "right": [8, 9, 10, 11]})
+    joined = dd.from_pandas(left, npartitions=2).merge(
+        dd.from_pandas(right, npartitions=2), on="key", shuffle_method="p2p"
+    )
+    shuffle_ids = {
+        task.args[0 if side == "left" else 1]
+        for task in joined.__dask_graph__().values()
+        if getattr(task, "func", None) is merge_unpack
+    }
+    assert len(shuffle_ids) == 1
+    shuffle_id = shuffle_ids.pop()
+    original = ShuffleWorkerPlugin.get_output_partition
+    injected = 0
+    recovered = 0
+
+    def get_output_partition(self, id, *args, **kwargs):
+        nonlocal injected, recovered
+        if id == shuffle_id and not injected:
+            injected += 1
+            raise ShuffleClosedError("injected closed shuffle")
+        result = original(self, id, *args, **kwargs)
+        if id == shuffle_id and injected:
+            recovered += 1
+        return result
+
+    with mock.patch.object(
+        ShuffleWorkerPlugin, "get_output_partition", get_output_partition
+    ):
+        result = await c.compute(joined)
+    assert injected == 1
+    assert recovered > 0
+    assert_eq(result, left.merge(right, on="key"), check_index=False)
 
 
 async def list_eq(a, b):
