@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from dask._task_spec import GraphNode
 from dask.typing import Key
 
-from distributed.shuffle._core import ShuffleId, get_worker_plugin
+from distributed.shuffle._core import ShuffleId, get_worker_plugin, handle_unpack_errors
 from distributed.shuffle._shuffle import shuffle_transfer
 
 if TYPE_CHECKING:
@@ -49,8 +49,12 @@ def merge_unpack(
 
     ext = get_worker_plugin()
     # If the partition is empty, it doesn't contain the hash column name
-    left = ext.get_output_partition(shuffle_id_left, barrier_left, output_partition)
-    right = ext.get_output_partition(shuffle_id_right, barrier_right, output_partition)
+    with handle_unpack_errors(shuffle_id_left):
+        left = ext.get_output_partition(shuffle_id_left, barrier_left, output_partition)
+    with handle_unpack_errors(shuffle_id_right):
+        right = ext.get_output_partition(
+            shuffle_id_right, barrier_right, output_partition
+        )
     return merge_chunk(
         left,
         right,
