@@ -2062,6 +2062,56 @@ async def test_statistical_profiling_failure(c, s, a, b):
     assert profile["count"]
 
 
+@pytest.mark.parametrize("shared", [False, True])
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("duplicate_keys", [False, True])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_cancel_releases_keys_once_per_client(
+    c, s, a, shared, force, duplicate_keys
+):
+    futures = c.map(inc, range(3))
+    await c.gather(futures)
+    keys = [f.key for f in futures]
+    if duplicate_keys:
+        keys *= 2
+
+    async with Client(s.address, asynchronous=True) as c2:
+        if shared:
+            shared_futures = c2.map(inc, range(3))
+            await c2.gather(shared_futures)
+            assert all(
+                s.tasks[key].who_wants == {s.clients[c.id], s.clients[c2.id]}
+                for key in keys
+            )
+
+        with mock.patch.object(
+            s, "client_releases_keys", wraps=s.client_releases_keys
+        ) as release:
+            # Call synchronously to exclude later client-side cleanup from the count.
+            s.stimulus_cancel(
+                keys=keys, client=c.id, force=force, reason="test", msg="test"
+            )
+
+        expected_clients = {c.id, c2.id} if shared and force else {c.id}
+        assert release.call_count == len(expected_clients)
+        assert {
+            call.kwargs["client"] for call in release.call_args_list
+        } == expected_clients
+        cancelled_keys = [] if shared and not force else keys
+        assert all(
+            call.kwargs["keys"] == cancelled_keys for call in release.call_args_list
+        )
+
+        if shared and not force:
+            assert all(
+                s.tasks[key].who_wants == {s.clients[c.id], s.clients[c2.id]}
+                for key in keys
+            )
+        else:
+            assert not s.tasks
+        s.validate_state()
+
+
 @gen_cluster(client=True)
 async def test_cancel_fire_and_forget(c, s, a, b):
     ev1 = Event()

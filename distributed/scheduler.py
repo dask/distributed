@@ -5785,7 +5785,7 @@ class Scheduler(SchedulerState, ServerNode):
                 cancelled_keys.append(key)
             assert ts.who_wants
             clients.extend(list(ts.who_wants) if force else [cs])
-        for cs in clients:
+        for cs in set(clients):
             self.client_releases_keys(
                 keys=cancelled_keys,
                 client=cs.client_key,
