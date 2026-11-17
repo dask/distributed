@@ -3841,6 +3841,20 @@ class Client(SyncMethodMixin):
         )
         expr = collections_to_expr(collections, optimize_graph)
 
+        # Persistence rebuilds collections on the client. Only the top-level
+        # HLG wrappers have unused finalizers: nested finalizers may be part of
+        # the computation itself. These hooks can hold large non-Dask data,
+        # such as xarray coordinates, which must not go to the scheduler.
+        from dask._expr import HLGExpr, _ExprSequence
+
+        expr = _ExprSequence(
+            *(
+                node.substitute_parameters({"postcompute": None})
+                if type(node) is HLGExpr
+                else node
+                for node in expr
+            )
+        )
         expr2 = expr.optimize()
 
         keys = expr2.__dask_keys__()

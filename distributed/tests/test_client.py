@@ -8465,3 +8465,121 @@ async def test_map_accepts_nested_futures(c, s, a, b, use_kwarg):
 
     result = await future.result()
     assert result == 30 if not offset else 31
+
+
+@pytest.mark.parametrize("optimize_graph", [True, False])
+@gen_cluster(client=True)
+async def test_persist_keeps_xarray_coordinates_on_client(c, s, a, b, optimize_graph):
+    from distributed.protocol import serialize, to_serialize
+    from distributed.utils import nbytes
+
+    xr = pytest.importorskip("xarray")
+    np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+
+    values = xr.DataArray(
+        da.arange(100_000, chunks=10_000),
+        dims=["x"],
+        coords={"x": np.arange(100_000)},
+        name="values",
+        attrs={"description": "coordinates remain on the client"},
+    )
+    sizes = []
+    graph_to_futures = c._graph_to_futures
+
+    def record_graph(expr, *args, **kwargs):
+        header, frames = serialize(to_serialize(expr), on_error="raise")
+        sizes.append(sum(map(nbytes, [header, *frames])))
+        return graph_to_futures(expr, *args, **kwargs)
+
+    # Multiple collections must retain joint graph optimization and must not
+    # mutate the original collections' finalization metadata.
+    with mock.patch.object(c, "_graph_to_futures", record_graph):
+        persisted = c.persist([values, values + 1], optimize_graph=optimize_graph)
+    assert len(sizes) == 1
+    assert sizes[0] < 100_000
+    for actual, expected in zip(persisted, [values, values + 1]):
+        assert actual.name == expected.name
+        assert actual.attrs == expected.attrs
+        xr.testing.assert_equal(
+            actual.coords.to_dataset(), expected.coords.to_dataset()
+        )
+        xr.testing.assert_equal(await c.compute(actual), await c.compute(expected))
+
+
+@gen_cluster(client=True)
+async def test_persist_preserves_embedded_finalizer(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+    from dask._expr import HLGExpr
+    from dask.delayed import Delayed
+
+    class FinalizedCollection:
+        def __init__(self):
+            self.expr = (
+                HLGExpr.from_collection(da.arange(10, chunks=5))
+                .finalize_compute()
+                .optimize()
+            )
+
+        def __dask_graph__(self):
+            return self.expr.__dask_graph__()
+
+        def __dask_keys__(self):
+            return self.expr.__dask_keys__()
+
+        def __dask_postcompute__(self):
+            return operator.itemgetter(0), ()
+
+        def __dask_postpersist__(self):
+            return self.rebuild, (self.__dask_keys__()[0],)
+
+        @staticmethod
+        def rebuild(graph, key):
+            return Delayed(key, graph)
+
+    persisted = c.persist(FinalizedCollection())
+    np.testing.assert_array_equal(await c.compute(persisted), np.arange(10))
+
+
+@gen_cluster(client=True)
+async def test_persist_keeps_legacy_collection_metadata_on_client(c, s, a, b):
+    from distributed.protocol import serialize, to_serialize
+    from distributed.utils import nbytes
+
+    class Collection:
+        __dask_optimize__ = None
+
+        def __init__(self, graph, metadata):
+            self.graph = graph
+            self.metadata = metadata
+
+        def __dask_graph__(self):
+            return self.graph
+
+        def __dask_keys__(self):
+            return ["x"]
+
+        def __dask_postcompute__(self):
+            return self.finalize, (self.metadata,)
+
+        @staticmethod
+        def finalize(results, metadata):
+            return results[0], metadata
+
+        def __dask_postpersist__(self):
+            return type(self), (self.metadata,)
+
+    metadata = b"client-only metadata" * 100_000
+    original = Collection({"x": (inc, 1)}, metadata)
+    graph_to_futures = c._graph_to_futures
+
+    def check_graph(expr, *args, **kwargs):
+        header, frames = serialize(to_serialize(expr), on_error="raise")
+        assert sum(map(nbytes, [header, *frames])) < 100_000
+        return graph_to_futures(expr, *args, **kwargs)
+
+    with mock.patch.object(c, "_graph_to_futures", check_graph):
+        persisted = c.persist(original)
+    assert persisted.metadata is metadata
+    assert await c.compute(persisted) == (2, metadata)
