@@ -18,7 +18,10 @@ import distributed
 
 def get_documenter_objtype(app, obj, parent):
     """Return the Sphinx autodoc object type for an object."""
-    get_documenter = sphinx_autosummary._get_documenter
+    get_documenter = getattr(sphinx_autosummary, "_get_documenter", None)
+    if get_documenter is None:
+        # Sphinx 8.0 and 8.1 only expose the public helper.
+        return sphinx_autosummary.get_documenter(app, obj, parent).objtype
     if "registry" in signature(get_documenter).parameters:
         return get_documenter(obj, parent, registry=app.registry).objtype
     return get_documenter(obj, parent)
