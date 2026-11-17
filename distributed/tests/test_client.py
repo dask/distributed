@@ -2463,6 +2463,43 @@ async def test_cancel(c, s, a, b):
     s.validate_state()
 
 
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("released", [False, True])
+@gen_cluster(client=True)
+async def test_cancel_dependent_not_wanted_by_any_client(c, s, a, b, released, force):
+    """x <- y <- z, where the client holds x and z but no client wants y, either
+    because the client released it or because it is internal to a graph.
+    Cancelling x reaches y.
+    """
+    x = c.submit(inc, 1, key="x")
+    if released:
+        y = c.submit(inc, x, key="y")
+        z = c.submit(inc, y, key="z")
+        y.release()
+    else:
+        z = c.compute(
+            delayed(inc)(delayed(inc)(x, dask_key_name="y"), dask_key_name="z")
+        )
+    other = c.submit(inc, 10, key="other")
+    await wait([z, other])
+    await async_poll_for(lambda: not s.tasks["y"].who_wants, timeout=5)
+    cs = s.clients[c.id]
+
+    await c.cancel([x], force=force)
+    await async_poll_for(
+        lambda: "x" not in s.tasks or not s.tasks["x"].who_wants, timeout=5
+    )
+
+    # The scheduler did not drop the client. If it had, the client would have
+    # reconnected with the same id and a new ClientState.
+    assert s.clients[c.id] is cs
+    assert await other == 11
+    if force:
+        await async_poll_for(lambda: s.tasks.keys() == {"other"}, timeout=5)
+        assert z.cancelled()
+    s.validate_state()
+
+
 @gen_cluster(client=True)
 async def test_cancel_tuple_key(c, s, a, b):
     x = c.submit(inc, 1, key=("x", 0, 1))
