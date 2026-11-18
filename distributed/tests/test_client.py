@@ -6,6 +6,7 @@ import concurrent.futures
 import functools
 import gc
 import inspect
+import json
 import logging
 import multiprocessing
 import operator
@@ -22,7 +23,7 @@ import types
 import uuid
 import weakref
 import zipfile
-from collections import deque, namedtuple
+from collections import Counter, deque, namedtuple
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ from tlz import concat, identity, isdistinct, merge, pluck, valmap
 import dask
 import dask.bag as db
 from dask import delayed
+from dask.core import flatten
 from dask.task_spec import Task, TaskRef
 from dask.tokenize import TokenizationError, tokenize
 from dask.utils import get_default_shuffle_method, parse_timedelta, tmpfile
@@ -55,6 +57,7 @@ from distributed import (
     Worker,
     fire_and_forget,
     get_client,
+    get_task_stream,
     get_worker,
     performance_report,
     profile,
@@ -3784,6 +3787,77 @@ async def test_persist_optimize_graph(c, s, a, b):
         await wait(b4)
 
         assert not any(k in s.tasks for k in b2.__dask_keys__())
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("optimize_graph", [False, True])
+@gen_cluster(client=True)
+async def test_persist_joint_optimizer_and_shared_execution(
+    c, s, a, b, reverse, optimize_graph, tmp_path
+):
+    from dask.delayed import Delayed
+
+    record = tmp_path / "optimizer.jsonl"
+
+    # An identity optimizer records the keys that were optimized jointly.
+    def optimize(graph, keys, **kwargs):
+        with record.open("a", encoding="utf-8") as output:
+            output.write(json.dumps(sorted(flatten(keys))) + "\n")
+        return graph
+
+    def rebuild(graph, key):
+        return Delayed(key, graph)
+
+    class Collection:
+        __dask_optimize__ = staticmethod(optimize)
+
+        def __init__(self, key, graph):
+            self.key, self.graph = key, graph
+
+        def __dask_graph__(self):
+            return self.graph
+
+        def __dask_keys__(self):
+            return [self.key]
+
+        def __dask_postcompute__(self):
+            return operator.itemgetter(0), ()
+
+        def __dask_postpersist__(self):
+            return rebuild, (self.key,)
+
+    source, left, right = "joint-source", "joint-left", "joint-right"
+    common = {source: (sum, [1, 2, 3])}
+    inputs = [
+        Collection(left, {**common, left: (operator.add, source, 10)}),
+        Collection(right, {**common, right: (operator.mul, source, 10)}),
+    ]
+    expected = [16, 60]
+    if reverse:
+        inputs.reverse()
+        expected.reverse()
+
+    async with get_task_stream(c) as stream:
+        persisted = c.persist(inputs, optimize_graph=optimize_graph)
+        await wait(persisted)
+    counts = Counter(event["key"] for event in stream.data)
+    assert counts[source] == 1
+    assert counts[left] == counts[right] == 1
+    optimizer_calls = (
+        [
+            set(json.loads(line))
+            for line in record.read_text(encoding="utf-8").splitlines()
+        ]
+        if record.exists()
+        else []
+    )
+    if optimize_graph:
+        assert optimizer_calls
+        assert all(keys == {left, right} for keys in optimizer_calls)
+    else:
+        assert optimizer_calls == []
+    outputs = [item.dask[item.key] for item in persisted]
+    assert await c.gather(outputs) == expected
 
 
 @gen_cluster(client=True, nthreads=[])
