@@ -47,6 +47,7 @@ from distributed.core import ConnectionPool, ErrorMessage, OKMessage
 from distributed.scheduler import TaskState as SchedulerTaskState
 from distributed.shuffle._arrow import (
     buffers_to_table,
+    concat_tables,
     convert_shards,
     read_from_disk,
     serialize_table,
@@ -2533,6 +2534,81 @@ async def test_raise_on_incompatible_partitions(c, s, a, b):
     await assert_worker_cleanup(a)
     await assert_worker_cleanup(b)
     await assert_scheduler_cleanup(s)
+
+
+@gen_cluster(client=True)
+@pytest.mark.parametrize("category_count", [127, 128, 200, 32768])
+async def test_shuffle_categorical_dictionary_growth(c, s, a, b, category_count):
+    """Partitions may have small dictionaries whose union needs wider indices."""
+    frames = []
+    for i, (start, stop) in enumerate(
+        [(0, category_count // 2), (category_count // 2, category_count)]
+    ):
+        values = list(range(start, stop)) + [start, None]
+        frames.append(
+            pd.DataFrame(
+                {
+                    "row_id": np.arange(start + 2 * i, stop + 2 * i + 2),
+                    "key": 0,
+                    "category": pd.Categorical(values),
+                    "label": pd.Categorical(
+                        [None if value is None else str(value) for value in values]
+                    ),
+                }
+            )
+        )
+
+    meta = frames[0].iloc[:0].copy()
+    for column in ["category", "label"]:
+        meta[column] = pd.Categorical([], categories=[dd.utils.UNKNOWN_CATEGORIES])
+    df = dd.from_delayed([dask.delayed(frame) for frame in frames], meta=meta)
+    shuffled = df.shuffle("key", npartitions=2, shuffle_method="p2p", force=True)
+    result = await c.compute(shuffled)
+    result = result.sort_values("row_id").reset_index(drop=True)
+    expected = pd.concat(frames, ignore_index=True)
+    for column in ["category", "label"]:
+        expected[column] = pd.api.types.union_categoricals(
+            [frame[column].array for frame in frames]
+        )
+        assert isinstance(result[column].dtype, pd.CategoricalDtype)
+        assert not result[column].cat.ordered
+        assert set(result[column].cat.categories) == set(
+            expected[column].cat.categories
+        )
+    pd.testing.assert_frame_equal(result, expected, check_categorical=False)
+
+    del result, shuffled
+    await assert_worker_cleanup(a)
+    await assert_worker_cleanup(b)
+    await assert_scheduler_cleanup(s)
+
+
+@pytest.mark.parametrize("ordered", [False, True])
+def test_concat_tables_identical_dictionaries(ordered):
+    array = pa.array(pd.Categorical(range(100), ordered=ordered))
+    table = pa.table({"category": array})
+    result = concat_tables([table, table])
+    assert result.schema == table.schema
+    assert (
+        result.combine_chunks().column("category").to_pylist() == list(range(100)) * 2
+    )
+
+
+@pytest.mark.parametrize("category_count", [127, 128, 32767, 32768])
+def test_concat_tables_dictionary_growth(category_count):
+    tables = [
+        pa.table({"category": pa.array(pd.Categorical(range(start, stop)))})
+        for start, stop in [
+            (0, category_count // 2),
+            (category_count // 2, category_count),
+        ]
+    ]
+    result = concat_tables(tables)
+    # Combining a previously combined table must account for all its chunks too.
+    result = concat_tables([result.slice(0, 1), result.slice(1)])
+    assert result.combine_chunks().column("category").to_pylist() == list(
+        range(category_count)
+    )
 
 
 @gen_cluster(client=True)
