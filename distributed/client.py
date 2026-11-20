@@ -4484,10 +4484,9 @@ class Client(SyncMethodMixin):
                 filename = "dask-profile.html"
 
             if filename:
-                from bokeh.plotting import output_file, save
+                from bokeh.io import save
 
-                output_file(filename=filename, title="Dask Profile")
-                save(figure, filename=filename)
+                save(figure, filename=filename, title="Dask Profile", resources="cdn")
             return (state, figure)
 
         else:
@@ -6051,7 +6050,7 @@ class performance_report:
         of the report. Defaults to `1` which is the frame calling ``performance_report``
 
     mode: str, optional
-        Mode parameter to pass to :func:`bokeh.io.output.output_file`. Defaults to ``None``.
+        BokehJS resource mode, passed to :func:`bokeh.io.save`. Defaults to ``None``.
 
     storage_options: dict, optional
          Any additional arguments to :func:`fsspec.open` when writing to a URL.

@@ -222,10 +222,14 @@ async def _get_task_stream_impl(
     source, figure = task_stream_figure(sizing_mode="stretch_both")
     source.data.update(rects)
     if plot == "save":
-        from bokeh.plotting import output_file, save
+        from bokeh.io import save
 
-        output_file(filename=filename, title="Dask Task Stream")
-        save(figure, filename=filename, resources=bokeh_resources)
+        save(
+            figure,
+            filename=filename,
+            title="Dask Task Stream",
+            resources=bokeh_resources or "cdn",
+        )
     return (msgs, figure)
 
 

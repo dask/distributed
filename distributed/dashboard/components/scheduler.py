@@ -16,11 +16,9 @@ from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
     AdaptiveTicker,
-    Arrow,
     BasicTicker,
     BoxSelectTool,
     BoxZoomTool,
-    CDSView,
     ColorBar,
     ColumnDataSource,
     CustomJSHover,
@@ -46,6 +44,17 @@ from bokeh.models import (
     VeeHead,
     WheelZoomTool,
 )
+
+try:
+    from bokeh.models import Arrow
+except ImportError:  # Bokeh 4 replaced the Arrow annotation with a glyph method
+    Arrow = None
+
+try:
+    from bokeh.models import CDSView
+except ImportError:  # Bokeh 4 renamed CDSView to IndexedSubset
+    from bokeh.models import IndexedSubset as CDSView
+
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.models.widgets.markups import Div
 from bokeh.palettes import Viridis11
@@ -2280,7 +2289,8 @@ class TaskGraph(DashboardComponent):
         )
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
-        filter = GroupFilter(column_name="visible", group="True")
+        # Pass the field positionally: Bokeh 4 renamed `column_name` to `field_name`
+        filter = GroupFilter("visible", "True")
         node_view = CDSView(filter=filter)
         edge_view = CDSView(filter=filter)
         node_colors = factor_cmap(
@@ -2549,7 +2559,7 @@ class TaskGroupGraph(DashboardComponent):
             source=self.nodes_source,
         )
 
-        self.arrows = Arrow(
+        arrow_kwargs = dict(
             end=VeeHead(size=8),
             line_color="black",
             line_alpha=0.5,
@@ -2560,7 +2570,11 @@ class TaskGroupGraph(DashboardComponent):
             y_end="ye",
             source=self.arrows_source,
         )
-        self.root.add_layout(self.arrows)
+        if Arrow is not None:
+            self.arrows = Arrow(**arrow_kwargs)
+            self.root.add_layout(self.arrows)
+        else:
+            self.arrows = self.root.arrow(**arrow_kwargs)
 
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
