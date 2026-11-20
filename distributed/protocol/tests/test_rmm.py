@@ -7,7 +7,6 @@ pytestmark = pytest.mark.gpu
 from distributed.protocol import deserialize, serialize
 
 numpy = pytest.importorskip("numpy")
-cuda = pytest.importorskip("numba.cuda")
 rmm = pytest.importorskip("rmm")
 
 
@@ -19,7 +18,7 @@ def test_serialize_rmm_device_buffer(size, serializers):
 
     x_np = numpy.arange(size, dtype="u1")
     x = rmm.DeviceBuffer(size=size)
-    cuda.to_device(x_np, to=cuda.as_cuda_array(x))
+    x.copy_from_host(x_np)
 
     header, frames = serialize(x, serializers=serializers)
     y = deserialize(header, frames, deserializers=serializers)
