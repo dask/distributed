@@ -427,17 +427,13 @@ async def test_chained_error_message(c, s, a, b):
     config={"distributed.scheduler.allowed-failures": 0},
 )
 async def test_base_exception_in_task(c, s, a, sync, exc_type):
-    if sync:
+    def sync_raiser():
+        raise exc_type(f"this is a {exc_type}")
 
-        def raiser():
-            raise exc_type(f"this is a {exc_type}")
+    async def async_raiser():
+        raise exc_type(f"this is a {exc_type}")
 
-    else:
-
-        async def raiser():
-            raise exc_type(f"this is a {exc_type}")
-
-    f = c.submit(raiser)
+    f = c.submit(sync_raiser if sync else async_raiser)
 
     try:
         with pytest.raises(
@@ -558,7 +554,7 @@ async def test_gather_missing_workers(c, s, a, b):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("know_real", [False, True, True, True, True])  # Read below
+@pytest.mark.parametrize("know_real", [False, True, True, True, True])  # Read below  # noqa: PT014
 @gen_cluster(client=True, worker_kwargs={"timeout": "1s"}, config=NO_AMM)
 async def test_gather_missing_workers_replicated(c, s, a, b, know_real):
     """A worker owning a redundant copy of a key is missing.
@@ -1134,9 +1130,11 @@ async def test_start_services(s):
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
-        async with Scheduler(scheduler_file=fn, dashboard_address=":0") as s:
-            async with Worker(scheduler_file=fn) as w:
-                assert set(s.workers) == {w.address}
+        async with (
+            Scheduler(scheduler_file=fn, dashboard_address=":0") as s,
+            Worker(scheduler_file=fn) as w,
+        ):
+            assert set(s.workers) == {w.address}
 
 
 @gen_cluster(client=True)
@@ -1449,11 +1447,13 @@ async def test_host_uses_scheduler_protocol(monkeypatch):
     monkeypatch.setitem(backends, "foo", BadBackend())
 
     with dask.config.set({"distributed.comm.default-scheme": "foo"}):
-        async with Scheduler(protocol="tcp", dashboard_address=":0") as s:
-            async with Worker(s.address):
-                # Ensure that worker is able to properly start up
-                # without BadBackend.get_address_host raising a ValueError
-                pass
+        async with (
+            Scheduler(protocol="tcp", dashboard_address=":0") as s,
+            Worker(s.address),
+        ):
+            # Ensure that worker is able to properly start up
+            # without BadBackend.get_address_host raising a ValueError
+            pass
 
 
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
@@ -1553,19 +1553,15 @@ async def test_close_gracefully_no_suspicious_tasks(c, s, a, b):
 async def test_close_while_executing(c, s, a, sync):
     ev = Event()
 
-    if sync:
+    def sync_f(ev):
+        ev.set()
+        sleep(2)
 
-        def f(ev):
-            ev.set()
-            sleep(2)
+    async def async_f(ev):
+        await ev.set()
+        await asyncio.Event().wait()  # Block indefinitely
 
-    else:
-
-        async def f(ev):
-            await ev.set()
-            await asyncio.Event().wait()  # Block indefinitely
-
-    f1 = c.submit(f, ev, key="f1")
+    f1 = c.submit(sync_f if sync else async_f, ev, key="f1")
     await ev.wait()
     task = next(
         task for task in asyncio.all_tasks() if "execute('f1')" in task.get_name()
@@ -1642,7 +1638,7 @@ async def test_lifetime_stagger(s, a, b):
 @gen_cluster(nthreads=[])
 async def test_bad_metrics(s):
     def bad_metric(w):
-        raise Exception("Hello")
+        raise AssertionError("Hello")
 
     async with Worker(s.address, metrics={"bad": bad_metric}) as w:
         assert "bad" not in s.workers[w.address].metrics
@@ -1909,7 +1905,7 @@ async def test_worker_descopes_data(c, s, a):
 
     def f(x):
         y = C()
-        raise Exception(x, y)
+        raise AssertionError(x, y)
 
     f1 = c.submit(C, key="f1")
     f2 = c.submit(f, f1, key="f2")
@@ -2570,7 +2566,7 @@ async def test_hold_on_to_replicas(c, s, *workers):
     while sum_2.key not in workers[3].state.tasks:
         await asyncio.sleep(0.01)
 
-    while not workers[3].state.tasks[sum_2.key].state == "memory":
+    while workers[3].state.tasks[sum_2.key].state != "memory":
         assert len(s.tasks[f1.key].who_has) >= 2
         assert s.tasks[f2.key].state == "released"
         await asyncio.sleep(0.01)
@@ -2627,9 +2623,7 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     s.request_acquire_replicas(b.address, [futA.key], stimulus_id=f"test-{time()}")
 
     await futC
-    while (
-        futA.key not in b.state.tasks or not b.state.tasks[futA.key].state == "memory"
-    ):
+    while futA.key not in b.state.tasks or b.state.tasks[futA.key].state != "memory":
         await asyncio.sleep(0.005)
 
     while len(s.tasks[futA.key].who_has) != 2:
@@ -2769,7 +2763,7 @@ async def test_who_has_consistent_remove_replicas(c, s, *workers):
     for w in other_workers:
         s.request_acquire_replicas(w.address, [f1.key], stimulus_id=f"test-{time()}")
 
-    while not len(s.tasks[f1.key].who_has) == len(other_workers):
+    while len(s.tasks[f1.key].who_has) != len(other_workers):
         await asyncio.sleep(0)
 
     f2 = c.submit(inc, f1, workers=[a.address])
@@ -2996,15 +2990,21 @@ async def test_log_remove_worker(c, s, a, b):
         f"Retired worker '{a.address}' (stimulus_id='graceful')",
         # Aborted graceful
         f"Retire worker addresses (stimulus_id='graceful_abort') ['{b.address}']",
-        f"Could not retire worker '{b.address}': unique data could not be "
-        "moved to any other worker (stimulus_id='graceful_abort')",
+        (
+            f"Could not retire worker '{b.address}': unique data could not be "
+            "moved to any other worker (stimulus_id='graceful_abort')"
+        ),
         # Ungraceful
         f"Remove worker addr: {b.address} name: {b.name} (stimulus_id='ungraceful')",
-        f"Removing worker '{b.address}' caused the cluster to lose already "
-        "computed task(s), which will be recomputed elsewhere: {'x'} "
-        "(stimulus_id='ungraceful')",
-        f"Removing worker '{b.address}' caused the cluster to lose scattered "
-        "data, which can't be recovered: {'z'} (stimulus_id='ungraceful')",
+        (
+            f"Removing worker '{b.address}' caused the cluster to lose already "
+            "computed task(s), which will be recomputed elsewhere: {'x'} "
+            "(stimulus_id='ungraceful')"
+        ),
+        (
+            f"Removing worker '{b.address}' caused the cluster to lose scattered "
+            "data, which can't be recovered: {'z'} (stimulus_id='ungraceful')"
+        ),
         "Lost all workers",
     ]
 
@@ -3180,33 +3180,32 @@ async def test_gather_dep_cancelled_rescheduled(c, s):
 
     See also test_gather_dep_do_not_handle_response_of_not_requested_tasks
     """
-    async with BlockedGetData(s.address) as a:
-        async with BlockedGatherDep(s.address) as b:
-            fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
-            fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
-            await wait(fut2)
-            fut4 = c.submit(sum, fut1, fut2, workers=[b.address], key="f4")
-            fut3 = c.submit(inc, fut1, workers=[b.address], key="f3")
+    async with BlockedGetData(s.address) as a, BlockedGatherDep(s.address) as b:
+        fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
+        fut2 = c.submit(inc, fut1, workers=[a.address], key="f2")
+        await wait(fut2)
+        fut4 = c.submit(sum, fut1, fut2, workers=[b.address], key="f4")
+        fut3 = c.submit(inc, fut1, workers=[b.address], key="f3")
 
-            await wait_for_state(fut2.key, "flight", b)
-            await b.in_gather_dep.wait()
+        await wait_for_state(fut2.key, "flight", b)
+        await b.in_gather_dep.wait()
 
-            fut4.release()
-            while fut4.key in b.state.tasks:
-                await asyncio.sleep(0)
+        fut4.release()
+        while fut4.key in b.state.tasks:
+            await asyncio.sleep(0)
 
-            assert b.state.tasks[fut2.key].state == "cancelled"
+        assert b.state.tasks[fut2.key].state == "cancelled"
 
-            b.block_gather_dep.set()
-            await a.in_get_data.wait()
+        b.block_gather_dep.set()
+        await a.in_get_data.wait()
 
-            fut4 = c.submit(sum, [fut1, fut2], workers=[b.address], key="f4")
-            await wait_for_state(fut2.key, "flight", b)
+        fut4 = c.submit(sum, [fut1, fut2], workers=[b.address], key="f4")
+        await wait_for_state(fut2.key, "flight", b)
 
-            a.block_get_data.set()
-            await wait([fut3, fut4])
-            f2_story = b.state.story(fut2.key)
-            assert f2_story
+        a.block_get_data.set()
+        await wait([fut3, fut4])
+        f2_story = b.state.story(fut2.key)
+        assert f2_story
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -3370,7 +3369,6 @@ async def test_extension_methods(s):
     class SchedulerExtension:
         def __init__(self, scheduler):
             self.scheduler = scheduler
-            pass
 
         def heartbeat(self, ws, data):
             nonlocal flag
@@ -3417,7 +3415,7 @@ async def test_tick_interval(c, s, a, b):
         await asyncio.sleep(0.01)
     while s.workers[a.address].metrics["event_loop_interval"] < 0.100:
         await asyncio.sleep(0.01)
-        time.sleep(0.200)
+        time.sleep(0.200)  # noqa: ASYNC251
 
 
 class BreakingWorker(Worker):

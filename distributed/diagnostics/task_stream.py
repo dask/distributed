@@ -122,10 +122,9 @@ def rectangles(msgs, workers=None, start_boundary=0):
         key = msg["key"]
         name = key_split(key)
         startstops = msg.get("startstops", [])
-        try:
-            worker_thread = f"{msg['worker']}-{msg['thread']}"
-        except Exception:
+        if "worker" not in msg or "thread" not in msg:
             continue
+        worker_thread = f"{msg['worker']}-{msg['thread']}"
 
         if worker_thread not in workers:
             workers[worker_thread] = len(workers) / 2

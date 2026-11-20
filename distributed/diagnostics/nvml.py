@@ -79,14 +79,17 @@ def init_once():
     Modifies global variables NVML_STATE and NVML_OWNER_PID"""
     global NVML_STATE, NVML_OWNER_PID
 
-    if NVML_STATE in {
-        NVMLState.DISABLED_PYNVML_NOT_AVAILABLE,
-        NVMLState.DISABLED_CONFIG,
-        NVMLState.DISABLED_LIBRARY_NOT_FOUND,
-        NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER,
-    }:
-        return
-    elif NVML_STATE == NVMLState.INITIALIZED and NVML_OWNER_PID == os.getpid():
+    if (
+        NVML_STATE
+        in {
+            NVMLState.DISABLED_PYNVML_NOT_AVAILABLE,
+            NVMLState.DISABLED_CONFIG,
+            NVMLState.DISABLED_LIBRARY_NOT_FOUND,
+            NVMLState.DISABLED_WSL_INSUFFICIENT_DRIVER,
+        }
+        or NVML_STATE == NVMLState.INITIALIZED
+        and NVML_OWNER_PID == os.getpid()
+    ):
         return
     elif NVML_STATE == NVMLState.UNINITIALIZED and not dask.config.get(
         "distributed.diagnostics.nvml"

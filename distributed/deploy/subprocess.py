@@ -183,7 +183,7 @@ def SubprocessCluster(
     n_workers: int | None = None,
     threads_per_worker: int | None = None,
     worker_kwargs: dict | None = None,
-    silence_logs: int = logging.WARN,
+    silence_logs: int = logging.WARNING,
     **kwargs: Any,
 ) -> SpecCluster:
     """Create a scheduler and workers that run in dedicated subprocesses

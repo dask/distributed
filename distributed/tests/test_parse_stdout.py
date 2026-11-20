@@ -17,22 +17,22 @@ parse_stdout = pytest.importorskip("parse_stdout")
 # Note: test_timeout below ends with a whitespace!
 stdout = """
 Unrelated row, must ignore
-distributed/tests/test1.py::test_fail [31mFAILED[0m[31m                             [ 10%][0m
-distributed/tests/test1.py::test_error_in_setup [31mERROR[0m[31m                    [ 20%][0m
-distributed/tests/test1.py::test_pass_and_then_error_in_teardown [32mPASSED[0m[31m  [ 30%][0m
-distributed/tests/test1.py::test_pass_and_then_error_in_teardown [31mERROR[0m[31m   [ 30%][0m
-distributed/tests/test1.py::test_fail_and_then_error_in_teardown [31mFAILED[0m[31m  [ 40%][0m
-distributed/tests/test1.py::test_fail_and_then_error_in_teardown [31mERROR[0m[31m   [ 40%][0m
-distributed/tests/test1.py::test_skip [33mSKIPPED[0m (unconditional skip)[31m       [ 50%][0m
-distributed/tests/test1.py::test_xfail [33mXFAIL[0m[31m                             [ 60%][0m
-distributed/tests/test1.py::test_flaky [33mRERUN[0m[31m                             [ 70%][0m
-distributed/tests/test1.py::test_flaky [32mPASSED[0m[31m                            [ 70%][0m
-distributed/tests/test1.py::test_leaking [32mPASSED[0m[31m                          [ 72%][0m
-distributed/tests/test1.py::test_leaking [32mLEAKED[0m[31m                          [ 72%][0m
-distributed/tests/test1.py::test_pass [32mPASSED[0m[31m                             [ 75%][0m
-distributed/tests/test1.py::test_params[a a] [32mPASSED[0m[31m                      [ 78%][0m
-distributed/tests/test1.py::test_escape_chars[<lambda>] [32mPASSED[0m[31m           [ 80%][0m
-distributed/tests/test1.py::MyTest::test_unittest [32mPASSED[0m[31m                 [ 86%][0m
+distributed/tests/test1.py::test_fail \x1b[31mFAILED\x1b[0m\x1b[31m                             [ 10%]\x1b[0m
+distributed/tests/test1.py::test_error_in_setup \x1b[31mERROR\x1b[0m\x1b[31m                    [ 20%]\x1b[0m
+distributed/tests/test1.py::test_pass_and_then_error_in_teardown \x1b[32mPASSED\x1b[0m\x1b[31m  [ 30%]\x1b[0m
+distributed/tests/test1.py::test_pass_and_then_error_in_teardown \x1b[31mERROR\x1b[0m\x1b[31m   [ 30%]\x1b[0m
+distributed/tests/test1.py::test_fail_and_then_error_in_teardown \x1b[31mFAILED\x1b[0m\x1b[31m  [ 40%]\x1b[0m
+distributed/tests/test1.py::test_fail_and_then_error_in_teardown \x1b[31mERROR\x1b[0m\x1b[31m   [ 40%]\x1b[0m
+distributed/tests/test1.py::test_skip \x1b[33mSKIPPED\x1b[0m (unconditional skip)\x1b[31m       [ 50%]\x1b[0m
+distributed/tests/test1.py::test_xfail \x1b[33mXFAIL\x1b[0m\x1b[31m                             [ 60%]\x1b[0m
+distributed/tests/test1.py::test_flaky \x1b[33mRERUN\x1b[0m\x1b[31m                             [ 70%]\x1b[0m
+distributed/tests/test1.py::test_flaky \x1b[32mPASSED\x1b[0m\x1b[31m                            [ 70%]\x1b[0m
+distributed/tests/test1.py::test_leaking \x1b[32mPASSED\x1b[0m\x1b[31m                          [ 72%]\x1b[0m
+distributed/tests/test1.py::test_leaking \x1b[32mLEAKED\x1b[0m\x1b[31m                          [ 72%]\x1b[0m
+distributed/tests/test1.py::test_pass \x1b[32mPASSED\x1b[0m\x1b[31m                             [ 75%]\x1b[0m
+distributed/tests/test1.py::test_params[a a] \x1b[32mPASSED\x1b[0m\x1b[31m                      [ 78%]\x1b[0m
+distributed/tests/test1.py::test_escape_chars[<lambda>] \x1b[32mPASSED\x1b[0m\x1b[31m           [ 80%]\x1b[0m
+distributed/tests/test1.py::MyTest::test_unittest \x1b[32mPASSED\x1b[0m\x1b[31m                 [ 86%]\x1b[0m
 distributed/tests/test1.py::test_timeout 
 """
 

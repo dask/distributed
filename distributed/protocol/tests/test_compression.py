@@ -53,9 +53,11 @@ def test_get_compression_settings():
         assert get_compression_settings("test123") is None
     with dask.config.set({"test123": "zlib"}):
         assert get_compression_settings("test123") == "zlib"
-    with dask.config.set({"test123": "hello"}):
-        with pytest.raises(ValueError, match="Invalid.*test123=hello.*zlib"):
-            get_compression_settings("test123")
+    with (
+        dask.config.set({"test123": "hello"}),
+        pytest.raises(ValueError, match="Invalid.*test123=hello.*zlib"),
+    ):
+        get_compression_settings("test123")
 
 
 def test_auto_compression():
@@ -228,20 +230,21 @@ async def test_compress_remote_comms(c, s, compression_counters):
     # Note: if you swap the IP addresses, the test will fail saying that compression
     # was not used. This is because the auto-generated Comm.local_address for the TCP
     # client is unrelated to the listening address of the worker that spawned it.
-    async with Worker(s.address, host="127.0.0.2") as a:
-        async with Worker(s.address, host="127.0.0.1") as b:
-            x = c.submit(lambda: "x" * 11_000, workers=[a.address])
-            y = c.submit(lambda x: None, x, workers=[b.address])
-            await wait(y)
-            assert compression_counters == [2, 1]
+    async with (
+        Worker(s.address, host="127.0.0.2") as a,
+        Worker(s.address, host="127.0.0.1") as b,
+    ):
+        x = c.submit(lambda: "x" * 11_000, workers=[a.address])
+        y = c.submit(lambda x: None, x, workers=[b.address])
+        await wait(y)
+        assert compression_counters == [2, 1]
 
 
 @pytest.mark.parametrize("host", [None, "127.0.0.1", "localhost"])
 @gen_cluster(client=True, nthreads=[], config={"distributed.comm.compression": "dummy"})
 async def test_disable_compression_on_localhost(c, s, compression_counters, host):
-    async with Worker(s.address, host=host) as a:
-        async with Worker(s.address, host=host) as b:
-            x = c.submit(lambda: "x" * 11_000, workers=[a.address])
-            y = c.submit(lambda x: None, x, workers=[b.address])
-            await wait(y)
-            assert compression_counters == [0, 0]
+    async with Worker(s.address, host=host) as a, Worker(s.address, host=host) as b:
+        x = c.submit(lambda: "x" * 11_000, workers=[a.address])
+        y = c.submit(lambda x: None, x, workers=[b.address])
+        await wait(y)
+        assert compression_counters == [0, 0]

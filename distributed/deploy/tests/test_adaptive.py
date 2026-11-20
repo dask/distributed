@@ -141,21 +141,23 @@ async def test_avoid_churn():
     Instead we want to wait a few beats before removing a worker in case the
     user is taking a brief pause between work
     """
-    async with LocalCluster(
-        n_workers=0,
-        asynchronous=True,
-        processes=False,
-        silence_logs=False,
-        dashboard_address=":0",
-    ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            adapt = cluster.adapt(interval="20 ms", wait_count=5)
+    async with (
+        LocalCluster(
+            n_workers=0,
+            asynchronous=True,
+            processes=False,
+            silence_logs=False,
+            dashboard_address=":0",
+        ) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
+        adapt = cluster.adapt(interval="20 ms", wait_count=5)
 
-            for i in range(10):
-                await client.submit(slowinc, i, delay=0.040)
-                await asyncio.sleep(0.040)
+        for i in range(10):
+            await client.submit(slowinc, i, delay=0.040)
+            await asyncio.sleep(0.040)
 
-            assert len(adapt.log) == 1
+        assert len(adapt.log) == 1
 
 
 @gen_test()
@@ -468,18 +470,20 @@ async def test_scale_needs_to_be_awaited():
 
             return self.sync(_)
 
-    async with RequiresAwaitCluster(
-        n_workers=0, asynchronous=True, dashboard_address=":0"
-    ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            futures = client.map(slowinc, range(5), delay=0.05)
-            assert len(cluster.workers) == 0
-            cluster.adapt()
+    async with (
+        RequiresAwaitCluster(
+            n_workers=0, asynchronous=True, dashboard_address=":0"
+        ) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
+        futures = client.map(slowinc, range(5), delay=0.05)
+        assert len(cluster.workers) == 0
+        cluster.adapt()
 
-            await client.gather(futures)
+        await client.gather(futures)
 
-            del futures
-            await async_poll_for(lambda: not cluster.workers)
+        del futures
+        await async_poll_for(lambda: not cluster.workers)
 
 
 @gen_test()

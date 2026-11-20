@@ -29,12 +29,12 @@ AnyBytes: TypeAlias = "bytes | bytearray | memoryview"
 
 
 class Compression(NamedTuple):
-    name: None | str
+    name: str | None
     compress: Callable[[AnyBytes], AnyBytes]
     decompress: Callable[[AnyBytes], AnyBytes]
 
 
-compressions: dict[str | None | Literal[False], Compression] = {
+compressions: dict[str | Literal[False] | None, Compression] = {
     None: Compression(None, identity, identity),
     False: Compression(None, identity, identity),  # alias
     "auto": Compression(None, identity, identity),
@@ -157,7 +157,7 @@ def maybe_compress(
     sample_size: int = 10_000,
     nsamples: int = 5,
     min_ratio: float = 0.7,
-    compression: str | None | Literal[False] = "auto",
+    compression: str | Literal[False] | None = "auto",
 ) -> tuple[str | None, AnyBytes]:
     """Maybe compress payload
 

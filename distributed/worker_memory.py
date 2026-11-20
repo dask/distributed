@@ -132,7 +132,7 @@ class WorkerMemoryManager:
         elif isinstance(data, tuple):
             func, kwargs = data
             if not callable(func):
-                raise ValueError("Expecting a callable")
+                raise TypeError("Expecting a callable")
             if has_arg(func, "worker_local_directory"):
                 self.data = func(
                     worker_local_directory=worker.local_directory, **kwargs

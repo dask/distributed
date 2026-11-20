@@ -319,7 +319,7 @@ def plot_data(state, profile_interval=0.010):
 
         x = start
 
-        for _, child in state["children"].items():
+        for child in state["children"].values():
             width = child["count"] * delta
             traverse(child, x, x + width, height + 1)
             x += width
@@ -374,7 +374,7 @@ def watch(
     thread_id: int | None = None,
     interval: str = "20ms",
     cycle: str = "2s",
-    maxlen: int | None | NoDefault = no_default,
+    maxlen: int | NoDefault | None = no_default,
     omit: Collection[str] = (),
     stop: Callable[[], bool] = lambda: False,
 ) -> deque[tuple[float, dict[str, Any]]]:

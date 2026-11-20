@@ -222,9 +222,8 @@ async def test_separate_thread_false(c, s, a):
 @gen_cluster(client=True)
 async def test_client_executor(c, s, a, b):
     def mysum():
-        with worker_client() as c:
-            with c.get_executor() as e:
-                return sum(e.map(double, range(30)))
+        with worker_client() as c, c.get_executor() as e:
+            return sum(e.map(double, range(30)))
 
     future = c.submit(mysum)
     result = await future
@@ -273,7 +272,6 @@ async def test_local_client_warning(c, s, a, b):
 async def test_closing_worker_doesnt_close_client(c, s, a, b):
     def func(x):
         get_client()
-        return
 
     await wait(c.map(func, range(10)))
     await a.close()

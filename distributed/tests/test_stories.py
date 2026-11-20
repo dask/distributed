@@ -92,7 +92,7 @@ async def test_client_story(c, s, a):
     # Every event should be prefixed with its origin
     # This changes the format compared to default scheduler / worker stories
     prefixes = set()
-    stripped_story = list()
+    stripped_story = []
     for msg in story:
         prefixes.add(msg[0])
         stripped_story.append(msg[1:])

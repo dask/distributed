@@ -1297,7 +1297,7 @@ async def test_messages_are_ordered_bsend():
                         b.send({"op": "sync_handler", "val": ix})
                     else:
                         b.send({"op": "async_handler", "val": ix})
-                while not len(ledger) == n:
+                while len(ledger) != n:
                     await asyncio.sleep(0.01)
                 assert ledger == list(range(n))
             finally:
@@ -1334,7 +1334,7 @@ async def test_messages_are_ordered_raw():
                     await comm.write({"op": "sync_handler", "val": ix})
                 else:
                     await comm.write({"op": "async_handler", "val": ix})
-            while not len(ledger) == n:
+            while len(ledger) != n:
                 await asyncio.sleep(0.01)
             assert ledger == list(range(n))
         finally:

@@ -55,14 +55,14 @@ def _fetch_memray_profile(
             return fd.read()
 
     report_filename = path.with_suffix(".html")
-    if not report_args[0] == "memray":
+    if report_args[0] != "memray":
         report_args = ["memray"] + list(report_args)
     assert "-f" not in report_args, "Cannot provide filename for report generation"
     assert "-o" not in report_args, (
         "Cannot provide output filename for report generation"
     )
     report_args = list(report_args) + ["-f", str(path), "-o", str(report_filename)]
-    subprocess.run(report_args)
+    subprocess.run(report_args, check=True)
     with open(report_filename, "rb") as fd:
         return fd.read()
 
@@ -70,7 +70,7 @@ def _fetch_memray_profile(
 @contextlib.contextmanager
 def memray_workers(
     directory: str | pathlib.Path = "memray-profiles",
-    workers: int | None | list[str] = None,
+    workers: int | list[str] | None = None,
     report_args: Sequence[str] | Literal[False] = (
         "flamegraph",
         "--temporal",

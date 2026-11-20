@@ -604,7 +604,7 @@ async def test_waiter(c, s, a, b):
     await c.gather(futures)
 
 
-@gen_cluster(client=True, client_kwargs=dict(set_as_default=False))
+@gen_cluster(client=True, client_kwargs={"set_as_default": False})
 # ^ NOTE: without `set_as_default=False`, `get_client()` within worker would return
 # the same client instance the test is using (because it's all one process).
 # Even with this, both workers will share the same client instance.
@@ -764,15 +764,14 @@ async def test_exception_async(client, s, a, b):
 def test_as_completed(client):
     ac = client.submit(Counter, actor=True).result()
     futures = [ac.increment() for _ in range(10)]
-    max = 0
+    max_value = 0
 
     for future in as_completed(futures):
         value = future.result()
-        if value > max:
-            max = value
+        max_value = max(max_value, value)
 
     assert all(future.done() for future in futures)
-    assert max == 10
+    assert max_value == 10
 
 
 @gen_cluster(client=True)
@@ -780,10 +779,10 @@ async def test_actor_future_awaitable(client, s, a, b):
     ac = await client.submit(Counter, actor=True)
     futures = [ac.increment() for _ in range(10)]
 
-    assert all([isinstance(future, BaseActorFuture) for future in futures])
+    assert all(isinstance(future, BaseActorFuture) for future in futures)
 
     out = await asyncio.gather(*futures)
-    assert all([future.done() for future in futures])
+    assert all(future.done() for future in futures)
     assert max(out) == 10
 
 

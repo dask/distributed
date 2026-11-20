@@ -960,20 +960,20 @@ class Worker(BaseWorker, ServerNode):
                 k = k[:1] + k[2:]
             digests[k] += v
 
-        out: dict = dict(
-            task_counts=self.state.task_counter.current_count(by_prefix=False),
-            bandwidth={
+        out: dict = {
+            "task_counts": self.state.task_counter.current_count(by_prefix=False),
+            "bandwidth": {
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
-            digests_total_since_heartbeat=dict(digests),
-            managed_bytes=self.state.nbytes,
-            spilled_bytes={
+            "digests_total_since_heartbeat": dict(digests),
+            "managed_bytes": self.state.nbytes,
+            "spilled_bytes": {
                 "memory": spilled_memory,
                 "disk": spilled_disk,
             },
-            transfer={
+            "transfer": {
                 "incoming_bytes": self.state.transfer_incoming_bytes,
                 "incoming_count": self.state.transfer_incoming_count,
                 "incoming_count_total": self.state.transfer_incoming_count_total,
@@ -981,8 +981,8 @@ class Worker(BaseWorker, ServerNode):
                 "outgoing_count": self.transfer_outgoing_count,
                 "outgoing_count_total": self.transfer_outgoing_count_total,
             },
-            event_loop_interval=self._tick_interval_observed,
-        )
+            "event_loop_interval": self._tick_interval_observed,
+        }
 
         monitor_recent = self.monitor.recent()
         # Convert {foo.bar: 123} to {foo: {bar: 123}}
@@ -994,27 +994,25 @@ class Worker(BaseWorker, ServerNode):
                 out[k] = v
 
         for k, metric in self.metrics.items():
-            try:
+            # TODO: log error once
+            with suppress(Exception):
                 result = metric(self)
                 if isawaitable(result):
                     result = await result
                 # In case of collision, prefer core metrics
                 out.setdefault(k, result)
-            except Exception:  # TODO: log error once
-                pass
 
         return out
 
     async def get_startup_information(self):
         result = {}
         for k, f in self.startup_information.items():
-            try:
+            # TODO: log error once
+            with suppress(Exception):
                 v = f(self)
                 if isawaitable(v):
                     v = await v
                 result[k] = v
-            except Exception:  # TODO: log error once
-                pass
 
         return result
 
@@ -1093,26 +1091,26 @@ class Worker(BaseWorker, ServerNode):
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
                 await comm.write(
-                    dict(
-                        op="register-worker",
-                        reply=False,
-                        address=self.contact_address,
-                        status=self.status.name,
-                        nthreads=self.state.nthreads,
-                        name=self.name,
-                        now=time(),
-                        resources=self.state.total_resources,
-                        memory_limit=self.memory_manager.memory_limit,
-                        local_directory=self.local_directory,
-                        services=self.service_ports,
-                        nanny=self.nanny,
-                        pid=os.getpid(),
-                        versions=get_versions(),
-                        metrics=await self.get_metrics(),
-                        extra=await self.get_startup_information(),
-                        stimulus_id=f"worker-connect-{time()}",
-                        server_id=self.id,
-                    ),
+                    {
+                        "op": "register-worker",
+                        "reply": False,
+                        "address": self.contact_address,
+                        "status": self.status.name,
+                        "nthreads": self.state.nthreads,
+                        "name": self.name,
+                        "now": time(),
+                        "resources": self.state.total_resources,
+                        "memory_limit": self.memory_manager.memory_limit,
+                        "local_directory": self.local_directory,
+                        "services": self.service_ports,
+                        "nanny": self.nanny,
+                        "pid": os.getpid(),
+                        "versions": get_versions(),
+                        "metrics": await self.get_metrics(),
+                        "extra": await self.get_startup_information(),
+                        "stimulus_id": f"worker-connect-{time()}",
+                        "server_id": self.id,
+                    },
                     serializers=["msgpack"],
                 )
                 future = comm.read(deserializers=["msgpack"])
@@ -1262,15 +1260,15 @@ class Worker(BaseWorker, ServerNode):
             return {"status": "OK"}
 
     def get_monitor_info(self, recent: bool = False, start: int = 0) -> dict[str, Any]:
-        result: dict[str, Any] = dict(
-            range_query=(
+        result: dict[str, Any] = {
+            "range_query": (
                 self.monitor.recent()
                 if recent
                 else self.monitor.range_query(start=start)
             ),
-            count=self.monitor.count,
-            last_time=self.monitor.last_time,
-        )
+            "count": self.monitor.count,
+            "last_time": self.monitor.last_time,
+        }
         if nvml.device_get_count() > 0:
             result["gpu_name"] = self.monitor.gpu_name
             result["gpu_memory_total"] = self.monitor.gpu_memory_total
@@ -1490,27 +1488,24 @@ class Worker(BaseWorker, ServerNode):
         for pc in self.periodic_callbacks.values():
             pc.stop()
 
-        if self._client:
-            # If this worker is the last one alive, clean up the worker
-            # initialized clients
-            if not any(
-                w
-                for w in Worker._instances
-                if w != self and w.status in WORKER_ANY_RUNNING
-            ):
-                for c in Worker._initialized_clients:
-                    # Regardless of what the client was initialized with
-                    # we'll require the result as a future. This is
-                    # necessary since the heuristics of asynchronous are not
-                    # reliable and we might deadlock here
-                    c._asynchronous = True
-                    if c.asynchronous:
-                        await c.close()
-                    else:
-                        # There is still the chance that even with us
-                        # telling the client to be async, itself will decide
-                        # otherwise
-                        c.close()
+        # If this worker is the last one alive, clean up the worker
+        # initialized clients
+        if self._client and not any(
+            w for w in Worker._instances if w != self and w.status in WORKER_ANY_RUNNING
+        ):
+            for c in Worker._initialized_clients:
+                # Regardless of what the client was initialized with
+                # we'll require the result as a future. This is
+                # necessary since the heuristics of asynchronous are not
+                # reliable and we might deadlock here
+                c._asynchronous = True
+                if c.asynchronous:
+                    await c.close()
+                else:
+                    # There is still the chance that even with us
+                    # telling the client to be async, itself will decide
+                    # otherwise
+                    c.close()
 
         self._stop_listeners()
         await self.rpc.close()
@@ -1557,10 +1552,9 @@ class Worker(BaseWorker, ServerNode):
                         _close, executor=executor, wait=executor_wait
                     )
                 except RuntimeError:
-                    logger.error(
+                    logger.exception(
                         "Could not close executor %r by dispatching to thread. Trying synchronously.",
                         executor,
-                        exc_info=True,
                     )
                     _close(
                         executor=executor, wait=executor_wait
@@ -2291,10 +2285,7 @@ class Worker(BaseWorker, ServerNode):
             # - A dependency was unspilled but failed to deserialize due to a bug in
             #   user-defined or third party classes.
             if ts.state in ("executing", "long-running"):
-                logger.error(
-                    f"Exception during execution of task {key!r}",
-                    exc_info=True,
-                )
+                logger.exception(f"Exception during execution of task {key!r}")
             return ExecuteFailureEvent.from_exception(
                 exc,
                 key=key,
@@ -2970,8 +2961,7 @@ def convert_args_to_str(args, max_len: int | None = None) -> str:
         length += len(sarg) + 2
         if max_len is not None and length > max_len:
             return "({}".format(", ".join(strs[: i + 1]))[:max_len]
-    else:
-        return "({})".format(", ".join(strs))
+    return "({})".format(", ".join(strs))
 
 
 def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
@@ -2990,8 +2980,7 @@ def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
         length += len(skwarg) + 2
         if max_len is not None and length > max_len:
             return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
-    else:
-        return "{{{}}}".format(", ".join(strs))
+    return "{{{}}}".format(", ".join(strs))
 
 
 async def run(server, comm, function, args=(), kwargs=None, wait=True):
@@ -3050,11 +3039,8 @@ def add_gpu_metrics():
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
 
 
-try:
+with suppress(Exception):
     import rmm as _rmm
-except Exception:
-    pass
-else:
 
     async def rmm_metric(worker):
         result = await offload(rmm.real_time)
@@ -3065,11 +3051,9 @@ else:
 
 # avoid importing cuDF unless explicitly enabled
 if dask.config.get("distributed.diagnostics.cudf"):
-    try:
+    with suppress(Exception):
         import cudf as _cudf
-    except Exception:
-        pass
-    else:
+
         from distributed.diagnostics import cudf
 
         async def cudf_metric(worker):

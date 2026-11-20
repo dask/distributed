@@ -256,12 +256,10 @@ class ChildProcessesChecker(ResourceChecker, name="processes"):
                         and any(
                             # Skip multiprocessing resource tracker
                             a.startswith(
-                                "from multiprocessing.resource_tracker import main"
-                            )
-                            # Skip forkserver process; the forkserver's children
-                            # however will be recorded normally
-                            or a.startswith(
-                                "from multiprocessing.forkserver import main"
+                                (
+                                    "from multiprocessing.resource_tracker import main",
+                                    "from multiprocessing.forkserver import main",
+                                )
                             )
                             for a in c.cmdline()
                         )
@@ -320,8 +318,10 @@ class TracemallocMemoryChecker(ResourceChecker, name="tracemalloc"):
         diff = snap_after.compare_to(snap_before, "traceback")
 
         lines = [
-            f"leaked {(bytes_after - bytes_before) / 2**20:.1f} MiB "
-            "of traced Python memory"
+            (
+                f"leaked {(bytes_after - bytes_before) / 2**20:.1f} MiB "
+                "of traced Python memory"
+            )
         ]
         for stat in diff[: self.NDIFF]:
             size_diff = stat.size_diff or stat.size

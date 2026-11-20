@@ -117,7 +117,7 @@ class PublishExtension:
 
     @log_errors
     def list(self) -> list[Key]:
-        return list(sorted(self.datasets, key=str))
+        return sorted(self.datasets, key=str)
 
     @log_errors
     def get(self, names: tuple[Key, ...]) -> list[PublishedDataset | None]:  # type: ignore[valid-type]

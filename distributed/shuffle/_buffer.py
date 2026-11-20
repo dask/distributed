@@ -5,6 +5,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Sized
+from types import TracebackType
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from distributed.metrics import context_meter, time
@@ -13,8 +14,9 @@ from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
-    # TODO import from collections.abc (requires Python >=3.12)
-    from typing_extensions import Buffer
+    # TODO import Self from typing (requires Python >=3.11)
+    # TODO import Buffer from collections.abc (requires Python >=3.12)
+    from typing_extensions import Buffer, Self
 else:
     Buffer = Sized
 
@@ -60,7 +62,7 @@ class ShardsBuffer(Generic[ShardType]):
 
     _accepts_input: bool
     _inputs_done: bool
-    _exception: None | Exception
+    _exception: Exception | None
     _tasks: list[asyncio.Task]
     _shards_available: asyncio.Condition
     _flush_lock: asyncio.Lock
@@ -257,8 +259,13 @@ class ShardsBuffer(Generic[ShardType]):
             self._shards_available.notify_all()
         await asyncio.gather(*self._tasks)
 
-    async def __aenter__(self) -> ShardsBuffer:
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, exc: Any, typ: Any, traceback: Any) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         await self.close()

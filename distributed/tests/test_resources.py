@@ -472,7 +472,7 @@ async def test_resources_from_config(c, s, a, b):
 
 
 @gen_cluster(
-    worker_kwargs=dict(resources={"my_resources": 10}),
+    worker_kwargs={"resources": {"my_resources": 10}},
     config={"distributed.worker.resources.my_resources": 1},
     client=True,
 )

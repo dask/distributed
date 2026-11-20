@@ -114,7 +114,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
                 if isinstance(r, OSError):
                     workers.append(w)
                 else:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: TRY004
                         f"Unexpected error encountered during P2P barrier: {r!r}"
                     )
             workers = [w for w, r in res.items() if r is not None]
@@ -359,7 +359,7 @@ class ShuffleSchedulerPlugin(SchedulerPlugin):
             # e.g. in a hash join.
             return
         if ts.annotations is None:
-            ts.annotations = dict()
+            ts.annotations = {}
         ts.annotations["shuffle_original_restrictions"] = (
             ts.worker_restrictions.copy()
             if ts.worker_restrictions is not None

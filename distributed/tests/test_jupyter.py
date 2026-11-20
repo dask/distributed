@@ -48,27 +48,27 @@ def test_jupyter_cli(loop, requires_default_ports):
 
     port = open_port()
 
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "scheduler",
-            "--jupyter",
-            "--dashboard-address",
-            "127.0.0.1:0",
-            "--host",
-            f"127.0.0.1:{port}",
-        ],
-        terminate_timeout=120,
-        kill_timeout=60,
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--jupyter",
+                "--dashboard-address",
+                "127.0.0.1:0",
+                "--host",
+                f"127.0.0.1:{port}",
+            ],
+            terminate_timeout=120,
+            kill_timeout=60,
+        ),
+        Client(f"127.0.0.1:{port}", loop=loop) as c,
     ):
-        with Client(f"127.0.0.1:{port}", loop=loop) as c:
-            dashboard_port = get_dashboard_port(c)
-            response = requests.get(
-                f"http://127.0.0.1:{dashboard_port}/jupyter/api/status"
-            )
-            assert response.status_code == 200
+        dashboard_port = get_dashboard_port(c)
+        response = requests.get(f"http://127.0.0.1:{dashboard_port}/jupyter/api/status")
+        assert response.status_code == 200
 
 
 @gen_test()

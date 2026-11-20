@@ -48,8 +48,8 @@ logger = logging.getLogger("distributed.worker.state_machine")
 if TYPE_CHECKING:
     from typing import ParamSpec, TypeAlias
 
-    # TODO import from typing (NotRequired requires Python >=3.11)
-    from typing_extensions import NotRequired
+    # TODO import from typing (requires Python >=3.11)
+    from typing_extensions import NotRequired, Self
 
     P = ParamSpec("P")
 
@@ -231,9 +231,9 @@ class TaskState:
     state: TaskStateState = "released"
     #: The previous state of the task. It is not None iff :attr:`state` in
     #: (cancelled, resumed).
-    previous: Literal["executing", "long-running", "flight", None] = None
+    previous: Literal["executing", "long-running", "flight"] | None = None
     #: The next state of the task. It is not None iff :attr:`state` == resumed.
-    next: Literal["fetch", "waiting", None] = None
+    next: Literal["fetch", "waiting"] | None = None
 
     #: The priority this task given by the scheduler. Determines run order.
     priority: tuple[int, ...] | None = None
@@ -571,7 +571,7 @@ class StateMachineEvent:
     # handled: float | None = field(init=False, default=None)
     _classes: ClassVar[dict[str, type[StateMachineEvent]]] = {}
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> StateMachineEvent:
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
         """Hack to initialize the ``handled`` attribute in Python <3.10"""
         self = object.__new__(cls)
         self.handled = None

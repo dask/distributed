@@ -106,9 +106,8 @@ def _import_module(name: str, file_dir: str | None = None) -> ModuleType:
         if file_dir is not None:
             basename = os.path.basename(name)
             copy_dst = os.path.join(file_dir, basename)
-            if os.path.exists(copy_dst):
-                if not filecmp.cmp(name, copy_dst):
-                    logger.error("File name collision: %s", basename)
+            if os.path.exists(copy_dst) and not filecmp.cmp(name, copy_dst):
+                logger.error("File name collision: %s", basename)
             shutil.copy(name, copy_dst)
             module = import_file(copy_dst)[0]
         else:
@@ -153,7 +152,7 @@ def _download_module(url: str) -> ModuleType:
 
     compiled = compile(source, url, "exec")
     module = ModuleType(url)
-    exec(compiled, module.__dict__)
+    exec(compiled, module.__dict__)  # noqa: S102
     return module
 
 
