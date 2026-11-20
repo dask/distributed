@@ -14,7 +14,7 @@ import dask
 from distributed.comm import get_address_host, get_tcp_server_addresses
 from distributed.core import Server
 from distributed.http.routing import RoutingApplication
-from distributed.utils import DequeHandler, clean_dashboard_address
+from distributed.utils import DequeHandler, clean_dashboard_address, sync
 from distributed.versions import get_versions
 
 
@@ -73,9 +73,16 @@ class ServerNode(Server):
                 )
 
     def stop_services(self):
+        sync(self.loop, self._stop_services)
+
+    async def _stop_services(self):
         if hasattr(self, "http_application"):
             for application in self.http_application.applications:
-                if hasattr(application, "stop") and callable(application.stop):
+                if hasattr(application, "stop_async") and callable(
+                    application.stop_async
+                ):
+                    await application.stop_async()
+                elif hasattr(application, "stop") and callable(application.stop):
                     application.stop()
         for service in self.services.values():
             service.stop()

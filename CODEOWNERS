@@ -1,8 +1,6 @@
-*  @fjetter
-
 # Dashboard
 distributed/dashboard/*  @jacobtomlinson
-distributed/diagnostics/*  @jacobtomlinson @fjetter
+distributed/diagnostics/*  @jacobtomlinson
 
 # Deployment tooling
 distributed/deploy/*  @jacobtomlinson

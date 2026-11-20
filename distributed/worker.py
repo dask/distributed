@@ -1483,7 +1483,7 @@ class Worker(BaseWorker, ServerNode):
                 if isawaitable(result):
                     await result
 
-        self.stop_services()
+        await self._stop_services()
 
         await self.preloads.teardown()
 
