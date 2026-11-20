@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import numba
-import numba.cuda
 import numpy
 import rmm
 
@@ -32,7 +30,7 @@ if hasattr(rmm, "DeviceBuffer"):
     @dask_serialize.register(rmm.DeviceBuffer)
     def dask_serialize_rmm_device_buffer(x):
         header, frames = cuda_serialize_rmm_device_buffer(x)
-        frames = [numba.cuda.as_cuda_array(f).copy_to_host().data for f in frames]
+        frames = [f.copy_to_host().data for f in frames]
         return header, frames
 
     @dask_deserialize.register(rmm.DeviceBuffer)

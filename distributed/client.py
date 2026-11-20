@@ -1607,13 +1607,14 @@ class Client(SyncMethodMixin):
 
     async def _update_scheduler_info(self, n_workers=0):
         if self.status not in ("running", "connecting") or self.scheduler is None:
-            return
+            return self._scheduler_identity
         try:
-            self._scheduler_identity = SchedulerInfo(
-                await self.scheduler.identity(n_workers=n_workers)
-            )
+            info = SchedulerInfo(await self.scheduler.identity(n_workers=n_workers))
         except OSError:
             logger.debug("Unable to query scheduler for identity")
+        else:
+            self._scheduler_identity = info
+        return self._scheduler_identity
 
     async def _wait_for_workers(
         self, n_workers: int, timeout: float | None = None
@@ -4525,7 +4526,13 @@ class Client(SyncMethodMixin):
                                          'time-delay': 0.0061032772064208984}}}
         """
         if not self.asynchronous:
-            self.sync(self._update_scheduler_info, n_workers=n_workers)
+            # Return the value fetched by this call directly, rather than
+            # reading back ``self._scheduler_identity``. The periodic
+            # ``_update_scheduler_info`` callback (which defaults to
+            # ``n_workers=0``, i.e. no per-worker info) runs on the event loop
+            # and may overwrite ``self._scheduler_identity`` between the sync
+            # call completing and our reading the attribute.
+            return self.sync(self._update_scheduler_info, n_workers=n_workers)
         return self._scheduler_identity
 
     def dump_cluster_state(
