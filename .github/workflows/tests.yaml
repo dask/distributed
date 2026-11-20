@@ -88,15 +88,15 @@ jobs:
             task: test-noqueue
             partition: not ci1
 
-          # Free-threading (WIP - tests don't pass yet)
-          # - os: ubuntu-latest
-          #   environment: py314t
-          #   task: test-ci
-          #   partition: ci1
-          # - os: ubuntu-latest
-          #   environment: py314t
-          #   task: test-ci
-          #   partition: not ci1
+          # Free-threading
+          - os: ubuntu-latest
+            environment: py314t
+            task: test-ci
+            partition: ci1
+          - os: ubuntu-latest
+            environment: py314t
+            task: test-ci
+            partition: not ci1
 
     steps:
       - name: Checkout source
