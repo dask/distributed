@@ -1392,7 +1392,9 @@ async def test_bokeh_relative(s, a, b):
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(f"http://localhost:{s.http_server.port}/status")
     assert response.code == 200
-    assert 'src="static/' in response.body.decode()
+    body = response.body.decode()
+    # Bokeh 4 emits root-relative URLs instead of plain relative ones
+    assert 'src="static/' in body or 'src="/static/' in body
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
