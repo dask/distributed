@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import suppress
 
 import psutil
 
@@ -33,14 +34,11 @@ def memory_limit() -> int:
             "/sys/fs/cgroup/memory.high",  # cgroups v2 soft limit
             "/sys/fs/cgroup/memory.low",  # cgroups v2 softest limit
         ]:
-            try:
-                with open(path) as f:
-                    cgroups_limit = int(f.read())
+            with suppress(Exception), open(path) as f:
+                cgroups_limit = int(f.read())
                 if cgroups_limit > 0:
                     path_used = path
                     limit = min(limit, cgroups_limit)
-            except Exception:
-                pass
         if path_used:
             logger.debug(
                 "Setting system memory limit based on cgroup value defined in %s",

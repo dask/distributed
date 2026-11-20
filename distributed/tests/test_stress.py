@@ -51,13 +51,12 @@ async def test_stress_1(c, s, a, b):
 @pytest.mark.slow
 @pytest.mark.parametrize(("func", "n"), [(slowinc, 100), (inc, 1000)])
 def test_stress_gc(loop, func, n):
-    with cluster() as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            x = c.submit(func, 1)
-            for _ in range(n):
-                x = c.submit(func, x)
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop) as c:
+        x = c.submit(func, 1)
+        for _ in range(n):
+            x = c.submit(func, x)
 
-            assert x.result() == n + 2
+        assert x.result() == n + 2
 
 
 @pytest.mark.skipif(WINDOWS, reason="test can leave dangling RPC objects")
@@ -86,15 +85,17 @@ def test_cancel_stress_sync(loop):
     da = pytest.importorskip("dask.array")
 
     x = da.random.random((50, 50), chunks=(2, 2))
-    with cluster(active_rpc_timeout=10) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            x = c.persist(x)
-            y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
-            wait(x)
-            for _ in range(5):
-                f = c.compute(y)
-                sleep(random.random())
-                c.cancel(f)
+    with (
+        cluster(active_rpc_timeout=10) as (s, [a, b]),
+        Client(s["address"], loop=loop) as c,
+    ):
+        x = c.persist(x)
+        y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
+        wait(x)
+        for _ in range(5):
+            f = c.compute(y)
+            sleep(random.random())
+            c.cancel(f)
 
 
 @pytest.mark.slow

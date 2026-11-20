@@ -71,23 +71,25 @@ def test_no_dashboard(loop, requires_default_ports):
 
     port = open_port()
 
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "scheduler",
-            "--host",
-            f"127.0.0.1:{port}",
-            "--dashboard-address",
-            "127.0.0.1:0",
-            "--no-dashboard",
-        ]
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--host",
+                f"127.0.0.1:{port}",
+                "--dashboard-address",
+                "127.0.0.1:0",
+                "--no-dashboard",
+            ]
+        ),
+        Client(f"127.0.0.1:{port}", loop=loop) as c,
     ):
-        with Client(f"127.0.0.1:{port}", loop=loop) as c:
-            dashboard_port = get_dashboard_port(c)
-            response = requests.get(f"http://127.0.0.1:{dashboard_port}/status/")
-            assert response.status_code == 404
+        dashboard_port = get_dashboard_port(c)
+        response = requests.get(f"http://127.0.0.1:{dashboard_port}/status/")
+        assert response.status_code == 404
 
 
 def test_dashboard(loop):
@@ -225,19 +227,20 @@ def test_interface(loop):
         )
 
     port = open_port()
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "scheduler",
-            f"--port={port}",
-            "--no-dashboard",
-            "--interface",
-            if_name,
-        ]
-    ) as s:
-        with popen(
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                f"--port={port}",
+                "--no-dashboard",
+                "--interface",
+                if_name,
+            ]
+        ) as s,
+        popen(
             [
                 sys.executable,
                 "-m",
@@ -248,15 +251,16 @@ def test_interface(loop):
                 "--interface",
                 if_name,
             ]
-        ) as a:
-            with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
-                start = time()
-                while not len(c.nthreads()):
-                    sleep(0.1)
-                    assert time() - start < 30
-                info = c.scheduler_info()
-                assert "tcp://127.0.0.1" in info["address"]
-                assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
+        ) as a,
+        Client(f"tcp://127.0.0.1:{port}", loop=loop) as c,
+    ):
+        start = time()
+        while not len(c.nthreads()):
+            sleep(0.1)
+            assert time() - start < 30
+        info = c.scheduler_info()
+        assert "tcp://127.0.0.1" in info["address"]
+        assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
@@ -298,8 +302,9 @@ def test_pid_file(loop):
         ) as sched:
             check_pidfile(sched, s)
 
-        with tmpfile() as w:
-            with popen(
+        with (
+            tmpfile() as w,
+            popen(
                 [
                     sys.executable,
                     "-m",
@@ -310,13 +315,15 @@ def test_pid_file(loop):
                     w,
                     "--no-dashboard",
                 ]
-            ) as worker:
-                check_pidfile(worker, w)
+            ) as worker,
+        ):
+            check_pidfile(worker, w)
 
 
 def test_scheduler_port_zero(loop):
-    with tmpfile() as fn:
-        with popen(
+    with (
+        tmpfile() as fn,
+        popen(
             [
                 sys.executable,
                 "-m",
@@ -328,29 +335,32 @@ def test_scheduler_port_zero(loop):
                 "--port",
                 "0",
             ]
-        ):
-            with Client(scheduler_file=fn, loop=loop) as c:
-                assert c.scheduler.port
-                assert c.scheduler.port != 8786
+        ),
+        Client(scheduler_file=fn, loop=loop) as c,
+    ):
+        assert c.scheduler.port
+        assert c.scheduler.port != 8786
 
 
 def test_dashboard_port_zero(loop):
     pytest.importorskip("bokeh")
     port = open_port()
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "scheduler",
-            "--host",
-            f"127.0.0.1:{port}",
-            "--dashboard-address",
-            ":0",
-        ],
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--host",
+                f"127.0.0.1:{port}",
+                "--dashboard-address",
+                ":0",
+            ],
+        ),
+        Client(f"tcp://127.0.0.1:{port}", loop=loop) as c,
     ):
-        with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
-            assert get_dashboard_port(c) > 0
+        assert get_dashboard_port(c) > 0
 
 
 PRELOAD_TEXT = """
@@ -374,8 +384,9 @@ def test_preload_file(loop, tmp_path):
     path = tmp_path / "scheduler_info.py"
     with open(path, "w") as f:
         f.write(PRELOAD_TEXT)
-    with tmpfile() as fn:
-        with popen(
+    with (
+        tmpfile() as fn,
+        popen(
             [
                 sys.executable,
                 "-m",
@@ -387,9 +398,10 @@ def test_preload_file(loop, tmp_path):
                 path,
                 f"--port={open_port()}",
             ]
-        ):
-            with Client(scheduler_file=fn, loop=loop) as c:
-                assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
+        ),
+        Client(scheduler_file=fn, loop=loop) as c,
+    ):
+        assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
 
 
 def test_preload_module(loop, tmp_path):
@@ -406,8 +418,9 @@ def test_preload_module(loop, tmp_path):
         env["PYTHONPATH"] = str(tmp_path) + ":" + env["PYTHONPATH"]
     else:
         env["PYTHONPATH"] = str(tmp_path)
-    with tmpfile() as fn:
-        with popen(
+    with (
+        tmpfile() as fn,
+        popen(
             [
                 sys.executable,
                 "-m",
@@ -420,19 +433,21 @@ def test_preload_module(loop, tmp_path):
                 f"--port={open_port()}",
             ],
             env=env,
-        ):
-            with Client(scheduler_file=fn, loop=loop) as c:
-                assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
+        ),
+        Client(scheduler_file=fn, loop=loop) as c,
+    ):
+        assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
 
 
 def test_preload_remote_module(loop, tmp_path):
     with open(tmp_path / "scheduler_info.py", "w") as f:
         f.write(PRELOAD_TEXT)
     http_server_port = open_port()
-    with popen(
-        [sys.executable, "-m", "http.server", str(http_server_port)], cwd=tmp_path
-    ):
-        with popen(
+    with (
+        popen(
+            [sys.executable, "-m", "http.server", str(http_server_port)], cwd=tmp_path
+        ),
+        popen(
             [
                 sys.executable,
                 "-m",
@@ -444,16 +459,15 @@ def test_preload_remote_module(loop, tmp_path):
                 f"http://localhost:{http_server_port}/scheduler_info.py",
                 f"--port={open_port()}",
             ]
-        ) as proc:
-            with Client(
-                scheduler_file=tmp_path / "scheduler-file.json", loop=loop
-            ) as c:
-                assert (
-                    c.run_on_scheduler(
-                        lambda dask_scheduler: getattr(dask_scheduler, "foo", None)
-                    )
-                    == "bar"
-                )
+        ) as proc,
+        Client(scheduler_file=tmp_path / "scheduler-file.json", loop=loop) as c,
+    ):
+        assert (
+            c.run_on_scheduler(
+                lambda dask_scheduler: getattr(dask_scheduler, "foo", None)
+            )
+            == "bar"
+        )
 
 
 def test_preload_config(loop):
@@ -462,14 +476,16 @@ def test_preload_config(loop):
     with tmpfile() as fn:
         env = os.environ.copy()
         env["DASK_DISTRIBUTED__SCHEDULER__PRELOAD"] = PRELOAD_TEXT
-        with popen(
-            [sys.executable, "-m", "dask", "scheduler", "--scheduler-file", fn], env=env
+        with (
+            popen(
+                [sys.executable, "-m", "dask", "scheduler", "--scheduler-file", fn],
+                env=env,
+            ),
+            Client(scheduler_file=fn, loop=loop) as c,
         ):
-            with Client(scheduler_file=fn, loop=loop) as c:
-                assert (
-                    c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.foo)
-                    == "bar"
-                )
+            assert (
+                c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.foo) == "bar"
+            )
 
 
 PRELOAD_COMMAND_TEXT = """
@@ -500,22 +516,24 @@ def test_preload_command(loop):
 
         with tmpfile() as fn:
             print(fn)
-            with popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "dask",
-                    "scheduler",
-                    "--scheduler-file",
-                    fn,
-                    "--preload",
-                    path,
-                    "--passthrough",
-                    "foobar",
-                ]
+            with (
+                popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "dask",
+                        "scheduler",
+                        "--scheduler-file",
+                        fn,
+                        "--preload",
+                        path,
+                        "--passthrough",
+                        "foobar",
+                    ]
+                ),
+                Client(scheduler_file=fn, loop=loop) as c,
             ):
-                with Client(scheduler_file=fn, loop=loop) as c:
-                    assert c.run_on_scheduler(check_passthrough) == "foobar"
+                assert c.run_on_scheduler(check_passthrough) == "foobar"
     finally:
         shutil.rmtree(tmpdir)
 
@@ -534,22 +552,24 @@ def test_preload_command_default(loop):
 
         with tmpfile() as fn2:
             print(fn2)
-            with popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "dask",
-                    "scheduler",
-                    "--scheduler-file",
-                    fn2,
-                    "--preload",
-                    path,
-                ],
-                stdout=sys.stdout,
-                stderr=sys.stderr,
+            with (
+                popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "dask",
+                        "scheduler",
+                        "--scheduler-file",
+                        fn2,
+                        "--preload",
+                        path,
+                    ],
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                ),
+                Client(scheduler_file=fn2, loop=loop) as c,
             ):
-                with Client(scheduler_file=fn2, loop=loop) as c:
-                    assert c.run_on_scheduler(check_passthrough) == "default"
+                assert c.run_on_scheduler(check_passthrough) == "default"
 
     finally:
         shutil.rmtree(tmpdir)
@@ -596,18 +616,19 @@ def dask_setup(worker):
     worker.foo = 'setup'
 """
     port = open_port()
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "scheduler",
-            "--no-dashboard",
-            "--host",
-            f"127.0.0.1:{port}",
-        ]
-    ) as s:
-        with popen(
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--no-dashboard",
+                "--host",
+                f"127.0.0.1:{port}",
+            ]
+        ) as s,
+        popen(
             [
                 sys.executable,
                 "-m",
@@ -620,13 +641,14 @@ def dask_setup(worker):
                 "--preload-nanny",
                 text,
             ]
-        ) as a:
-            with Client(f"127.0.0.1:{port}", loop=loop) as c:
-                c.wait_for_workers(1)
-                [foo] = c.run(lambda dask_worker: dask_worker.foo).values()
-                assert foo == "setup"
-                [foo] = c.run(lambda dask_worker: dask_worker.foo, nanny=True).values()
-                assert foo == "setup"
+        ) as a,
+        Client(f"127.0.0.1:{port}", loop=loop) as c,
+    ):
+        c.wait_for_workers(1)
+        [foo] = c.run(lambda dask_worker: dask_worker.foo).values()
+        assert foo == "setup"
+        [foo] = c.run(lambda dask_worker: dask_worker.foo, nanny=True).values()
+        assert foo == "setup"
 
 
 def test_multiple_workers(loop):

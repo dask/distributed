@@ -164,7 +164,7 @@ class CommunicatingStream(DashboardComponent):
 
         self.last_transfer_incoming_count_total = 0
         self.last_transfer_outgoing_count_total = 0
-        self.who = dict()
+        self.who = {}
 
     @without_property_validation
     @log_errors
@@ -344,7 +344,7 @@ class Counters(DashboardComponent):
         )
         fig.yaxis.visible = False
         fig.ygrid.visible = False
-        if name.endswith("bandwidth") or name.endswith("bytes"):
+        if name.endswith(("bandwidth", "bytes")):
             fig.xaxis[0].formatter = NumeralTickFormatter(format="0.0b")
 
         for i in range(n):

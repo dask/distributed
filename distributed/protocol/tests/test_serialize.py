@@ -144,9 +144,7 @@ def test_Serialize():
 
     u = Serialize(123)
     assert s == u
-    assert not (s != u)
     assert s != t
-    assert not (s == t)
     assert hash(s) == hash(u)
     assert hash(s) != hash(t)  # most probably
 
@@ -156,9 +154,7 @@ def test_Serialized():
     t = Serialized(*serialize((1, 2)))
     u = Serialized(*serialize(123))
     assert s == u
-    assert not (s != u)
     assert s != t
-    assert not (s == t)
 
 
 def test_nested_deserialize():
@@ -584,7 +580,7 @@ async def test_frame_split():
             marks=pytest.mark.xfail(reason="Only checks 0th element for now."),
         ),
         ([MyObj([0, 1, 2]), 1], True),
-        (tuple([MyObj(None)]), True),
+        ((MyObj(None),), True),
         ({("x", i): MyObj(5) for i in range(100)}, True),
         (memoryview(b"hello"), True),
         pytest.param(

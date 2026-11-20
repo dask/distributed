@@ -158,8 +158,7 @@ def test_map(client):
         it = e.map(slowinc, range(N), [0.3] * N, timeout=1.2)
         results = []
         with pytest.raises(TimeoutError):
-            for x in it:
-                results.append(x)
+            results.extend(it)
         assert 2 <= len(results) < 7
 
     with client.get_executor(pure=False) as e:

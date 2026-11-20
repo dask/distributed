@@ -57,7 +57,7 @@ async def test_persist(c, s, a, b):
     assert_equal(await c.compute(ddfp), await c.compute(ddf))
     del ddfp
 
-    while not sum(ts.state == "memory" for ts in s.tasks.values()) == 0:
+    while sum(ts.state == "memory" for ts in s.tasks.values()) != 0:
         await asyncio.sleep(0.01)
 
     # One collection but in a tuple
@@ -68,7 +68,7 @@ async def test_persist(c, s, a, b):
     assert_equal(await c.compute(ddfp), await c.compute(ddf))
     del ddfp
 
-    while not sum(ts.state == "memory" for ts in s.tasks.values()) == 0:
+    while sum(ts.state == "memory" for ts in s.tasks.values()) != 0:
         await asyncio.sleep(0.01)
 
     # Multiple collections
@@ -80,7 +80,7 @@ async def test_persist(c, s, a, b):
     assert_equal(await c.compute(ddfp1), await c.compute(ddf))
     assert_equal(await c.compute(ddfp2), await c.compute(ddf2))
     del ddfp1, ddfp2
-    while not sum(ts.state == "memory" for ts in s.tasks.values()) == 0:
+    while sum(ts.state == "memory" for ts in s.tasks.values()) != 0:
         await asyncio.sleep(0.01)
 
 

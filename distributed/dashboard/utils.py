@@ -44,11 +44,14 @@ def update(source, data):
         arrays
     3.  If profiling then perform the update in another callback
     """
-    if not np or not any(
-        isinstance(v, np.ndarray) for v in chain(source.data.values(), data.values())
-    ):
-        if source.data == data:
-            return
+    if (
+        not np
+        or not any(
+            isinstance(v, np.ndarray)
+            for v in chain(source.data.values(), data.values())
+        )
+    ) and source.data == data:
+        return
     if np and len(data[first(data)]) > 10:
         d = {}
         for k, v in data.items():

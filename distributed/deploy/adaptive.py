@@ -109,7 +109,7 @@ class Adaptive(AdaptiveCore):
         cluster: Cluster,
         interval: str | float | timedelta | None = None,
         minimum: int | None = None,
-        maximum: int | float | None = None,
+        maximum: float | None = None,
         wait_count: int | None = None,
         target_duration: str | float | timedelta | None = None,
         worker_key: (

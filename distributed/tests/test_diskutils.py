@@ -108,21 +108,21 @@ def test_workspace_process_crash(tmp_path):
 
     ws = WorkSpace(base_dir)
 
-    code = """if 1:
+    code = f"""if 1:
         import signal
         import sys
         import time
 
         from distributed.diskutils import WorkSpace
 
-        ws = WorkSpace(%(base_dir)r)
+        ws = WorkSpace({base_dir!r})
         a = ws.new_work_dir(name='aa')
         b = ws.new_work_dir(prefix='foo-')
         print((a.dir_path, b.dir_path))
         sys.stdout.flush()
 
         time.sleep(100)
-        """ % dict(base_dir=base_dir)
+        """
 
     p = subprocess.Popen(
         [sys.executable, "-c", code],
@@ -290,14 +290,14 @@ def test_workspace_concurrency(tmp_path):
 def test_unwritable_base_dir(tmp_path):
     os.mkdir(f"{tmp_path}/bad", mode=0o500)
     with pytest.raises(PermissionError):
-        open(f"{tmp_path}/bad/tryme", "w")
+        open(f"{tmp_path}/bad/tryme", "w").close()
 
     ws = WorkSpace(f"{tmp_path}/bad")
     assert ws.base_dir == f"{tmp_path}/bad-{os.getuid()}"
 
     os.chmod(f"{tmp_path}/bad-{os.getuid()}", 0o500)
     with pytest.raises(PermissionError):
-        open(f"{tmp_path}/bad-{os.getuid()}/tryme", "w")
+        open(f"{tmp_path}/bad-{os.getuid()}/tryme", "w").close()
 
     ws = WorkSpace(f"{tmp_path}/bad")
     assert ws.base_dir.startswith(f"{tmp_path}/bad-")

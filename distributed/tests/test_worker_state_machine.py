@@ -6,14 +6,14 @@ import pickle
 from collections import defaultdict
 from collections.abc import Iterator
 from time import sleep
+from typing import Any
 
 import pytest
 from tlz import first
 
 from dask.sizeof import sizeof
 
-import distributed.profile as profile
-from distributed import Nanny, Worker, wait
+from distributed import Nanny, Worker, profile, wait
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.protocol.serialize import Serialize
 from distributed.scheduler import TaskState as SchedulerTaskState
@@ -254,13 +254,13 @@ def test_WorkerState_pickle(ws):
     [
         (
             InvalidTransition,
-            dict(key="x", start="released", finish="waiting", story=[]),
+            {"key": "x", "start": "released", "finish": "waiting", "story": []},
         ),
         (
             TransitionCounterMaxExceeded,
-            dict(key="x", start="released", finish="waiting", story=[]),
+            {"key": "x", "start": "released", "finish": "waiting", "story": []},
         ),
-        (InvalidTaskState, dict(key="x", state="released", story=[])),
+        (InvalidTaskState, {"key": "x", "state": "released", "story": []}),
     ],
 )
 @pytest.mark.parametrize("positional", [False, True])
@@ -275,7 +275,7 @@ def test_pickle_exceptions(cls, kwargs, positional):
         assert getattr(e2, k) == v
 
 
-def traverse_subclasses(cls: type) -> Iterator[type]:
+def traverse_subclasses(cls: type[Any]) -> Iterator[type[Any]]:
     yield cls
     for subcls in cls.__subclasses__():
         yield from traverse_subclasses(subcls)
@@ -1033,7 +1033,7 @@ def test_aggregate_gather_deps(ws, nbytes, n_in_flight_per_worker, n_remote_work
     instructions = ws.handle_stimulus(
         AcquireReplicasEvent(
             who_has=who_has,
-            nbytes={task: nbytes for task in who_has.keys()},
+            nbytes={task: nbytes for task in who_has},
             stimulus_id="s1",
         )
     )

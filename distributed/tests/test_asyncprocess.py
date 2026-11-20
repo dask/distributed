@@ -114,7 +114,7 @@ async def test_simple():
     while wr1() is not None and time() < start + 1:
         # Perhaps the GIL switched before _watch_process() exit,
         # help it a little
-        sleep(0.001)
+        await asyncio.sleep(0.001)
         gc.collect()
 
     if wr1() is not None:

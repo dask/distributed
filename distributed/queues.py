@@ -28,8 +28,8 @@ class QueueExtension:
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.queues = dict()
-        self.client_refcount = dict()
+        self.queues = {}
+        self.client_refcount = {}
         self.future_refcount = defaultdict(int)
 
         self.scheduler.handlers.update(

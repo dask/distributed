@@ -772,15 +772,17 @@ async def test_retire_workers_with_tuple_keys(c, s, a, b):
 async def test_get_workers(c, s, a, b):
     aiohttp = pytest.importorskip("aiohttp")
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(
             "http://localhost:%d/api/v1/get_workers" % s.http_server.port
-        ) as resp:
-            assert resp.status == 200
-            assert resp.headers["Content-Type"] == "application/json"
-            workers_info = json.loads(await resp.text())["workers"]
-            workers_address = [worker.get("address") for worker in workers_info]
-            assert set(workers_address) == {a.address, b.address}
+        ) as resp,
+    ):
+        assert resp.status == 200
+        assert resp.headers["Content-Type"] == "application/json"
+        workers_info = json.loads(await resp.text())["workers"]
+        workers_address = [worker.get("address") for worker in workers_info]
+        assert set(workers_address) == {a.address, b.address}
 
 
 @gen_cluster(
@@ -794,14 +796,16 @@ async def test_get_workers(c, s, a, b):
 async def test_adaptive_target(c, s, a, b):
     aiohttp = pytest.importorskip("aiohttp")
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(
             "http://localhost:%d/api/v1/adaptive_target" % s.http_server.port
-        ) as resp:
-            assert resp.status == 200
-            assert resp.headers["Content-Type"] == "application/json"
-            num_workers = json.loads(await resp.text())["workers"]
-            assert num_workers == 0
+        ) as resp,
+    ):
+        assert resp.status == 200
+        assert resp.headers["Content-Type"] == "application/json"
+        num_workers = json.loads(await resp.text())["workers"]
+        assert num_workers == 0
 
 
 @gen_cluster(
@@ -815,14 +819,15 @@ async def test_adaptive_target(c, s, a, b):
 async def test_check_idle(c, s, a, b):
     aiohttp = pytest.importorskip("aiohttp")
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(
             "http://localhost:%d/api/v1/check_idle" % s.http_server.port
-        ) as resp:
-            assert resp.status == 200
-            assert resp.headers["Content-Type"] == "application/json"
-            response = json.loads(await resp.text())
-            assert (
-                isinstance(response["idle_since"], float)
-                or response["idle_since"] is None
-            )
+        ) as resp,
+    ):
+        assert resp.status == 200
+        assert resp.headers["Content-Type"] == "application/json"
+        response = json.loads(await resp.text())
+        assert (
+            isinstance(response["idle_since"], float) or response["idle_since"] is None
+        )

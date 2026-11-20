@@ -42,7 +42,7 @@ def async_ssh(cmd_dict):
     while True:  # Be robust to transient SSH failures.
         try:
             # Set paramiko logging to WARN or higher to squelch INFO messages.
-            logging.getLogger("paramiko").setLevel(logging.WARN)
+            logging.getLogger("paramiko").setLevel(logging.WARNING)
 
             ssh.connect(
                 hostname=cmd_dict["address"],

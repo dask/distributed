@@ -655,10 +655,12 @@ async def test_gather_skip(c, s, a):
     x = c.submit(div, 1, 0, priority=10)
     y = c.submit(slowinc, 1, delay=0.5)
 
-    with captured_logger("distributed.scheduler") as sched:
-        with captured_logger("distributed.client") as client:
-            L = await c.gather([x, y], errors="skip")
-            assert L == [2]
+    with (
+        captured_logger("distributed.scheduler") as sched,
+        captured_logger("distributed.client") as client,
+    ):
+        L = await c.gather([x, y], errors="skip")
+        assert L == [2]
 
     assert not client.getvalue()
     assert not sched.getvalue()
@@ -1292,11 +1294,10 @@ def test_current_nested(s, loop):
         assert Client.current() is c_outer
         assert Client.current(allow_global=False) is c_outer
 
-        with pytest.raises(MyException):
-            with Client(s["address"], loop=loop) as c_inner2:
-                assert Client.current() is c_inner2
-                assert Client.current(allow_global=False) is c_inner2
-                raise MyException
+        with pytest.raises(MyException), Client(s["address"], loop=loop) as c_inner2:
+            assert Client.current() is c_inner2
+            assert Client.current(allow_global=False) is c_inner2
+            raise MyException
 
         assert Client.current() is c_outer
         assert Client.current(allow_global=False) is c_outer
@@ -1411,15 +1412,14 @@ def test_global_clients(loop):
         r"\n  client = Client\('ip-addr-of-scheduler:8786'\)",
     ):
         default_client()
-    with cluster() as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            assert _get_global_client() is c
-            assert default_client() is c
-            with Client(s["address"], loop=loop) as f:
-                assert _get_global_client() is f
-                assert default_client() is f
-                assert default_client(c) is c
-                assert default_client(f) is f
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop) as c:
+        assert _get_global_client() is c
+        assert default_client() is c
+        with Client(s["address"], loop=loop) as f:
+            assert _get_global_client() is f
+            assert default_client() is f
+            assert default_client(c) is c
+            assert default_client(f) is f
 
     assert _get_global_client() is None
 
@@ -1829,8 +1829,10 @@ async def test_upload_file_egg(c, s, a, b):
                     f.write(f"b = {value}\n")
 
                 # compile these into an egg
-                subprocess.check_call(
-                    [sys.executable, "setup.py", "bdist_egg"], cwd=dirname
+                await asyncio.to_thread(
+                    subprocess.check_call,
+                    [sys.executable, "setup.py", "bdist_egg"],
+                    cwd=dirname,
                 )
 
                 egg_root = os.path.join(dirname, "dist")
@@ -1853,18 +1855,17 @@ async def test_upload_file_egg(c, s, a, b):
 async def test_upload_large_file(c, s, a, b):
     assert a.local_directory
     assert b.local_directory
-    with tmp_text("myfile", "abc") as fn:
-        with tmp_text("myfile2", "def") as fn2:
-            await c._upload_large_file(fn, remote_filename="x")
-            await c._upload_large_file(fn2)
+    with tmp_text("myfile", "abc") as fn, tmp_text("myfile2", "def") as fn2:
+        await c._upload_large_file(fn, remote_filename="x")
+        await c._upload_large_file(fn2)
 
-            for w in [a, b]:
-                assert os.path.exists(os.path.join(w.local_directory, "x"))
-                assert os.path.exists(os.path.join(w.local_directory, "myfile2"))
-                with open(os.path.join(w.local_directory, "x")) as f:
-                    assert f.read() == "abc"
-                with open(os.path.join(w.local_directory, "myfile2")) as f:
-                    assert f.read() == "def"
+        for w in [a, b]:
+            assert os.path.exists(os.path.join(w.local_directory, "x"))
+            assert os.path.exists(os.path.join(w.local_directory, "myfile2"))
+            with open(os.path.join(w.local_directory, "x")) as f:
+                assert f.read() == "abc"
+            with open(os.path.join(w.local_directory, "myfile2")) as f:
+                assert f.read() == "def"
 
 
 def test_upload_file_sync(c):
@@ -1881,15 +1882,13 @@ def test_upload_file_sync(c):
 
 @gen_cluster(client=True)
 async def test_upload_file_exception(c, s, a, b):
-    with tmp_text("myfile.py", "syntax-error!") as fn:
-        with pytest.raises(SyntaxError):
-            await c.upload_file(fn)
+    with tmp_text("myfile.py", "syntax-error!") as fn, pytest.raises(SyntaxError):
+        await c.upload_file(fn)
 
 
 def test_upload_file_exception_sync(c):
-    with tmp_text("myfile.py", "syntax-error!") as fn:
-        with pytest.raises(SyntaxError):
-            c.upload_file(fn)
+    with tmp_text("myfile.py", "syntax-error!") as fn, pytest.raises(SyntaxError):
+        c.upload_file(fn)
 
 
 @gen_cluster(client=True)
@@ -2146,7 +2145,7 @@ async def test_badly_serialized_input_stderr(capsys, c):
     future = c.submit(inc, o)
 
     while True:
-        sleep(0.01)
+        await asyncio.sleep(0.01)
         out, err = capsys.readouterr()
         if "hello!" in err:
             break
@@ -2474,30 +2473,32 @@ async def test_cancel_tuple_key(c, s, a, b):
 
 @gen_cluster()
 async def test_cancel_multi_client(s, a, b):
-    async with Client(s.address, asynchronous=True, name="c") as c:
-        async with Client(s.address, asynchronous=True, name="f") as f:
-            x = c.submit(slowinc, 1)
-            y = f.submit(slowinc, 1)
+    async with (
+        Client(s.address, asynchronous=True, name="c") as c,
+        Client(s.address, asynchronous=True, name="f") as f,
+    ):
+        x = c.submit(slowinc, 1)
+        y = f.submit(slowinc, 1)
 
-            assert x.key == y.key
+        assert x.key == y.key
 
-            # Ensure both clients are known to the scheduler.
-            await y
+        # Ensure both clients are known to the scheduler.
+        await y
+        await x
+
+        await c.cancel([x])
+
+        # Give the scheduler time to pass messages
+        await asyncio.sleep(0.1)
+
+        assert x.cancelled()
+        assert not y.cancelled()
+
+        out = await y
+        assert out == 2
+
+        with pytest.raises(CancelledError):
             await x
-
-            await c.cancel([x])
-
-            # Give the scheduler time to pass messages
-            await asyncio.sleep(0.1)
-
-            assert x.cancelled()
-            assert not y.cancelled()
-
-            out = await y
-            assert out == 2
-
-            with pytest.raises(CancelledError):
-                await x
 
 
 @gen_cluster(nthreads=[("", 1)], client=True)
@@ -2571,9 +2572,8 @@ async def test_map_different_lengths(c, s, a, b):
 
 
 def test_Future_exception_sync_2(loop, capsys):
-    with cluster() as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            assert dask.base.get_scheduler() == c.get
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop) as c:
+        assert dask.base.get_scheduler() == c.get
 
     out, err = capsys.readouterr()
     assert len(out.strip().split("\n")) == 1
@@ -3066,20 +3066,20 @@ async def test_rebalance_workers_and_keys(client, s, a, b, c):
 
 
 def test_rebalance_sync(loop):
-    with dask.config.set(REBALANCE_MANAGED_CONFIG):
-        with Client(
-            n_workers=2, processes=False, dashboard_address=":0", loop=loop
-        ) as c:
-            s = c.cluster.scheduler
-            a = c.cluster.workers[0]
-            b = c.cluster.workers[1]
-            futures = c.scatter(range(100), workers=[a.address])
+    with (
+        dask.config.set(REBALANCE_MANAGED_CONFIG),
+        Client(n_workers=2, processes=False, dashboard_address=":0", loop=loop) as c,
+    ):
+        s = c.cluster.scheduler
+        a = c.cluster.workers[0]
+        b = c.cluster.workers[1]
+        futures = c.scatter(range(100), workers=[a.address])
 
-            assert len(a.data) == 100
-            assert len(b.data) == 0
-            c.rebalance()
-            assert len(a.data) == 50
-            assert len(b.data) == 50
+        assert len(a.data) == 100
+        assert len(b.data) == 0
+        c.rebalance()
+        assert len(a.data) == 50
+        assert len(b.data) == 50
 
 
 @gen_cluster(client=True, config=NO_AMM)
@@ -3577,8 +3577,8 @@ async def test_get_foo(c, s, a, b):
 
 
 def assert_dict_key_equal(expected, actual):
-    assert set(expected.keys()) == set(actual.keys())
-    for k in actual.keys():
+    assert expected.keys() == actual.keys()
+    for k in actual:
         ev = expected[k]
         av = actual[k]
         assert list(ev) == list(av)
@@ -3622,9 +3622,11 @@ async def test_get_foo_lost_keys(c, s, u, v, w):
 )
 async def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
-    with captured_logger("distributed.scheduler") as logger:
-        with pytest.raises(KilledWorker) as info:
-            await f
+    with (
+        captured_logger("distributed.scheduler") as logger,
+        pytest.raises(KilledWorker) as info,
+    ):
+        await f
 
     text = logger.getvalue()
     assert f.key in text
@@ -4237,16 +4239,15 @@ def test_as_current_is_thread_local(s, loop):
     cm_before_exit = threading.Barrier(parties=parties, timeout=15)
 
     def run():
-        with Client(s["address"], loop=loop) as c:
-            with c.as_current():
-                cm_after_enter.wait()
-                try:
-                    # This line runs only when all parties are inside the
-                    # context manager
-                    assert Client.current(allow_global=False) is c
-                    assert default_client() is c
-                finally:
-                    cm_before_exit.wait()
+        with Client(s["address"], loop=loop) as c, c.as_current():
+            cm_after_enter.wait()
+            try:
+                # This line runs only when all parties are inside the
+                # context manager
+                assert Client.current(allow_global=False) is c
+                assert default_client() is c
+            finally:
+                cm_before_exit.wait()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=parties) as tpe:
         for fut in concurrent.futures.as_completed(
@@ -4863,7 +4864,7 @@ async def test_restart_workers_no_nanny_raises_many_workers(c, s, *workers):
 async def test_restart_workers_kill_timeout(c, s, a, raise_for_error):
     # FIXME a timeout _too_ tight causes the scheduler to hang as wait_for cancels
     # the nanny.kill RPC too soon.
-    kwargs = dict(workers=[a.worker_address], timeout=2)
+    kwargs = {"workers": [a.worker_address], "timeout": 2}
 
     if raise_for_error:  # default is to raise
         with pytest.raises(TimeoutError) as excinfo:
@@ -4889,7 +4890,7 @@ async def test_restart_workers_restart_timeout(c, s, raise_for_error):
         # FIXME a timeout _too_ tight causes the scheduler to hang as wait_for cancels
         # the nanny.kill RPC too soon. We also don't want to accidentally time out on
         # the previous step that calls nanny.kill().
-        kwargs = dict(workers=[a.worker_address], timeout=3)
+        kwargs = {"workers": [a.worker_address], "timeout": 3}
 
         if raise_for_error:  # default is to raise
             with pytest.raises(TimeoutError) as excinfo:
@@ -5486,12 +5487,14 @@ def test_use_synchronous_client_in_async_context(loop, c):
 def test_quiet_quit_when_cluster_leaves(loop_in_thread):
     loop = loop_in_thread
     with LocalCluster(loop=loop, dashboard_address=":0", silence_logs=False) as cluster:
-        with captured_logger("distributed.comm") as sio:
-            with Client(cluster, loop=loop) as client:
-                futures = client.map(lambda x: x + 1, range(10))
-                sleep(0.05)
-                cluster.close()
-                sleep(0.05)
+        with (
+            captured_logger("distributed.comm") as sio,
+            Client(cluster, loop=loop) as client,
+        ):
+            futures = client.map(lambda x: x + 1, range(10))
+            sleep(0.05)
+            cluster.close()
+            sleep(0.05)
 
         text = sio.getvalue()
         assert not text
@@ -5779,10 +5782,12 @@ async def test_avoid_delayed_finalize(c, s, a, b):
 
 @gen_cluster()
 async def test_config_scheduler_address(s, a, b):
-    with dask.config.set({"scheduler-address": s.address}):
-        with captured_logger("distributed.client") as sio:
-            async with Client(asynchronous=True) as c:
-                assert c.scheduler.address == s.address
+    with (
+        dask.config.set({"scheduler-address": s.address}),
+        captured_logger("distributed.client") as sio,
+    ):
+        async with Client(asynchronous=True) as c:
+            assert c.scheduler.address == s.address
 
     assert sio.getvalue() == f"Config value `scheduler-address` found: {s.address}\n"
 
@@ -5856,15 +5861,17 @@ async def test_quiet_scheduler_loss(c, s):
 def test_dashboard_link(loop, monkeypatch):
     monkeypatch.setenv("USER", "myusername")
 
-    with cluster(scheduler_kwargs={"dashboard_address": ":12355"}) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            with dask.config.set(
-                {"distributed.dashboard.link": "{scheme}://foo-{USER}:{port}/status"}
-            ):
-                link = "http://foo-myusername:12355/status"
-                assert link == c.dashboard_link
-                text = c._repr_html_()
-                assert link in text
+    with (
+        cluster(scheduler_kwargs={"dashboard_address": ":12355"}) as (s, [a, b]),
+        Client(s["address"], loop=loop) as c,
+        dask.config.set(
+            {"distributed.dashboard.link": "{scheme}://foo-{USER}:{port}/status"}
+        ),
+    ):
+        link = "http://foo-myusername:12355/status"
+        assert link == c.dashboard_link
+        text = c._repr_html_()
+        assert link in text
 
 
 @gen_test()
@@ -6270,14 +6277,14 @@ async def test_file_descriptors_dont_leak(Worker):
 
     proc = psutil.Process()
     before = proc.num_fds()
-    async with Scheduler(dashboard_address=":0") as s:
-        async with (
-            Worker(s.address),
-            Worker(s.address),
-            Client(s.address, asynchronous=True) as c,
-        ):
-            assert proc.num_fds() > before
-            await c.persist(df.sum())
+    async with (
+        Scheduler(dashboard_address=":0") as s,
+        Worker(s.address),
+        Worker(s.address),
+        Client(s.address, asynchronous=True) as c,
+    ):
+        assert proc.num_fds() > before
+        await c.persist(df.sum())
 
     start = time()
     while proc.num_fds() > before:
@@ -6292,23 +6299,27 @@ async def test_dashboard_link_cluster():
         def dashboard_link(self):
             return "http://foo.com"
 
-    async with MyCluster(
-        processes=False, asynchronous=True, dashboard_address=":0"
-    ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            assert "http://foo.com" in client._repr_html_()
+    async with (
+        MyCluster(
+            processes=False, asynchronous=True, dashboard_address=":0"
+        ) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
+        assert "http://foo.com" in client._repr_html_()
 
 
 @gen_test()
 async def test_shutdown():
-    async with Scheduler(dashboard_address=":0") as s:
-        async with Worker(s.address) as w:
-            async with Client(s.address, asynchronous=True) as c:
-                await c.shutdown()
+    async with (
+        Scheduler(dashboard_address=":0") as s,
+        Worker(s.address) as w,
+        Client(s.address, asynchronous=True) as c,
+    ):
+        await c.shutdown()
 
-                assert s.status == Status.closed
-                assert w.status in {Status.closed, Status.closing}
-                assert c.status == "closed"
+        assert s.status == Status.closed
+        assert w.status in {Status.closed, Status.closing}
+        assert c.status == "closed"
 
 
 @gen_test()
@@ -6326,11 +6337,13 @@ async def test_shutdown_localcluster():
 
 @gen_test()
 async def test_shutdown_stops_callbacks():
-    async with Scheduler(dashboard_address=":0") as s:
-        async with Worker(s.address) as w:
-            async with Client(s.address, asynchronous=True) as c:
-                await c.shutdown()
-                assert not any(pc.is_running() for pc in c._periodic_callbacks.values())
+    async with (
+        Scheduler(dashboard_address=":0") as s,
+        Worker(s.address) as w,
+        Client(s.address, asynchronous=True) as c,
+    ):
+        await c.shutdown()
+        assert not any(pc.is_running() for pc in c._periodic_callbacks.values())
 
 
 @gen_test()
@@ -6363,14 +6376,16 @@ async def test_client_is_quiet_cluster_close():
 @gen_test()
 async def test_config_inherited_by_subprocess():
     with dask.config.set(foo=100):
-        async with LocalCluster(
-            n_workers=1,
-            asynchronous=True,
-            processes=True,
-            dashboard_address=":0",
-        ) as lc:
-            async with Client(lc, asynchronous=True) as c:
-                assert await c.submit(dask.config.get, "foo") == 100
+        async with (
+            LocalCluster(
+                n_workers=1,
+                asynchronous=True,
+                processes=True,
+                dashboard_address=":0",
+            ) as lc,
+            Client(lc, asynchronous=True) as c,
+        ):
+            assert await c.submit(dask.config.get, "foo") == 100
 
 
 @gen_cluster(client=True)
@@ -6510,10 +6525,9 @@ def test_client_sync_with_async_def(loop):
         await asyncio.sleep(0.01)
         return 1
 
-    with cluster() as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            assert sync(loop, ff) == 1
-            assert c.sync(ff) == 1
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop) as c:
+        assert sync(loop, ff) == 1
+        assert c.sync(ff) == 1
 
 
 @pytest.mark.skip(reason="known intermittent failure")
@@ -6711,12 +6725,12 @@ def test_futures_in_subgraphs(loop_in_thread):
     with cluster() as (s, [a, b]), Client(s["address"], loop=loop_in_thread) as c:
         ddf = dd.from_pandas(
             pd.DataFrame(
-                dict(
-                    uid=range(50),
-                    enter_time=pd.date_range(
+                {
+                    "uid": range(50),
+                    "enter_time": pd.date_range(
                         start="2020-01-01", end="2020-09-01", periods=50, tz="UTC"
                     ),
-                )
+                }
             ),
             npartitions=5,
         )
@@ -7045,20 +7059,22 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
     scheduler_addr = c.scheduler.address
 
     def f(x):
-        with LocalCluster(
-            n_workers=1,
-            processes=False,
-            dashboard_address=":0",
-            worker_dashboard_address=":0",
-            loop=None,
-        ) as cluster2:
-            with Client(cluster2) as c1:
-                c2 = get_client()
+        with (
+            LocalCluster(
+                n_workers=1,
+                processes=False,
+                dashboard_address=":0",
+                worker_dashboard_address=":0",
+                loop=None,
+            ) as cluster2,
+            Client(cluster2) as c1,
+        ):
+            c2 = get_client()
 
-                c1_scheduler = c1.scheduler.address
-                c2_scheduler = c2.scheduler.address
-                assert c1_scheduler != c2_scheduler
-                assert c2_scheduler == scheduler_addr
+            c1_scheduler = c1.scheduler.address
+            c2_scheduler = c2.scheduler.address
+            assert c1_scheduler != c2_scheduler
+            assert c2_scheduler == scheduler_addr
 
     await c.gather(c.map(f, range(2)))
     await a.close()
@@ -7106,11 +7122,13 @@ def test_computation_code_walk_frames():
     assert nested[-2].lineno_relative == nested_call_lineno_relative
     assert nested[-2].filename == __file__
 
-    with pytest.raises(TypeError, match="Ignored modules must be a list"):
-        with dask.config.set(
+    with (
+        pytest.raises(TypeError, match="Ignored modules must be a list"),
+        dask.config.set(
             {"distributed.diagnostics.computations.ignore-modules": "test_client"}
-        ):
-            code = Client._get_computation_code()
+        ),
+    ):
+        code = Client._get_computation_code()
 
     with dask.config.set(
         {
@@ -7447,21 +7465,23 @@ async def test_upload_directory_to_scheduler(mode, tmp_path):
 
         return bar.x
 
-    async with SubprocessCluster(
-        asynchronous=True,
-        dashboard_address=":0",
-        scheduler_kwargs={"idle_timeout": "5s"},
-        worker_kwargs={"death_timeout": "5s"},
-    ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            with pytest.raises(ModuleNotFoundError, match="'bar'"):
-                res = await client.run_on_scheduler(f)
+    async with (
+        SubprocessCluster(
+            asynchronous=True,
+            dashboard_address=":0",
+            scheduler_kwargs={"idle_timeout": "5s"},
+            worker_kwargs={"death_timeout": "5s"},
+        ) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
+        with pytest.raises(ModuleNotFoundError, match="'bar'"):
+            res = await client.run_on_scheduler(f)
 
-            plugin = UploadDirectory(
-                tmp_path, mode=mode, restart_workers=True, update_path=True
-            )
-            await client.register_plugin(plugin)
-            assert await client.run_on_scheduler(f) == 123
+        plugin = UploadDirectory(
+            tmp_path, mode=mode, restart_workers=True, update_path=True
+        )
+        await client.register_plugin(plugin)
+        assert await client.run_on_scheduler(f) == 123
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])
@@ -7715,7 +7735,7 @@ async def test_forward_logging(c, s, a, b):
         try:
             raise ValueError("wrong value")
         except ValueError:
-            logging.getLogger("test.logger").error("oops", exc_info=True)
+            logging.getLogger("test.logger").exception("oops")
 
     with captured_logger(client_side_logger) as log:
         await c.submit(do_exception)
@@ -7990,7 +8010,6 @@ class TestClientSecurityLoader:
 
         def loader(info):
             loader.called = True
-            return None
 
         with dask.config.set(config):
             async with Scheduler(dashboard_address=":0", protocol="tls") as scheduler:
@@ -8010,12 +8029,16 @@ class TestClientSecurityLoader:
     async def test_security_loader_import_failed(self):
         security = tls_only_security()
 
-        with dask.config.set(
-            {"distributed.client.security-loader": "totally_fake_module_name_2.loader"}
+        with (
+            dask.config.set(
+                {
+                    "distributed.client.security-loader": "totally_fake_module_name_2.loader"
+                }
+            ),
+            pytest.raises(ImportError, match="totally_fake_module_name_2.loader"),
         ):
-            with pytest.raises(ImportError, match="totally_fake_module_name_2.loader"):
-                async with Client("tls://bad-address:8888", asynchronous=True):
-                    pass
+            async with Client("tls://bad-address:8888", asynchronous=True):
+                pass
 
 
 @pytest.mark.skip(reason="This is very slow and probably not worth the cost")

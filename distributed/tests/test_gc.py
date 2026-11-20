@@ -127,7 +127,6 @@ def test_gc_diagnosis_rss_win():
     def make_refcycle(nbytes):
         l = [b"x" * nbytes]
         l.append(l)
-        return
 
     with enable_gc_diagnosis_and_log(diag) as sio:
         make_refcycle(100 * 1024)

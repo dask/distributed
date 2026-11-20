@@ -47,23 +47,25 @@ async def test_n_workers():
 @pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @gen_test()
 async def test_scale_up_and_down():
-    async with SubprocessCluster(
-        n_workers=0,
-        silence_logs=False,
-        dashboard_address=":0",
-        asynchronous=True,
-    ) as cluster:
-        async with Client(cluster, asynchronous=True) as c:
-            assert not cluster.workers
+    async with (
+        SubprocessCluster(
+            n_workers=0,
+            silence_logs=False,
+            dashboard_address=":0",
+            asynchronous=True,
+        ) as cluster,
+        Client(cluster, asynchronous=True) as c,
+    ):
+        assert not cluster.workers
 
-            cluster.scale(2)
-            await c.wait_for_workers(2)
-            assert len(cluster.workers) == 2
+        cluster.scale(2)
+        await c.wait_for_workers(2)
+        assert len(cluster.workers) == 2
 
-            cluster.scale(1)
-            await cluster
+        cluster.scale(1)
+        await cluster
 
-            assert len(cluster.workers) == 1
+        assert len(cluster.workers) == 1
 
 
 @pytest.mark.skipif(WINDOWS, reason="distributed#7434")

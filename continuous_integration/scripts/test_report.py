@@ -283,9 +283,7 @@ def dataframe_from_jxml(run: Iterable) -> pandas.DataFrame:
                 continue
             result = result[0]
             m = result.message if result and hasattr(result, "message") else ""
-            if isinstance(result, junitparser.Error):
-                s = "x"
-            elif isinstance(result, junitparser.Failure):
+            if isinstance(result, (junitparser.Error, junitparser.Failure)):
                 s = "x"
             elif isinstance(result, junitparser.Skipped):
                 s = "s"
@@ -421,7 +419,7 @@ def make_chart(name, df, times):
 
     # Create a grid with hover tooltip for error messages
     return altair.Chart(df).mark_rect(stroke="gray").encode(
-        x=altair.X("date:O", scale=altair.Scale(domain=sorted(list(times)))),
+        x=altair.X("date:O", scale=altair.Scale(domain=sorted(times))),
         y=altair.Y("suite:N", title=None),
         href=altair.Href("html_url:N"),
         color=altair.Color(
