@@ -279,6 +279,7 @@ class TaskState:
     _instances: ClassVar[weakref.WeakSet[TaskState]] = weakref.WeakSet()
 
     # Support for weakrefs to a class with __slots__
+    # TODO use @dataclass(weakref_slot=True) (requires Python >=3.11)
     __weakref__: Any = field(init=False)
 
     def __post_init__(self) -> None:
@@ -337,11 +338,10 @@ class TaskState:
         return {k: v for k, v in out.items() if v and k != "prefix"}
 
 
-@dataclass
+@dataclass(slots=True)
 class Instruction:
     """Command from the worker state machine to the Worker, in response to an event"""
 
-    __slots__ = ("stimulus_id",)
     stimulus_id: str
 
     @classmethod
@@ -397,23 +397,20 @@ class _InstructionMatch:
         return all(getattr(other, k) == v for k, v in self.kwargs.items())
 
 
-@dataclass
+@dataclass(slots=True)
 class GatherDep(Instruction):
-    __slots__ = ("worker", "to_gather", "total_nbytes")
     worker: str
     to_gather: set[Key]
     total_nbytes: int
 
 
-@dataclass
+@dataclass(slots=True)
 class Execute(Instruction):
-    __slots__ = ("key",)
     key: Key
 
 
-@dataclass
+@dataclass(slots=True)
 class RetryBusyWorkerLater(Instruction):
-    __slots__ = ("worker",)
     worker: str
 
 
@@ -430,7 +427,7 @@ class SendMessageToScheduler(Instruction):
         return d
 
 
-@dataclass
+@dataclass(slots=True)
 class TaskFinishedMsg(SendMessageToScheduler):
     op = "task-finished"
 
@@ -442,7 +439,6 @@ class TaskFinishedMsg(SendMessageToScheduler):
     metadata: dict
     thread: int | None
     startstops: list[StartStop]
-    __slots__ = tuple(__annotations__)
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -450,7 +446,7 @@ class TaskFinishedMsg(SendMessageToScheduler):
         return d
 
 
-@dataclass
+@dataclass(slots=True)
 class TaskErredMsg(SendMessageToScheduler):
     op = "task-erred"
 
@@ -462,7 +458,6 @@ class TaskErredMsg(SendMessageToScheduler):
     traceback_text: str
     thread: int | None
     startstops: list[StartStop]
-    __slots__ = tuple(__annotations__)
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -487,42 +482,38 @@ class TaskErredMsg(SendMessageToScheduler):
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class ReleaseWorkerDataMsg(SendMessageToScheduler):
     op = "release-worker-data"
 
-    __slots__ = ("key",)
     key: Key
 
 
 # Not to be confused with RescheduleEvent below or the distributed.Reschedule Exception
-@dataclass
+@dataclass(slots=True)
 class RescheduleMsg(SendMessageToScheduler):
     op = "reschedule"
 
-    __slots__ = ("key",)
     key: Key
 
 
-@dataclass
+@dataclass(slots=True)
 class LongRunningMsg(SendMessageToScheduler):
     op = "long-running"
 
-    __slots__ = ("key", "run_id", "compute_duration")
     key: Key
     run_id: int
     compute_duration: float | None
 
 
-@dataclass
+@dataclass(slots=True)
 class AddKeysMsg(SendMessageToScheduler):
     op = "add-keys"
 
-    __slots__ = ("keys",)
     keys: Collection[Key]
 
 
-@dataclass
+@dataclass(slots=True)
 class RequestRefreshWhoHasMsg(SendMessageToScheduler):
     """Worker -> Scheduler asynchronous request for updated who_has information.
     Not to be confused with the scheduler.who_has synchronous RPC call, which is used
@@ -538,11 +529,10 @@ class RequestRefreshWhoHasMsg(SendMessageToScheduler):
 
     op = "request-refresh-who-has"
 
-    __slots__ = ("keys",)
     keys: Collection[Key]
 
 
-@dataclass
+@dataclass(slots=True)
 class StealResponseMsg(SendMessageToScheduler):
     """Worker->Scheduler response to ``{op: steal-request}``
 
@@ -553,29 +543,19 @@ class StealResponseMsg(SendMessageToScheduler):
 
     op = "steal-response"
 
-    __slots__ = ("key", "state")
     key: Key
     state: TaskStateState | None
 
 
-@dataclass
+@dataclass(slots=True)
 class StateMachineEvent:
     """Base abstract class for all stimuli that can modify the worker state"""
 
-    __slots__ = ("stimulus_id", "handled")
     #: Unique ID of the event
     stimulus_id: str
     #: timestamp of when the event was handled by the worker
-    # TODO Switch to @dataclass(slots=True), uncomment the line below, and remove the
-    #      __new__ method (requires Python >=3.10)
-    # handled: float | None = field(init=False, default=None)
+    handled: float | None = field(init=False, default=None)
     _classes: ClassVar[dict[str, type[StateMachineEvent]]] = {}
-
-    def __new__(cls, *args: Any, **kwargs: Any) -> StateMachineEvent:
-        """Hack to initialize the ``handled`` attribute in Python <3.10"""
-        self = object.__new__(cls)
-        self.handled = None
-        return self
 
     def __init_subclass__(cls) -> None:
         StateMachineEvent._classes[cls.__name__] = cls
@@ -623,38 +603,34 @@ class StateMachineEvent:
         """Optional post-processing after an instance is created by ``from_dict``"""
 
 
-@dataclass
+@dataclass(slots=True)
 class PauseEvent(StateMachineEvent):
-    __slots__ = ()
+    pass
 
 
-@dataclass
+@dataclass(slots=True)
 class UnpauseEvent(StateMachineEvent):
-    __slots__ = ()
+    pass
 
 
-@dataclass
+@dataclass(slots=True)
 class RetryBusyWorkerEvent(StateMachineEvent):
-    __slots__ = ("worker",)
     worker: str
 
 
-@dataclass
+@dataclass(slots=True)
 class GatherDepDoneEvent(StateMachineEvent):
     """:class:`GatherDep` instruction terminated (abstract base class)"""
 
-    __slots__ = ("worker", "total_nbytes")
     worker: str
     total_nbytes: int  # Must be the same as in GatherDep instruction
 
 
-@dataclass
+@dataclass(slots=True)
 class GatherDepSuccessEvent(GatherDepDoneEvent):
     """:class:`GatherDep` instruction terminated:
     remote worker fetched successfully
     """
-
-    __slots__ = ("data",)
 
     data: dict[Key, object]  # There may be fewer keys than in GatherDep
 
@@ -668,25 +644,21 @@ class GatherDepSuccessEvent(GatherDepDoneEvent):
         self.data = {k: None for k in self.data}
 
 
-@dataclass
+@dataclass(slots=True)
 class GatherDepBusyEvent(GatherDepDoneEvent):
     """:class:`GatherDep` instruction terminated:
     remote worker is busy
     """
 
-    __slots__ = ()
 
-
-@dataclass
+@dataclass(slots=True)
 class GatherDepNetworkFailureEvent(GatherDepDoneEvent):
     """:class:`GatherDep` instruction terminated:
     network failure while trying to communicate with remote worker
     """
 
-    __slots__ = ()
 
-
-@dataclass
+@dataclass(slots=True)
 class GatherDepFailureEvent(GatherDepDoneEvent):
     """class:`GatherDep` instruction terminated:
     generic error raised (not a network failure); e.g. data failed to deserialize.
@@ -696,7 +668,6 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
-    __slots__ = tuple(__annotations__)
 
     def _after_from_dict(self) -> None:
         self.exception = Serialize(Exception())
@@ -723,13 +694,12 @@ class GatherDepFailureEvent(GatherDepDoneEvent):
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class RemoveWorkerEvent(StateMachineEvent):
     worker: str
-    __slots__ = ("worker",)
 
 
-@dataclass
+@dataclass(slots=True)
 class ComputeTaskEvent(StateMachineEvent):
     key: Key
     run_id: int
@@ -741,8 +711,6 @@ class ComputeTaskEvent(StateMachineEvent):
     actor: bool
     annotations: dict
     span_id: str | None
-
-    __slots__ = tuple(__annotations__)
 
     def __post_init__(self) -> None:
         # Fixes after msgpack decode
@@ -804,17 +772,16 @@ class ComputeTaskEvent(StateMachineEvent):
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class ExecuteDoneEvent(StateMachineEvent):
     """Abstract base event for all the possible outcomes of a :class:`Compute`
     instruction
     """
 
     key: Key
-    __slots__ = ("key",)
 
 
-@dataclass
+@dataclass(slots=True)
 class ExecuteSuccessEvent(ExecuteDoneEvent):
     run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     value: object
@@ -822,7 +789,6 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
     stop: float
     nbytes: int
     type: type | None
-    __slots__ = tuple(__annotations__)
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
         out = copy(self)
@@ -865,7 +831,7 @@ class ExecuteSuccessEvent(ExecuteDoneEvent):
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class ExecuteFailureEvent(ExecuteDoneEvent):
     run_id: int  # FIXME: Utilize the run ID in all ExecuteDoneEvents
     start: float | None
@@ -874,7 +840,6 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
     traceback: Serialize | None
     exception_text: str
     traceback_text: str
-    __slots__ = tuple(__annotations__)
 
     def _after_from_dict(self) -> None:
         self.exception = Serialize(Exception())
@@ -932,9 +897,8 @@ class ExecuteFailureEvent(ExecuteDoneEvent):
 
 
 # Not to be confused with RescheduleMsg above or the distributed.Reschedule Exception
-@dataclass
+@dataclass(slots=True)
 class RescheduleEvent(ExecuteDoneEvent):
-    __slots__ = ()
 
     @staticmethod
     def dummy(key: Key, *, stimulus_id: str) -> RescheduleEvent:
@@ -944,18 +908,17 @@ class RescheduleEvent(ExecuteDoneEvent):
         return RescheduleEvent(key=key, stimulus_id=stimulus_id)
 
 
-@dataclass
+@dataclass(slots=True)
 class CancelComputeEvent(StateMachineEvent):
-    __slots__ = ("key",)
     key: Key
 
 
-@dataclass
+@dataclass(slots=True)
 class FindMissingEvent(StateMachineEvent):
-    __slots__ = ()
+    pass
 
 
-@dataclass
+@dataclass(slots=True)
 class RefreshWhoHasEvent(StateMachineEvent):
     """Scheduler -> Worker message containing updated who_has information.
 
@@ -964,31 +927,27 @@ class RefreshWhoHasEvent(StateMachineEvent):
     RequestRefreshWhoHasMsg
     """
 
-    __slots__ = ("who_has",)
     # {key: [worker address, ...]}
     who_has: dict[Key, Collection[str]]
 
 
-@dataclass
+@dataclass(slots=True)
 class AcquireReplicasEvent(StateMachineEvent):
-    __slots__ = ("who_has", "nbytes")
     who_has: dict[Key, Collection[str]]
     nbytes: dict[Key, int]
 
 
-@dataclass
+@dataclass(slots=True)
 class RemoveReplicasEvent(StateMachineEvent):
-    __slots__ = ("keys",)
     keys: Collection[Key]
 
 
-@dataclass
+@dataclass(slots=True)
 class FreeKeysEvent(StateMachineEvent):
-    __slots__ = ("keys",)
     keys: Collection[Key]
 
 
-@dataclass
+@dataclass(slots=True)
 class StealRequestEvent(StateMachineEvent):
     """Event that requests a worker to release a key because it's now being computed
     somewhere else.
@@ -998,13 +957,11 @@ class StealRequestEvent(StateMachineEvent):
     StealResponseMsg
     """
 
-    __slots__ = ("key",)
     key: Key
 
 
-@dataclass
+@dataclass(slots=True)
 class UpdateDataEvent(StateMachineEvent):
-    __slots__ = ("data",)
     data: dict[Key, object]
 
     def to_loggable(self, *, handled: float) -> StateMachineEvent:
@@ -1014,15 +971,15 @@ class UpdateDataEvent(StateMachineEvent):
         return out
 
 
-@dataclass
+@dataclass(slots=True)
 class SecedeEvent(StateMachineEvent):
-    __slots__ = ("key", "compute_duration")
     key: Key
     compute_duration: float
 
 
 # {TaskState -> finish: TaskStateState | (finish: TaskStateState, transition *args)}
 # Not to be confused with distributed.scheduler.Recs
+# TODO replace with `type` statement (requires Python >=3.12)
 Recs: TypeAlias = dict[TaskState, TaskStateState | tuple]
 Instructions: TypeAlias = list[Instruction]
 RecsInstrs: TypeAlias = tuple[Recs, Instructions]

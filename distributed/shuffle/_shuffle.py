@@ -327,7 +327,7 @@ class DataFrameShuffleRun(ShuffleRun[int, "pd.DataFrame"]):
             raise ValueError(f"Expected {self.meta.columns=} to match {data.columns=}.")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DataFrameShuffleSpec(ShuffleSpec[int]):
     npartitions: int
     column: str
