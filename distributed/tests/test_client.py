@@ -7428,7 +7428,6 @@ def test_upload_directory_invalid_mode():
         UploadDirectory(".", mode="invalid")
 
 
-@pytest.mark.skipif(WINDOWS, reason="distributed#7434")
 @pytest.mark.parametrize("mode", ["all", "scheduler"])
 @gen_test()
 async def test_upload_directory_to_scheduler(mode, tmp_path):
