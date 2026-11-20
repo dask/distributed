@@ -1921,6 +1921,15 @@ class WorkerState:
         self.fetch_count -= 1
         return self._transition_generic_released(ts, stimulus_id=stimulus_id)
 
+    def _transition_fetch_waiting(
+        self, ts: TaskState, *, stimulus_id: str
+    ) -> RecsInstrs:
+        # Going through released would recommend releasing the dependencies that
+        # _transition_released_waiting then recommends to fetch
+        self.fetch_count -= 1
+        self._purge_state(ts)
+        return self._transition_released_waiting(ts, stimulus_id=stimulus_id)
+
     def _transition_memory_released(
         self, ts: TaskState, *, stimulus_id: str
     ) -> RecsInstrs:
@@ -2514,6 +2523,7 @@ class WorkerState:
         ("fetch", "flight"): _transition_fetch_flight,
         ("fetch", "missing"): _transition_fetch_missing,
         ("fetch", "released"): _transition_fetch_released,
+        ("fetch", "waiting"): _transition_fetch_waiting,
         ("flight", "error"): _transition_generic_error,
         ("flight", "fetch"): _transition_flight_fetch,
         ("flight", "memory"): _transition_flight_memory,
