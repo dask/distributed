@@ -26,11 +26,11 @@ unknown_version = None
 
 @pytest.fixture
 def kwargs_matching():
-    return dict(
-        scheduler=get_versions(),
-        workers={f"worker-{i}": get_versions() for i in range(3)},
-        source=get_versions(),
-    )
+    return {
+        "scheduler": get_versions(),
+        "workers": {f"worker-{i}": get_versions() for i in range(3)},
+        "source": get_versions(),
+    }
 
 
 def test_versions_match(kwargs_matching):

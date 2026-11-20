@@ -140,7 +140,7 @@ def error_message(scheduler, workers, source, source_name="Client"):
             worker_versions = None
 
         errs.append((pkg, source_version, scheduler_version, worker_versions))
-        if pkg in notes_mismatch_package.keys():
+        if pkg in notes_mismatch_package:
             notes.append(f"-  {pkg}: {notes_mismatch_package[pkg]}")
 
     out = {"warning": "", "error": ""}

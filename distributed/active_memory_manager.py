@@ -635,7 +635,6 @@ class RetireWorker(ActiveMemoryManagerPolicy):
         return f"RetireWorker({self.address!r})"
 
     def run(self) -> SuggestionGenerator:
-        """"""
         ws = self.manager.scheduler.workers.get(self.address)
         if ws is None:
             logger.debug("Removing policy %s: Worker no longer in cluster", self)

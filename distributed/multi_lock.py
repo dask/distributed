@@ -65,7 +65,7 @@ class MultiLockExtension:
         """
         assert id not in self.requests
         self.requests[id] = set(locks)
-        assert len(locks) >= num_locks and num_locks > 0
+        assert len(locks) >= num_locks > 0
         self.requests_left[id] = num_locks
 
         locks = sorted(locks, key=lambda x: len(self.locks[x]))

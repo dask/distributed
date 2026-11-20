@@ -34,7 +34,7 @@ def df_left():
     k = [i for s in partition_sizes for i in range(s)]
     vi = range(len(k))
 
-    return pd.DataFrame(dict(idx=idx, k=k, v1=vi)).set_index(["idx"])
+    return pd.DataFrame({"idx": idx, "k": k, "v1": vi}).set_index(["idx"])
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def df_right():
     k = [i for s in partition_sizes for i in range(s)]
     vi = range(len(k))
 
-    return pd.DataFrame(dict(idx=idx, k=k, v1=vi)).set_index(["idx"])
+    return pd.DataFrame({"idx": idx, "k": k, "v1": vi}).set_index(["idx"])
 
 
 @pytest.fixture

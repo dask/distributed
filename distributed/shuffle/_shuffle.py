@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 import toolz
 from tornado.ioloop import IOLoop
 
-from dask._task_spec import GraphNode
 from dask.typing import Key
 from dask.utils import is_dataframe_like
 
@@ -41,8 +40,6 @@ from distributed.sizeof import sizeof
 
 logger = logging.getLogger("distributed.shuffle")
 if TYPE_CHECKING:
-    from typing import TypeAlias
-
     import pandas as pd
     import pyarrow as pa
 
@@ -67,9 +64,6 @@ def shuffle_unpack(
         return get_worker_plugin().get_output_partition(
             id, barrier_run_id, output_partition
         )
-
-
-_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
 
 
 def split_by_worker(

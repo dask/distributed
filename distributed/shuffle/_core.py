@@ -536,7 +536,7 @@ def handle_unpack_errors(id: ShuffleId) -> Generator[None]:
     try:
         yield
     except Reschedule as e:
-        raise e
+        raise
     except ShuffleClosedError:
         raise Reschedule()
     except P2PConsistencyError:
@@ -573,7 +573,7 @@ def p2p_barrier(id: ShuffleId, *run_ids: int) -> int:
     try:
         return get_worker_plugin().barrier(id, run_ids)
     except Reschedule as e:
-        raise e
+        raise
     except P2PConsistencyError:
         raise
     except P2POutOfDiskError:

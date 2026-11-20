@@ -471,7 +471,7 @@ class WSSConnector(WSConnector):
         if connection_args.get("server_hostname"):
             wss_args["headers"] = {
                 **wss_args.get("headers", {}),
-                **{"Host": connection_args["server_hostname"]},
+                "Host": connection_args["server_hostname"],
             }
 
         return wss_args

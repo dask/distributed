@@ -1,6 +1,8 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import logging
+import sys
 from textwrap import dedent
 
 import click
@@ -156,7 +158,7 @@ def main(
 
     except IndexError:
         print(ctx.get_help())
-        exit(1)
+        sys.exit(1)
 
     c = SSHCluster(
         scheduler,

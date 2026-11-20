@@ -390,23 +390,25 @@ def test_scheduler_address_env(loop, monkeypatch):
     port = open_port()
     monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", f"tcp://127.0.0.1:{port}")
     # The env var is only picked up by the dask worker command
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "scheduler",
-            "--no-dashboard",
-            "--port",
-            str(port),
-        ]
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--no-dashboard",
+                "--port",
+                str(port),
+            ]
+        ),
+        popen([sys.executable, "-m", "dask", "worker", "--no-dashboard"]),
+        Client(os.environ["DASK_SCHEDULER_ADDRESS"], loop=loop) as c,
     ):
-        with popen([sys.executable, "-m", "dask", "worker", "--no-dashboard"]):
-            with Client(os.environ["DASK_SCHEDULER_ADDRESS"], loop=loop) as c:
-                start = time()
-                while not c.scheduler_info()["workers"]:
-                    sleep(0.1)
-                    assert time() < start + 10
+        start = time()
+        while not c.scheduler_info()["workers"]:
+            sleep(0.1)
+            assert time() < start + 10
 
 
 @gen_cluster(nthreads=[])
@@ -444,24 +446,24 @@ async def test_nworkers_auto(c, s):
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[])
 async def test_nworkers_expands_name(c, s):
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "worker",
-            s.address,
-            "--nworkers",
-            "2",
-            "--name",
-            "0",
-        ]
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "worker",
+                s.address,
+                "--nworkers",
+                "2",
+                "--name",
+                "0",
+            ]
+        ),
+        popen([sys.executable, "-m", "dask", "worker", s.address, "--nworkers", "2"]),
     ):
-        with popen(
-            [sys.executable, "-m", "dask", "worker", s.address, "--nworkers", "2"]
-        ):
-            await c.wait_for_workers(4)
-            info = c.scheduler_info()
+        await c.wait_for_workers(4)
+        info = c.scheduler_info()
 
     names = [d["name"] for d in info["workers"].values()]
     assert len(names) == len(set(names)) == 4
@@ -768,6 +770,7 @@ def test_timeout(nanny):
         text=True,
         encoding="utf8",
         capture_output=True,
+        check=False,
     )
 
     assert "timed out starting worker" in worker.stderr.lower()
@@ -780,15 +783,20 @@ def test_timeout(nanny):
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
 @gen_cluster(client=True, nthreads=[])
 async def test_signal_handling(c, s, nanny, sig):
-    with subprocess.Popen(
-        [sys.executable, "-m", "distributed.cli.dask_worker", s.address, nanny],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    ) as worker:
+    worker = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "distributed.cli.dask_worker",
+        s.address,
+        nanny,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    try:
         await c.wait_for_workers(1)
 
         worker.send_signal(sig)
-        stdout, stderr = worker.communicate()
+        stdout, stderr = await worker.communicate()
         logs = stdout.decode().lower()
         assert stderr is None
         assert sig.name.lower() in logs
@@ -802,6 +810,10 @@ async def test_signal_handling(c, s, nanny, sig):
         assert "timed out" not in logs
         assert "error" not in logs
         assert "exception" not in logs
+    finally:
+        if worker.returncode is None:
+            worker.kill()
+            await worker.wait()
 
 
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
@@ -811,30 +823,32 @@ def test_error_during_startup(monkeypatch, nanny, loop):
     scheduler_addr = f"tcp://127.0.0.1:{scheduler_port}"
 
     monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", scheduler_addr)
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "scheduler",
-            f"--port={scheduler_port}",
-            "--dashboard-address=:0",
-        ],
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                f"--port={scheduler_port}",
+                "--dashboard-address=:0",
+            ],
+        ),
+        Client(scheduler_addr, loop=loop) as c,
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "worker",
+                scheduler_addr,
+                nanny,
+                # This should clash due to a port conflict
+                f"--worker-port={scheduler_port}",
+            ],
+        ) as worker,
     ):
-        with Client(scheduler_addr, loop=loop) as c:
-            with popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "dask",
-                    "worker",
-                    scheduler_addr,
-                    nanny,
-                    # This should clash due to a port conflict
-                    f"--worker-port={scheduler_port}",
-                ],
-            ) as worker:
-                assert worker.wait(10) == 1
+        assert worker.wait(10) == 1
 
 
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])

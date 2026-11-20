@@ -90,7 +90,6 @@ class AsyncTaskGroup(_LoopBoundMixin):
         task = self._get_loop().create_task(afunc(*args, **kwargs))
         task.add_done_callback(self._ongoing_tasks.remove)
         self._ongoing_tasks.add(task)
-        return None
 
     def call_later(
         self,

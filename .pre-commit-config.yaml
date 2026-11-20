@@ -1,12 +1,12 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.16
+    rev: v0.17.6
     hooks:
       - id: ruff-check
-        # args: [--fix]
+        # args: [--fix, --unsafe-fixes]
       - id: ruff-format
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.4.2
+    rev: v2.4.3
     hooks:
       -   id: codespell
           additional_dependencies:
@@ -14,7 +14,7 @@ repos:
           types_or: [rst, markdown]
           files: docs
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.20.2
+    rev: v2.4.1
     hooks:
       - id: mypy
         # Override default --ignore-missing-imports

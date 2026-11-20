@@ -217,7 +217,6 @@ def test_retry_does_retry_and_sleep(cleanup):
 
     async def my_sleep(amount):
         sleep_calls.append(amount)
-        return
 
     async def f():
         return await retry(
@@ -229,9 +228,8 @@ def test_retry_does_retry_and_sleep(cleanup):
             jitter_fraction=0.0,
         )
 
-    with mock.patch("asyncio.sleep", my_sleep):
-        with pytest.raises(MyEx, match="RT_ERROR 6"):
-            asyncio_run(f(), loop_factory=get_loop_factory())
+    with mock.patch("asyncio.sleep", my_sleep), pytest.raises(MyEx, match="RT_ERROR 6"):
+        asyncio_run(f(), loop_factory=get_loop_factory())
 
     assert n_calls == 6
     assert sleep_calls == [0.0, 1.0, 3.0, 6.0, 6.0]

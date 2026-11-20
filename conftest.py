@@ -1,6 +1,8 @@
 # https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 from __future__ import annotations
 
+from contextlib import suppress
+
 import pytest
 
 # Uncomment to enable more logging and checks
@@ -13,13 +15,11 @@ try:
 except ImportError:
     pass
 else:
-    try:
+    with suppress(Exception):
         faulthandler.enable()
-    except Exception:
-        pass
 
 # Make all fixtures available
-from distributed.utils_test import *  # noqa
+from distributed.utils_test import *
 
 
 def pytest_addoption(parser):

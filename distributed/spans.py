@@ -523,7 +523,7 @@ class SpansSchedulerExtension:
 
         for ts in tss:
             if ts.annotations is None:
-                ts.annotations = dict()
+                ts.annotations = {}
             # You may have different tasks belonging to the same TaskGroup but to
             # different spans. If that happens, arbitrarily force everything onto the
             # span of the earliest encountered TaskGroup.
@@ -641,7 +641,8 @@ class SpansSchedulerExtension:
         for (context, span_id, *other), v in data.items():
             assert isinstance(span_id, str)
             span = self.spans[span_id]
-            span._cumulative_worker_metrics[(context, *other)] += v
+            key = (context, *other)
+            span._cumulative_worker_metrics[key] += v
 
 
 class SpansWorkerExtension:

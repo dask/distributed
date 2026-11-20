@@ -140,7 +140,7 @@ class SpillBuffer(zict.Buffer[Key, object]):
             raise HandledError()
         except OSError:
             # Typically, this is a disk full error
-            logger.error("Spill to disk failed; keeping data in memory", exc_info=True)
+            logger.exception("Spill to disk failed; keeping data in memory")
             raise HandledError()
         except PickleError as e:
             assert e.key in self.fast
@@ -159,7 +159,7 @@ class SpillBuffer(zict.Buffer[Key, object]):
                 # failed to serialize. There's nothing wrong with the new key. The older
                 # key is still in memory.
                 if e.key not in self.logged_pickle_errors:
-                    logger.error("Failed to pickle %r", e.key, exc_info=True)
+                    logger.exception("Failed to pickle %r", e.key)
                     self.logged_pickle_errors.add(e.key)
                 raise HandledError()
 

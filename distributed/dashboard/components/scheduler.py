@@ -950,7 +950,7 @@ class BandwidthTypes(DashboardComponent):
     @log_errors
     def update(self):
         bw = self.scheduler.bandwidth_types
-        self.root.y_range.factors = list(sorted(bw))
+        self.root.y_range.factors = sorted(bw)
         result = {
             "bandwidth": list(bw.values()),
             "bandwidth-half": [b / 2 for b in bw.values()],
@@ -1047,7 +1047,7 @@ class BandwidthWorkers(DashboardComponent):
 
         self.color_map.high = max(value)
 
-        factors = list(sorted(set(x + y)))
+        factors = sorted(set(x + y))
         self.root.x_range.factors = factors
         self.root.y_range.factors = factors[::-1]
 
@@ -1553,13 +1553,13 @@ class ComputePerKey(DashboardComponent):
 
         self.fig.x_range.factors = compute_names
 
-        compute_result = dict(
-            angles=angles,
-            times=compute_time,
-            color=compute_colors,
-            names=compute_names,
-            formatted_time=[format_time(t) for t in compute_time],
-        )
+        compute_result = {
+            "angles": angles,
+            "times": compute_time,
+            "color": compute_colors,
+            "names": compute_names,
+            "formatted_time": [format_time(t) for t in compute_time],
+        }
 
         update(self.compute_source, compute_result)
 
@@ -1635,9 +1635,9 @@ class AggregateAction(DashboardComponent):
         # order by largest time first
         agg_times = sorted(agg_times.items(), key=lambda x: x[1], reverse=True)
 
-        agg_colors = list()
-        agg_names = list()
-        agg_time = list()
+        agg_colors = []
+        agg_names = []
+        agg_time = []
         for action, t in agg_times:
             agg_names.append(action)
             if action == "compute":
@@ -1649,12 +1649,12 @@ class AggregateAction(DashboardComponent):
         self.root.x_range.factors = agg_names
         self.root.title.text = "Aggregate Time Per Action"
 
-        action_result = dict(
-            times=agg_time,
-            color=agg_colors,
-            names=agg_names,
-            formatted_time=[format_time(t) for t in agg_time],
-        )
+        action_result = {
+            "times": agg_time,
+            "color": agg_colors,
+            "names": agg_names,
+            "formatted_time": [format_time(t) for t in agg_time],
+        }
 
         update(self.action_source, action_result)
 
@@ -1718,7 +1718,7 @@ class MemoryByKey(DashboardComponent):
                 counts[ks] += 1
                 nbytes[ks] += ts.nbytes
 
-        names = list(sorted(counts))
+        names = sorted(counts)
         self.root.x_range.factors = names
         result = {
             "name": names,
@@ -1974,7 +1974,7 @@ class StealingEvents(DashboardComponent):
     @log_errors
     def update(self):
         topic = self.scheduler._broker._topics["stealing"]
-        log = log = topic.events
+        log = topic.events
         n = min(topic.count - self.last, len(log))
         if log:
             log = [log[-i][1][1] for i in range(1, n + 1) if log[-i][1][0] == "request"]
@@ -1999,7 +1999,7 @@ class StealingEvents(DashboardComponent):
 class Events(DashboardComponent):
     def __init__(self, scheduler, name, height=150, **kwargs):
         self.scheduler = scheduler
-        self.action_ys = dict()
+        self.action_ys = {}
         self.last = 0
         self.name = name
         self.source = ColumnDataSource(
@@ -2092,7 +2092,7 @@ class TaskStream(DashboardComponent):
         self.plugin = self.scheduler.plugins[TaskStreamPlugin.name]
 
         self.index = max(0, self.plugin.index - n_rectangles)
-        self.workers = dict()
+        self.workers = {}
         self.n_rectangles = n_rectangles
         clear_interval = parse_timedelta(clear_interval, default="ms")
         self.clear_interval = clear_interval
@@ -2172,18 +2172,18 @@ def task_stream_figure(clear_interval="20s", **kwargs):
     clear_interval = parse_timedelta(clear_interval, default="ms")
 
     source = ColumnDataSource(
-        data=dict(
-            start=[time() - clear_interval],
-            duration=[0.1],
-            key=["start"],
-            name=["start"],
-            color=["white"],
-            duration_text=["100 ms"],
-            worker=["foo"],
-            y=[0],
-            worker_thread=[1],
-            alpha=[0.0],
-        )
+        data={
+            "start": [time() - clear_interval],
+            "duration": [0.1],
+            "key": ["start"],
+            "name": ["start"],
+            "color": ["white"],
+            "duration_text": ["100 ms"],
+            "worker": ["foo"],
+            "y": [0],
+            "worker_thread": [1],
+            "alpha": [0.0],
+        }
     )
 
     x_range = DataRange1d(range_padding=0)
@@ -3167,7 +3167,14 @@ class TaskProgress(DashboardComponent):
         self.scheduler = scheduler
 
         data = progress_quads(
-            dict(all={}, memory={}, erred={}, released={}, processing={}, queued={})
+            {
+                "all": {},
+                "memory": {},
+                "erred": {},
+                "released": {},
+                "processing": {},
+                "queued": {},
+            }
         )
         self.source = ColumnDataSource(data=data)
 
@@ -3853,16 +3860,16 @@ class Contention(DashboardComponent):
     @log_errors
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
-        self.data = dict(
-            names=[
+        self.data = {
+            "names": [
                 ("Scheduler", "Event Loop"),
                 ("Scheduler", "GIL"),
                 ("Workers", "Event Loop"),
                 ("Workers", "GIL"),
             ],
-            values=[0, 0, 0, 0],
-            text=["0s", "0%", "0s", "0%"],
-        )
+            "values": [0, 0, 0, 0],
+            "text": ["0s", "0%", "0s", "0%"],
+        }
         title = "Event Loop & GIL Contention"
 
         # Remove GIL related names/values if not monitoring GIL

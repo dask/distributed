@@ -30,7 +30,7 @@ class KillWorker(WorkerPlugin):
 
     def __init__(
         self,
-        delay: str | int | float = "100 s",
+        delay: str | float = "100 s",
         mode: Literal["sys.exit", "graceful", "segfault"] = "sys.exit",
     ):
         self.delay = parse_timedelta(delay)

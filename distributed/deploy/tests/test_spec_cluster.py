@@ -139,25 +139,27 @@ async def test_scale():
 @gen_test()
 async def test_adaptive_killed_worker():
     with dask.config.set({"distributed.deploy.lost-worker-timeout": 0.1}):
-        async with SpecCluster(
-            asynchronous=True,
-            worker={"cls": Nanny, "options": {"nthreads": 1}},
-            scheduler=scheduler,
-        ) as cluster:
-            async with Client(cluster, asynchronous=True) as client:
-                # Scale up a cluster with 1 worker.
-                cluster.adapt(minimum=1, maximum=1)
-                while not cluster.workers:
-                    await asyncio.sleep(0.01)
+        async with (
+            SpecCluster(
+                asynchronous=True,
+                worker={"cls": Nanny, "options": {"nthreads": 1}},
+                scheduler=scheduler,
+            ) as cluster,
+            Client(cluster, asynchronous=True) as client,
+        ):
+            # Scale up a cluster with 1 worker.
+            cluster.adapt(minimum=1, maximum=1)
+            while not cluster.workers:
+                await asyncio.sleep(0.01)
 
-                future = client.submit(sleep, 0.1)
+            future = client.submit(sleep, 0.1)
 
-                # Kill the only worker.
-                [worker_id] = cluster.workers
-                await cluster.workers[worker_id].kill()
+            # Kill the only worker.
+            [worker_id] = cluster.workers
+            await cluster.workers[worker_id].kill()
 
-                # Wait for the worker to re-spawn and finish sleeping.
-                await future
+            # Wait for the worker to re-spawn and finish sleeping.
+            await future
 
 
 @gen_test()
@@ -195,16 +197,16 @@ async def test_unexpected_closed_worker():
 async def test_restart():
     """Regression test for https://github.com/dask/distributed/issues/3062"""
     worker = {"cls": Nanny, "options": {"nthreads": 1}}
-    async with SpecCluster(
-        asynchronous=True, scheduler=scheduler, worker=worker
-    ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            cluster.scale(2)
-            await cluster
-            assert len(cluster.workers) == 2
-            await client.restart()
-            while len(cluster.workers) < 2:
-                await asyncio.sleep(0.01)
+    async with (
+        SpecCluster(asynchronous=True, scheduler=scheduler, worker=worker) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
+        cluster.scale(2)
+        await cluster
+        assert len(cluster.workers) == 2
+        await client.restart()
+        while len(cluster.workers) < 2:
+            await asyncio.sleep(0.01)
 
 
 @gen_test()
@@ -488,7 +490,7 @@ async def test_run_spec_cluster_worker_names():
         await cluster
         worker_names = [0, 1]
         assert list(cluster.worker_spec) == worker_names
-        assert sorted(list(cluster.workers)) == worker_names
+        assert sorted(cluster.workers) == worker_names
 
     async with MyCluster(
         asynchronous=True, scheduler=scheduler, worker=worker, name="test-name"
@@ -497,7 +499,7 @@ async def test_run_spec_cluster_worker_names():
         cluster.scale(2)
         await cluster
         assert list(cluster.worker_spec) == worker_names
-        assert sorted(list(cluster.workers)) == worker_names
+        assert sorted(cluster.workers) == worker_names
 
 
 @gen_test()

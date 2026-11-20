@@ -83,11 +83,10 @@ async def test_nanny_process_failure(c, s):
 
 @gen_cluster(nthreads=[])
 async def test_run(s):
-    async with Nanny(s.address, nthreads=2) as n:
-        async with rpc(n.address) as nn:
-            response = await nn.run(function=dumps(lambda: 1))
-            assert response["status"] == "OK"
-            assert response["result"] == 1
+    async with Nanny(s.address, nthreads=2) as n, rpc(n.address) as nn:
+        response = await nn.run(function=dumps(lambda: 1))
+        assert response["status"] == "OK"
+        assert response["result"] == 1
 
 
 @pytest.mark.slow
@@ -314,9 +313,11 @@ async def test_environment_variable(c, s):
 
 @gen_cluster(nthreads=[], client=True)
 async def test_environment_variable_by_config(c, s, monkeypatch):
-    with dask.config.set({"distributed.nanny.environ": "456"}):
-        with pytest.raises(TypeError, match="configuration must be of type dict"):
-            Nanny(s.address, memory_limit=0)
+    with (
+        dask.config.set({"distributed.nanny.environ": "456"}),
+        pytest.raises(TypeError, match="configuration must be of type dict"),
+    ):
+        Nanny(s.address, memory_limit=0)
 
     with dask.config.set({"distributed.nanny.environ": {"FOO": "456"}}):
         # precedence
@@ -420,12 +421,11 @@ async def test_config_param_overlays(c, s):
 
 @gen_cluster(nthreads=[])
 async def test_local_directory(s):
-    with tmpfile() as fn:
-        with dask.config.set(temporary_directory=fn):
-            async with Nanny(s.address) as n:
-                assert n.local_directory.startswith(fn)
-                assert "dask-scratch-space" in n.local_directory
-                assert n.process.worker_dir.count("dask-scratch-space") == 1
+    with tmpfile() as fn, dask.config.set(temporary_directory=fn):
+        async with Nanny(s.address) as n:
+            assert n.local_directory.startswith(fn)
+            assert "dask-scratch-space" in n.local_directory
+            assert n.process.worker_dir.count("dask-scratch-space") == 1
 
 
 @pytest.mark.skipif(
@@ -436,7 +436,7 @@ async def test_local_directory(s):
 async def test_unwriteable_dask_worker_space(s, tmp_path):
     os.mkdir(f"{tmp_path}/dask-scratch-space", mode=0o500)
     with pytest.raises(PermissionError):
-        open(f"{tmp_path}/dask-scratch-space/tryme", "w")
+        open(f"{tmp_path}/dask-scratch-space/tryme", "w").close()
 
     with dask.config.set(temporary_directory=tmp_path):
         async with Nanny(s.address) as n:
@@ -448,7 +448,6 @@ async def test_unwriteable_dask_worker_space(s, tmp_path):
 
 def _noop(x):
     """Define here because closures aren't pickleable."""
-    pass
 
 
 @gen_cluster(
@@ -507,22 +506,23 @@ async def test_lifetime(s):
                 event.set()
 
     s.add_plugin(Plugin())
-    async with Nanny(s.address):
-        async with Nanny(s.address, lifetime="500 ms", lifetime_restart=True):
-            await event.wait()
+    async with (
+        Nanny(s.address),
+        Nanny(s.address, lifetime="500 ms", lifetime_restart=True),
+    ):
+        await event.wait()
 
 
 @gen_cluster(client=True, nthreads=[])
 async def test_nanny_closes_cleanly_if_worker_is_terminated(c, s):
-    async with Nanny(s.address) as n:
-        async with c.rpc(n.worker_address) as w:
-            IOLoop.current().add_callback(w.terminate)
-            start = time()
-            while n.status != Status.closed:
-                await asyncio.sleep(0.01)
-                assert time() < start + 5
+    async with Nanny(s.address) as n, c.rpc(n.worker_address) as w:
+        IOLoop.current().add_callback(w.terminate)
+        start = time()
+        while n.status != Status.closed:
+            await asyncio.sleep(0.01)
+            assert time() < start + 5
 
-            assert n.status == Status.closed
+        assert n.status == Status.closed
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -569,13 +569,13 @@ class KeyboardInterruptWorker(worker.Worker):
 
 @gen_test()
 async def test_nanny_closed_by_keyboard_interrupt():
-    async with Scheduler(dashboard_address=":0") as s:
-        async with Nanny(
-            s.address, nthreads=1, worker_class=KeyboardInterruptWorker
-        ) as n:
-            await n.process.stopped.wait()
-            # Check that the scheduler has been notified about the closed worker
-            assert "remove-worker" in str(s.get_events())
+    async with (
+        Scheduler(dashboard_address=":0") as s,
+        Nanny(s.address, nthreads=1, worker_class=KeyboardInterruptWorker) as n,
+    ):
+        await n.process.stopped.wait()
+        # Check that the scheduler has been notified about the closed worker
+        assert "remove-worker" in str(s.get_events())
 
 
 class BrokenWorker(worker.Worker):
@@ -586,15 +586,17 @@ class BrokenWorker(worker.Worker):
 @gen_cluster(nthreads=[])
 async def test_worker_start_exception(s):
     nanny = Nanny(s.address, worker_class=BrokenWorker)
-    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with raises_with_cause(
+    with (
+        captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs,
+        raises_with_cause(
             RuntimeError,
             "Nanny failed to start",
             RuntimeError,
             "BrokenWorker failed to start",
-        ):
-            async with nanny:
-                pass
+        ),
+    ):
+        async with nanny:
+            pass
     assert nanny.status == Status.failed
     # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
     assert nanny.process is None
@@ -613,15 +615,17 @@ async def test_worker_start_exception_while_killing(s):
         await nanny.kill()
 
     kill_task = asyncio.create_task(try_to_kill_nanny())
-    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with raises_with_cause(
+    with (
+        captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs,
+        raises_with_cause(
             RuntimeError,
             "Nanny failed to start",
             RuntimeError,
             "BrokenWorker failed to start",
-        ):
-            async with nanny:
-                pass
+        ),
+    ):
+        async with nanny:
+            pass
     await kill_task
     assert nanny.status == Status.failed
     # ^ NOTE: `Nanny.close` sets it to `closed`, then `Server.start._close_on_failure` sets it to `failed`
@@ -633,9 +637,11 @@ async def test_worker_start_exception_while_killing(s):
 
 @gen_cluster(nthreads=[])
 async def test_failure_during_worker_initialization(s):
-    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
-        with pytest.raises(RuntimeError):
-            await Nanny(s.address, foo="bar")
+    with (
+        captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs,
+        pytest.raises(RuntimeError),
+    ):
+        await Nanny(s.address, foo="bar")
     assert "Restarting worker" not in logs.getvalue()
 
 

@@ -30,7 +30,17 @@ async def test_eventstream(c, s, *workers):
 
     lists = {
         name: collections.deque(maxlen=100)
-        for name in "start duration key name color worker worker_thread y alpha".split()
+        for name in [
+            "start",
+            "duration",
+            "key",
+            "name",
+            "color",
+            "worker",
+            "worker_thread",
+            "y",
+            "alpha",
+        ]
     }
     workers = {}
     for msg in es.buffer:

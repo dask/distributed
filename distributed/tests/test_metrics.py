@@ -118,10 +118,12 @@ def test_context_meter_raise():
     it = iter([123, 124])
     cbs = []
 
-    with pytest.raises(ValueError):
-        with metrics.context_meter.add_callback(lambda l, v, u: cbs.append((l, v, u))):
-            with metrics.context_meter.meter("m1", func=lambda: next(it)) as m:
-                raise ValueError()
+    with (
+        pytest.raises(ValueError),
+        metrics.context_meter.add_callback(lambda l, v, u: cbs.append((l, v, u))),
+        metrics.context_meter.meter("m1", func=lambda: next(it)) as m,
+    ):
+        raise ValueError()
 
     # Not recorded - out of context
     metrics.context_meter.digest_metric("m1", 123, "foo")
@@ -138,11 +140,13 @@ def test_context_meter_nested():
     cbs1 = []
     cbs2 = []
 
-    with metrics.context_meter.add_callback(lambda l, v, u: cbs1.append((l, v, u))):
-        with metrics.context_meter.add_callback(lambda l, v, u: cbs2.append((l, v, u))):
-            with metrics.context_meter.meter("m1", func=lambda: next(it1)) as m1:
-                with metrics.context_meter.meter("m2", func=lambda: next(it2)) as m2:
-                    pass
+    with (
+        metrics.context_meter.add_callback(lambda l, v, u: cbs1.append((l, v, u))),
+        metrics.context_meter.add_callback(lambda l, v, u: cbs2.append((l, v, u))),
+        metrics.context_meter.meter("m1", func=lambda: next(it1)) as m1,
+        metrics.context_meter.meter("m2", func=lambda: next(it2)) as m2,
+    ):
+        pass
 
     assert m1.start == 123
     assert m1.stop == 126
@@ -178,10 +182,12 @@ def test_context_meter_nested_floor():
     it2 = iter([124, 128])
     cbs = []
 
-    with metrics.context_meter.add_callback(lambda l, v, u: cbs.append((l, v, u))):
-        with metrics.context_meter.meter("m1", func=lambda: next(it1), floor=0.1) as m1:
-            with metrics.context_meter.meter("m2", func=lambda: next(it2)):
-                pass
+    with (
+        metrics.context_meter.add_callback(lambda l, v, u: cbs.append((l, v, u))),
+        metrics.context_meter.meter("m1", func=lambda: next(it1), floor=0.1) as m1,
+        metrics.context_meter.meter("m2", func=lambda: next(it2)),
+    ):
+        pass
 
     assert m1.delta == 0.1
     assert cbs == [("m2", 4, "seconds"), ("m1", 0.1, "seconds")]

@@ -281,7 +281,7 @@ async def test_gather_dep_failed(c, s, a, b):
     class C:
         def __reduce__(self):
             def expand():
-                raise Exception()
+                raise AssertionError()
 
             return expand, ()
 

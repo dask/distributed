@@ -214,7 +214,7 @@ async def test_stop_in_flight(c, s, a, b):
         workers=[a.address],
         allow_other_workers=True,
     )
-    while not len(a.state.tasks) == num_tasks:
+    while len(a.state.tasks) != num_tasks:
         await asyncio.sleep(0.01)
     assert len(b.state.tasks) == 0
     await steal.start()
@@ -269,7 +269,7 @@ async def test_allow_tasks_stolen_before_first_completes(c, s, a, b):
         )
         # All tasks are put on A since this is what we asked for. Only work
         # stealing should rebalance the tasks once we allow for it
-        while not len(a.state.tasks) == 11:
+        while len(a.state.tasks) != 11:
             await asyncio.sleep(0.1)
 
         assert len(b.state.tasks) == 0
@@ -758,7 +758,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
     result = [
         sorted(
             # The name of input data starts with ``SizeOf``
-            (int(key_split(t)) for t in w.data.keys() if not t.startswith("SizeOf")),
+            (int(key_split(t)) for t in w.data if not t.startswith("SizeOf")),
             reverse=True,
         )
         for w in workers
@@ -1104,7 +1104,7 @@ async def test_blocklist_shuffle_split(c, s, a, b):
 
     blocked = fast_tasks & s.task_prefixes.keys()
     assert blocked
-    assert any(["split" in prefix for prefix in blocked])
+    assert any("split" in prefix for prefix in blocked)
 
     stealable = s.extensions["stealing"].stealable
     while not res.done():

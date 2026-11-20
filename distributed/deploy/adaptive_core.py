@@ -83,7 +83,7 @@ class AdaptiveCore(ABC):
     def __init__(
         self,
         minimum: int = 0,
-        maximum: int | float = math.inf,
+        maximum: float = math.inf,
         wait_count: int = 3,
     ):
         if not isinstance(maximum, int) and not math.isinf(maximum):
@@ -130,8 +130,7 @@ class AdaptiveCore(ABC):
         if n > self.maximum:
             n = cast(int, self.maximum)
 
-        if n < self.minimum:
-            n = self.minimum
+        n = max(n, self.minimum)
 
         return n
 

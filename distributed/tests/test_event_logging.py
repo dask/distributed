@@ -383,7 +383,7 @@ async def test_log_event_plugin(c, s, a, b):
     class EventPlugin(SchedulerPlugin):
         async def start(self, scheduler: Scheduler) -> None:
             self.scheduler = scheduler
-            self.scheduler._recorded_events = list()  # type: ignore
+            self.scheduler._recorded_events = []  # type: ignore
 
         def log_event(self, topic, msg):
             self.scheduler._recorded_events.append((topic, msg))
@@ -403,7 +403,7 @@ async def test_log_event_plugin_multiple_topics(c, s, a, b):
     class EventPlugin(SchedulerPlugin):
         async def start(self, scheduler: Scheduler) -> None:
             self.scheduler = scheduler
-            self.scheduler._recorded_events = list()  # type: ignore
+            self.scheduler._recorded_events = []  # type: ignore
 
         def log_event(self, topic, msg):
             self.scheduler._recorded_events.append((topic, msg))

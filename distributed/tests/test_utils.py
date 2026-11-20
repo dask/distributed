@@ -584,22 +584,25 @@ async def test_all_quiet_exceptions():
 
 
 def test_warn_on_duration():
-    with warnings.catch_warnings(record=True) as record:
-        with warn_on_duration("10s", "foo"):
-            pass
+    with warnings.catch_warnings(record=True) as record, warn_on_duration("10s", "foo"):
+        pass
     assert not record
 
-    with pytest.warns(UserWarning, match=r"foo") as record:
-        with warn_on_duration("1ms", "foo"):
-            sleep(0.100)
+    with (
+        pytest.warns(UserWarning, match=r"foo") as record,
+        warn_on_duration("1ms", "foo"),
+    ):
+        sleep(0.100)
 
     assert record
 
-    with pytest.warns(UserWarning) as record:
-        with warn_on_duration("1ms", "{duration:.4f}"):
-            start = time()
-            sleep(0.100)
-            measured = time() - start
+    def measure():
+        start = time()
+        sleep(0.100)
+        return time() - start
+
+    with pytest.warns(UserWarning) as record, warn_on_duration("1ms", "{duration:.4f}"):
+        measured = measure()
 
     assert record
     assert len(record) == 1
@@ -665,7 +668,7 @@ async def test_run_in_executor_with_context():
     class MyExecutor(Executor):
         call_count = 0
 
-        def submit(self, __fn, *args, **kwargs):
+        def submit(self, __fn, /, *args, **kwargs):
             self.call_count += 1
             f = Future()
             f.set_result(__fn(*args, **kwargs))
@@ -817,7 +820,6 @@ def test_recursive_to_dict_no_nest():
             self.name = name
             self.children = []
             self.pets = []
-            ...
 
         def _to_dict_no_nest(self, exclude=()):
             return recursive_to_dict(self.__dict__, exclude=exclude)
@@ -829,7 +831,6 @@ def test_recursive_to_dict_no_nest():
         def __init__(self, name):
             self.name = name
             self.owners = []
-            ...
 
         def _to_dict_no_nest(self, exclude=()):
             return recursive_to_dict(self.__dict__, exclude=exclude)
@@ -871,21 +872,17 @@ async def test_log_errors():
         with log_errors():
             pass
 
-        with log_errors():
-            with log_errors():
-                pass
+        with log_errors(), log_errors():
+            pass
 
         with log_errors(pdb=True):
             pass
 
-        with pytest.raises(CustomError):
-            with log_errors():
-                raise CustomError("err1")
+        with pytest.raises(CustomError), log_errors():
+            raise CustomError("err1")
 
-        with pytest.raises(CustomError):
-            with log_errors():
-                with log_errors():
-                    raise CustomError("err2")
+        with pytest.raises(CustomError), log_errors(), log_errors():
+            raise CustomError("err2")
 
         # Bare decorator
         @log_errors

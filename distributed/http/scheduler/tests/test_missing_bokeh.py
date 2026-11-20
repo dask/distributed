@@ -11,6 +11,17 @@ from distributed import Scheduler
 from distributed.utils_test import gen_test
 
 
+async def _check_bokeh_warning():
+    async with Scheduler(dashboard_address=":0") as s:
+        http_client = AsyncHTTPClient()
+        response = await http_client.fetch(
+            f"http://localhost:{s.http_server.port}/status"
+        )
+        assert response.code == 200
+        body = response.body.decode()
+        assert "Dask needs bokeh" in body
+
+
 @gen_test()
 async def test_missing_bokeh():
     with mock.patch.dict(sys.modules, {"bokeh": None}):
@@ -42,16 +53,11 @@ async def test_bokeh_version_too_low():
         sys.modules.pop("distributed.dashboard.scheduler", None)
         sys.modules.pop("distributed.dashboard.core", None)
 
-        with mock.patch("distributed.dashboard.utils.BOKEH_VERSION", Version("1.4.0")):
-            with pytest.warns(UserWarning, match="1.4.0"):
-                async with Scheduler(dashboard_address=":0") as s:
-                    http_client = AsyncHTTPClient()
-                    response = await http_client.fetch(
-                        f"http://localhost:{s.http_server.port}/status"
-                    )
-                    assert response.code == 200
-                    body = response.body.decode()
-                    assert "Dask needs bokeh" in body
+        with (
+            mock.patch("distributed.dashboard.utils.BOKEH_VERSION", Version("1.4.0")),
+            pytest.warns(UserWarning, match="1.4.0"),
+        ):
+            await _check_bokeh_warning()
 
 
 @gen_test()
@@ -62,13 +68,8 @@ async def test_bokeh_version_too_high():
         sys.modules.pop("distributed.dashboard.scheduler", None)
         sys.modules.pop("distributed.dashboard.core", None)
 
-        with mock.patch("distributed.dashboard.utils.BOKEH_VERSION", Version("3.0.1")):
-            with pytest.warns(UserWarning, match="3.0.1"):
-                async with Scheduler(dashboard_address=":0") as s:
-                    http_client = AsyncHTTPClient()
-                    response = await http_client.fetch(
-                        f"http://localhost:{s.http_server.port}/status"
-                    )
-                    assert response.code == 200
-                    body = response.body.decode()
-                    assert "Dask needs bokeh" in body
+        with (
+            mock.patch("distributed.dashboard.utils.BOKEH_VERSION", Version("3.0.1")),
+            pytest.warns(UserWarning, match="3.0.1"),
+        ):
+            await _check_bokeh_warning()

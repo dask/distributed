@@ -38,7 +38,7 @@ class SystemMonitor:
 
     def __init__(
         self,
-        maxlen: int | None | NoDefault = no_default,
+        maxlen: int | NoDefault | None = no_default,
         monitor_disk_io: bool | None = None,
         monitor_host_cpu: bool | None = None,
         monitor_gil_contention: bool | None = None,

@@ -12,14 +12,14 @@ from distributed.diagnostics.memray import memray_scheduler, memray_workers
 
 def test_all_workers(tmp_path, loop):
     n_workers = 7
-    with LocalCluster(
-        n_workers=n_workers, loop=loop, dashboard_address=":0"
-    ) as cluster:
-        with Client(cluster, loop=loop) as client:
-            with memray_workers(tmp_path):
-                pass
+    with (
+        LocalCluster(n_workers=n_workers, loop=loop, dashboard_address=":0") as cluster,
+        Client(cluster, loop=loop) as client,
+    ):
+        with memray_workers(tmp_path):
+            pass
 
-            assert len(list(tmp_path.glob("*.html"))) == n_workers
+        assert len(list(tmp_path.glob("*.html"))) == n_workers
 
 
 @pytest.mark.parametrize("fetch_reports_parallel", [True, False, 1])

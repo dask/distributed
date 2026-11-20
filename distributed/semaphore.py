@@ -38,10 +38,10 @@ class SemaphoreExtension:
         # {semaphore_name: asyncio.Event}
         self.events = defaultdict(asyncio.Event)
         # {semaphore_name: max_leases}
-        self.max_leases = dict()
+        self.max_leases = {}
         # {semaphore_name: {lease_id: lease_last_seen_timestamp}}
         self.leases = defaultdict(dict)
-        self.lease_timeouts = dict()
+        self.lease_timeouts = {}
         self.scheduler.handlers.update(
             {
                 "semaphore_register": self.create,
@@ -117,9 +117,7 @@ class SemaphoreExtension:
         return result
 
     def _semaphore_exists(self, name):
-        if name not in self.max_leases:
-            return False
-        return True
+        return name in self.max_leases
 
     @log_errors
     async def acquire(self, name=None, timeout=None, lease_id=None):
@@ -233,14 +231,13 @@ class SemaphoreExtension:
                     RuntimeWarning,
                 )
             del self.leases[name]
-        if name in self.metrics["pending"]:
-            if self.metrics["pending"][name]:
-                warnings.warn(
-                    f"Closing semaphore {name} but there remain pending leases",
-                    RuntimeWarning,
-                )
+        if name in self.metrics["pending"] and self.metrics["pending"][name]:
+            warnings.warn(
+                f"Closing semaphore {name} but there remain pending leases",
+                RuntimeWarning,
+            )
         # Clean-up state of semaphore metrics
-        for _, metric_dict in self.metrics.items():
+        for metric_dict in self.metrics.values():
             if name in metric_dict:
                 del metric_dict[name]
 
@@ -489,9 +486,8 @@ class Semaphore(SyncMethodMixin):
             )
             return True
         except Exception:  # Release fails for whatever reason
-            logger.error(
+            logger.exception(
                 f"Release failed for id={self.id}, lease_id={lease_id}, name={self.name}. Cluster network might be unstable?",
-                exc_info=True,
             )
             return False
 

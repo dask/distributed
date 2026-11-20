@@ -13,7 +13,7 @@ from distributed.config import get_loop_factory
 from distributed.deploy.spec import init_spec
 
 
-@click.command(name="spec", context_settings=dict(ignore_unknown_options=True))
+@click.command(name="spec", context_settings={"ignore_unknown_options": True})
 @click.argument("args", nargs=-1)
 @click.option("--spec", type=str, default="", help="")
 @click.option("--spec-file", type=str, default=None, help="")
