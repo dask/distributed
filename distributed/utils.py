@@ -1420,6 +1420,16 @@ def cli_keywords(
 
 
 def is_valid_xml(text):
+    # Bokeh 4 emits valueless ``data-bokeh-*`` attributes and embeds raw
+    # JavaScript in script tags. Neither is valid XML, so drop the Bokeh
+    # scripts and give the attributes a value before parsing.
+    text = re.sub(
+        r"<script\b(?=[^>]*\bdata-bokeh-embed)[^>]*>.*?</script>",
+        "",
+        text,
+        flags=re.DOTALL,
+    )
+    text = re.sub(r"(\sdata-bokeh-[\w-]+)(?=[\s/>])", r'\1=""', text)
     return xml.etree.ElementTree.fromstring(text) is not None
 
 
