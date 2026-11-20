@@ -2289,13 +2289,8 @@ class TaskGraph(DashboardComponent):
         )
         self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
 
-        # Bokeh 4 renamed GroupFilter.column_name to field_name
-        filter_kwargs = (
-            {"field_name": "visible"}
-            if "field_name" in GroupFilter.properties()
-            else {"column_name": "visible"}
-        )
-        filter = GroupFilter(**filter_kwargs, group="True")
+        # Pass the field positionally: Bokeh 4 renamed `column_name` to `field_name`
+        filter = GroupFilter("visible", "True")
         node_view = CDSView(filter=filter)
         edge_view = CDSView(filter=filter)
         node_colors = factor_cmap(
