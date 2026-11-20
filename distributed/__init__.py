@@ -81,9 +81,18 @@ try:
     from distributed._version import __commit_id__ as __git_revision__
     from distributed._version import __version__
 except ImportError:
-    __git_revision__ = "unknown"
-    __version__ = "unknown"
+    # The version file is generated at install time; a cached install may skip it. Fall
+    # back to the distribution metadata, and only report "unknown" when the package is
+    # not installed at all. A bare "unknown" would break anything parsing the version.
+    from importlib.metadata import PackageNotFoundError, version
 
+    try:
+        __version__ = version("distributed")
+    except PackageNotFoundError:
+        __version__ = "unknown"
+
+    __git_revision__ = "unknown"
+    del PackageNotFoundError, version
 
 __all__ = [
     "Actor",
