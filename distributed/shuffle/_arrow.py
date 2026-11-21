@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from dask.utils import parse_bytes
 
@@ -12,6 +13,12 @@ if TYPE_CHECKING:
 
 
 _INPUT_PARTITION_ID_COLUMN = "__input_partition_id__"
+_NULL_OBJECT_COLUMNS = b"dask.null_object_columns"
+
+
+class _NullObjectInfo(TypedDict):
+    marker: str
+    object_dtype: bool
 
 
 def check_dtype_support(meta_input: pd.DataFrame) -> None:
@@ -29,10 +36,81 @@ def check_dtype_support(meta_input: pd.DataFrame) -> None:
             raise TypeError("p2p does not support sparse data found in column '{name}'")
 
 
+def preserve_null_objects(table: pa.Table, df: pd.DataFrame) -> pa.Table:
+    """Retain pandas null semantics that Arrow's null type cannot represent."""
+    import numpy as np
+    import pandas as pd
+    import pyarrow as pa
+
+    from dask.dataframe._compat import PANDAS_GE_300
+
+    if not PANDAS_GE_300 or not isinstance(df, pd.DataFrame):
+        return table
+
+    def null_kind(value: object) -> int:
+        if value is None:
+            return 0
+        if value is pd.NA:
+            return 2
+        if value is pd.NaT:
+            return 3
+        return 1  # NaN
+
+    # Use the same marker names even if input partitions reorder their columns.
+    columns: dict[str, _NullObjectInfo] = {}
+    for i, column in enumerate(sorted(df.columns.tolist())):
+        series = df[column]
+        # NumPy-backed columns already round-trip their null sentinel through
+        # Arrow. Extension arrays may need pd.NA restored after object promotion.
+        if (
+            series.dtype != object
+            and getattr(series.dtype, "na_value", None) is not pd.NA
+        ):
+            continue
+        if not table[column].null_count:
+            continue
+        marker = f"__dask_null_object_{i}__"
+        while marker in table.column_names:
+            marker += "_"
+        mask = series.isna().to_numpy()
+        # 255 denotes a non-null value; 0..3 distinguish pandas null sentinels.
+        kinds = np.full(len(series), 255, dtype=np.uint8)
+        if series.dtype == object:
+            values = series.to_numpy()[mask]
+            kinds[mask] = [null_kind(value) for value in values]
+        else:
+            kinds[mask] = 2  # Extension arrays use pd.NA, as checked above.
+        table = table.append_column(marker, pa.array(kinds))
+        columns[column] = {
+            "marker": marker,
+            "object_dtype": series.dtype == object
+            and pa.types.is_null(table[column].type),
+        }
+    if columns:
+        metadata = dict(table.schema.metadata or {})
+        metadata[_NULL_OBJECT_COLUMNS] = json.dumps(columns).encode()
+        table = table.replace_schema_metadata(metadata)
+    return table
+
+
 def concat_tables(tables: Iterable[pa.Table]) -> pa.Table:
     import pyarrow as pa
 
-    return pa.concat_tables(tables, promote_options="permissive")
+    tables = list(tables)
+    null_columns: dict[str, _NullObjectInfo] = {}
+    for table in tables:
+        for column, info in json.loads(
+            (table.schema.metadata or {}).get(_NULL_OBJECT_COLUMNS, b"{}")
+        ).items():
+            if column in null_columns:
+                info["object_dtype"] |= null_columns[column]["object_dtype"]
+            null_columns[column] = info
+    result = pa.concat_tables(tables, promote_options="permissive")
+    if null_columns:
+        metadata = dict(result.schema.metadata or {})
+        metadata[_NULL_OBJECT_COLUMNS] = json.dumps(null_columns).encode()
+        result = result.replace_schema_metadata(metadata)
+    return result
 
 
 def convert_shards(
@@ -45,11 +123,29 @@ def convert_shards(
 
     table = concat_tables(shards)
     table = table.sort_by(_INPUT_PARTITION_ID_COLUMN)
-    table = table.drop([_INPUT_PARTITION_ID_COLUMN])
+    null_columns = json.loads(
+        (table.schema.metadata or {}).get(_NULL_OBJECT_COLUMNS, b"{}")
+    )
+    # Arrow promotes null columns to the other shards' types. Pandas >=3 instead
+    # retains object dtype when concatenating all-null object and typed columns.
+    null_kinds = {
+        column: table[info["marker"]].to_numpy().copy()
+        for column, info in null_columns.items()
+        if info["object_dtype"]
+    }
+    table = table.drop(
+        [_INPUT_PARTITION_ID_COLUMN]
+        + [info["marker"] for info in null_columns.values()]
+    )
 
     if drop_column:
         meta = meta.drop(columns=partition_column)
-    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True)
+    kwargs = {"integer_object_nulls": True} if null_kinds else {}
+    df = from_pyarrow_table_dispatch(meta, table, self_destruct=True, **kwargs)
+    for column, kinds in null_kinds.items():
+        df[column] = df[column].astype(object)
+        for code, value in enumerate((None, float("nan"), pd.NA, pd.NaT)):
+            df.loc[kinds == code, column] = value
     reconciled_dtypes = {}
     for column, dtype in meta.dtypes.items():
         actual = df[column].dtype

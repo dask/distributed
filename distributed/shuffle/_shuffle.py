@@ -22,6 +22,7 @@ from distributed.shuffle._arrow import (
     buffers_to_table,
     convert_shards,
     deserialize_table,
+    preserve_null_objects,
     read_from_disk,
     serialize_table,
 )
@@ -101,6 +102,7 @@ def split_by_worker(
     # FIXME: If we do not preserve the index something is corrupting the
     # bytestream such that it cannot be deserialized anymore
     t = to_pyarrow_table_dispatch(df, preserve_index=True)
+    t = preserve_null_objects(t, df)
     t = t.sort_by("_worker")
     codes = np.asarray(t["_worker"])
     t = t.drop(["_worker"])

@@ -2430,18 +2430,22 @@ async def test_handle_null_partitions(c, s, a, b):
     await assert_scheduler_cleanup(s)
 
 
-@pytest.mark.xfail(PANDAS_GE_300, reason="dask/distributed#9184", strict=True)
+@pytest.mark.parametrize("disk", [True, False])
+@pytest.mark.parametrize("null_first", [True, False])
 @gen_cluster(client=True)
-async def test_handle_null_partitions_2(c, s, a, b):
+async def test_handle_null_partitions_2(c, s, a, b, disk, null_first):
     def make_partition(i):
         """Return null column for every other partition"""
-        if i % 2 == 1:
-            return pd.DataFrame({"a": np.random.random(10), "b": [None] * 10})
-        return pd.DataFrame({"a": np.random.random(10), "b": np.random.random(10)})
+        values = np.arange(i * 10, (i + 1) * 10, dtype=float)
+        return pd.DataFrame(
+            {"a": values, "b": [None] * 10 if (i % 2 == 0) == null_first else values}
+        )
 
     with dask.config.set({"dataframe.convert-string": False}):
         ddf = dd.from_map(make_partition, range(5), meta={"a": float, "b": float})
-    with dask.config.set({"dataframe.shuffle.method": "p2p"}):
+    with dask.config.set(
+        {"dataframe.shuffle.method": "p2p", "distributed.p2p.storage.disk": disk}
+    ):
         out = ddf.shuffle(on="a", ignore_index=True, force=True)
     expected, result = c.compute([ddf, out])
     del out
@@ -2452,6 +2456,45 @@ async def test_handle_null_partitions_2(c, s, a, b):
     await assert_worker_cleanup(a)
     await assert_worker_cleanup(b)
     await assert_scheduler_cleanup(s)
+
+
+@pytest.mark.parametrize("null_first", [True, False])
+@pytest.mark.parametrize(
+    "null_values", [[None, None], [np.nan, np.nan], [pd.NA, None], [pd.NaT, np.nan]]
+)
+@pytest.mark.parametrize("dtype", ["float64", "int64", "bool", "str", "Int64"])
+@pytest.mark.skipif(not PANDAS_GE_300, reason="Pandas 3 null-object concat semantics")
+def test_null_object_column_survives_arrow_concatenation(
+    tmp_path, null_first, null_values, dtype
+):
+    values = [2**60 + 1, 2**60 + 3] if dtype in ("int64", "Int64") else [1, 2]
+    if dtype == "Int64":
+        values[1] = pd.NA
+    null = pd.DataFrame({"a": [0, 1], "b": pd.Series(null_values, dtype=object)})
+    typed = pd.DataFrame({"a": [2, 3], "b": pd.Series(values, dtype=dtype)})
+    # Marker names must not collide with user columns or depend on column order.
+    null["__dask_null_object_4__"] = [4, 5]
+    typed["__dask_null_object_4__"] = [6, 7]
+    typed = typed[typed.columns[::-1]]
+    frames = [null, typed] if null_first else [typed, null]
+    # Exercise both the receive-side concat and subsequent disk-buffer concats.
+    shards = []
+    worker_for = pd.Series({0: "worker"}).astype("category")
+    for partition_id, frame in enumerate(frames):
+        frame = frame.assign(_partitions=0)
+        table = split_by_worker(frame, "_partitions", frame.iloc[:0], worker_for)[
+            "worker"
+        ]
+        shards.append(buffers_to_table([(partition_id, serialize_table(table))]))
+    path = tmp_path / "shards"
+    with path.open("ab") as f:
+        for shard in shards:
+            f.write(serialize_table(shard))
+    shards, _ = read_from_disk(path)
+    result = convert_shards(shards, typed.iloc[:0], "_partitions", False)
+    result = result.drop(columns="_partitions")
+    expected = pd.concat(frames)
+    pd.testing.assert_frame_equal(result, expected)
 
 
 @gen_cluster(client=True)
