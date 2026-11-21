@@ -4929,6 +4929,23 @@ async def test_restart_workers_by_name(c, s, a, b, by_name):
     assert results == {a.name if by_name else a_addr: "OK", b_addr: "OK"}
 
 
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("", 1)])
+async def test_restart_worker_preserves_name_restrictions(c, s, a):
+    event = Event()
+    future = c.submit(block_on_event, event, workers=[a.name])
+    await wait_for_state(future.key, "processing", s)
+
+    old_address = a.worker_address
+    await c.restart_workers([a.name])
+    while a.worker_address == old_address:
+        await asyncio.sleep(0.01)
+
+    assert s.valid_workers(s.tasks[future.key]) == set(s.workers.values())
+    await event.set()
+    await future
+
+
 class MyException(Exception):
     pass
 

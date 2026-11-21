@@ -1347,12 +1347,12 @@ class TaskState:
     #: certain hosts. A hostname may correspond to one or several connected workers.
     host_restrictions: set[str] | None
 
-    #: A set of complete worker addresses where this can be run (or ``None`` if empty).
+    #: A set of worker addresses or names where this can be run (or ``None`` if empty).
     #: Usually this is empty unless the task has been specifically restricted to only
     #: run on certain workers.
-    #: Note this is tracking worker addresses, not worker states, since the specific
-    #: workers may not be connected at this time.
-    worker_restrictions: set[str] | None
+    #: Note this is tracking worker addresses or names, not worker states, since the
+    #: specific workers may not be connected at this time.
+    worker_restrictions: set[Hashable] | None
 
     #: Resources required by this task, such as ``{'gpu': 1}`` or ``{'memory': 1e9}``
     #: These are user-defined names and are matched against the : contents of each
@@ -3196,6 +3196,15 @@ class SchedulerState:
         nbytes = sum(dts.get_nbytes() for dts in deps)
         return nbytes / self.bandwidth
 
+    def _resolve_worker_restrictions(
+        self, worker_restrictions: Collection[Hashable]
+    ) -> set[str]:
+        return {
+            address
+            for worker in worker_restrictions
+            if isinstance(address := self.aliases.get(worker, worker), str)
+        }
+
     def valid_workers(self, ts: TaskState) -> set[WorkerState] | None:
         """Return set of currently valid workers for key
 
@@ -3212,7 +3221,11 @@ class SchedulerState:
         s: set[str] | None = None
 
         if ts.worker_restrictions:
-            s = {addr for addr in ts.worker_restrictions if addr in self.workers}
+            s = {
+                addr
+                for addr in self._resolve_worker_restrictions(ts.worker_restrictions)
+                if addr in self.workers
+            }
 
         if ts.host_restrictions:
             # Resolve the alias here rather than early, for the worker
@@ -5285,6 +5298,9 @@ class Scheduler(SchedulerState, ServerNode):
                     host_restrictions = set()
                     worker_restrictions = set()
                     for w in value:
+                        if w in self.aliases:
+                            worker_restrictions.add(w)
+                            continue
                         try:
                             w = self.coerce_address(w)
                         except ValueError:
@@ -9258,7 +9274,7 @@ class NoValidWorkerError(Exception):
         self,
         task: Key,
         host_restrictions: set[str],
-        worker_restrictions: set[str],
+        worker_restrictions: set[Hashable],
         resource_restrictions: dict[str, float],
         timeout: float,
     ):
