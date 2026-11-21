@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import ssl
 import warnings
 import weakref
 from contextlib import suppress
 
 import tlz
+import tornado.netutil as netutil
 from tornado.httpserver import HTTPServer
 
 import dask
@@ -159,28 +161,46 @@ class ServerNode(Server):
 
             if http_address["address"] is None or http_address["address"] == "":
                 address = self._start_address
+
                 if isinstance(address, (list, tuple)):
                     address = address[0]
                 if address:
                     with suppress(ValueError):
-                        http_address["address"] = get_address_host(address)
+                        address = get_address_host(address)
+
+                        http_address["address"] = address
 
             change_port = False
             retries_left = 3
-            while True:
-                try:
-                    if not change_port:
-                        self.http_server.listen(**http_address)
-                    else:
-                        self.http_server.listen(**tlz.merge(http_address, {"port": 0}))
-                    break
-                except Exception:
-                    change_port = True
-                    retries_left = retries_left - 1
-                    if retries_left < 1:
-                        raise
 
-        bound_addresses = get_tcp_server_addresses(self.http_server)
+            if os.path.isabs(http_address["address"]) or http_address[
+                "address"
+            ].startswith("unix://"):  # unix socket
+                address = http_address["address"].split("unix://")[-1]
+                try:  # remove any old sockets
+                    os.remove(address)
+                except OSError:
+                    pass
+                dashboard_socket = netutil.bind_unix_socket(address, mode=0o600)
+                self.http_server.add_socket(dashboard_socket)
+                bound_addresses = [(f"unix://{address}", 0)]
+            else:
+                while True:
+                    try:
+                        if not change_port:
+                            self.http_server.listen(**http_address)
+                        else:
+                            self.http_server.listen(
+                                **tlz.merge(http_address, {"port": 0})
+                            )
+                        break
+                    except Exception:
+                        change_port = True
+                        retries_left = retries_left - 1
+                        if retries_left < 1:
+                            raise
+
+                bound_addresses = get_tcp_server_addresses(self.http_server)
 
         # If more than one address is configured we just use the first here
         # Socket addresses representation: https://docs.python.org/3/library/socket.html#socket-families

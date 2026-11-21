@@ -12,6 +12,7 @@ import operator
 import os
 import pickle
 import random
+import socket
 import textwrap
 import uuid
 import warnings
@@ -22,6 +23,7 @@ from collections.abc import (
     Callable,
     Collection,
     Container,
+    Generator,
     Hashable,
     Iterable,
     Iterator,
@@ -94,6 +96,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
+from distributed.compatibility import WINDOWS
 from distributed.core import (
     ErrorMessage,
     OKMessage,
@@ -4279,13 +4282,24 @@ class Scheduler(SchedulerState, ServerNode):
 
     def identity(self, n_workers: int = -1) -> dict[str, Any]:
         """Basic information about ourselves and our cluster"""
+
+        def _map_services_to_uri(services: dict) -> Generator[tuple[str, int | str]]:
+            """the services dict contains k/v-pairs where v is either an int port number, of a unix socket url"""
+            for k, v in services.items():
+                s = list(v._sockets.values())[0]
+                if not WINDOWS and s.family is socket.AF_UNIX:
+                    yield k, f"unix://{s.getsockname()}"
+                else:
+                    yield k, v.port
+
         if n_workers == -1:
             n_workers = len(self.workers)
+
         d = {
             "type": type(self).__name__,
             "id": str(self.id),
             "address": self.address,
-            "services": {key: v.port for (key, v) in self.services.items()},
+            "services": {k: v for k, v in _map_services_to_uri(self.services)},
             "started": self.time_started,
             "n_workers": len(self.workers),
             "total_threads": self.total_nthreads,
