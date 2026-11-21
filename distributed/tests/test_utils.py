@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import errno
 import functools
 import io
 import logging
@@ -36,6 +37,7 @@ from distributed.utils import (
     RateLimiterFilter,
     TimeoutError,
     TupleComparable,
+    _get_ip,
     ensure_ip,
     ensure_memoryview,
     format_dashboard_link,
@@ -190,6 +192,95 @@ def test_get_ip_interface():
     assert get_ip_interface(iface) == "127.0.0.1"
     with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
         get_ip_interface("__notexist")
+
+
+def test_get_ip_silent_when_network_unreachable():
+    """A machine without external connectivity must not emit RuntimeWarning."""
+
+    class FakeSocket:
+        def __init__(self, family, kind):
+            pass
+
+        def connect(self, addr):
+            raise OSError(
+                errno.ENETUNREACH,
+                "Network is unreachable",
+            )
+
+        def getsockname(self):
+            return ("192.168.1.5", 0)
+
+        def close(self):
+            pass
+
+    fake_addrinfo = [
+        (socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP, "", ("10.0.0.1", 0)),
+    ]
+    with (
+        mock.patch("socket.socket", FakeSocket),
+        mock.patch("socket.gethostname", return_value="offline-test"),
+        mock.patch("socket.getaddrinfo", return_value=fake_addrinfo),
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter("error")
+        # No warning may be raised for an expected offline machine.
+        assert _get_ip("8.8.8.8", 80, socket.AF_INET) == "10.0.0.1"
+
+
+def test_get_ip_warns_for_other_socket_errors():
+    """Genuine socket errors must still surface a RuntimeWarning.
+
+    Uses a different host than the sibling tests: ``_get_ip`` is memoized
+    on ``(host, port, family)``, so each test needs its own cache key.
+    """
+
+    class FakeSocket:
+        def __init__(self, family, kind):
+            pass
+
+        def connect(self, addr):
+            raise OSError(errno.EACCES, "Permission denied")
+
+        def close(self):
+            pass
+
+    fake_addrinfo = [
+        (socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP, "", ("10.0.0.1", 0)),
+    ]
+    with (
+        mock.patch("socket.socket", FakeSocket),
+        mock.patch("socket.gethostname", return_value="offline-test"),
+        mock.patch("socket.getaddrinfo", return_value=fake_addrinfo),
+        pytest.warns(RuntimeWarning, match="Couldn't detect"),
+    ):
+        _get_ip("1.1.1.1", 80, socket.AF_INET)
+
+
+def test_get_ip_returns_local_address():
+    """A normal UDP probe returns the local address without warning."""
+
+    class FakeSocket:
+        def __init__(self, family, kind):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+
+        def connect(self, addr):
+            pass
+
+        def getsockname(self):
+            return ("192.168.1.5", 0)
+
+        def close(self):
+            pass
+
+    with mock.patch("socket.socket", FakeSocket), warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert _get_ip("9.9.9.9", 80, socket.AF_INET) == "192.168.1.5"
 
 
 @pytest.mark.skipif(
