@@ -8465,3 +8465,24 @@ async def test_map_accepts_nested_futures(c, s, a, b, use_kwarg):
 
     result = await future.result()
     assert result == 30 if not offset else 31
+
+
+@gen_cluster(client=True)
+async def test_done_callback_shutdown_runtime_error(c, s, a, b):
+    from distributed.client import done_callback
+
+    future = c.submit(inc, 1)
+    await future
+
+    # Shutdown-related RuntimeError is swallowed
+    def cb_shutdown(fut):
+        raise RuntimeError("cannot schedule new futures after interpreter shutdown")
+
+    await done_callback(future, cb_shutdown)
+
+    # Unrelated RuntimeError is re-raised
+    def cb_other(fut):
+        raise RuntimeError("something else")
+
+    with pytest.raises(RuntimeError, match="something else"):
+        await done_callback(future, cb_other)
