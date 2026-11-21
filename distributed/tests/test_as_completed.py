@@ -71,6 +71,29 @@ def test_as_completed_sync(client):
     assert list(as_completed([])) == []
 
 
+@pytest.mark.parametrize("with_results", [False, True])
+@gen_cluster(client=True)
+async def test_count_duplicate_futures(c, s, a, b, with_results):
+    x = c.submit(inc, 1)
+    y = c.submit(inc, 2)
+    ac = as_completed([x, x, y], with_results=with_results)
+    assert ac.count() == 3
+    ac.add(x)
+    assert ac.count() == 4
+    ac.update([x])
+    assert ac.count() == 5
+
+    results = []
+    for remaining in range(4, -1, -1):
+        results.append(await ac.__anext__())
+        assert ac.count() == remaining
+    expected_x = (x, 2) if with_results else x
+    expected_y = (y, 3) if with_results else y
+    assert results.count(expected_x) == 4
+    assert results.count(expected_y) == 1
+    assert ac.is_empty()
+
+
 def test_as_completed_with_non_futures(client):
     with pytest.raises(TypeError):
         list(as_completed([1, 2, 3]))
