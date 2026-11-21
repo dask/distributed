@@ -326,6 +326,7 @@ def serialize(  # type: ignore[no-untyped-def]
                 _header, _frames = serialize(
                     v, serializers=serializers, on_error=on_error, context=context
                 )
+                _header = _header.copy()
                 _header["key"] = k
                 headers_frames.append((_header, _frames))
         else:
@@ -420,6 +421,7 @@ def deserialize(header, frames, deserializers=None):
         if cls is dict:
             d = {}
             for _header, _length in zip(headers, lengths):
+                _header = _header.copy()
                 k = _header.pop("key")
                 d[k] = deserialize(
                     _header,
