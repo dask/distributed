@@ -15,7 +15,6 @@ from tornado.ioloop import IOLoop
 from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend, backends
 from distributed.protocol.serialize import _nested_deserialize
-from distributed.utils import get_ip
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +37,7 @@ class Manager:
     @property
     def ip(self):
         if not self._ip:
-            try:
-                self._ip = get_ip()
-            except OSError:
-                self._ip = "127.0.0.1"
+            self._ip = "127.0.0.1"
         return self._ip
 
     def add_listener(self, addr, listener):
