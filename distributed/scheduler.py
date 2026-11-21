@@ -3995,6 +3995,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         http_server_modules = dask.config.get("distributed.scheduler.http.routes")
         show_dashboard = dashboard or (dashboard is None and dashboard_address)
+        self._dashboard_requested = bool(show_dashboard)
         # install vanilla route if show_dashboard but bokeh is not installed
         if show_dashboard:
             try:
@@ -4432,6 +4433,8 @@ class Scheduler(SchedulerState, ServerNode):
         for listener in self.listeners:
             logger.info("  Scheduler at: %25s", listener.contact_address)
         for name, server in self.services.items():
+            if name == "dashboard" and not self._dashboard_requested:
+                continue
             if name == "dashboard":
                 addr = get_address_host(listener.contact_address)
                 try:

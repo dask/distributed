@@ -2710,6 +2710,22 @@ async def test_dashboard_address():
         assert s.services["dashboard"].port == 8901
 
 
+@gen_test()
+async def test_dashboard_link_not_logged_when_dashboard_disabled():
+    with captured_logger("distributed.scheduler") as log:
+        async with Scheduler(dashboard_address=None, dashboard=None, port=0):
+            pass
+    assert "dashboard at" not in log.getvalue()
+
+
+@gen_test()
+async def test_dashboard_link_logged_when_dashboard_enabled():
+    with captured_logger("distributed.scheduler") as log:
+        async with Scheduler(dashboard_address=":0", port=0):
+            pass
+    assert re.search(r"dashboard at:\s*http://", log.getvalue())
+
+
 def test_stop_services():
     pytest.importorskip("bokeh")
     loop_runner = LoopRunner()
