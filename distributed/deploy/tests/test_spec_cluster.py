@@ -512,6 +512,42 @@ async def test_bad_close():
 
 
 @gen_test()
+async def test_correct_state_skips_retirement_while_closing():
+    retired = False
+
+    class DummyScheduler:
+        status = Status.running
+
+    class DummySchedulerComm:
+        async def retire_workers(self, workers):
+            nonlocal retired
+            retired = True
+
+    class DummyWorker:
+        def __init__(self):
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    cluster = object.__new__(SpecCluster)
+    cluster._lock = asyncio.Lock()
+    cluster._correct_state_waiting = None
+    cluster.status = Status.closing
+    cluster.scheduler = DummyScheduler()
+    cluster.scheduler_comm = DummySchedulerComm()
+    worker = DummyWorker()
+    cluster.workers = {"worker": worker}
+    cluster.worker_spec = {}
+
+    await cluster._correct_state_internal()
+
+    assert not retired
+    assert worker.closed
+    assert not cluster.workers
+
+
+@gen_test()
 async def test_shutdown_scheduler_disabled():
     async with SpecCluster(
         workers=worker_spec,
