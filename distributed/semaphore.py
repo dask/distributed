@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 import warnings
+import weakref
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
@@ -356,15 +357,19 @@ class Semaphore(SyncMethodMixin):
             default="s",
         )
         refresh_leases_interval = lease_timeout / 5
+        # The event loop retains the callback. It must not keep an otherwise
+        # unused semaphore alive (e.g. one deserialized as a task argument).
+        self_ref = weakref.ref(self)
+
+        async def refresh_leases():
+            semaphore = self_ref()
+            if semaphore is not None:
+                await semaphore._refresh_leases()
+
         pc = PeriodicCallback(
-            self._refresh_leases, callback_time=refresh_leases_interval * 1000
+            refresh_leases, callback_time=refresh_leases_interval * 1000
         )
         self.refresh_callback = pc
-
-        # Need to start the callback using IOLoop.add_callback to ensure that the
-        # PC uses the correct event loop.
-        if self.loop is not None:
-            self.loop.add_callback(pc.start)
 
     @property
     def scheduler(self):
@@ -414,6 +419,10 @@ class Semaphore(SyncMethodMixin):
             operation=f"semaphore register id={self.id} name={self.name}",
         )
         self._registered = True
+        # Deserializing an unused task argument must not start a timer. Start
+        # lease renewal only when this instance is registered for actual use.
+        if hasattr(self, "refresh_callback"):
+            self.refresh_callback.start()
 
     def register(self, **kwargs):
         return self.sync(self._register)
