@@ -78,7 +78,8 @@ class SchedulerPlugin:
     async def start(self, scheduler: Scheduler) -> None:
         """Run when the scheduler starts up
 
-        This runs at the end of the Scheduler startup process
+        This runs at the end of the Scheduler startup process,
+        or immediately upon registering the plugin, if Scheduler has already started.
         """
 
     async def before_close(self) -> None:
