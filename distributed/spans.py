@@ -641,8 +641,7 @@ class SpansSchedulerExtension:
         for (context, span_id, *other), v in data.items():
             assert isinstance(span_id, str)
             span = self.spans[span_id]
-            key = (context, *other)
-            span._cumulative_worker_metrics[key] += v
+            span._cumulative_worker_metrics[(context,) + tuple(other)] += v
 
 
 class SpansWorkerExtension:

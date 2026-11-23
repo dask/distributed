@@ -231,7 +231,7 @@ class SemaphoreExtension:
                     RuntimeWarning,
                 )
             del self.leases[name]
-        if name in self.metrics["pending"] and self.metrics["pending"][name]:
+        if self.metrics["pending"].get(name):
             warnings.warn(
                 f"Closing semaphore {name} but there remain pending leases",
                 RuntimeWarning,
