@@ -254,10 +254,12 @@ class ChildProcessesChecker(ResourceChecker, name="processes"):
                         c.ppid() == p.pid
                         and _samefile(c.exe(), sys.executable)
                         and any(
-                            # Skip multiprocessing resource tracker
                             a.startswith(
                                 (
+                                    # Skip multiprocessing resource tracker
                                     "from multiprocessing.resource_tracker import main",
+                                    # Skip forkserver process; the forkserver's children
+                                    # however will be recorded normally
                                     "from multiprocessing.forkserver import main",
                                 )
                             )
