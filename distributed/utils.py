@@ -820,11 +820,11 @@ class _LogErrors:
                 with self:
                     return await func(*args, **kwargs)
 
-            return cast("Callable[P, T]", wraps(func)(wrapper))
+        else:
 
-        def wrapper(*args, **kwargs):  # type: ignore[no-redef]
-            with self:
-                return func(*args, **kwargs)
+            def wrapper(*args, **kwargs):  # type: ignore[misc]
+                with self:
+                    return func(*args, **kwargs)
 
         return cast("Callable[P, T]", wraps(func)(wrapper))
 

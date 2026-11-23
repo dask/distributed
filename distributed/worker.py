@@ -3039,7 +3039,7 @@ def add_gpu_metrics():
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
 
 
-with suppress(Exception):
+with suppress(ImportError):
     import rmm as _rmm
 
     async def rmm_metric(worker):
@@ -3051,7 +3051,7 @@ with suppress(Exception):
 
 # avoid importing cuDF unless explicitly enabled
 if dask.config.get("distributed.diagnostics.cudf"):
-    with suppress(Exception):
+    with suppress(ImportError):
         import cudf as _cudf
 
         from distributed.diagnostics import cudf
