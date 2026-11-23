@@ -6656,9 +6656,11 @@ async def test_performance_report(c, s, a, b, local):
     assert "Dask Performance Report" in data
 
     data = await f(stacklevel=1, mode="inline")
-    assert "cdn.bokeh.org" not in data
+    # Bokeh 4 inlines its bootstrap code, which mentions the CDN even when no
+    # script is loaded from it; check script tags instead of raw text.
+    assert 'src="https://cdn.bokeh.org' not in data
     data = await f(stacklevel=1, mode="cdn")
-    assert "cdn.bokeh.org" in data
+    assert 'src="https://cdn.bokeh.org' in data
 
 
 @gen_cluster(client=True)
