@@ -2583,7 +2583,10 @@ class SchedulerState:
         for cs in ts.who_wants or ():
             client_msgs[cs.client_key] = [report_msg]
 
-        if not ts.run_spec or ts.has_lost_dependencies:  # pure data
+        if (
+            not ts.run_spec  # pure data
+            or ts.has_lost_dependencies
+        ):
             recommendations[key] = "forgotten"
         elif (ts.who_wants or ts.waiters) and not any(
             dts.state == "erred" for dts in ts.dependencies
