@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from html import unescape
 from typing import Any
 from unittest import mock
+from urllib.parse import urljoin
 
 import pytest
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
@@ -574,6 +576,62 @@ KEY_EDGE_CASES = [
 ]
 
 
+@pytest.mark.parametrize("state", ["memory", "processing"])
+@pytest.mark.parametrize("key", KEY_EDGE_CASES)
+@gen_cluster(client=True)
+async def test_worker_task_links(c, s, a, b, key, state):
+    event = Event()
+    future = c.submit(event.wait, key=key, workers=a.address)
+    await wait_for_state(key, "executing", a)
+    if state == "memory":
+        await event.set()
+        await future
+
+    http_client = AsyncHTTPClient()
+    url = (
+        f"http://localhost:{s.http_server.port}"
+        f"/info/worker/{url_escape(a.address)}.html"
+    )
+    try:
+        response = await http_client.fetch(url)
+        links = re.findall(r'href="(\.\./task/[^"]+)"', response.body.decode())
+        assert links
+        for link in set(links):
+            task_url = urljoin(url, unescape(link))
+            response = await http_client.fetch(task_url)
+            assert response.code == 200
+            if state == "processing":
+                call_stack_links = re.findall(
+                    r'href="(\.\./call-stack/[^"]+)"', response.body.decode()
+                )
+                assert call_stack_links
+                for link in call_stack_links:
+                    response = await http_client.fetch(
+                        urljoin(task_url, unescape(link))
+                    )
+                    assert response.code == 200
+    finally:
+        await event.set()
+        await future
+
+
+@pytest.mark.parametrize("key", ["a b", "a+b", ("a b+c", 1)])
+@gen_cluster(client=True)
+async def test_exception_task_links(c, s, a, b, key):
+    future = c.submit(div, 1, 0, key=key)
+    with pytest.raises(ZeroDivisionError):
+        await future
+
+    http_client = AsyncHTTPClient()
+    url = f"http://localhost:{s.http_server.port}/info/main/exceptions.html"
+    response = await http_client.fetch(url)
+    links = re.findall(r'href="(\.\./task/[^"]+)"', response.body.decode())
+    assert links
+    for link in set(links):
+        response = await http_client.fetch(urljoin(url, unescape(link)))
+        assert response.code == 200
+
+
 @pytest.mark.parametrize("key", KEY_EDGE_CASES)
 @gen_cluster(client=True)
 async def test_task_page(c, s, a, b, key):
@@ -584,8 +642,10 @@ async def test_task_page(c, s, a, b, key):
     response = await http_client.fetch(url, raise_error=False)
     assert response.code == 404
 
-    future = c.submit(lambda: 1, key=key, workers=a.address)
-    await future
+    dependency = c.submit(lambda: 1, key=("dependency", key), workers=a.address)
+    future = c.submit(inc, dependency, key=key, workers=a.address)
+    dependent = c.submit(inc, future, key=("dependent", key), workers=a.address)
+    await dependent
     response = await http_client.fetch(url)
     assert response.code == 200
     body = response.body.decode()
@@ -594,6 +654,16 @@ async def test_task_page(c, s, a, b, key):
     assert str(sizeof(1)) in body
     assert "int" in body
     assert "memory" in body
+
+    links = [
+        link
+        for link in re.findall(r'href="([^"]+\.html)"', body)
+        if not link.startswith(("/", ".", "#"))
+    ]
+    assert links
+    for link in set(links):
+        response = await http_client.fetch(urljoin(url, unescape(link)))
+        assert response.code == 200
 
 
 @pytest.mark.parametrize("key", KEY_EDGE_CASES)
