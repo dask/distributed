@@ -2559,17 +2559,17 @@ class TaskGroupGraph(DashboardComponent):
             source=self.nodes_source,
         )
 
-        arrow_kwargs = dict(
-            end=VeeHead(size=8),
-            line_color="black",
-            line_alpha=0.5,
-            line_width=1,
-            x_start="xs",
-            y_start="ys",
-            x_end="xe",
-            y_end="ye",
-            source=self.arrows_source,
-        )
+        arrow_kwargs = {
+            "end": VeeHead(size=8),
+            "line_color": "black",
+            "line_alpha": 0.5,
+            "line_width": 1,
+            "x_start": "xs",
+            "y_start": "ys",
+            "x_end": "xe",
+            "y_end": "ye",
+            "source": self.arrows_source,
+        }
         if Arrow is not None:
             self.arrows = Arrow(**arrow_kwargs)
             self.root.add_layout(self.arrows)
