@@ -45,6 +45,7 @@ def test_serialize_scipy_sparse(sparse_type, dtype):
 
         assert header["serializer"] == "dask"
         assert type(asp2) is sparse_type
+        assert asp2.dtype == dtype
         assert (a == asp2.todense()).all()
 
 
@@ -63,4 +64,5 @@ def test_serialize_scipy_sparray(format, dtype):
 
     assert header["serializer"] == "dask"
     assert type(asp2) is sparse_type
+    assert asp2.dtype == dtype
     assert (a == asp2.toarray()).all()
