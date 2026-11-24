@@ -1131,8 +1131,7 @@ class TaskGroup(TaskCollection):
         self._all_durations_us[action] += duration_us
 
         if action == "compute":
-            if self.stop < stop:
-                self.stop = stop
+            self.stop = max(self.stop, stop)
             if self.start == 0.0 or self.start > start:
                 self.start = start
         self.prefix.add_duration(action, start, stop)
@@ -2071,11 +2070,14 @@ class SchedulerState:
                     del self.tasks[ts.key]
 
             tg = ts.group
-            if ts.state == "forgotten" and tg.name in self.task_groups:
-                # Remove TaskGroup if all tasks are in the forgotten state
-                if all(v == 0 or k == "forgotten" for k, v in tg.states.items()):
-                    ts.prefix.remove_group(tg)
-                    del self.task_groups[tg.name]
+            # Remove TaskGroup if all tasks are in the forgotten state
+            if (
+                ts.state == "forgotten"
+                and tg.name in self.task_groups
+                and all(v == 0 or k == "forgotten" for k, v in tg.states.items())
+            ):
+                ts.prefix.remove_group(tg)
+                del self.task_groups[tg.name]
 
             return recommendations, client_msgs, worker_msgs
         except Exception:
@@ -2581,9 +2583,10 @@ class SchedulerState:
         for cs in ts.who_wants or ():
             client_msgs[cs.client_key] = [report_msg]
 
-        if not ts.run_spec:  # pure data
-            recommendations[key] = "forgotten"
-        elif ts.has_lost_dependencies:
+        if (
+            not ts.run_spec  # pure data
+            or ts.has_lost_dependencies
+        ):
             recommendations[key] = "forgotten"
         elif (ts.who_wants or ts.waiters) and not any(
             dts.state == "erred" for dts in ts.dependencies
@@ -3610,7 +3613,7 @@ class SchedulerState:
         assert not ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
-        assert not any([ts in (dts.waiters or ()) for dts in ts.dependencies])
+        assert not any(ts in (dts.waiters or ()) for dts in ts.dependencies)
         assert ts not in self.unrunnable
         assert ts not in self.queued
 
@@ -4240,9 +4243,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS.copy()
-            if not dask.config.get("distributed.scheduler.work-stealing"):
-                if "stealing" in extensions:
-                    del extensions["stealing"]
+            if "stealing" in extensions and not dask.config.get(
+                "distributed.scheduler.work-stealing"
+            ):
+                del extensions["stealing"]
 
         for name, extension in extensions.items():
             self.extensions[name] = extension(self)
@@ -5314,7 +5318,7 @@ class Scheduler(SchedulerState, ServerNode):
         internal_priority: dict[Key, int],
         submitting_task: Key | None,
         user_priority: int | dict[Key, int],
-        fifo_timeout: int | float | str,
+        fifo_timeout: float | str,
         start: float,
         tasks: set[TaskState],
     ) -> None:
@@ -6363,7 +6367,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         assert isinstance(data, dict)
 
-        workers = list(ws.address for ws in wss)
+        workers = [ws.address for ws in wss]
         keys, who_has, nbytes = await scatter_to_workers(workers, data, rpc=self.rpc)
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
@@ -7304,7 +7308,7 @@ class Scheduler(SchedulerState, ServerNode):
     @log_errors
     def workers_to_close(
         self,
-        memory_ratio: int | float | None = None,
+        memory_ratio: float | None = None,
         n: int | None = None,
         key: Callable[[WorkerState], Hashable] | bytes | None = None,
         minimum: int | None = None,
@@ -7371,14 +7375,13 @@ class Scheduler(SchedulerState, ServerNode):
         if target is not None and n is None:
             n = len(self.workers) - target
         if n is not None:
-            if n < 0:
-                n = 0
+            n = max(n, 0)
             target = len(self.workers) - n
 
         if n is None and memory_ratio is None:
             memory_ratio = 2
 
-        if not n and all([ws.processing for ws in self.workers.values()]):
+        if not n and all(ws.processing for ws in self.workers.values()):
             return []
 
         if key is None:
@@ -7403,7 +7406,7 @@ class Scheduler(SchedulerState, ServerNode):
         total = sum(group_bytes.values())
 
         def _key(group: str) -> tuple[bool, int]:
-            is_idle = not any([wws.processing for wws in groups[group]])
+            is_idle = not any(wws.processing for wws in groups[group])
             bytes = -group_bytes[group]
             return is_idle, bytes
 
@@ -7414,7 +7417,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         while idle:
             group = idle.pop()
-            if n is None and any([ws.processing for ws in groups[group]]):
+            if n is None and any(ws.processing for ws in groups[group]):
                 break
 
             if minimum and n_remain - len(groups[group]) < minimum:
@@ -7465,7 +7468,7 @@ class Scheduler(SchedulerState, ServerNode):
         remove: bool = True,
         stimulus_id: str | None = None,
         # Parameters for workers_to_close()
-        memory_ratio: int | float | None = None,
+        memory_ratio: float | None = None,
         n: int | None = None,
         key: Callable[[WorkerState], Hashable] | bytes | None = None,
         minimum: int | None = None,
@@ -7977,10 +7980,10 @@ class Scheduler(SchedulerState, ServerNode):
                 out["network"][size].append(duration)
 
         result = {}
-        for mode in out:
+        for mode, size_durations in out.items():
             result[mode] = {
                 size: sum(durations) / len(durations)
-                for size, durations in out[mode].items()
+                for size, durations in size_durations.items()
             }
 
         return result
@@ -8138,7 +8141,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
-            msg=dict(op="plugin-add", plugin=plugin, name=name)
+            msg={"op": "plugin-add", "plugin": plugin, "name": name}
         )
         return responses
 
@@ -8151,7 +8154,7 @@ class Scheduler(SchedulerState, ServerNode):
         except KeyError:
             raise ValueError(f"The worker plugin {name} does not exist")
 
-        responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
+        responses = await self.broadcast(msg={"op": "plugin-remove", "name": name})
         return responses
 
     async def register_nanny_plugin(
@@ -8171,7 +8174,7 @@ class Scheduler(SchedulerState, ServerNode):
                 lambda: not self._starting_nannies
             )
             responses = await self.broadcast(
-                msg=dict(op="plugin_add", plugin=plugin, name=name),
+                msg={"op": "plugin_add", "plugin": plugin, "name": name},
                 nanny=True,
             )
             return responses
@@ -8186,7 +8189,7 @@ class Scheduler(SchedulerState, ServerNode):
             raise ValueError(f"The nanny plugin {name} does not exist")
 
         responses = await self.broadcast(
-            msg=dict(op="plugin_remove", name=name), nanny=True
+            msg={"op": "plugin_remove", "name": name}, nanny=True
         )
         return responses
 
@@ -8698,16 +8701,15 @@ class Scheduler(SchedulerState, ServerNode):
                 self.idle_since = last_activity
                 return self.idle_since
 
-        if self.idle_timeout:
-            if time() > self.idle_since + self.idle_timeout:
-                assert self.idle_since
-                logger.info(
-                    "Scheduler closing after being idle for %s",
-                    format_time(self.idle_timeout),
-                )
-                self._ongoing_background_tasks.call_soon(
-                    self.close, reason="idle-timeout-exceeded"
-                )
+        if self.idle_timeout and time() > self.idle_since + self.idle_timeout:
+            assert self.idle_since
+            logger.info(
+                "Scheduler closing after being idle for %s",
+                format_time(self.idle_timeout),
+            )
+            self._ongoing_background_tasks.call_soon(
+                self.close, reason="idle-timeout-exceeded"
+            )
         return self.idle_since
 
     def _check_no_workers(self) -> None:
@@ -9021,9 +9023,8 @@ def decide_worker(
         candidates &= valid_workers
         if not candidates:
             candidates = valid_workers
-            if not candidates:
-                if ts.loose_restrictions:
-                    return decide_worker(ts, all_workers, None, objective)
+            if not candidates and ts.loose_restrictions:
+                return decide_worker(ts, all_workers, None, objective)
 
     if not candidates:
         return None
@@ -9113,11 +9114,7 @@ def validate_task_state(ts: TaskState) -> None:
             assert ts.type
             assert isinstance(ts.type, str)
         assert not any(
-            [
-                ts in dts.waiting_on
-                for dts in ts.dependents
-                if dts.waiting_on is not None
-            ]
+            ts in dts.waiting_on for dts in ts.dependents if dts.waiting_on is not None
         )
         for ws in ts.who_has:
             assert ts in ws.has_what, (

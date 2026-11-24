@@ -67,13 +67,15 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
             buffers.clear()
             pickler.dump(x)
             result = f.getvalue()
-        if b"__main__" in result or (
-            getattr(inspect.getmodule(x), "__name__", None)
-            in cloudpickle.list_registry_pickle_by_value()
-        ):
-            if len(result) < 1000 or not _always_use_pickle_for(x):
-                buffers.clear()
-                result = cloudpickle.dumps(x, **dump_kwargs)
+        if (
+            b"__main__" in result
+            or (
+                getattr(inspect.getmodule(x), "__name__", None)
+                in cloudpickle.list_registry_pickle_by_value()
+            )
+        ) and (len(result) < 1000 or not _always_use_pickle_for(x)):
+            buffers.clear()
+            result = cloudpickle.dumps(x, **dump_kwargs)
     except Exception:
         try:
             buffers.clear()

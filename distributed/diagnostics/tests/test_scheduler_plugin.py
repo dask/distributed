@@ -102,9 +102,8 @@ async def test_async_add_remove_worker(s):
     s.add_plugin(plugin)
     assert events == []
 
-    async with Worker(s.address) as a:
-        async with Worker(s.address) as b:
-            pass
+    async with Worker(s.address) as a, Worker(s.address) as b:
+        pass
 
     assert len(events) == 4
     assert set(events) == {
@@ -243,7 +242,6 @@ async def test_failing_async_add_remove_worker(s):
         async with Worker(s.address):
             while "add_worker failed" not in logger.getvalue():
                 await asyncio.sleep(0)
-            pass
         while "remove_worker failed" not in logger.getvalue():
             await asyncio.sleep(0)
 

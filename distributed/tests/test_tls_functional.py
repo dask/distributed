@@ -179,9 +179,8 @@ async def test_worker_client_gather(c, s, a, b):
 @gen_tls_cluster(client=True)
 async def test_worker_client_executor(c, s, a, b):
     def mysum():
-        with worker_client() as c:
-            with c.get_executor() as e:
-                return sum(e.map(double, range(30)))
+        with worker_client() as c, c.get_executor() as e:
+            return sum(e.map(double, range(30)))
 
     future = c.submit(mysum)
     result = await future
@@ -202,21 +201,25 @@ async def test_retire_workers(c, s, a, b):
 
 @gen_test()
 async def test_security_dict_input_no_security():
-    async with Scheduler(dashboard_address=":0", security={}) as s:
-        async with Worker(s.address, security={}):
-            async with Client(s.address, security={}, asynchronous=True) as c:
-                result = await c.submit(inc, 1)
-                assert result == 2
+    async with (
+        Scheduler(dashboard_address=":0", security={}) as s,
+        Worker(s.address, security={}),
+        Client(s.address, security={}, asynchronous=True) as c,
+    ):
+        result = await c.submit(inc, 1)
+        assert result == 2
 
 
 @gen_test()
 async def test_security_bool_input_disabled_security():
-    async with Scheduler(dashboard_address=":0", security=False) as s:
-        async with Worker(s.address, security=False):
-            async with Client(s.address, security=False, asynchronous=True) as c:
-                result = await c.submit(inc, 1)
-                assert c.security.require_encryption is False
-                assert result == 2
+    async with (
+        Scheduler(dashboard_address=":0", security=False) as s,
+        Worker(s.address, security=False),
+        Client(s.address, security=False, asynchronous=True) as c,
+    ):
+        result = await c.submit(inc, 1)
+        assert c.security.require_encryption is False
+        assert result == 2
 
 
 @gen_test()

@@ -45,30 +45,32 @@ def test_variable_in_task(loop):
     port = open_port()
     # Ensure that we can create a Variable inside a task on a
     # worker in a separate Python process than the client
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "scheduler",
-            "--no-dashboard",
-            "--port",
-            str(port),
-        ]
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "scheduler",
+                "--no-dashboard",
+                "--port",
+                str(port),
+            ]
+        ),
+        popen([sys.executable, "-m", "dask", "worker", f"127.0.0.1:{port}"]),
+        Client(f"tcp://127.0.0.1:{port}", loop=loop) as c,
     ):
-        with popen([sys.executable, "-m", "dask", "worker", f"127.0.0.1:{port}"]):
-            with Client(f"tcp://127.0.0.1:{port}", loop=loop) as c:
-                c.wait_for_workers(1)
+        c.wait_for_workers(1)
 
-                x = Variable("x")
-                x.set(123)
+        x = Variable("x")
+        x.set(123)
 
-                def foo():
-                    y = Variable("x")
-                    return y.get()
+        def foo():
+            y = Variable("x")
+            return y.get()
 
-                result = c.submit(foo).result()
-                assert result == 123
+        result = c.submit(foo).result()
+        assert result == 123
 
 
 @gen_cluster(client=True)

@@ -45,7 +45,7 @@ from importlib.util import cache_from_source
 from pickle import PickleBuffer
 from time import sleep
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar, TypeVar, overload
+from typing import TYPE_CHECKING, ClassVar, TypeVar, cast, overload
 from typing import Any as AnyType
 
 import psutil
@@ -822,11 +822,11 @@ class _LogErrors:
 
         else:
 
-            def wrapper(*args, **kwargs):
+            def wrapper(*args, **kwargs):  # type: ignore[misc]
                 with self:
                     return func(*args, **kwargs)
 
-        return wraps(func)(wrapper)
+        return cast("Callable[P, T]", wraps(func)(wrapper))
 
     def __enter__(self):
         return self
@@ -844,7 +844,7 @@ class _LogErrors:
         try:
             logger = logging.getLogger(modname)
             logger.exception(exc_value)
-        except Exception:  # Interpreter teardown
+        except Exception:  # noqa: S110  # Interpreter teardown
             pass  # pragma: nocover
 
         if self.pdb:
@@ -1114,7 +1114,7 @@ def asciitable(columns, rows):
     header = row_template % tuple(columns)
     bar = "+{}+".format("+".join("-" * (w + 2) for w in widths))
     data = "\n".join(row_template % r for r in rows)
-    return "\n".join([bar, header, bar, data, bar])
+    return f"{bar}\n{header}\n{bar}\n{data}\n{bar}"
 
 
 def nbytes(frame, _bytes_like=(bytes, bytearray)):
@@ -1141,8 +1141,7 @@ def json_load_robust(fn, load=json.load, timeout=None):
             except (ValueError, KeyError):  # race with writing process
                 pass
         sleep(0.1)
-    else:
-        raise TimeoutError(f"Could not load file after {timeout}s.")
+    raise TimeoutError(f"Could not load file after {timeout}s.")
 
 
 class DequeHandler(logging.Handler):
@@ -1178,7 +1177,7 @@ def reset_logger_locks():
 
     https://github.com/dask/distributed/issues/1491
     """
-    for name in logging.Logger.manager.loggerDict.keys():
+    for name in logging.Logger.manager.loggerDict:
         for handler in logging.getLogger(name).handlers:
             handler.createLock()
 
@@ -1274,7 +1273,7 @@ def format_dashboard_link(host, port):
     else:
         scheme = "http"
     return template.format(
-        **toolz.merge(os.environ, dict(scheme=scheme, host=host, port=port))
+        **toolz.merge(os.environ, {"scheme": scheme, "host": host, "port": port})
     )
 
 

@@ -180,7 +180,7 @@ class FuturesCancelledError(CancelledError):
         )
 
     def __str__(self):
-        count = sum(map(lambda group: len(group.errors), self.error_groups))
+        count = sum(len(group.errors) for group in self.error_groups)
         result = f"{count} Future{'s' if count > 1 else ''} cancelled:"
         return "\n".join(
             [result, "Reasons:"] + [str(group) for group in self.error_groups]
@@ -227,7 +227,7 @@ def _get_global_client() -> Client | None:
     c = _current_client.get()
     if c:
         return c
-    L = sorted(list(_global_clients), reverse=True)
+    L = sorted(_global_clients, reverse=True)
     for k in L:
         c = _global_clients[k]
         if c.status != "closed":
@@ -1096,7 +1096,7 @@ class Client(SyncMethodMixin):
             raise ValueError("None is an invalid value for global client timeout")
         self._timeout = timeout
 
-        self.futures = dict()
+        self.futures = {}
         self.refcount = defaultdict(int)
         self._handle_report_task = None
         if name is None:
@@ -1197,7 +1197,7 @@ class Client(SyncMethodMixin):
             dask.config.get("distributed.client.scheduler-info-interval", default="ms")
         )
 
-        self._periodic_callbacks = dict()
+        self._periodic_callbacks = {}
         self._periodic_callbacks["scheduler-info"] = PeriodicCallback(
             self._update_scheduler_info, scheduler_info_interval * 1000
         )
@@ -1386,7 +1386,7 @@ class Client(SyncMethodMixin):
     def _repr_html_(self):
         try:
             dle_version = parse_version(version("dask-labextension"))
-            JUPYTERLAB = False if dle_version < parse_version("6.0.0") else True
+            JUPYTERLAB = dle_version >= parse_version("6.0.0")
         except PackageNotFoundError:
             JUPYTERLAB = False
 
@@ -1883,10 +1883,9 @@ class Client(SyncMethodMixin):
         _del_global_client(self)
         self._scheduler_identity = {}
         if self._set_as_default and not _get_global_client():
-            with suppress(AttributeError):
-                # clear the dask.config set keys
-                with self._set_config:
-                    pass
+            # clear the dask.config set keys
+            with suppress(AttributeError), self._set_config:
+                pass
         if self.get == dask.config.get("get", None):
             del dask.config.config["get"]
 
@@ -2351,7 +2350,7 @@ class Client(SyncMethodMixin):
                 f"{ {f: f.client.id for f in mismatched_futures} }"
             )
         keys = [future.key for future in future_set]
-        bad_data = dict()
+        bad_data = {}
         data = {}
 
         if direct is None:
@@ -2759,7 +2758,7 @@ class Client(SyncMethodMixin):
         """
         if timeout is no_default:
             timeout = self._timeout
-        if isinstance(data, pyQueue) or isinstance(data, Iterator):
+        if isinstance(data, (pyQueue, Iterator)):
             raise TypeError(
                 "Dask no longer supports mapping over Iterators or Queues."
                 "Consider using a normal for loop and Client.submit"
@@ -3118,13 +3117,13 @@ class Client(SyncMethodMixin):
         **kwargs,
     ):
         responses = await self.scheduler.broadcast(
-            msg=dict(
-                op="run",
-                function=dumps(function),
-                args=dumps(args),
-                wait=wait,
-                kwargs=dumps(kwargs),
-            ),
+            msg={
+                "op": "run",
+                "function": dumps(function),
+                "args": dumps(args),
+                "wait": wait,
+                "kwargs": dumps(kwargs),
+            },
             workers=workers,
             nanny=nanny,
             on_error="return_pickle",
@@ -3327,11 +3326,11 @@ class Client(SyncMethodMixin):
             if fname_pattern and fname_pattern.match(fr.f_code.co_filename):
                 continue
 
-            kwargs = dict(
-                lineno_frame=lineno_frame,
-                lineno_relative=lineno_frame - fr.f_code.co_firstlineno,
-                filename=fr.f_code.co_filename,
-            )
+            kwargs = {
+                "lineno_frame": lineno_frame,
+                "lineno_relative": lineno_frame - fr.f_code.co_firstlineno,
+                "filename": fr.f_code.co_filename,
+            }
 
             try:
                 code.append(SourceCode(code=inspect.getsource(fr), **kwargs))  # type: ignore
@@ -3871,7 +3870,7 @@ class Client(SyncMethodMixin):
         return result
 
     async def _restart(
-        self, timeout: str | int | float | NoDefault, wait_for_workers: bool
+        self, timeout: str | float | NoDefault, wait_for_workers: bool
     ) -> None:
         if timeout is no_default:
             timeout = self._timeout * 4
@@ -3885,7 +3884,7 @@ class Client(SyncMethodMixin):
 
     def restart(
         self,
-        timeout: str | int | float | NoDefault = no_default,
+        timeout: str | float | NoDefault = no_default,
         wait_for_workers: bool = True,
     ):
         """
@@ -3924,7 +3923,7 @@ class Client(SyncMethodMixin):
     async def _restart_workers(
         self,
         workers: list[str],
-        timeout: str | int | float | NoDefault,
+        timeout: str | float | NoDefault,
         raise_for_error: bool,
     ) -> dict[str, Literal["OK", "removed", "timed out"]]:
         if timeout is no_default:
@@ -3963,7 +3962,7 @@ class Client(SyncMethodMixin):
     def restart_workers(
         self,
         workers: list[str],
-        timeout: str | int | float | NoDefault = no_default,
+        timeout: str | float | NoDefault = no_default,
         raise_for_error: bool = True,
     ):
         """Restart a specified set of workers
@@ -5964,7 +5963,7 @@ def futures_of(o, client=None):
     """
     stack = [o]
     seen = set()
-    futures = list()
+    futures = []
     while stack:
         x = stack.pop()
         if type(x) in (tuple, set, list):

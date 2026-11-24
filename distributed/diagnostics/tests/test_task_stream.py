@@ -22,7 +22,7 @@ async def test_TaskStreamPlugin(c, s, *workers):
 
     assert len(es.buffer) == 11
 
-    workers = dict()
+    workers = {}
 
     rects = es.rectangles(0, 10, workers)
     assert workers

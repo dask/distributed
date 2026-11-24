@@ -3,19 +3,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dask._task_spec import GraphNode
-from dask.typing import Key
-
 from distributed.shuffle._core import ShuffleId, get_worker_plugin
 from distributed.shuffle._shuffle import shuffle_transfer
 
 if TYPE_CHECKING:
-    from typing import TypeAlias
-
     import pandas as pd
     from pandas._typing import IndexLabel, MergeHow, Suffixes
-
-_T_LowLevelGraph: TypeAlias = dict[Key, GraphNode]
 
 
 def merge_transfer(

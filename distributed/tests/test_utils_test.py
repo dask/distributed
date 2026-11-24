@@ -542,11 +542,13 @@ def garbage_process(
 
 def test_check_process_leak():
     barrier = get_mp_context().Barrier(parties=2)
-    with pytest.raises(AssertionError):
-        with check_process_leak(check=True, check_timeout=0.01):
-            p = get_mp_context().Process(target=garbage_process, args=(barrier,))
-            p.start()
-            barrier.wait()
+    with (
+        pytest.raises(AssertionError),
+        check_process_leak(check=True, check_timeout=0.01),
+    ):
+        p = get_mp_context().Process(target=garbage_process, args=(barrier,))
+        p.start()
+        barrier.wait()
     assert not p.is_alive()
 
 
@@ -595,15 +597,13 @@ def test_start_failure_worker(nanny):
         ctx = raises_with_cause(RuntimeError, None, TypeError, None)
     else:
         ctx = pytest.raises(TypeError)
-    with ctx:
-        with cluster(nanny=nanny, worker_kwargs={"foo": "bar"}):
-            return
+    with ctx, cluster(nanny=nanny, worker_kwargs={"foo": "bar"}):
+        return
 
 
 def test_start_failure_scheduler():
-    with pytest.raises(TypeError):
-        with cluster(scheduler_kwargs={"foo": "bar"}):
-            return
+    with pytest.raises(TypeError), cluster(scheduler_kwargs={"foo": "bar"}):
+        return
 
 
 def test_invalid_transitions(capsys):
@@ -613,11 +613,13 @@ def test_invalid_transitions(capsys):
         await x
         ts = a.state.tasks["task-name"]
         ev = PauseEvent(stimulus_id="test")
-        with mock.patch.object(
-            WorkerState, "_handle_event", return_value=({ts: "foo"}, [])
+        with (
+            mock.patch.object(
+                WorkerState, "_handle_event", return_value=({ts: "foo"}, [])
+            ),
+            pytest.raises(InvalidTransition),
         ):
-            with pytest.raises(InvalidTransition):
-                a.handle_stimulus(ev)
+            a.handle_stimulus(ev)
 
         while not s.get_events("invalid-worker-transition"):
             await asyncio.sleep(0.01)
@@ -676,21 +678,29 @@ def test_raises_with_cause():
     # If the exception types don't match, raise the first exception that doesn't match
     # If the text doesn't match, raise an assert
 
-    with pytest.raises(OSError):
-        with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
-            raise RuntimeError("exception") from OSError("cause")
+    with (
+        pytest.raises(OSError),
+        raises_with_cause(RuntimeError, "exception", ValueError, "cause"),
+    ):
+        raise RuntimeError("exception") from OSError("cause")
 
-    with pytest.raises(OSError):
-        with raises_with_cause(RuntimeError, "exception", ValueError, "cause"):
-            raise OSError("exception") from ValueError("cause")
+    with (
+        pytest.raises(OSError),
+        raises_with_cause(RuntimeError, "exception", ValueError, "cause"),
+    ):
+        raise OSError("exception") from ValueError("cause")
 
-    with pytest.raises(AssertionError):
-        with raises_with_cause(RuntimeError, "exception", ValueError, "foo"):
-            raise RuntimeError("exception") from ValueError("cause")
+    with (
+        pytest.raises(AssertionError),
+        raises_with_cause(RuntimeError, "exception", ValueError, "foo"),
+    ):
+        raise RuntimeError("exception") from ValueError("cause")
 
-    with pytest.raises(AssertionError):
-        with raises_with_cause(RuntimeError, "foo", ValueError, "cause"):
-            raise RuntimeError("exception") from ValueError("cause")
+    with (
+        pytest.raises(AssertionError),
+        raises_with_cause(RuntimeError, "foo", ValueError, "cause"),
+    ):
+        raise RuntimeError("exception") from ValueError("cause")
 
     # There can be more than one nested cause
     with raises_with_cause(
@@ -701,23 +711,27 @@ def test_raises_with_cause():
         except ValueError as e:
             raise RuntimeError("exception") from e
 
-    with pytest.raises(OSError):
-        with raises_with_cause(
+    with (
+        pytest.raises(OSError),
+        raises_with_cause(
             RuntimeError, "exception", ValueError, "cause1", TypeError, "cause2"
-        ):
-            try:
-                raise ValueError("cause1") from OSError("cause2")
-            except ValueError as e:
-                raise RuntimeError("exception") from e
+        ),
+    ):
+        try:
+            raise ValueError("cause1") from OSError("cause2")
+        except ValueError as e:
+            raise RuntimeError("exception") from e
 
-    with pytest.raises(AssertionError):
-        with raises_with_cause(
+    with (
+        pytest.raises(AssertionError),
+        raises_with_cause(
             RuntimeError, "exception", ValueError, "cause1", OSError, "cause2"
-        ):
-            try:
-                raise ValueError("cause1") from OSError("no match")
-            except ValueError as e:
-                raise RuntimeError("exception") from e
+        ),
+    ):
+        try:
+            raise ValueError("cause1") from OSError("no match")
+        except ValueError as e:
+            raise RuntimeError("exception") from e
 
 
 @pytest.mark.slow
@@ -729,14 +743,16 @@ def test_check_thread_leak():
 
     t2 = t3 = None
     try:
-        with pytest.raises(
-            pytest.fail.Exception, match=r"2 thread\(s\) were leaked"
-        ) as exc:
-            with check_thread_leak():
-                t2 = threading.Thread(target=lambda: (event.wait(), "two"))
-                t2.start()
-                t3 = threading.Thread(target=lambda: (event.wait(), "three"))
-                t3.start()
+        with (
+            pytest.raises(
+                pytest.fail.Exception, match=r"2 thread\(s\) were leaked"
+            ) as exc,
+            check_thread_leak(),
+        ):
+            t2 = threading.Thread(target=lambda: (event.wait(), "two"))
+            t2.start()
+            t3 = threading.Thread(target=lambda: (event.wait(), "three"))
+            t3.start()
 
         msg = exc.value.msg
         assert msg
@@ -842,8 +858,9 @@ def test_popen_write_during_terminate_deadlock():
 
 
 def test_popen_timeout(capsys):
-    with pytest.raises(subprocess.TimeoutExpired):
-        with popen(
+    with (
+        pytest.raises(subprocess.TimeoutExpired),
+        popen(
             [
                 sys.executable,
                 "-c",
@@ -863,9 +880,11 @@ def test_popen_timeout(capsys):
             ],
             capture_output=True,
             terminate_timeout=1,
-        ) as proc:
-            assert proc.stdout
-            assert proc.stdout.readline().strip() == b"ready"
+        ) as proc,
+    ):
+        assert proc.stdout
+        assert proc.stdout.readline().strip() == b"ready"
+
     # Exiting contextmanager sends SIGINT/SIGBREAK, waits 1s for shutdown.
     # Our script ignores SIGINT/SIGBREAK, so after 1s it sends SIGKILL.
     # The contextmanager raises `TimeoutExpired` once the process is killed,
@@ -1011,10 +1030,9 @@ async def test_ensure_no_new_clients():
     async with Scheduler(dashboard_address=":0") as s:
         with ensure_no_new_clients():
             pass
-        with pytest.raises(AssertionError):
-            with ensure_no_new_clients():
-                async with Client(s.address, asynchronous=True):
-                    pass
+        with pytest.raises(AssertionError), ensure_no_new_clients():
+            async with Client(s.address, asynchronous=True):
+                pass
         async with Client(s.address, asynchronous=True):
             with ensure_no_new_clients():
                 pass
@@ -1025,15 +1043,17 @@ def test_cluster_uses_config_for_test(nanny):
     key = "distributed.admin.tick.interval"
     local = dask.config.get(key)
 
-    with cluster(nanny=nanny, nworkers=1) as (scheduler, workers):
-        with Client(scheduler["address"]) as client:
-            s_remote = client.run_on_scheduler(dask.config.get, key)
-            assert s_remote != local
+    with (
+        cluster(nanny=nanny, nworkers=1) as (scheduler, workers),
+        Client(scheduler["address"]) as client,
+    ):
+        s_remote = client.run_on_scheduler(dask.config.get, key)
+        assert s_remote != local
 
-            w_remote = client.run(dask.config.get, key)
-            w_remote = next(iter(w_remote.values()))
-            assert w_remote != local
-            assert w_remote == s_remote
+        w_remote = client.run(dask.config.get, key)
+        w_remote = next(iter(w_remote.values()))
+        assert w_remote != local
+        assert w_remote == s_remote
 
 
 def test_captured_logger():
@@ -1073,9 +1093,11 @@ def test_popen_file_not_found():
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="tmp-python")
     os.close(tmp_fd)
     os.remove(tmp_path)
-    with pytest.raises(
-        FileNotFoundError,
-        match=r"provide an absolute path to an existing installation to popen",
+    with (
+        pytest.raises(
+            FileNotFoundError,
+            match=r"provide an absolute path to an existing installation to popen",
+        ),
+        popen([tmp_path]),
     ):
-        with popen([tmp_path]):
-            pass
+        pass

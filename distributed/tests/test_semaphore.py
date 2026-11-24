@@ -131,32 +131,32 @@ async def test_async_ctx(c, s, a, b):
 
 
 def test_worker_dies(loop):
-    with cluster(
-        config={
-            "distributed.scheduler.locks.lease-timeout": "50ms",
-            "distributed.scheduler.locks.lease-validation-interval": "10ms",
-        }
-    ) as (scheduler, workers):
-        with Client(scheduler["address"], loop=loop) as client:
-            sem = Semaphore(name="x", max_leases=1)
+    with (
+        cluster(
+            config={
+                "distributed.scheduler.locks.lease-timeout": "50ms",
+                "distributed.scheduler.locks.lease-validation-interval": "10ms",
+            }
+        ) as (scheduler, workers),
+        Client(scheduler["address"], loop=loop) as client,
+    ):
+        sem = Semaphore(name="x", max_leases=1)
 
-            def f(x, sem, kill_address):
-                with sem:
-                    from distributed.worker import get_worker
+        def f(x, sem, kill_address):
+            with sem:
+                from distributed.worker import get_worker
 
-                    worker = get_worker()
-                    if worker.address == kill_address:
-                        import os
+                worker = get_worker()
+                if worker.address == kill_address:
+                    import os
 
-                        os.kill(os.getpid(), signal.SIGTERM)
-                    return x
+                    os.kill(os.getpid(), signal.SIGTERM)
+                return x
 
-            futures = client.map(
-                f, range(10), sem=sem, kill_address=workers[0]["address"]
-            )
-            results = client.gather(futures)
+        futures = client.map(f, range(10), sem=sem, kill_address=workers[0]["address"])
+        results = client.gather(futures)
 
-            assert sorted(results) == list(range(10))
+        assert sorted(results) == list(range(10))
 
 
 @gen_cluster(client=True)
@@ -487,31 +487,33 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup, loop):
     #   of the `lease-timeout`. Accounting for this and some jitter, this should
     #   be sufficiently small to ensure smooth operation.
 
-    with dask.config.set(
-        {
-            "distributed.scheduler.locks.lease-validation-interval": 0.01,
-            "distributed.scheduler.locks.lease-timeout": 0.1,
-        }
-    ):
-        with Client(
+    with (
+        dask.config.set(
+            {
+                "distributed.scheduler.locks.lease-validation-interval": 0.01,
+                "distributed.scheduler.locks.lease-timeout": 0.1,
+            }
+        ),
+        Client(
             processes=False, dashboard_address=":0", threads_per_worker=4, loop=loop
-        ) as client:
-            sem = Semaphore(max_leases=1, name="database", loop=None)
-            assert sem.loop is loop
-            protected_resource = []
+        ) as client,
+    ):
+        sem = Semaphore(max_leases=1, name="database", loop=None)
+        assert sem.loop is loop
+        protected_resource = []
 
-            def access_limited(val, sem):
-                import time
+        def access_limited(val, sem):
+            import time
 
-                with sem:
-                    assert len(protected_resource) == 0
-                    protected_resource.append(val)
-                    # Interact with the DB
-                    time.sleep(0.01)
-                    protected_resource.remove(val)
+            with sem:
+                assert len(protected_resource) == 0
+                protected_resource.append(val)
+                # Interact with the DB
+                time.sleep(0.01)
+                protected_resource.remove(val)
 
-            client.gather(client.map(access_limited, range(10), sem=sem))
-            assert sem.refresh_callback.io_loop is loop
+        client.gather(client.map(access_limited, range(10), sem=sem))
+        assert sem.refresh_callback.io_loop is loop
 
 
 @gen_cluster(client=True)
@@ -569,7 +571,7 @@ async def test_release_failure(c, s, a, b, caplog):
 
             pool.deactivate()  # comm chaos stops
             assert ext.get_value(name) == 1  # lease is still registered
-            while not (await semaphore.get_value() == 0):
+            while await semaphore.get_value() != 0:
                 await asyncio.sleep(0.01)
         finally:
             await pool.close()

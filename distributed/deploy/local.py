@@ -120,7 +120,7 @@ class LocalCluster(SpecCluster):
         host=None,
         ip=None,  # deprecated
         scheduler_port=0,
-        silence_logs=logging.WARN,
+        silence_logs=logging.WARNING,
         dashboard_address=":8787",
         worker_dashboard_address=None,
         services=None,
@@ -225,18 +225,18 @@ class LocalCluster(SpecCluster):
         scheduler = {
             "cls": Scheduler,
             "options": toolz.merge(
-                dict(
-                    host=host,
-                    services=services,
-                    service_kwargs=service_kwargs,
-                    security=security,
-                    port=scheduler_port,
-                    interface=interface,
-                    protocol=protocol,
-                    dashboard=dashboard_address is not None,
-                    dashboard_address=dashboard_address,
-                    blocked_handlers=blocked_handlers,
-                ),
+                {
+                    "host": host,
+                    "services": services,
+                    "service_kwargs": service_kwargs,
+                    "security": security,
+                    "port": scheduler_port,
+                    "interface": interface,
+                    "protocol": protocol,
+                    "dashboard": dashboard_address is not None,
+                    "dashboard_address": dashboard_address,
+                    "blocked_handlers": blocked_handlers,
+                },
                 scheduler_kwargs or {},
             ),
         }

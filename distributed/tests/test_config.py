@@ -350,7 +350,7 @@ def test_schema_is_complete():
         for k, v in c.items():
             key = f"{root}.{k}" if root else k
             if isinstance(v, dict) and key not in skip:
-                test_matches(c[k], s["properties"][k], key)
+                test_matches(v, s["properties"][k], key)
 
     test_matches(config, schema, "")
 
@@ -392,9 +392,8 @@ def test_uvloop():
     ],
 )
 def test_deprecations_on_set(args, kwargs):
-    with pytest.warns(FutureWarning) as info:
-        with dask.config.set(*args, **kwargs):
-            assert dask.config.get("distributed.scheduler.allowed-failures") == 123
+    with pytest.warns(FutureWarning) as info, dask.config.set(*args, **kwargs):
+        assert dask.config.get("distributed.scheduler.allowed-failures") == 123
 
     assert "distributed.scheduler.allowed-failures" in str(info[0].message)
 

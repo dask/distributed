@@ -47,7 +47,7 @@ EXTERNAL_IP4 = get_ip()
 def tcp(monkeypatch, request):
     """Set the TCP backend to either tornado or asyncio"""
     if request.param == "tornado":
-        import distributed.comm.tcp as tcp
+        from distributed.comm import tcp
     else:
         raise NotImplementedError()
     monkeypatch.setitem(backends, "tcp", tcp.TCPBackend())
@@ -77,10 +77,10 @@ def check_tls_extra(info):
     assert secret_bits >= 128
 
 
-tls_kwargs = dict(
-    listen_args={"ssl_context": get_server_ssl_context()},
-    connect_args={"ssl_context": get_client_ssl_context()},
-)
+tls_kwargs = {
+    "listen_args": {"ssl_context": get_server_ssl_context()},
+    "connect_args": {"ssl_context": get_client_ssl_context()},
+}
 
 
 async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwargs):
@@ -345,8 +345,7 @@ async def test_comm_failure_threading(tcp):
         for _ in range(60):
             await asyncio.sleep(0.001)
             thread_count = threading.active_count()
-            if thread_count > max_thread_count:
-                max_thread_count = thread_count
+            max_thread_count = max(max_thread_count, thread_count)
         return max_thread_count
 
     original_thread_count = threading.active_count()
@@ -1384,8 +1383,6 @@ def test_register_backend_entrypoint(tmp_path):
 
 class OpaqueList(list):
     """Don't let the serialization layer traverse this object"""
-
-    pass
 
 
 @pytest.mark.parametrize(

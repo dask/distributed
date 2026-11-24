@@ -194,7 +194,7 @@ def serialization_error_loads(header, frames):
     raise TypeError(msg)
 
 
-families = {}
+families: dict[str, tuple[Any, Any, bool]] = {}
 
 
 def register_serialization_family(name, dumps, loads):
@@ -547,9 +547,6 @@ class Serialize:
     def __eq__(self, other):
         return isinstance(other, Serialize) and other.data == self.data
 
-    def __ne__(self, other):
-        return not (self == other)
-
     def __hash__(self):
         return hash(self.data)
 
@@ -575,9 +572,6 @@ class Serialized:
             and other.header == self.header
             and other.frames == self.frames
         )
-
-    def __ne__(self, other):
-        return not (self == other)
 
 
 class ToPickle(Generic[T]):
@@ -680,7 +674,7 @@ def sizeof_serialized(obj):
 
 
 def serialize_bytelist(
-    x: object, compression: str | None | Literal[False] = "auto", **kwargs: Any
+    x: object, compression: str | Literal[False] | None = "auto", **kwargs: Any
 ) -> list[bytes | bytearray | memoryview]:
     header, frames = serialize_and_split(x, **kwargs)
     if frames:
@@ -864,7 +858,7 @@ def _is_msgpack_serializable(v):
         or typ is float
         or isinstance(v, dict)
         and all(map(_is_msgpack_serializable, v.values()))
-        and all(type(x) is str for x in v.keys())
+        and all(type(x) is str for x in v)
         or isinstance(v, (list, tuple))
         and all(map(_is_msgpack_serializable, v))
     )
@@ -885,7 +879,7 @@ def _is_dumpable(v):
         or typ is ToPickle
         or isinstance(v, dict)
         and all(map(_is_dumpable, v.values()))
-        and all(type(x) is str for x in v.keys())
+        and all(type(x) is str for x in v)
         or isinstance(v, (list, tuple))
         and all(map(_is_dumpable, v))
     )

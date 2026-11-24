@@ -162,10 +162,12 @@ from distributed.comm.tcp import TCPBackend
 backends["foo"] = TCPBackend()
 """.strip()
     try:
-        async with Scheduler(dashboard_address=":0", preload=text, protocol="foo") as s:
-            async with Nanny(s.address, preload=text, protocol="foo") as n:
-                async with Client(s.address, asynchronous=True) as c:
-                    await c.wait_for_workers(1)
+        async with (
+            Scheduler(dashboard_address=":0", preload=text, protocol="foo") as s,
+            Nanny(s.address, preload=text, protocol="foo") as n,
+            Client(s.address, asynchronous=True) as c,
+        ):
+            await c.wait_for_workers(1)
     finally:
         from distributed.comm.registry import backends
 
@@ -234,9 +236,11 @@ async def test_web_preload_worker():
         "urllib.request.urlopen",
         **{"return_value.__enter__.return_value.read.return_value": data},
     ) as mock_urlopen:
-        async with Scheduler(port=port, host="localhost", dashboard_address=":0") as s:
-            async with Nanny(preload_nanny=["http://example.com/preload"]) as nanny:
-                assert nanny.scheduler_addr == s.address
+        async with (
+            Scheduler(port=port, host="localhost", dashboard_address=":0") as s,
+            Nanny(preload_nanny=["http://example.com/preload"]) as nanny,
+        ):
+            assert nanny.scheduler_addr == s.address
     assert mock_urlopen.call_args_list == [mock.call("http://example.com/preload")]
 
 
@@ -363,10 +367,12 @@ def dask_teardown(worker):
     raise Exception(456)
 """
 
-    with dask.config.set({"distributed.client.preload": [text]}):
-        with captured_logger("distributed.preloading") as logger:
-            async with Client(s.address, asynchronous=True):
-                pass
+    with (
+        dask.config.set({"distributed.client.preload": [text]}),
+        captured_logger("distributed.preloading") as logger,
+    ):
+        async with Client(s.address, asynchronous=True):
+            pass
 
     logs = logger.getvalue()
     assert "123" in logs

@@ -74,14 +74,13 @@ def test_serialize_deserialize_dataset():
 
 @silence_h5py_issue775
 def test_raise_error_on_serialize_write_permissions():
-    with tmpfile() as fn:
-        with h5py.File(fn, mode="a") as f:
-            x = f.create_dataset("/x", shape=(2, 2), dtype="i4")
-            f.flush()
-            with pytest.raises(TypeError):
-                deserialize(*serialize(x))
-            with pytest.raises(TypeError):
-                deserialize(*serialize(f))
+    with tmpfile() as fn, h5py.File(fn, mode="a") as f:
+        x = f.create_dataset("/x", shape=(2, 2), dtype="i4")
+        f.flush()
+        with pytest.raises(TypeError):
+            deserialize(*serialize(x))
+        with pytest.raises(TypeError):
+            deserialize(*serialize(f))
 
 
 import dask.array as da

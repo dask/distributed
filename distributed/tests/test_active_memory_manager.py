@@ -689,11 +689,13 @@ async def test_replicate_avoids_paused_workers_2(c, s, a, b):
 
 @gen_test()
 async def test_bad_measure():
-    with dask.config.set(
-        {"distributed.scheduler.active-memory-manager.measure": "notexist"}
+    with (
+        dask.config.set(
+            {"distributed.scheduler.active-memory-manager.measure": "notexist"}
+        ),
+        pytest.raises(ValueError) as e,
     ):
-        with pytest.raises(ValueError) as e:
-            await Scheduler(dashboard_address=":0")
+        await Scheduler(dashboard_address=":0")
 
     assert "measure must be one of " in str(e.value)
 

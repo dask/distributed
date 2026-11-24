@@ -19,11 +19,13 @@ def _check_loop_runner():
 def _check_cluster_and_client_loop(loop):
     # Setup simple cluster with one threaded worker.
     # Complex setup is not required here since we test only IO loop teardown.
-    with LocalCluster(
-        loop=loop, n_workers=1, dashboard_address=":0", processes=False
-    ) as cluster:
-        with Client(cluster, loop=loop) as client:
-            client.run(max, 1, 2)
+    with (
+        LocalCluster(
+            loop=loop, n_workers=1, dashboard_address=":0", processes=False
+        ) as cluster,
+        Client(cluster, loop=loop) as client,
+    ):
+        client.run(max, 1, 2)
 
 
 # Test if Client stops LoopRunner on close.

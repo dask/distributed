@@ -180,7 +180,7 @@ class InProc(Comm):
         self._closed = False
 
         self._finalizer = weakref.finalize(self, self._get_finalizer())
-        self._finalizer.atexit = False  # type: ignore[misc]
+        self._finalizer.atexit = False
         self._initialized = True
 
     def _get_finalizer(self):

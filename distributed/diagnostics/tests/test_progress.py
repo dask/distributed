@@ -247,16 +247,14 @@ async def test_group_timing(c, s, a, b):
 
     assert len(p.time) > 2
     assert len(p.nthreads) == len(p.time)
-    assert all([nt == s.total_nthreads for nt in p.nthreads])
+    assert all(nt == s.total_nthreads for nt in p.nthreads)
     assert "slowinc" in p.compute
     assert "slowdec" in p.compute
-    assert all([len(v) == len(p.time) for v in p.compute.values()])
+    assert all(len(v) == len(p.time) for v in p.compute.values())
     assert s.task_groups.keys() == p.compute.keys()
     assert all(
-        [
-            abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-6 * len(v)
-            for k, v in p.compute.items()
-        ]
+        abs(s.task_groups[k].all_durations["compute"] - sum(v)) < 1.0e-6 * len(v)
+        for k, v in p.compute.items()
     )
 
     await s.restart(stimulus_id="test")

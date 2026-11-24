@@ -37,7 +37,7 @@ async def test_ssh_cluster_raises_if_asyncssh_not_installed(monkeypatch):
     ):
         async with SSHCluster(
             ["127.0.0.1"] * 3,
-            connect_options=[dict(known_hosts=None)] * 3,
+            connect_options=[{"known_hosts": None}] * 3,
             asynchronous=True,
             scheduler_options={"idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
@@ -49,7 +49,7 @@ async def test_ssh_cluster_raises_if_asyncssh_not_installed(monkeypatch):
 async def test_basic():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
-        connect_options=dict(known_hosts=None),
+        connect_options={"known_hosts": None},
         asynchronous=True,
         scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
@@ -67,7 +67,7 @@ async def test_basic():
 async def test_n_workers():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
-        connect_options=dict(known_hosts=None),
+        connect_options={"known_hosts": None},
         asynchronous=True,
         scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s", "n_workers": 2},
@@ -84,27 +84,29 @@ async def test_n_workers():
 
 @gen_test()
 async def test_keywords():
-    async with SSHCluster(
-        ["127.0.0.1"] * 3,
-        connect_options=dict(known_hosts=None),
-        asynchronous=True,
-        worker_options={
-            "nthreads": 2,
-            "memory_limit": "2 GiB",
-            "death_timeout": "5s",
-        },
-        scheduler_options={"idle_timeout": "10s"},
-    ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            assert (
-                await client.run_on_scheduler(
-                    lambda dask_scheduler: dask_scheduler.idle_timeout
-                )
-            ) == 10
-            # scheduler_info() carries no per-worker detail for async clients
-            d = (await client.scheduler.identity(n_workers=-1))["workers"]
-            assert d
-            assert all(v["nthreads"] == 2 for v in d.values())
+    async with (
+        SSHCluster(
+            ["127.0.0.1"] * 3,
+            connect_options={"known_hosts": None},
+            asynchronous=True,
+            worker_options={
+                "nthreads": 2,
+                "memory_limit": "2 GiB",
+                "death_timeout": "5s",
+            },
+            scheduler_options={"idle_timeout": "10s"},
+        ) as cluster,
+        Client(cluster, asynchronous=True) as client,
+    ):
+        assert (
+            await client.run_on_scheduler(
+                lambda dask_scheduler: dask_scheduler.idle_timeout
+            )
+        ) == 10
+        # scheduler_info() carries no per-worker detail for async clients
+        d = (await client.scheduler.identity(n_workers=-1))["workers"]
+        assert d
+        assert all(v["nthreads"] == 2 for v in d.values())
 
 
 @pytest.mark.xfail(reason="Very flaky (leaks resources)", strict=False)
@@ -149,23 +151,25 @@ async def test_config_inherited_by_subprocess(loop):
         return dask.config.get("foo") + 1
 
     with dask.config.set(foo=100):
-        async with SSHCluster(
-            ["127.0.0.1"] * 2,
-            connect_options=dict(known_hosts=None),
-            asynchronous=True,
-            scheduler_options={"idle_timeout": "5s"},
-            worker_options={"death_timeout": "5s"},
-        ) as cluster:
-            async with Client(cluster, asynchronous=True) as client:
-                result = await client.submit(f, 1)
-                assert result == 101
+        async with (
+            SSHCluster(
+                ["127.0.0.1"] * 2,
+                connect_options={"known_hosts": None},
+                asynchronous=True,
+                scheduler_options={"idle_timeout": "5s"},
+                worker_options={"death_timeout": "5s"},
+            ) as cluster,
+            Client(cluster, asynchronous=True) as client,
+        ):
+            result = await client.submit(f, 1)
+            assert result == 101
 
 
 @gen_test()
 async def test_list_of_connect_options():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
-        connect_options=[dict(known_hosts=None)] * 3,
+        connect_options=[{"known_hosts": None}] * 3,
         asynchronous=True,
         scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
@@ -184,7 +188,7 @@ async def test_list_of_connect_options_raises():
     with pytest.raises(RuntimeError):
         async with SSHCluster(
             ["127.0.0.1"] * 3,
-            connect_options=[dict(known_hosts=None)] * 4,  # Mismatch in length 4 != 3
+            connect_options=[{"known_hosts": None}] * 4,  # Mismatch in length 4 != 3
             asynchronous=True,
             scheduler_options={"idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
@@ -196,7 +200,7 @@ async def test_list_of_connect_options_raises():
 async def test_remote_python():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
-        connect_options=[dict(known_hosts=None)] * 3,
+        connect_options=[{"known_hosts": None}] * 3,
         asynchronous=True,
         scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
@@ -209,7 +213,7 @@ async def test_remote_python():
 async def test_remote_python_as_dict():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
-        connect_options=[dict(known_hosts=None)] * 3,
+        connect_options=[{"known_hosts": None}] * 3,
         asynchronous=True,
         scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
@@ -223,7 +227,7 @@ async def test_list_of_remote_python_raises():
     with pytest.raises(RuntimeError):
         async with SSHCluster(
             ["127.0.0.1"] * 3,
-            connect_options=[dict(known_hosts=None)] * 3,
+            connect_options=[{"known_hosts": None}] * 3,
             asynchronous=True,
             scheduler_options={"idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
