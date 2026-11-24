@@ -33,6 +33,11 @@ SCIPY_GE_1_15_0 = SCIPY_VERSION.release >= (1, 15, 0)
         numpy.dtype("<f8"),
     ],
 )
+# SciPy 2 deprecates the sparse matrix classes that this test covers, including
+# internally when serializing them. Keep the warning scoped to that deprecation.
+@pytest.mark.filterwarnings(
+    r"ignore:.*_matrix is being replaced by .*_array\.:DeprecationWarning"
+)
 def test_serialize_scipy_sparse(sparse_type, dtype):
     a = numpy.array([[0, 1, 0], [2, 0, 3], [0, 4, 0]], dtype=dtype)
 
