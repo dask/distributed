@@ -121,6 +121,8 @@ version_file = "distributed/_version.py"
 version_scheme = "post-release"
 
 [tool.pytest.ini_options]
+# The anyio pytest plugin is unused here. On Python 3.10, the newest installable
+# anyio release imports pytest's deprecated CallSpec2 alias at plugin load time.
 addopts = '''
 -v -rsfE
 --durations=20
@@ -130,6 +132,7 @@ addopts = '''
 --ignore=.github
 --strict-markers
 --strict-config
+-p no:anyio
 -p no:asyncio
 -p no:legacypath'''
 filterwarnings = [
