@@ -171,7 +171,7 @@ class WorkerMetricCollector(PrometheusCollector):
         # The following metrics will export NaN, if the corresponding digests are None
         if not self.crick_available:
             return
-        assert self.server.digests
+        assert self.server.digests is not None
 
         yield GaugeMetricFamily(
             self.build_name("tick_duration_median"),
@@ -262,9 +262,11 @@ class PrometheusHandler(RequestHandler):
             PrometheusHandler._collector.server = self.server
             return
 
-        PrometheusHandler._collector = WorkerMetricCollector(self.server)
-        # Register collector
-        prometheus_client.REGISTRY.register(PrometheusHandler._collector)
+        collector = WorkerMetricCollector(self.server)
+        # Registration collects metrics and may fail. Only cache a registered
+        # collector so a later request can retry after a failure.
+        prometheus_client.REGISTRY.register(collector)
+        PrometheusHandler._collector = collector
 
     def get(self):
         self.write(prometheus_client.generate_latest())

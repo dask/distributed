@@ -15,6 +15,71 @@ from distributed.utils_test import (
 )
 
 
+@gen_cluster(nthreads=[])
+async def test_prometheus_before_worker_registered(s, monkeypatch):
+    prometheus_client = pytest.importorskip("prometheus_client")
+    pytest.importorskip("crick")
+    from distributed.http.worker.prometheus.core import PrometheusHandler
+
+    registry = prometheus_client.CollectorRegistry(auto_describe=True)
+    generate_latest = prometheus_client.generate_latest
+    monkeypatch.setattr(prometheus_client, "REGISTRY", registry)
+    monkeypatch.setattr(
+        prometheus_client, "generate_latest", lambda: generate_latest(registry)
+    )
+    monkeypatch.setattr(PrometheusHandler, "_collector", None)
+
+    class StartupWorker(Worker):
+        async def _register_with_scheduler(self):
+            # HTTP is already listening, but periodic callbacks have not populated
+            # the worker's digests yet. Prometheus may discover this endpoint now.
+            assert self.digests is not None
+            assert not self.digests
+            metrics = await fetch_metrics_sample_names(
+                self.http_server.port, prefix="dask_worker_"
+            )
+            assert "dask_worker_threads" in metrics
+            assert "dask_worker_tick_duration_median_seconds" in metrics
+            await super()._register_with_scheduler()
+
+    async with StartupWorker(s.address, dashboard_address=":0") as worker:
+        for _ in range(2):
+            metrics = await fetch_metrics_sample_names(
+                worker.http_server.port, prefix="dask_worker_"
+            )
+            assert "dask_worker_threads" in metrics
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
+async def test_prometheus_registration_retry(s, a, monkeypatch):
+    prometheus_client = pytest.importorskip("prometheus_client")
+    from tornado.simple_httpclient import HTTPStreamClosedError
+
+    from distributed.http.worker.prometheus.core import PrometheusHandler
+
+    registry = prometheus_client.CollectorRegistry(auto_describe=True)
+    generate_latest = prometheus_client.generate_latest
+    monkeypatch.setattr(prometheus_client, "REGISTRY", registry)
+    monkeypatch.setattr(
+        prometheus_client, "generate_latest", lambda: generate_latest(registry)
+    )
+    monkeypatch.setattr(PrometheusHandler, "_collector", None)
+
+    with (
+        mock.patch.object(
+            registry, "register", side_effect=RuntimeError("test failure")
+        ),
+        pytest.raises(HTTPStreamClosedError),
+    ):
+        await fetch_metrics_sample_names(a.http_server.port, prefix="dask_worker_")
+
+    for _ in range(2):
+        metrics = await fetch_metrics_sample_names(
+            a.http_server.port, prefix="dask_worker_"
+        )
+        assert "dask_worker_threads" in metrics
+
+
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)],
