@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import logging
 from unittest import mock
 
@@ -93,11 +94,18 @@ async def test_pip_install_fails(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
 async def test_conda_install_fails_when_conda_not_found(c, s, a, b):
+    real_import = builtins.__import__
+
+    def fail_conda_import(name, *args, **kwargs):
+        if name == "conda.cli.python_api":
+            raise ModuleNotFoundError("conda could not be found")
+        return real_import(name, *args, **kwargs)
+
     with (
         captured_logger(
             "distributed.diagnostics.plugin", level=logging.ERROR
         ) as logger,
-        mock.patch.dict("sys.modules", {"conda": None}),
+        mock.patch("builtins.__import__", new=fail_conda_import),
     ):
         with pytest.raises(RuntimeError):
             await c.register_plugin(CondaInstall(packages=["not-a-package"]))
