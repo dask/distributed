@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from dask.array.scipy_compat import SCIPY_GE_111, SCIPY_GE_200
 from dask.utils_test import assert_scipy_sparse_matrix_deprecated
 
 from distributed.protocol import deserialize, serialize
@@ -11,6 +10,10 @@ numpy = pytest.importorskip("numpy")
 pytest.importorskip("scipy")
 scipy_sparse = pytest.importorskip("scipy.sparse")
 
+# Probe for the sparse array API instead of importing dask.array.scipy_compat:
+# that would import dask.array (and therefore require numpy) at collection time,
+# breaking the "mindeps" environment where neither numpy nor scipy is installed.
+HAS_SPARRAY = hasattr(scipy_sparse, "sparray")
 
 DTYPES = [numpy.dtype("<f4"), numpy.dtype("<f8")]
 MATRIX_TYPES = [
@@ -34,8 +37,9 @@ def sample_sparse_data(dtype):
 @pytest.mark.parametrize("dtype", DTYPES)
 def test_serialize_scipy_sparse(sparse_type, dtype):
     # SciPy 2 deprecates the sparse matrix classes, including their internal
-    # conversion to COO during serialization. Only expect that deprecation.
-    with assert_scipy_sparse_matrix_deprecated(SCIPY_GE_200):
+    # conversion to COO during serialization. Only expect that deprecation; the
+    # context manager is a no-op on SciPy 1.x. Warnings must not be swallowed.
+    with assert_scipy_sparse_matrix_deprecated():
         a, anz = sample_sparse_data(dtype)
         acoo = scipy_sparse.coo_matrix((a[anz], anz))
         asp = sparse_type(acoo)
@@ -49,7 +53,7 @@ def test_serialize_scipy_sparse(sparse_type, dtype):
         assert (a == asp2.todense()).all()
 
 
-@pytest.mark.skipif(not SCIPY_GE_111, reason="scipy.sparse.sparray required")
+@pytest.mark.skipif(not HAS_SPARRAY, reason="scipy.sparse.sparray required")
 @pytest.mark.parametrize("format", SPARRAY_FORMATS)
 @pytest.mark.parametrize("dtype", DTYPES)
 def test_serialize_scipy_sparray(format, dtype):
