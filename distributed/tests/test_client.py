@@ -111,7 +111,6 @@ from distributed.utils_test import (
     poll_for,
     popen,
     raises_with_cause,
-    randominc,
     relative_frame_linenumber,
     save_sys_modules,
     slowadd,
@@ -3428,25 +3427,9 @@ async def test_scheduler_saturates_cores(c, s, a, b):
     for delay in [0, 0.01, 0.1]:
         futures = c.map(slowinc, range(100), delay=delay)
         futures = c.map(slowinc, futures, delay=delay / 10)
-        while not s.tasks:
-            if s.tasks:
-                assert all(
-                    len(p) >= 20
-                    for w in s.workers.values()
-                    for p in w.processing.values()
-                )
-            await asyncio.sleep(0.01)
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 20)] * 2)
-async def test_scheduler_saturates_cores_random(c, s, a, b):
-    futures = c.map(randominc, range(100), scale=0.1)
-    while not s.tasks:
-        if s.tasks:
-            assert all(
-                len(p) >= 20 for w in s.workers.values() for p in w.processing.values()
-            )
-        await asyncio.sleep(0.01)
+        await async_poll_for(lambda: bool(s.tasks))
+        for w in s.workers.values():
+            assert len(w.processing) >= 20
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)

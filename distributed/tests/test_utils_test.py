@@ -280,7 +280,10 @@ def _listen(delay=0):
 
     def do_listen():
         e.set()
-        sleep(delay)
+        # sleep(0) yields to the OS scheduler and can take
+        # hundreds of milliseconds on a loaded worker
+        if delay:
+            sleep(delay)
         serv.listen(5)
         ret = serv.accept()
         if ret is not None:
