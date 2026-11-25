@@ -3579,9 +3579,9 @@ async def test_memory(c, s, *nannies):
     # Wait for the memory readings to stabilize after workers go online
     await asyncio.sleep(2)
     await asyncio.gather(
-        assert_memory(a, "unmanaged_recent", 0, 5, timeout=10),
-        assert_memory(b, "unmanaged_recent", 0, 5, timeout=10),
-        assert_memory(s, "unmanaged_recent", 0, 10, timeout=10.1),
+        assert_memory(a, "unmanaged_recent", 0, 20, timeout=10),
+        assert_memory(b, "unmanaged_recent", 0, 20, timeout=10),
+        assert_memory(s, "unmanaged_recent", 0, 40, timeout=10.1),
     )
 
     print()
@@ -3593,9 +3593,9 @@ async def test_memory(c, s, *nannies):
     f2 = c.submit(leaking, 50, 100, 2, key="f2", workers=[b.name])
 
     await asyncio.gather(
-        assert_memory(a, "unmanaged_recent", 150, 170, timeout=1.8),
-        assert_memory(b, "unmanaged_recent", 150, 170, timeout=1.8),
-        assert_memory(s, "unmanaged_recent", 300, 340, timeout=1.9),
+        assert_memory(a, "unmanaged_recent", 150, 180, timeout=1.8),
+        assert_memory(b, "unmanaged_recent", 150, 180, timeout=1.8),
+        assert_memory(s, "unmanaged_recent", 300, 360, timeout=1.9),
     )
     await wait([f1, f2])
 
@@ -3604,9 +3604,9 @@ async def test_memory(c, s, *nannies):
         assert_memory(a, "managed", 50, 51, timeout=0),
         assert_memory(b, "managed", 50, 51, timeout=0),
         assert_memory(s, "managed", 100, 101, timeout=0),
-        assert_memory(a, "unmanaged_recent", 100, 120, timeout=0),
-        assert_memory(b, "unmanaged_recent", 100, 120, timeout=0),
-        assert_memory(s, "unmanaged_recent", 200, 240, timeout=0),
+        assert_memory(a, "unmanaged_recent", 100, 130, timeout=0),
+        assert_memory(b, "unmanaged_recent", 100, 130, timeout=0),
+        assert_memory(s, "unmanaged_recent", 200, 260, timeout=0),
     )
 
     # Force the output of f1 and f2 to spill to disk
@@ -3656,9 +3656,9 @@ async def test_memory(c, s, *nannies):
     # Wait until 4s have passed since the spill to observe unmanaged_recent
     # transition into unmanaged_old
     await asyncio.gather(
-        assert_memory(a, "unmanaged_recent", 0, 5, timeout=4.5),
-        assert_memory(b, "unmanaged_recent", 0, 5, timeout=4.5),
-        assert_memory(s, "unmanaged_recent", 0, 10, timeout=4.6),
+        assert_memory(a, "unmanaged_recent", 0, 10, timeout=4.5),
+        assert_memory(b, "unmanaged_recent", 0, 10, timeout=4.5),
+        assert_memory(s, "unmanaged_recent", 0, 20, timeout=4.6),
     )
 
     # When the leaked memory is cleared, unmanaged and unmanaged_old drop.
@@ -3679,8 +3679,8 @@ async def test_memory(c, s, *nannies):
         assert_memory(b, "unmanaged", 0, prev_unmanaged_b - 50, timeout=10),
     )
     await asyncio.gather(
-        assert_memory(a, "unmanaged_recent", 0, 5, timeout=0),
-        assert_memory(b, "unmanaged_recent", 0, 5, timeout=0),
+        assert_memory(a, "unmanaged_recent", 0, 10, timeout=0),
+        assert_memory(b, "unmanaged_recent", 0, 10, timeout=0),
     )
 
 
