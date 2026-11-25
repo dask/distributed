@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import scipy
 
-from dask.array.scipy_compat import SCIPY_GE_111
-
 from distributed.protocol.serialize import (
     dask_deserialize,
     dask_serialize,
@@ -39,7 +37,12 @@ def deserialize_scipy_sparse_dok(header, frames):
 dask_serialize.register(scipy.sparse.dok_matrix)(serialize_scipy_sparse_dok)
 dask_deserialize.register(scipy.sparse.dok_matrix)(deserialize_scipy_sparse_dok)
 
-if SCIPY_GE_111:
+# scipy.sparse.sparray is not a subclass of scipy.sparse.spmatrix, so it needs its
+# own registration. Probe for the class instead of importing dask.array.scipy_compat:
+# this module is imported lazily on the first serialization and must not drag the
+# whole dask.array package (and its numpy requirement) into that path. Same pattern
+# as dask.sizeof.
+if hasattr(scipy.sparse, "sparray"):
     register_generic(scipy.sparse.sparray, "dask", dask_serialize, dask_deserialize)
     dask_serialize.register(scipy.sparse.dok_array)(serialize_scipy_sparse_dok)
     dask_deserialize.register(scipy.sparse.dok_array)(deserialize_scipy_sparse_dok)
