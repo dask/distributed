@@ -214,6 +214,10 @@ def inc(x):
     return x + 1
 
 
+def identity(x):
+    return x
+
+
 def dec(x):
     return x - 1
 
@@ -235,44 +239,41 @@ def double(x):
 
 
 def slowinc(x, delay=0.02):
-    sleep(delay)
+    # sleep(0) yields to the OS scheduler and can take
+    # hundreds of milliseconds on a loaded worker
+    if delay:
+        sleep(delay)
     return x + 1
 
 
 def slowdec(x, delay=0.02):
-    sleep(delay)
+    if delay:  # See slowinc
+        sleep(delay)
     return x - 1
 
 
 def slowdouble(x, delay=0.02):
-    sleep(delay)
+    if delay:  # See slowinc
+        sleep(delay)
     return 2 * x
 
 
-def randominc(x, scale=1):
-    from random import random
-
-    sleep(random() * scale)
-    return x + 1
-
-
 def slowadd(x, y, delay=0.02):
-    sleep(delay)
+    if delay:  # See slowinc
+        sleep(delay)
     return x + y
 
 
 def slowsum(seq, delay=0.02):
-    sleep(delay)
+    if delay:  # See slowinc
+        sleep(delay)
     return sum(seq)
 
 
-def slowidentity(*args, **kwargs):
-    delay = kwargs.get("delay", 0.02)
-    sleep(delay)
-    if len(args) == 1:
-        return args[0]
-    else:
-        return args
+def slowidentity(x, delay=0.02):
+    if delay:  # See slowinc
+        sleep(delay)
+    return x
 
 
 def lock_inc(x, lock):

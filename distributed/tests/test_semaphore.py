@@ -15,13 +15,7 @@ from dask.distributed import Client
 from distributed import Semaphore, fire_and_forget
 from distributed.core import ConnectionPool
 from distributed.metrics import time
-from distributed.utils_test import (
-    BrokenComm,
-    captured_logger,
-    cluster,
-    gen_cluster,
-    slowidentity,
-)
+from distributed.utils_test import BrokenComm, captured_logger, cluster, gen_cluster
 
 
 @gen_cluster(client=True)
@@ -361,7 +355,7 @@ async def test_oversubscribing_leases(c, s, a, b):
             # This simulates a task which holds the GIL for longer than the
             # lease-timeout. This is twice the lease timeout to ensure that the
             # leases are actually timed out
-            slowidentity(delay=0.2)
+            sleep(0.2)
 
             assert sem._leases
             # Now the GIL is free again, i.e. we enable the callback again

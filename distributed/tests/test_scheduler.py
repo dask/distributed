@@ -74,13 +74,13 @@ from distributed.utils_test import (
     freeze_data_fetching,
     gen_cluster,
     gen_test,
+    identity,
     inc,
     nodebug,
     padded_time,
     raises_with_cause,
     slowadd,
     slowdec,
-    slowidentity,
     slowinc,
     tls_only_security,
     varying,
@@ -398,8 +398,8 @@ async def test_graph_execution_width(c, s, *workers):
     """
 
     roots = [delayed(inc)(ix) for ix in range(32)]
-    passthrough1 = [delayed(slowidentity)(r, delay=0) for r in roots]
-    passthrough2 = [delayed(slowidentity)(r, delay=0) for r in passthrough1]
+    passthrough1 = [delayed(identity)(r) for r in roots]
+    passthrough2 = [delayed(identity)(r) for r in passthrough1]
     done = [delayed(lambda r: None)(r) for r in passthrough2]
     await c.register_plugin(CountData(keys=[f.key for f in roots]), name="count-roots")
     fs = c.compute(done)
