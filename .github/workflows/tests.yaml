@@ -35,18 +35,18 @@ jobs:
         # Note: after adding/removing builds here, update
         # codecov.yml to match.
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest]
-        environment: [py310, py311, py312, py313, py314]
+        environment: [py310, py311, py312, py313, py314, py315]
         task: [test-ci]
         # Cherry-pick test modules to split the overall runtime roughly in half
         partition: [ci1, not ci1]
         include:
-          # MacOS CI does not have many hosts available; run it on 3.14 only
+          # MacOS CI does not have many hosts available; run it on 3.15 only
           - os: macos-latest
-            environment: py314
+            environment: py315
             task: test-ci
             partition: ci1
           - os: macos-latest
-            environment: py314
+            environment: py315
             task: test-ci
             partition: not ci1
 
