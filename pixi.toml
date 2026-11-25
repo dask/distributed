@@ -120,11 +120,13 @@ setproctitle = "*"
 
 # Optional dependencies that don't work yet in free-threading
 [feature.optional-gil.dependencies]
-gilknocker = "*"  # Makes no sense in free-threading
 ipykernel = "*"  # No 3.14t build for Windows yet
 jupyter-server-proxy = "*"  # Depends on ipykernel
 jupyterlab = "*"    # Depends on ipykernel
 python-snappy = "*"  # Dependency cramjam does not release the GIL
+
+[feature.optional-problematic.dependencies]
+gilknocker = "*"  # Not available for 3.15; makes no sense in free-threading
 
 [feature.optional-problematic.target.linux-64.dependencies]
 crick = "*"  # Not available for 3.14, 3.14t, and linux-aarch64
@@ -162,11 +164,17 @@ python = "=3.13"
 [feature.py314.dependencies]
 python = "=3.14"
 
+[feature.py315.dependencies]
+python = "=3.15"
+
 [feature.py314t.dependencies]
 python-freethreading = "=3.14"
 
+[feature.py315t.dependencies]
+python-freethreading = "=3.15"
+
 [feature.nightly.dependencies]
-python = "=3.14"
+python = "=3.15"
 # Need nodejs to build bokeh from sources.
 # Can't use bokeh nightlies from the bokeh/label/dev channel because it would downgrade
 # NumPy to the latest release (and building NumPy from sources takes longer than
@@ -196,7 +204,7 @@ channel-priority = "disabled"
 platforms = ["linux-64-cuda", "linux-aarch64-cuda"]
 
 [feature.cuda.dependencies]
-python = "=3.14"
+python = "=3.14"  # No pytorch for 3.15 yet
 numpy = "*"
 pandas = "*"
 pyarrow = "*"
@@ -234,14 +242,14 @@ env = { DASK_DISTRIBUTED__SCHEDULER__WORKER_SATURATION = "inf" }
 cmd = "coverage run -m pytest --junit-xml=pytest.xml --runslow --leaks=fds,processes,threads"
 
 [feature.lint.dependencies]
-python = "=3.14"
+python = "=3.15"
 pre-commit = "*"
 
 [feature.lint.tasks]
 lint = "pre-commit run --all-files"
 
 [feature.test-report.dependencies]
-python = "=3.14"
+python = "=3.15"
 altair = "*"
 junitparser = "*"
 pandas = "*"
@@ -256,7 +264,7 @@ python continuous_integration/scripts/test_report.py --repo '{{ repo }}' --max-d
 description = "Generate HTML reports of the flaky tests in the CI of the given repo, e.g. dask/distributed"
 
 [feature.build.dependencies]
-python = "=3.14"
+python = "=3.15"
 conda = "*"
 conda-build = "*"
 anaconda-client = "*"
@@ -270,7 +278,7 @@ cmd = "anaconda upload --label dev noarch/*.conda"
 description = "Upload to anaconda.org. Requires ANACONDA_API_TOKEN env variable to be set."
 
 [environments]
-default = ["cpu", "py314", "optional", "optional-gil", "test"]  # Same as py314
+default = ["cpu", "py315", "optional", "optional-gil", "test"]  # Same as py315
 mindeps = ["cpu", "mindeps", "test"]
 mindeps-array = ["cpu", "mindeps", "mindeps-array", "test"]
 mindeps-dataframe = ["cpu", "mindeps", "mindeps-dataframe", "test"]
@@ -279,7 +287,9 @@ py311 = ["cpu", "py311", "optional", "optional-gil", "optional-problematic", "te
 py312 = ["cpu", "py312", "optional", "optional-gil", "optional-problematic", "test"]
 py313 = ["cpu", "py313", "optional", "optional-gil", "optional-problematic", "test"]
 py314 = ["cpu", "py314", "optional", "optional-gil", "test"]
+py315 = ["cpu", "py315", "optional", "optional-gil", "test"]
 py314t = ["cpu", "py314t", "optional", "test"]
+py315t = ["cpu", "py315t", "test"]    # Many dependencies still missing
 nightly = ["cpu", "nightly", "test"]
 cuda = ["cuda", "test"]
 lint = { features = ["cpu", "lint"], no-default-feature = true }
