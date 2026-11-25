@@ -37,11 +37,7 @@ def deserialize_scipy_sparse_dok(header, frames):
 dask_serialize.register(scipy.sparse.dok_matrix)(serialize_scipy_sparse_dok)
 dask_deserialize.register(scipy.sparse.dok_matrix)(deserialize_scipy_sparse_dok)
 
-# scipy.sparse.sparray is not a subclass of scipy.sparse.spmatrix, so it needs its
-# own registration. Probe for the class instead of importing dask.array.scipy_compat:
-# this module is imported lazily on the first serialization and must not drag the
-# whole dask.array package (and its numpy requirement) into that path. Same pattern
-# as dask.sizeof.
+# scipy >=1.1. scipy.sparse.sparray is not a subclass of scipy.sparse.spmatrix.
 if hasattr(scipy.sparse, "sparray"):
     register_generic(scipy.sparse.sparray, "dask", dask_serialize, dask_deserialize)
     dask_serialize.register(scipy.sparse.dok_array)(serialize_scipy_sparse_dok)
