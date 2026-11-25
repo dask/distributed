@@ -70,7 +70,6 @@ class WorkDir:
                         "This may result in workspaces not being "
                         "cleaned up",
                         self._lock_path,
-                        exc_info=True,
                     )
                     self._lock_file = None
             except Exception:
@@ -276,8 +275,8 @@ class WorkSpace:
         try:
             self._purge_leftovers()
         except OSError:
-            logger.error(
-                "Failed to clean up lingering worker directories in path: %s ",
-                exc_info=True,
+            logger.exception(
+                "Failed to clean up lingering worker directories in path: %s",
+                self.base_dir,
             )
         return WorkDir(self, **kwargs)

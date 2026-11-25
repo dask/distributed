@@ -211,7 +211,7 @@ class Server:
     _original_local_dir: str
     _updated_sys_path: bool
     _workspace: WorkSpace
-    _workdir: None | WorkDir
+    _workdir: WorkDir | None
 
     _startup_lock: asyncio.Lock
     __startup_exc: Exception | None
@@ -403,7 +403,7 @@ class Server:
                 import_file(out_filename)
             except Exception as e:
                 logger.exception(e)
-                raise e
+                raise
 
         return {"status": "OK", "nbytes": len(data)}
 
@@ -1346,7 +1346,6 @@ class ConnectionPool:
 
     async def __aexit__(self, *args):
         await self.close()
-        return
 
     async def start(self) -> None:
         # Invariant: semaphore._value == limit - open - _n_connecting

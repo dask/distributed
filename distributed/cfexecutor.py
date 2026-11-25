@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures as cf
 import weakref
+from contextlib import suppress
 
 from tlz import merge
 from tornado import gen
@@ -37,10 +38,8 @@ def _cascade_future(future, cf_future):
 @gen.coroutine
 def _wait_on_futures(futures):
     for fut in futures:
-        try:
+        with suppress(Exception):
             yield fut
-        except Exception:
-            pass
 
 
 class ClientExecutor(cf.Executor):

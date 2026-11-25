@@ -40,13 +40,12 @@ pytestmark = pytest.mark.ci1
 
 @pytest.mark.slow()
 def test_submit_after_failed_worker_sync(loop):
-    with cluster() as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            L = c.map(inc, range(10))
-            wait(L)
-            a["proc"]().terminate()
-            total = c.submit(sum, L)
-            assert total.result() == sum(map(inc, range(10)))
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop) as c:
+        L = c.map(inc, range(10))
+        wait(L)
+        a["proc"]().terminate()
+        total = c.submit(sum, L)
+        assert total.result() == sum(map(inc, range(10)))
 
 
 @pytest.mark.parametrize("when", ["closing", "closed"])
@@ -116,13 +115,12 @@ async def test_submit_after_failed_worker(c, s, a, b):
 
 @pytest.mark.slow
 def test_gather_after_failed_worker(loop):
-    with cluster() as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            L = c.map(inc, range(10))
-            wait(L)
-            a["proc"]().terminate()
-            result = c.gather(L)
-            assert result == list(map(inc, range(10)))
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop) as c:
+        L = c.map(inc, range(10))
+        wait(L)
+        a["proc"]().terminate()
+        result = c.gather(L)
+        assert result == list(map(inc, range(10)))
 
 
 @pytest.mark.slow
@@ -185,33 +183,34 @@ async def test_restart_cleared(c, s, a, b):
 
 
 def test_restart_sync(loop):
-    with cluster(nanny=True) as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            x = c.submit(div, 1, 2)
+    with cluster(nanny=True) as (s, [a, b]), Client(s["address"], loop=loop) as c:
+        x = c.submit(div, 1, 2)
+        x.result()
+
+        assert sync(loop, c.scheduler.who_has)
+        c.restart()
+        assert not sync(loop, c.scheduler.who_has)
+        assert x.cancelled()
+        assert len(c.nthreads()) == 2
+
+        with pytest.raises(CancelledError):
             x.result()
 
-            assert sync(loop, c.scheduler.who_has)
-            c.restart()
-            assert not sync(loop, c.scheduler.who_has)
-            assert x.cancelled()
-            assert len(c.nthreads()) == 2
-
-            with pytest.raises(CancelledError):
-                x.result()
-
-            y = c.submit(div, 1, 3)
-            assert y.result() == 1 / 3
+        y = c.submit(div, 1, 3)
+        assert y.result() == 1 / 3
 
 
 def test_worker_doesnt_await_task_completion(loop):
-    with cluster(nanny=True, nworkers=1) as (s, [w]):
-        with Client(s["address"], loop=loop) as c:
-            future = c.submit(sleep, 100)
-            sleep(0.1)
-            start = time()
-            c.restart(timeout="15s", wait_for_workers=False)
-            stop = time()
-            assert stop - start < 20
+    with (
+        cluster(nanny=True, nworkers=1) as (s, [w]),
+        Client(s["address"], loop=loop) as c,
+    ):
+        future = c.submit(sleep, 100)
+        sleep(0.1)
+        start = time()
+        c.restart(timeout="15s", wait_for_workers=False)
+        stop = time()
+        assert stop - start < 20
 
 
 @gen_cluster(Worker=Nanny, timeout=60)
@@ -505,7 +504,7 @@ async def test_worker_ttl_restarts_worker(c, s, a, block_evloop):
         w = get_worker()
         w.periodic_callbacks["heartbeat"].stop()
         if block_evloop:
-            sleep(9999)  # Block event loop indefinitely
+            sleep(9999)  # noqa: ASYNC251  # Block event loop indefinitely
         else:
             await asyncio.sleep(9999)
 
@@ -549,7 +548,7 @@ async def test_restart_hung_worker(c, s, a):
     async def f():
         w = get_worker()
         w.periodic_callbacks["heartbeat"].stop()
-        sleep(9999)  # Block event loop indefinitely
+        sleep(9999)  # noqa: ASYNC251  # Block event loop indefinitely
 
     fut = c.submit(f)
     # Wait for worker to hang

@@ -93,15 +93,17 @@ async def test_pip_install_fails(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("", 2), ("", 2)])
 async def test_conda_install_fails_when_conda_not_found(c, s, a, b):
-    with captured_logger(
-        "distributed.diagnostics.plugin", level=logging.ERROR
-    ) as logger:
-        with mock.patch.dict("sys.modules", {"conda": None}):
-            with pytest.raises(RuntimeError):
-                await c.register_plugin(CondaInstall(packages=["not-a-package"]))
-            logs = logger.getvalue()
-            assert "install failed" in logs
-            assert "conda could not be found" in logs
+    with (
+        captured_logger(
+            "distributed.diagnostics.plugin", level=logging.ERROR
+        ) as logger,
+        mock.patch.dict("sys.modules", {"conda": None}),
+    ):
+        with pytest.raises(RuntimeError):
+            await c.register_plugin(CondaInstall(packages=["not-a-package"]))
+        logs = logger.getvalue()
+        assert "install failed" in logs
+        assert "conda could not be found" in logs
 
 
 @gen_cluster(client=True, nthreads=[("", 2), ("", 2)])

@@ -122,10 +122,9 @@ def rectangles(msgs, workers=None, start_boundary=0):
         key = msg["key"]
         name = key_split(key)
         startstops = msg.get("startstops", [])
-        try:
-            worker_thread = f"{msg['worker']}-{msg['thread']}"
-        except Exception:
+        if "worker" not in msg or "thread" not in msg:
             continue
+        worker_thread = f"{msg['worker']}-{msg['thread']}"
 
         if worker_thread not in workers:
             workers[worker_thread] = len(workers) / 2
@@ -222,10 +221,14 @@ async def _get_task_stream_impl(
     source, figure = task_stream_figure(sizing_mode="stretch_both")
     source.data.update(rects)
     if plot == "save":
-        from bokeh.plotting import output_file, save
+        from bokeh.io import save
 
-        output_file(filename=filename, title="Dask Task Stream")
-        save(figure, filename=filename, resources=bokeh_resources)
+        save(
+            figure,
+            filename=filename,
+            title="Dask Task Stream",
+            resources=bokeh_resources or "cdn",
+        )
     return (msgs, figure)
 
 

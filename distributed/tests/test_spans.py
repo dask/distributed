@@ -381,9 +381,8 @@ async def test_mismatched_span(c, s, a, use_default):
 
 
 def test_no_tags():
-    with pytest.raises(ValueError, match="at least one"):
-        with span():
-            pass
+    with pytest.raises(ValueError, match="at least one"), span():
+        pass
 
 
 @gen_cluster(client=True)

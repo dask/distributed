@@ -172,7 +172,7 @@ class SchedulerPlugin:
             This may include worker ID, compute time, etc.
         """
 
-    def add_worker(self, scheduler: Scheduler, worker: str) -> None | Awaitable[None]:
+    def add_worker(self, scheduler: Scheduler, worker: str) -> Awaitable[None] | None:
         """Run when a new worker enters the cluster
 
         If this method is synchronous, it is immediately and synchronously executed
@@ -189,7 +189,7 @@ class SchedulerPlugin:
 
     def remove_worker(
         self, scheduler: Scheduler, worker: str, *, stimulus_id: str, **kwargs: Any
-    ) -> None | Awaitable[None]:
+    ) -> Awaitable[None] | None:
         """Run when a worker leaves the cluster
 
         If this method is synchronous, it is immediately and synchronously executed
@@ -283,14 +283,14 @@ class WorkerPlugin:
 
     idempotent: bool = False
 
-    def setup(self, worker: Worker) -> None | Awaitable[None]:
+    def setup(self, worker: Worker) -> Awaitable[None] | None:
         """
         Run when the plugin is attached to a worker. This happens when the plugin is registered
         and attached to existing workers, or when a worker is created after the plugin has been
         registered.
         """
 
-    def teardown(self, worker: Worker) -> None | Awaitable[None]:
+    def teardown(self, worker: Worker) -> Awaitable[None] | None:
         """Run when the worker to which the plugin is attached is closed, or
         when the plugin is removed."""
 

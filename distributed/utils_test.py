@@ -659,7 +659,7 @@ def cluster(
                         if len(nthreads) == nworkers:
                             break
                         if time() - start > 5:  # pragma: nocover
-                            raise Exception("Timeout on cluster creation")
+                            raise TimeoutError("Timeout on cluster creation")
 
             _run_and_close_tornado(wait_for_workers)
 
@@ -895,18 +895,18 @@ def gen_cluster(
     if is_debugging():
         timeout = 3600
     scheduler_kwargs = merge(
-        dict(
-            dashboard=False,
-            dashboard_address=":0",
-            transition_counter_max=50_000,
-        ),
+        {
+            "dashboard": False,
+            "dashboard_address": ":0",
+            "transition_counter_max": 50_000,
+        },
         scheduler_kwargs,
     )
     worker_kwargs = merge(
-        dict(
-            memory_limit=system.MEMORY_LIMIT,
-            transition_counter_max=50_000,
-        ),
+        {
+            "memory_limit": system.MEMORY_LIMIT,
+            "transition_counter_max": 50_000,
+        },
         worker_kwargs,
     )
 
@@ -951,17 +951,13 @@ def gen_cluster(
                                 worker_kwargs=worker_kwargs,
                                 timeout=timeout // 4,
                             )
-                        except Exception as e:
-                            logger.error(
-                                "Failed to start gen_cluster: "
-                                f"{e.__class__.__name__}: {e}; retrying",
-                                exc_info=True,
-                            )
+                        except Exception:
+                            logger.exception("Failed to start gen_cluster; retrying")
                         else:
                             workers[:] = ws
                             break
                     if s is None:
-                        raise Exception("Could not start cluster")
+                        raise RuntimeError("Could not start cluster")
                     yield s, workers
                 finally:
                     if s is not None:
@@ -1082,9 +1078,12 @@ def validate_state(*servers: Scheduler | Worker | Nanny) -> None:
     Excludes workers wrapped by Nannies and workers manually started by the test.
     """
     for s in servers:
-        if isinstance(s, Scheduler) and s.validate:
-            s.validate_state()
-        elif isinstance(s, Worker) and s.state.validate:
+        if (
+            isinstance(s, Scheduler)
+            and s.validate
+            or isinstance(s, Worker)
+            and s.state.validate
+        ):
             s.validate_state()
 
 
@@ -1763,10 +1762,12 @@ def config_for_cluster_tests(**extra_config):
 @contextmanager
 def clean(threads=True, instances=True, processes=True):
     asyncio.set_event_loop(None)
-    with check_thread_leak() if threads else nullcontext():
-        with check_process_leak(check=processes):
-            with check_instances() if instances else nullcontext():
-                yield
+    with (
+        check_thread_leak() if threads else nullcontext(),
+        check_process_leak(check=processes),
+        check_instances() if instances else nullcontext(),
+    ):
+        yield
 
 
 @pytest.fixture

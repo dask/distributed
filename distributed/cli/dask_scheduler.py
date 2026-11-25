@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +28,7 @@ logger = logging.getLogger("distributed.scheduler")
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 
-@click.command(name="scheduler", context_settings=dict(ignore_unknown_options=True))
+@click.command(name="scheduler", context_settings={"ignore_unknown_options": True})
 @click.option("--host", type=str, default="", help="URI, IP or hostname of this server")
 @click.option("--port", type=str, default=None, help="Serving port")
 @click.option(
@@ -163,11 +164,11 @@ def main(
         else:
             port = 8786
 
-    if isinstance(protocol, list) or isinstance(port, list):
-        if (not isinstance(protocol, list) or not isinstance(port, list)) or len(
-            port
-        ) != len(protocol):
-            raise ValueError("--protocol and --port must both be lists of equal length")
+    if (isinstance(protocol, list) or isinstance(port, list)) and (
+        (not isinstance(protocol, list) or not isinstance(port, list))
+        or len(port) != len(protocol)
+    ):
+        raise ValueError("--protocol and --port must both be lists of equal length")
 
     sec = {
         k: v

@@ -387,23 +387,23 @@ class Nanny(ServerNode):
         Blocks until the process is up and the scheduler is properly informed
         """
         if self.process is None:
-            worker_kwargs = dict(
-                scheduler_ip=self.scheduler_addr,
-                nthreads=self.nthreads,
-                local_directory=self._original_local_dir,
-                services=self.services,
-                nanny=self.address,
-                name=self.name,
-                memory_limit=self.memory_manager.memory_limit,
-                resources=self.resources,
-                validate=self.validate,
-                silence_logs=self.silence_logs,
-                death_timeout=self.death_timeout,
-                preload=self.preload,
-                preload_argv=self.preload_argv,
-                security=self.security,
-                contact_address=self.contact_address,
-            )
+            worker_kwargs = {
+                "scheduler_ip": self.scheduler_addr,
+                "nthreads": self.nthreads,
+                "local_directory": self._original_local_dir,
+                "services": self.services,
+                "nanny": self.address,
+                "name": self.name,
+                "memory_limit": self.memory_manager.memory_limit,
+                "resources": self.resources,
+                "validate": self.validate,
+                "silence_logs": self.silence_logs,
+                "death_timeout": self.death_timeout,
+                "preload": self.preload,
+                "preload_argv": self.preload_argv,
+                "security": self.security,
+                "contact_address": self.contact_address,
+            }
             worker_kwargs.update(self.worker_kwargs)
             self.process = WorkerProcess(
                 worker_kwargs=worker_kwargs,
@@ -713,7 +713,7 @@ class WorkerProcess:
                 config=self.config,
             ),
             name="Dask Worker process (from Nanny)",
-            kwargs=dict(),
+            kwargs={},
         )
         self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)

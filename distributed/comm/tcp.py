@@ -137,9 +137,8 @@ def convert_stream_closed_error(obj, exc):
             raise CommClosedError(f"in {obj}: {exc}") from exc
         exc = exc.real_error
 
-    if isinstance(exc, ssl.SSLError):
-        if exc.reason and "UNKNOWN_CA" in exc.reason:
-            raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
+    if isinstance(exc, ssl.SSLError) and exc.reason and "UNKNOWN_CA" in exc.reason:
+        raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
     raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
 
 
@@ -178,7 +177,7 @@ class TCP(Comm):
         self._peer_addr = peer_addr
         self.stream = stream
         self._finalizer = weakref.finalize(self, self._get_finalizer())
-        self._finalizer.atexit = False  # type: ignore[misc]
+        self._finalizer.atexit = False
         self._extra: dict = {}
 
         ref = weakref.ref(self)
@@ -373,7 +372,6 @@ async def read_bytes_rw(stream: IOStream, n: int) -> memoryview:
 def _add_frames_header(
     frames: list[bytes | memoryview],
 ) -> tuple[list[bytes | memoryview], list[int], int]:
-    """ """
     frames_nbytes = [nbytes(f) for f in frames]
     frames_nbytes_total = sum(frames_nbytes)
 

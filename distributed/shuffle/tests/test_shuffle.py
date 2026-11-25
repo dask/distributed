@@ -638,7 +638,9 @@ async def test_closed_input_only_worker_during_transfer(c, s, a, b):
             start="2000-01-01",
             end="2000-05-01",
             dtypes={"x": float, "y": float},
-            freq="10 s",
+            # Keep many daily partitions to exercise the transfer race, but
+            # fewer rows so Windows CI stays under the gen_cluster timeout.
+            freq="60 s",
         )
         with dask.config.set({"dataframe.shuffle.method": "p2p"}):
             shuffled = df.shuffle("x", force=True)
@@ -2035,12 +2037,14 @@ async def test_meaningful_out_of_disk_error(c, s, a, b):
         {"dataframe.shuffle.method": "p2p", "distributed.p2p.storage.disk": True}
     ):
         shuffled = df.shuffle("x", npartitions=10, force=True)
-    with pytest.raises(P2POutOfDiskError, match="out of available disk space"):
-        with mock.patch(
+    with (
+        pytest.raises(P2POutOfDiskError, match="out of available disk space"),
+        mock.patch(
             "distributed.shuffle._core.DiskShardsBuffer",
             OutOfDiskShardsBuffer,
-        ):
-            await c.compute(shuffled)
+        ),
+    ):
+        await c.compute(shuffled)
     await assert_worker_cleanup(a)
     await assert_worker_cleanup(b)
     await c.close()
@@ -2718,14 +2722,16 @@ async def test_flaky_connect_fails_without_retry(c, s, a, b):
 
     rpc = await FlakyConnectionPool(failing_connects=1)
 
-    with mock.patch.object(a, "rpc", rpc):
-        with raises_with_cause(
+    with (
+        mock.patch.object(a, "rpc", rpc),
+        raises_with_cause(
             expected_exception=RuntimeError,
             match="P2P.*transfer",
             expected_cause=OSError,
             match_cause=None,
-        ):
-            await c.compute(x)
+        ),
+    ):
+        await c.compute(x)
 
     await assert_worker_cleanup(a)
     await assert_worker_cleanup(b)

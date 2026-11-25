@@ -30,7 +30,7 @@ class VariableExtension:
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.variables = dict()
+        self.variables = {}
         self.waiting = defaultdict(set)
         self.waiting_conditions = defaultdict(asyncio.Condition)
         self.started = asyncio.Condition()

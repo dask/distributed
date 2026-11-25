@@ -76,7 +76,6 @@ async def test_async_task_group_close_does_not_cancel_existing_tasks():
         nonlocal flag
         await ev.wait()
         flag = True
-        return None
 
     assert group.call_soon(set_flag) is None
 

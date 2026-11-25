@@ -18,17 +18,18 @@ from distributed.utils_test import gen_cluster, gen_test, popen
 @gen_test(timeout=120)
 async def test_text():
     port = open_port()
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "spec",
-            "--spec",
-            '{"cls": "dask.distributed.Scheduler", "opts": {"port": %d}}' % port,
-        ]
-    ):
-        with popen(
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "spec",
+                "--spec",
+                '{"cls": "dask.distributed.Scheduler", "opts": {"port": %d}}' % port,
+            ]
+        ),
+        popen(
             [
                 sys.executable,
                 "-m",
@@ -38,13 +39,14 @@ async def test_text():
                 "--spec",
                 '{"cls": "dask.distributed.Worker", "opts": {"nanny": false, "nthreads": 3, "name": "foo"}}',
             ]
-        ):
-            async with Client("tcp://localhost:%d" % port, asynchronous=True) as client:
-                await client.wait_for_workers(1)
-                info = await client.scheduler.identity()
-                [w] = info["workers"].values()
-                assert w["name"] == "foo"
-                assert w["nthreads"] == 3
+        ),
+    ):
+        async with Client("tcp://localhost:%d" % port, asynchronous=True) as client:
+            await client.wait_for_workers(1)
+            info = await client.scheduler.identity()
+            [w] = info["workers"].values()
+            assert w["name"] == "foo"
+            assert w["nthreads"] == 3
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -183,18 +185,21 @@ async def test_uvloop():
     def check():
         return isinstance(asyncio.get_event_loop(), uvloop.Loop)
 
-    with popen(
-        [
-            sys.executable,
-            "-m",
-            "dask",
-            "spec",
-            "--spec",
-            json.dumps({"cls": "dask.distributed.Scheduler", "opts": {"port": port}}),
-        ],
-        env=env,
-    ):
-        with popen(
+    with (
+        popen(
+            [
+                sys.executable,
+                "-m",
+                "dask",
+                "spec",
+                "--spec",
+                json.dumps(
+                    {"cls": "dask.distributed.Scheduler", "opts": {"port": port}}
+                ),
+            ],
+            env=env,
+        ),
+        popen(
             [
                 sys.executable,
                 "-m",
@@ -210,8 +215,9 @@ async def test_uvloop():
                 ),
             ],
             env=env,
-        ):
-            async with Client(f"tcp://localhost:{port}", asynchronous=True) as client:
-                await client.wait_for_workers(1)
-                assert await client.run_on_scheduler(check)
-                assert all((await client.run(check)).values())
+        ),
+    ):
+        async with Client(f"tcp://localhost:{port}", asynchronous=True) as client:
+            await client.wait_for_workers(1)
+            assert await client.run_on_scheduler(check)
+            assert all((await client.run(check)).values())

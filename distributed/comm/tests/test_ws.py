@@ -107,12 +107,9 @@ async def test_expect_scheduler_ssl_when_sharing_server(tmp_path):
         "distributed.scheduler.dashboard.tls.cert": cert_path,
     }
     port = open_port()
-    with dask.config.set(c):
-        with pytest.raises(RuntimeError):
-            async with Scheduler(
-                protocol="ws://", port=port, dashboard_address=f":{port}"
-            ):
-                pass
+    with dask.config.set(c), pytest.raises(RuntimeError):
+        async with Scheduler(protocol="ws://", port=port, dashboard_address=f":{port}"):
+            pass
 
 
 @gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
@@ -164,10 +161,12 @@ async def test_http_and_comm_server(dashboard, protocol, security, port):
             assert s.http_server is s.listener.server
         else:
             assert s.http_server is not s.listener.server
-        async with Worker(s.address, protocol=protocol, security=security) as w:
-            async with Client(s.address, asynchronous=True, security=security) as c:
-                result = await c.submit(lambda x: x + 1, 10)
-                assert result == 11
+        async with (
+            Worker(s.address, protocol=protocol, security=security) as w,
+            Client(s.address, asynchronous=True, security=security) as c,
+        ):
+            result = await c.submit(lambda x: x + 1, 10)
+            assert result == 11
 
 
 @pytest.mark.parametrize(
@@ -240,12 +239,12 @@ async def test_wss_roundtrip():
     xfail_ssl_issue5601()
     pytest.importorskip("cryptography")
     security = Security.temporary()
-    async with Scheduler(
-        protocol="wss://", security=security, dashboard_address=":0"
-    ) as s:
-        async with Worker(s.address, security=security) as w:
-            async with Client(s.address, security=security, asynchronous=True) as c:
-                x = np.arange(100)
-                future = await c.scatter(x)
-                y = await future
-                assert (x == y).all()
+    async with (
+        Scheduler(protocol="wss://", security=security, dashboard_address=":0") as s,
+        Worker(s.address, security=security) as w,
+        Client(s.address, security=security, asynchronous=True) as c,
+    ):
+        x = np.arange(100)
+        future = await c.scatter(x)
+        y = await future
+        assert (x == y).all()

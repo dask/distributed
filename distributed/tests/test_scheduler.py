@@ -634,7 +634,7 @@ async def test_secede_opens_slot(c, s, a):
     ],
 )
 def test_saturation_factor(
-    saturation_config: int | float | str, expected_task_counts: tuple[int, int]
+    saturation_config: float | str, expected_task_counts: tuple[int, int]
 ) -> None:
     @gen_cluster(
         client=True,
@@ -669,10 +669,12 @@ def test_saturation_factor(
 
 @gen_test()
 async def test_bad_saturation_factor():
-    with pytest.raises(ValueError, match="foo"):
-        with dask.config.set({"distributed.scheduler.worker-saturation": "foo"}):
-            async with Scheduler(dashboard_address=":0"):
-                pass
+    with (
+        pytest.raises(ValueError, match="foo"),
+        dask.config.set({"distributed.scheduler.worker-saturation": "foo"}),
+    ):
+        async with Scheduler(dashboard_address=":0"):
+            pass
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -1815,13 +1817,12 @@ def test_run_on_scheduler_sync(loop):
     def f(dask_scheduler=None):
         return dask_scheduler.address
 
-    with cluster() as (s, [a, b]):
-        with Client(s["address"], loop=loop) as c:
-            address = c.run_on_scheduler(f)
-            assert address == s["address"]
+    with cluster() as (s, [a, b]), Client(s["address"], loop=loop) as c:
+        address = c.run_on_scheduler(f)
+        assert address == s["address"]
 
-            with pytest.raises(ZeroDivisionError):
-                c.run_on_scheduler(div, 1, 0)
+        with pytest.raises(ZeroDivisionError):
+            c.run_on_scheduler(div, 1, 0)
 
 
 @gen_cluster(client=True)
@@ -1835,9 +1836,11 @@ async def test_run_on_scheduler(c, s, a, b):
 
 @gen_test()
 async def test_allow_pickle_false():
-    with dask.config.set({"distributed.scheduler.pickle": False}):
-        with pytest.raises(RuntimeError, match="Pickling can no longer be disabled"):
-            await Scheduler()
+    with (
+        dask.config.set({"distributed.scheduler.pickle": False}),
+        pytest.raises(RuntimeError, match="Pickling can no longer be disabled"),
+    ):
+        await Scheduler()
 
 
 @gen_cluster()
@@ -2679,7 +2682,7 @@ async def test_close_workers(s, *workers):
     await s.close()
 
     for w in workers:
-        if not w.status == Status.closed:
+        if w.status != Status.closed:
             await asyncio.sleep(0.1)
 
 
@@ -2800,9 +2803,8 @@ async def test_allowed_failures_config():
 
 @gen_test()
 async def test_finished():
-    async with Scheduler(dashboard_address=":0") as s:
-        async with Worker(s.address) as w:
-            pass
+    async with Scheduler(dashboard_address=":0") as s, Worker(s.address) as w:
+        pass
 
     await s.finished()
     await w.finished()
@@ -2881,7 +2883,7 @@ async def test_default_task_duration_splits(c, s, a, b):
     fut = c.compute(graph)
     await wait(fut)
 
-    split_prefix = [pre for pre in s.task_prefixes.keys() if "split" in pre]
+    split_prefix = [pre for pre in s.task_prefixes if "split" in pre]
     assert split_prefix == ["split-taskshuffle", "split-stage"]
     default_times = dask.config.get("distributed.scheduler.default-task-durations")
     for p in split_prefix:
@@ -2892,10 +2894,12 @@ async def test_default_task_duration_splits(c, s, a, b):
 @gen_test()
 async def test_no_dangling_asyncio_tasks():
     start = asyncio.all_tasks()
-    async with Scheduler(dashboard_address=":0") as s:
-        async with Worker(s.address, name="0"):
-            async with Client(s.address, asynchronous=True) as c:
-                await c.submit(lambda: 1)
+    async with (
+        Scheduler(dashboard_address=":0") as s,
+        Worker(s.address, name="0"),
+        Client(s.address, asynchronous=True) as c,
+    ):
+        await c.submit(lambda: 1)
 
     tasks = asyncio.all_tasks()
     assert tasks == start
@@ -3270,9 +3274,11 @@ async def test_gather_bad_worker(c, s, a, direct):
     c.rpc = await FlakyConnectionPool(failing_connections=3)
     s.rpc = await FlakyConnectionPool(failing_connections=1)
 
-    with captured_logger("distributed.scheduler") as sched_logger:
-        with captured_logger("distributed.client") as client_logger:
-            assert await c.gather(x, direct=direct) == 2
+    with (
+        captured_logger("distributed.scheduler") as sched_logger,
+        captured_logger("distributed.client") as client_logger,
+    ):
+        assert await c.gather(x, direct=direct) == 2
 
     assert "Couldn't gather keys: {'x': 'memory'}" in sched_logger.getvalue()
     assert "Couldn't gather 1 keys, rescheduling ('x',)" in client_logger.getvalue()
@@ -3314,25 +3320,27 @@ async def test_too_many_groups(c, s, a, b):
     ),
 )
 async def test_multiple_listeners(dashboard_link_template, expected_dashboard_link):
-    with dask.config.set({"distributed.dashboard.link": dashboard_link_template}):
-        with captured_logger("distributed.scheduler") as log:
-            async with Scheduler(
-                dashboard_address=":0", protocol=["inproc", "tcp"]
-            ) as s:
-                async with Worker(s.listeners[0].contact_address) as a:
-                    async with Worker(s.listeners[1].contact_address) as b:
-                        assert a.address.startswith("inproc")
-                        assert a.scheduler.address.startswith("inproc")
-                        assert b.address.startswith("tcp")
-                        assert b.scheduler.address.startswith("tcp")
+    with (
+        dask.config.set({"distributed.dashboard.link": dashboard_link_template}),
+        captured_logger("distributed.scheduler") as log,
+    ):
+        async with (
+            Scheduler(dashboard_address=":0", protocol=["inproc", "tcp"]) as s,
+            Worker(s.listeners[0].contact_address) as a,
+            Worker(s.listeners[1].contact_address) as b,
+        ):
+            assert a.address.startswith("inproc")
+            assert a.scheduler.address.startswith("inproc")
+            assert b.address.startswith("tcp")
+            assert b.scheduler.address.startswith("tcp")
 
-                        async with Client(s.address, asynchronous=True) as c:
-                            futures = c.map(inc, range(20))
-                            await wait(futures)
+            async with Client(s.address, asynchronous=True) as c:
+                futures = c.map(inc, range(20))
+                await wait(futures)
 
-                            # Force inter-worker communication both ways
-                            await c.submit(sum, futures, workers=[a.address])
-                            await c.submit(len, futures, workers=[b.address])
+                # Force inter-worker communication both ways
+                await c.submit(sum, futures, workers=[a.address])
+                await c.submit(len, futures, workers=[b.address])
 
     log = log.getvalue()
     assert re.search(r"Scheduler at:\s*tcp://", log)
@@ -3351,11 +3359,11 @@ async def test_worker_name_collision(s, a):
     # test that a name collision for workers produces the expected response
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
-    with captured_logger("distributed.scheduler") as log:
-        with raises_with_cause(
-            RuntimeError, None, ValueError, f"name taken, {a.name!r}"
-        ):
-            await Worker(s.address, name=a.name, host="127.0.0.1")
+    with (
+        captured_logger("distributed.scheduler") as log,
+        raises_with_cause(RuntimeError, None, ValueError, f"name taken, {a.name!r}"),
+    ):
+        await Worker(s.address, name=a.name, host="127.0.0.1")
 
     s.validate_state()
     assert set(s.workers) == {a.address}
@@ -3499,7 +3507,7 @@ def test_memorystate__to_dict():
     }
 
 
-_test_leak = []
+_test_leak: list[str] = []
 
 
 def leaking(out_mib, leak_mib, sleep_time):
@@ -3571,9 +3579,9 @@ async def test_memory(c, s, *nannies):
     # Wait for the memory readings to stabilize after workers go online
     await asyncio.sleep(2)
     await asyncio.gather(
-        assert_memory(a, "unmanaged_recent", 0, 5, timeout=10),
-        assert_memory(b, "unmanaged_recent", 0, 5, timeout=10),
-        assert_memory(s, "unmanaged_recent", 0, 10, timeout=10.1),
+        assert_memory(a, "unmanaged_recent", 0, 20, timeout=10),
+        assert_memory(b, "unmanaged_recent", 0, 20, timeout=10),
+        assert_memory(s, "unmanaged_recent", 0, 40, timeout=10.1),
     )
 
     print()
@@ -3585,9 +3593,9 @@ async def test_memory(c, s, *nannies):
     f2 = c.submit(leaking, 50, 100, 2, key="f2", workers=[b.name])
 
     await asyncio.gather(
-        assert_memory(a, "unmanaged_recent", 150, 170, timeout=1.8),
-        assert_memory(b, "unmanaged_recent", 150, 170, timeout=1.8),
-        assert_memory(s, "unmanaged_recent", 300, 340, timeout=1.9),
+        assert_memory(a, "unmanaged_recent", 150, 180, timeout=1.8),
+        assert_memory(b, "unmanaged_recent", 150, 180, timeout=1.8),
+        assert_memory(s, "unmanaged_recent", 300, 360, timeout=1.9),
     )
     await wait([f1, f2])
 
@@ -3596,9 +3604,9 @@ async def test_memory(c, s, *nannies):
         assert_memory(a, "managed", 50, 51, timeout=0),
         assert_memory(b, "managed", 50, 51, timeout=0),
         assert_memory(s, "managed", 100, 101, timeout=0),
-        assert_memory(a, "unmanaged_recent", 100, 120, timeout=0),
-        assert_memory(b, "unmanaged_recent", 100, 120, timeout=0),
-        assert_memory(s, "unmanaged_recent", 200, 240, timeout=0),
+        assert_memory(a, "unmanaged_recent", 100, 130, timeout=0),
+        assert_memory(b, "unmanaged_recent", 100, 130, timeout=0),
+        assert_memory(s, "unmanaged_recent", 200, 260, timeout=0),
     )
 
     # Force the output of f1 and f2 to spill to disk
@@ -3648,9 +3656,9 @@ async def test_memory(c, s, *nannies):
     # Wait until 4s have passed since the spill to observe unmanaged_recent
     # transition into unmanaged_old
     await asyncio.gather(
-        assert_memory(a, "unmanaged_recent", 0, 5, timeout=4.5),
-        assert_memory(b, "unmanaged_recent", 0, 5, timeout=4.5),
-        assert_memory(s, "unmanaged_recent", 0, 10, timeout=4.6),
+        assert_memory(a, "unmanaged_recent", 0, 10, timeout=4.5),
+        assert_memory(b, "unmanaged_recent", 0, 10, timeout=4.5),
+        assert_memory(s, "unmanaged_recent", 0, 20, timeout=4.6),
     )
 
     # When the leaked memory is cleared, unmanaged and unmanaged_old drop.
@@ -3671,8 +3679,8 @@ async def test_memory(c, s, *nannies):
         assert_memory(b, "unmanaged", 0, prev_unmanaged_b - 50, timeout=10),
     )
     await asyncio.gather(
-        assert_memory(a, "unmanaged_recent", 0, 5, timeout=0),
-        assert_memory(b, "unmanaged_recent", 0, 5, timeout=0),
+        assert_memory(a, "unmanaged_recent", 0, 10, timeout=0),
+        assert_memory(b, "unmanaged_recent", 0, 10, timeout=0),
     )
 
 
@@ -3708,7 +3716,7 @@ async def test_infrequent_sysmon(s, a, b):
 async def test_close_scheduler__close_workers_Worker(s, a, b):
     with captured_logger("distributed.comm", level=logging.DEBUG) as log:
         await s.close()
-        while not a.status == Status.closed:
+        while a.status != Status.closed:
             await asyncio.sleep(0.05)
     log = log.getvalue()
     assert "retry" not in log
@@ -3719,7 +3727,7 @@ async def test_close_scheduler__close_workers_Worker(s, a, b):
 async def test_close_scheduler__close_workers_Nanny(s, a, b):
     with captured_logger("distributed.comm", level=logging.DEBUG) as log:
         await s.close()
-        while not a.status == Status.closed:
+        while a.status != Status.closed:
             await asyncio.sleep(0.05)
     log = log.getvalue()
     assert "retry" not in log
@@ -4210,9 +4218,11 @@ async def test_transition_counter_max_scheduler(c, s, a, b):
     # This is set by @gen_cluster; it's False in production
     assert s.transition_counter_max > 0
     s.transition_counter_max = 1
-    with captured_logger("distributed.scheduler") as logger:
-        with pytest.raises(AssertionError):
-            await c.submit(inc, 2)
+    with (
+        captured_logger("distributed.scheduler") as logger,
+        pytest.raises(AssertionError),
+    ):
+        await c.submit(inc, 2)
     assert s.transition_counter == 1
     with pytest.raises(AssertionError):
         s.validate_state()
@@ -4341,8 +4351,10 @@ async def test_Scheduler__to_dict(c, s, a):
     # WorkerStates are serialized s dicts under workers and as
     # strings under tasks.*.who_has
     assert d["tasks"][futs[0].key]["who_has"] == [
-        f"<WorkerState '{a.address}', "
-        "name: 0, status: running, memory: 2, processing: 0>"
+        (
+            f"<WorkerState '{a.address}', "
+            "name: 0, status: running, memory: 2, processing: 0>"
+        )
     ]
     assert sorted(d["workers"][a.address]["has_what"]) == sorted(
         [
@@ -4610,12 +4622,14 @@ async def test_transition_waiting_memory(c, s, a, b):
     assert b.state.tasks["y"].state == "executing"
     assert s.tasks["x"].who_has == {s.workers[a.address]}
 
-    with freeze_batched_send(b.batched_stream):
-        with freeze_batched_send(s.stream_comms[b.address]):
-            await s.remove_worker(a.address, stimulus_id="remove_a")
-            assert s.tasks["x"].state == "no-worker"
-            assert s.tasks["y"].state == "waiting"
-            await wait_for_state("y", "memory", b)
+    with (
+        freeze_batched_send(b.batched_stream),
+        freeze_batched_send(s.stream_comms[b.address]),
+    ):
+        await s.remove_worker(a.address, stimulus_id="remove_a")
+        assert s.tasks["x"].state == "no-worker"
+        assert s.tasks["y"].state == "waiting"
+        await wait_for_state("y", "memory", b)
 
     await async_poll_for(lambda: not b.state.tasks)
 
