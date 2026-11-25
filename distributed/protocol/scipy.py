@@ -1,5 +1,5 @@
 """
-Efficient serialization of SciPy sparse matrices.
+Efficient serialization of SciPy sparse matrices and arrays.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from distributed.protocol.serialize import (
 register_generic(scipy.sparse.spmatrix, "dask", dask_serialize, dask_deserialize)
 
 
-@dask_serialize.register(scipy.sparse.dok_matrix)
 def serialize_scipy_sparse_dok(x):
     coo_header, coo_frames = dask_serialize(x.tocoo())
 
@@ -25,7 +24,6 @@ def serialize_scipy_sparse_dok(x):
     return header, frames
 
 
-@dask_deserialize.register(scipy.sparse.dok_matrix)
 def deserialize_scipy_sparse_dok(header, frames):
     coo_header = header["coo_header"]
     coo_frames = frames
@@ -34,3 +32,13 @@ def deserialize_scipy_sparse_dok(header, frames):
     x = x_coo.todok()
 
     return x
+
+
+dask_serialize.register(scipy.sparse.dok_matrix)(serialize_scipy_sparse_dok)
+dask_deserialize.register(scipy.sparse.dok_matrix)(deserialize_scipy_sparse_dok)
+
+# scipy >=1.1. scipy.sparse.sparray is not a subclass of scipy.sparse.spmatrix.
+if hasattr(scipy.sparse, "sparray"):
+    register_generic(scipy.sparse.sparray, "dask", dask_serialize, dask_deserialize)
+    dask_serialize.register(scipy.sparse.dok_array)(serialize_scipy_sparse_dok)
+    dask_deserialize.register(scipy.sparse.dok_array)(deserialize_scipy_sparse_dok)
