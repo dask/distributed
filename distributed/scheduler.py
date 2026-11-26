@@ -5787,8 +5787,7 @@ class Scheduler(SchedulerState, ServerNode):
                     )
                 logger.info("Scheduler cancels key %s.  Force=%s", key, force)
                 cancelled_keys.append(key)
-            assert ts.who_wants
-            clients.extend(list(ts.who_wants) if force else [cs])
+            clients.extend(list(ts.who_wants or ()) if force else [cs])
         for cs in clients:
             self.client_releases_keys(
                 keys=cancelled_keys,
