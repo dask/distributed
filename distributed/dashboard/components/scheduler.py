@@ -78,10 +78,7 @@ from dask.utils import (
 )
 
 from distributed.core import Status
-from distributed.dashboard.components import (
-    add_periodic_callback,
-    without_property_validation,
-)
+from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
     ProfileServer,
@@ -92,8 +89,6 @@ from distributed.dashboard.utils import (
     _DATATABLE_STYLESHEETS_KWARGS,
     BOKEH_VERSION,
     PROFILING,
-    get_title,
-    set_title,
     transpose,
     update,
 )
@@ -181,7 +176,6 @@ class Occupancy(DashboardComponent):
         hover.point_policy = "follow_mouse"
         self.root.add_tools(hover, tap)
 
-    @without_property_validation
     @log_errors
     def update(self):
         workers = self.scheduler.workers.values()
@@ -201,13 +195,12 @@ class Occupancy(DashboardComponent):
                 color.append("blue")
 
         if total:
-            set_title(
-                self.root,
+            self.root.title.text = (
                 f"Occupancy -- total time: {format_time(total)} "
-                f"wall time: {format_time(total / self.scheduler.total_nthreads)}",
+                f"wall time: {format_time(total / self.scheduler.total_nthreads)}"
             )
         else:
-            set_title(self.root, "Occupancy")
+            self.root.title.text = "Occupancy"
 
         if occupancy:
             result = {
@@ -257,7 +250,6 @@ class ProcessingHistogram(DashboardComponent):
             fill_alpha=0.5,
         )
 
-    @without_property_validation
     def update(self):
         L = [len(ws.processing) for ws in self.scheduler.workers.values()]
         counts, x = np.histogram(L, bins=40)
@@ -423,7 +415,6 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         else:
             return "blue"
 
-    @without_property_validation
     @log_errors
     def update(self):
         limit = sum(ws.memory_limit for ws in self.scheduler.workers.values())
@@ -454,7 +445,7 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         title = f"Bytes stored: {format_bytes(meminfo.process)}"
         if meminfo.spilled:
             title += f" + {format_bytes(meminfo.spilled)} spilled to disk"
-        set_title(self.root, title)
+        self.root.title.text = title
 
         update(self.source, result)
 
@@ -548,7 +539,6 @@ class WorkersMemory(DashboardComponent, MemoryColor):
         )
         self.root.add_tools(hover)
 
-    @without_property_validation
     @log_errors
     def update(self):
         def quadlist(i: Iterable[T]) -> list[T]:
@@ -652,7 +642,6 @@ class WorkersMemoryHistogram(DashboardComponent):
             fill_alpha=0.5,
         )
 
-    @without_property_validation
     def update(self):
         nbytes = np.asarray(
             [ws.metrics["memory"] for ws in self.scheduler.workers.values()]
@@ -732,7 +721,6 @@ class WorkersTransferBytes(DashboardComponent):
         )
         self.root.add_tools(hover, tap)
 
-    @without_property_validation
     @log_errors
     def update(self):
         wss = self.scheduler.workers.values()
@@ -768,9 +756,8 @@ class WorkersTransferBytes(DashboardComponent):
             "y_incoming": y_incoming,
             "y_outgoing": y_outgoing,
         }
-        set_title(
-            self.root,
-            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}",
+        self.root.title.text = (
+            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}"
         )
         update(self.source, result)
 
@@ -900,7 +887,7 @@ class Hardware(DashboardComponent):
     def update(self):
         if (
             not self.disk_data["size"]
-            or get_title(self.disk_figure) == "Disk Bandwidth"
+            or self.disk_figure.title.text == "Disk Bandwidth"
         ):
             return
 
@@ -910,9 +897,9 @@ class Hardware(DashboardComponent):
         update(self.disk_source, self.disk_data)
         update(self.memory_source, self.memory_data)
         update(self.network_source, self.network_data)
-        set_title(self.memory_figure, "Memory Bandwidth")
-        set_title(self.disk_figure, "Disk Bandwidth")
-        set_title(self.network_figure, "Network Bandwidth")
+        self.memory_figure.title.text = "Memory Bandwidth"
+        self.disk_figure.title.text = "Disk Bandwidth"
+        self.network_figure.title.text = "Network Bandwidth"
 
 
 class BandwidthTypes(DashboardComponent):
@@ -962,7 +949,6 @@ class BandwidthTypes(DashboardComponent):
         hover.point_policy = "follow_mouse"
         self.root.add_tools(hover)
 
-    @without_property_validation
     @log_errors
     def update(self):
         bw = self.scheduler.bandwidth_types
@@ -973,7 +959,7 @@ class BandwidthTypes(DashboardComponent):
             "type": list(bw.keys()),
             "bandwidth_text": [format_bytes(x) for x in bw.values()],
         }
-        set_title(self.root, f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}")
+        self.root.title.text = f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
         update(self.source, result)
 
 
@@ -1043,7 +1029,6 @@ class BandwidthWorkers(DashboardComponent):
         hover.point_policy = "follow_mouse"
         self.root.add_tools(hover)
 
-    @without_property_validation
     @log_errors
     def update(self):
         bw = self.scheduler.bandwidth_workers
@@ -1073,7 +1058,7 @@ class BandwidthWorkers(DashboardComponent):
             "bandwidth": value,
             "bandwidth_text": list(map(format_bytes, value)),
         }
-        set_title(self.root, f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}")
+        self.root.title.text = f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
         update(self.source, result)
 
 
@@ -1178,7 +1163,6 @@ class WorkerNetworkBandwidth(DashboardComponent):
         self.disk.ygrid.visible = False
         self.disk.toolbar_location = None
 
-    @without_property_validation
     @log_errors
     def update(self):
         workers = self.scheduler.workers.values()
@@ -1400,7 +1384,6 @@ class SystemTimeseries(DashboardComponent):
         }
         return result
 
-    @without_property_validation
     @log_errors
     def update(self):
         self.source.stream(self.get_data(), 1000)
@@ -1535,7 +1518,6 @@ class ComputePerKey(DashboardComponent):
 
         self.root = Tabs(tabs=[tab1, tab2], sizing_mode="stretch_both")
 
-    @without_property_validation
     @log_errors
     def update(self):
         compute_times = defaultdict(float)
@@ -1639,7 +1621,6 @@ class AggregateAction(DashboardComponent):
         hover.point_policy = "follow_mouse"
         self.root.add_tools(hover)
 
-    @without_property_validation
     @log_errors
     def update(self):
         agg_times = defaultdict(float)
@@ -1663,7 +1644,7 @@ class AggregateAction(DashboardComponent):
             agg_time.append(t)
 
         self.root.x_range.factors = agg_names
-        set_title(self.root, "Aggregate Time Per Action")
+        self.root.title.text = "Aggregate Time Per Action"
 
         action_result = {
             "times": agg_time,
@@ -1723,7 +1704,6 @@ class MemoryByKey(DashboardComponent):
         hover.point_policy = "follow_mouse"
         self.root.add_tools(hover)
 
-    @without_property_validation
     @log_errors
     def update(self):
         counts = defaultdict(int)
@@ -1743,7 +1723,7 @@ class MemoryByKey(DashboardComponent):
             "nbytes_text": [format_bytes(nbytes[name]) for name in names],
             "color": [color_of(name) for name in names],
         }
-        set_title(self.root, f"Total Use: {format_bytes(sum(nbytes.values()))}")
+        self.root.title.text = f"Total Use: {format_bytes(sum(nbytes.values()))}"
 
         update(self.source, result)
 
@@ -1829,7 +1809,6 @@ class CurrentLoad(DashboardComponent):
         self.processing_figure = processing
         self.cpu_figure = cpu
 
-    @without_property_validation
     @log_errors
     def update(self):
         workers = self.scheduler.workers.values()
@@ -1898,7 +1877,6 @@ class StealingTimeSeries(DashboardComponent):
             ResetTool(), PanTool(dimensions="width"), WheelZoomTool(dimensions="width")
         )
 
-    @without_property_validation
     @log_errors
     def update(self):
         result = {
@@ -1986,7 +1964,6 @@ class StealingEvents(DashboardComponent):
 
         return d
 
-    @without_property_validation
     @log_errors
     def update(self):
         topic = self.scheduler._broker._topics["stealing"]
@@ -2056,7 +2033,6 @@ class Events(DashboardComponent):
             WheelZoomTool(dimensions="width"),
         )
 
-    @without_property_validation
     @log_errors
     def update(self):
         topic = self.scheduler._broker._topics[self.name]
@@ -2120,7 +2096,6 @@ class TaskStream(DashboardComponent):
         # Required for update callback
         self.task_stream_index = [0]
 
-    @without_property_validation
     @log_errors
     def update(self):
         if self.index == self.plugin.index:
@@ -2344,7 +2319,6 @@ class TaskGraph(DashboardComponent):
         self.root.add_tools(hover, tap)
         self.max_items = config.get("distributed.dashboard.graph-max-items", 5000)
 
-    @without_property_validation
     @log_errors
     def update(self):
         # If there are too many tasks in the scheduler we'll disable this
@@ -2376,7 +2350,6 @@ class TaskGraph(DashboardComponent):
             else:
                 self.subtitle.text = " "
 
-    @without_property_validation
     def add_new_nodes_edges(self, new, new_edges, update=False):
         if new or update:
             node_key = []
@@ -2429,7 +2402,6 @@ class TaskGraph(DashboardComponent):
                 self.node_source.stream(node)
                 self.edge_source.stream(edge)
 
-    @without_property_validation
     def patch_updates(self):
         """
         Small updates like color changes or lost nodes from task transitions
@@ -2633,7 +2605,6 @@ class TaskGroupGraph(DashboardComponent):
 
         self.root.add_tools(hover)
 
-    @without_property_validation
     @log_errors
     def update_layout(self):
         # Get dependencies per task group.
@@ -2696,7 +2667,6 @@ class TaskGroupGraph(DashboardComponent):
 
         return y
 
-    @without_property_validation
     def update(self):
         if self.scheduler.transition_counter == self.old_counter:
             return
@@ -3037,7 +3007,6 @@ class TaskGroupProgress(DashboardComponent):
 
         return new_data
 
-    @without_property_validation
     @log_errors
     def update(self):
         """
@@ -3353,7 +3322,6 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_tools(hover, help_)
 
-    @without_property_validation
     @log_errors
     def update(self):
         state = {
@@ -3402,15 +3370,14 @@ class TaskProgress(DashboardComponent):
             v for k, v in totals.items() if k != "all"
         )
 
-        set_title(
-            self.root,
+        self.root.title.text = (
             "Progress -- total: {all}, "
             "waiting: {waiting}, "
             "queued: {queued}, "
             "processing: {processing}, "
             "in-memory: {memory}, "
             "no-worker: {no_worker}, "
-            "erred: {erred}".format(**totals),
+            "erred: {erred}".format(**totals)
         )
 
 
@@ -3487,7 +3454,6 @@ class FinePerformanceMetrics(DashboardComponent):
         fmt = self._bokeh_unit_format()
         self.task_exec_by_prefix_chart.xaxis[0].formatter.format = fmt
 
-    @without_property_validation
     @log_errors
     def update(self):
         self._update_selectors()
@@ -3934,7 +3900,6 @@ class Contention(DashboardComponent):
         )
         self.root.add_tools(hover)
 
-    @without_property_validation
     @log_errors
     def update(self):
         s = self.scheduler
@@ -4047,7 +4012,6 @@ class ExceptionsTable(DashboardComponent):
             **sizing_mode,
         )
 
-    @without_property_validation
     def update(self):
         new_data = {name: [] for name in self.names}
         erred_tasks = self.scheduler.erred_tasks
@@ -4284,7 +4248,6 @@ class WorkerTable(DashboardComponent):
 
         self.root = column(*components, **sizing_mode)
 
-    @without_property_validation
     def update(self):
         data = {name: [] for name in self.names + self.extra_names}
         for i, ws in enumerate(
@@ -4491,7 +4454,6 @@ class Shuffling(DashboardComponent):
 
         self.root = row(self.comm_memory, self.disk_memory)
 
-    @without_property_validation
     @log_errors
     def update(self):
         input = self.scheduler.extensions["shuffle"].heartbeats

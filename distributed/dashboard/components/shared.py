@@ -25,10 +25,7 @@ import dask
 
 from distributed import profile
 from distributed.compatibility import WINDOWS
-from distributed.dashboard.components import (
-    DashboardComponent,
-    without_property_validation,
-)
+from distributed.dashboard.components import DashboardComponent
 from distributed.dashboard.utils import update
 from distributed.utils import log_errors
 
@@ -90,7 +87,6 @@ class Processing(DashboardComponent):
 
         self.root = fig
 
-    @without_property_validation
     @log_errors
     def update(self, messages):
         msg = messages["processing"]
@@ -143,7 +139,6 @@ class ProfilePlot(DashboardComponent):
         self.states = data.pop("states")
         self.root, self.source = profile.plot_figure(data, **kwargs)
 
-        @without_property_validation
         @log_errors
         def cb(attr, old, new):
             try:
@@ -158,7 +153,6 @@ class ProfilePlot(DashboardComponent):
 
         self.source.selected.on_change("indices", cb)
 
-    @without_property_validation
     @log_errors
     def update(self, state):
         self.state = state
@@ -199,7 +193,6 @@ class ProfileTimePlot(DashboardComponent):
         self.profile_plot, self.source = profile.plot_figure(data, **kwargs)
         changing = [False]  # avoid repeated changes from within callback
 
-        @without_property_validation
         @log_errors
         def cb(attr, old, new):
             if changing[0] or len(new) == 0:
@@ -293,7 +286,6 @@ class ProfileTimePlot(DashboardComponent):
             self.reset_button.disabled = True
             self.update_button.disabled = True
 
-    @without_property_validation
     @log_errors
     def update(self, state, metadata=None):
         self.state = state
@@ -313,7 +305,6 @@ class ProfileTimePlot(DashboardComponent):
 
             self.ts_source.data.update(self.ts)
 
-    @without_property_validation
     def trigger_update(self, update_metadata=True):
         @log_errors
         async def cb():
@@ -352,7 +343,6 @@ class ProfileServer(DashboardComponent):
 
         changing = [False]  # avoid repeated changes from within callback
 
-        @without_property_validation
         @log_errors
         def cb(attr, old, new):
             if changing[0] or len(new) == 0:
@@ -427,7 +417,6 @@ class ProfileServer(DashboardComponent):
             self.reset_button.disabled = True
             self.update_button.disabled = True
 
-    @without_property_validation
     @log_errors
     def update(self, state):
         self.state = state
@@ -435,7 +424,6 @@ class ProfileServer(DashboardComponent):
         self.states = data.pop("states")
         update(self.source, data)
 
-    @without_property_validation
     def trigger_update(self):
         self.state = profile.get_profile(self.log, start=self.start, stop=self.stop)
         data = profile.plot_data(self.state, profile_interval)
@@ -579,7 +567,6 @@ class SystemMonitor(DashboardComponent):
         self.last_count = self.worker.monitor.count
         return d
 
-    @without_property_validation
     @log_errors
     def update(self):
         def mean(x):

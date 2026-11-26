@@ -5,11 +5,8 @@ from numbers import Number
 
 import bokeh
 from bokeh.io import curdoc
-from bokeh.models import Title
 from packaging.version import Version
 from tlz.curried import first
-
-from distributed.dashboard.components import without_property_validation
 
 try:
     import numpy as np
@@ -35,26 +32,6 @@ def transpose(lod):
     return {k: [d[k] for d in lod] for k in lod[0]}
 
 
-def get_title(fig):
-    """Read a plot title, whether or not Bokeh created a ``Title`` model."""
-    title = fig.title
-    return title.text if isinstance(title, Title) else title
-
-
-def set_title(fig, text):
-    """Set a plot title, also when Bokeh property validation is disabled.
-
-    With validation disabled, ``figure(title=text)`` stores the raw string
-    instead of converting it to a ``Title`` model, so ``fig.title.text`` is
-    not available.
-    """
-    if isinstance(fig.title, Title):
-        fig.title.text = text
-    else:
-        fig.title = Title(text=text)
-
-
-@without_property_validation
 def update(source, data):
     """Update source with data
 

@@ -16,18 +16,14 @@ from bokeh.plotting import figure
 
 from dask.utils import format_bytes
 
-from distributed.dashboard.components import (
-    DashboardComponent,
-    add_periodic_callback,
-    without_property_validation,
-)
+from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import (
     BOKEH_THEME,
     TICKS_1024,
     XLABEL_ORIENTATION,
     MemoryColor,
 )
-from distributed.dashboard.utils import set_title, update
+from distributed.dashboard.utils import update
 from distributed.utils import log_errors, url_escape
 
 T = TypeVar("T")
@@ -118,7 +114,6 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
         )
         self.root.add_tools(hover)
 
-    @without_property_validation
     @log_errors
     def update(self):
         def quadlist(i: Iterable[T]) -> list[T]:
@@ -184,7 +179,7 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
         title = f"RMM memory used: {format_bytes(sum(rmm_used))} / {format_bytes(sum(rmm_total))}\nGPU memory used: {format_bytes(sum(gpu_used))} / {format_bytes(sum(gpu_total))}"
         if sum(spilled):
             title += f" + {format_bytes(sum(spilled))} spilled to CPU"
-        set_title(self.root, title)  # pragma: no cover
+        self.root.title.text = title
 
         result = {
             "width": width,

@@ -1,28 +1,6 @@
 from __future__ import annotations
 
-import threading
 import weakref
-from functools import wraps
-
-from bokeh.core.properties import (
-    without_property_validation as _without_property_validation,
-)
-
-# Bokeh disables property validation with a process-global flag. Several
-# dashboard event loops may update components concurrently; without a lock, a
-# thread can restore validation while another one still needs it disabled.
-_validation_lock = threading.RLock()
-
-
-def without_property_validation(func):
-    inner = _without_property_validation(func)
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        with _validation_lock:
-            return inner(*args, **kwargs)
-
-    return wrapper
 
 
 class DashboardComponent:
@@ -62,7 +40,6 @@ def add_periodic_callback(doc, component, interval):
     _attach(doc, component)
 
 
-@without_property_validation
 def update(ref):
     comp = ref()
     if comp is not None:

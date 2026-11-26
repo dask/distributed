@@ -14,13 +14,9 @@ from bokeh.plotting import figure
 
 from dask.utils import format_bytes
 
-from distributed.dashboard.components import (
-    DashboardComponent,
-    add_periodic_callback,
-    without_property_validation,
-)
+from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
-from distributed.dashboard.utils import set_title, update
+from distributed.dashboard.utils import update
 from distributed.utils import log_errors, url_escape
 
 
@@ -112,7 +108,6 @@ class GPUCurrentLoad(DashboardComponent):
         self.utilization_figure.x_range.start = 0
         self.utilization_figure.x_range.end = 100
 
-    @without_property_validation
     @log_errors
     def update(self):
         workers = list(self.scheduler.workers.values())
@@ -154,9 +149,8 @@ class GPUCurrentLoad(DashboardComponent):
             "escaped_worker": [url_escape(w) for w in worker],
         }
 
-        set_title(  # pragma: no cover
-            self.memory_figure,
-            f"GPU Memory: {format_bytes(sum(memory))} / {format_bytes(memory_total)}",
+        self.memory_figure.title.text = (
+            f"GPU Memory: {format_bytes(sum(memory))} / {format_bytes(memory_total)}"
         )
         self.memory_figure.x_range.end = memory_max
 

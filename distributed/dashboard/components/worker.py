@@ -23,22 +23,14 @@ from tlz import merge, partition_all
 
 from dask.utils import format_bytes, format_time
 
-from distributed.dashboard.components import (
-    add_periodic_callback,
-    without_property_validation,
-)
+from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
     ProfileServer,
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import (
-    _DATATABLE_STYLESHEETS_KWARGS,
-    set_title,
-    transpose,
-    update,
-)
+from distributed.dashboard.utils import _DATATABLE_STYLESHEETS_KWARGS, transpose, update
 from distributed.metrics import time
 from distributed.utils import log_errors
 
@@ -92,7 +84,6 @@ class StateTable(DashboardComponent):
         )
         self.root = table
 
-    @without_property_validation
     @log_errors
     def update(self):
         w = self.worker
@@ -173,7 +164,6 @@ class CommunicatingStream(DashboardComponent):
         self.last_transfer_outgoing_count_total = 0
         self.who = {}
 
-    @without_property_validation
     @log_errors
     def update(self):
         transfer_outgoing_log = self.worker.transfer_outgoing_log
@@ -263,7 +253,6 @@ class CommunicatingTimeSeries(DashboardComponent):
 
         self.root = fig
 
-    @without_property_validation
     @log_errors
     def update(self):
         self.source.stream(
@@ -300,7 +289,6 @@ class ExecutingTimeSeries(DashboardComponent):
 
         self.root = fig
 
-    @without_property_validation
     @log_errors
     def update(self):
         self.source.stream(
@@ -405,7 +393,6 @@ class Counters(DashboardComponent):
         self.counter_figures[name] = fig
         return fig
 
-    @without_property_validation
     @log_errors
     def update(self):
         for name, fig in self.digest_figures.items():
@@ -418,7 +405,7 @@ class Counters(DashboardComponent):
                     if name.endswith("duration"):
                         xs *= 1000
                     self.digest_sources[name][i].data.update({"x": xs, "y": ys})
-            set_title(fig, f"{name}: {digest.size()}")
+            fig.title.text = f"{name}: {digest.size()}"
 
         for name, fig in self.counter_figures.items():
             counter = self.server.counters[name]
@@ -433,7 +420,7 @@ class Counters(DashboardComponent):
                     xs = [str(x) for x in xs]
                     d = {"x": xs, "y": ys, "y-center": y_centers, "counts": counts}
                     self.counter_sources[name][i].data.update(d)
-                set_title(fig, f"{name}: {counter.size()}")
+                fig.title.text = f"{name}: {counter.size()}"
                 fig.x_range.factors = [str(x) for x in xs]
 
 

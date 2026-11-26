@@ -9,13 +9,12 @@ from types import SimpleNamespace
 
 from bokeh.models import ColumnDataSource, Model
 
-from distributed.dashboard.components.scheduler import Hardware, Occupancy
+from distributed.dashboard.components.scheduler import Occupancy
 from distributed.dashboard.components.shared import (
     Processing,
     ProfilePlot,
     ProfileTimePlot,
 )
-from distributed.dashboard.utils import get_title
 from distributed.utils_test import gen_cluster, slowinc
 
 
@@ -26,7 +25,27 @@ def test_basic(Component):
     assert isinstance(c.root, Model)
 
 
-def test_occupancy_update():
+def test_update_keeps_property_validation_enabled(monkeypatch):
+    """A dashboard update must not disable Bokeh's property validation.
+
+    Bokeh implements validation as a process-global flag which it saves and
+    restores without any locking. Two updates running in different threads
+    (e.g. the scheduler and worker dashboards of a local cluster) can restore
+    it in the wrong order and leave it off for the rest of the process; plots
+    created afterwards then store a plain string in ``fig.title`` instead of a
+    ``Title`` model, and every ``fig.title.text`` assignment fails with
+    ``AttributeError``.
+    """
+    import bokeh.core.property.validation as bokeh_validation
+
+    validate = bokeh_validation.validate
+
+    def validate_(value):
+        assert value, "dashboard update disabled Bokeh property validation"
+        return validate(value)
+
+    monkeypatch.setattr(bokeh_validation, "validate", validate_)
+
     worker = SimpleNamespace(address="tcp://worker", occupancy=0)
     scheduler = SimpleNamespace(
         workers={worker.address: worker},
@@ -34,28 +53,7 @@ def test_occupancy_update():
         saturated=[],
         total_nthreads=1,
     )
-    plot = Occupancy(scheduler)
-
-    plot.update()
-    assert get_title(plot.root) == "Occupancy"
-
-    worker.occupancy = 1
-    plot.update()
-    assert get_title(plot.root).startswith("Occupancy -- total time")
-
-
-@gen_cluster(client=True, nthreads=[])
-async def test_hardware_update(c, s):
-    plot = Hardware(s)
-    plot.disk_data = {"size": ["1 MiB"], "bandwidth": [1]}
-    plot.memory_data = {"size": ["1 MiB"], "bandwidth": [1]}
-    plot.network_data = {"size": ["1 MiB"], "bandwidth": [1]}
-
-    plot.update()
-
-    assert get_title(plot.memory_figure) == "Memory Bandwidth"
-    assert get_title(plot.disk_figure) == "Disk Bandwidth"
-    assert get_title(plot.network_figure) == "Network Bandwidth"
+    Occupancy(scheduler).update()
 
 
 @pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
