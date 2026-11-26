@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import sys
@@ -28,6 +29,7 @@ class Process(ProcessInterface):
     def __init__(self, **kwargs):
         self.connection = None
         self.proc = None
+        self._logger_tasks: list[asyncio.Task] = []
         super().__init__(**kwargs)
 
     async def start(self):
@@ -35,9 +37,42 @@ class Process(ProcessInterface):
         weakref.finalize(
             self, self.proc.kill
         )  # https://github.com/ronf/asyncssh/issues/112
+        self._start_forwarding_output()
         await super().start()
 
+    def _start_forwarding_output(self) -> None:
+        """Keep draining the remote process' stdout and stderr.
+
+        Subclasses read stderr only until the remote process announces its address,
+        and never read stdout at all. Once that startup handshake is over nothing
+        consumes the SSH channel any more, so the receive window fills up and the
+        remote process blocks forever the next time it writes a log line.
+        """
+        assert self.proc
+        self._logger_tasks = [
+            asyncio.create_task(self._forward_output(stream))
+            for stream in (self.proc.stdout, self.proc.stderr)
+        ]
+
+    @staticmethod
+    async def _forward_output(stream: Any) -> None:
+        try:
+            while True:
+                line = await stream.readline()
+                if not line:  # EOF; the remote process exited
+                    break
+                logger.info(line.strip())
+        except Exception:
+            # The connection dropping is an expected way for this to end, and it is
+            # already reported through other channels; never let it surface here.
+            logger.debug("Stopped forwarding output from %r", stream, exc_info=True)
+
     async def close(self):
+        if self._logger_tasks:
+            for task in self._logger_tasks:
+                task.cancel()
+            await asyncio.gather(*self._logger_tasks, return_exceptions=True)
+            self._logger_tasks.clear()
         if self.proc:
             self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
         if self.connection:
