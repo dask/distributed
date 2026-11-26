@@ -184,7 +184,7 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
         title = f"RMM memory used: {format_bytes(sum(rmm_used))} / {format_bytes(sum(rmm_total))}\nGPU memory used: {format_bytes(sum(gpu_used))} / {format_bytes(sum(gpu_total))}"
         if sum(spilled):
             title += f" + {format_bytes(sum(spilled))} spilled to CPU"
-        set_title(self.root, title)
+        set_title(self.root, title)  # pragma: no cover
 
         result = {
             "width": width,

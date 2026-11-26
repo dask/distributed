@@ -154,7 +154,7 @@ class GPUCurrentLoad(DashboardComponent):
             "escaped_worker": [url_escape(w) for w in worker],
         }
 
-        set_title(
+        set_title(  # pragma: no cover
             self.memory_figure,
             f"GPU Memory: {format_bytes(sum(memory))} / {format_bytes(memory_total)}",
         )
