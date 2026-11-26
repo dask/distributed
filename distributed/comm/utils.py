@@ -7,6 +7,7 @@ import dask
 from dask.utils import parse_bytes
 
 from distributed import protocol
+from distributed._warnings_context import attach_warning_context
 from distributed.sizeof import safe_sizeof
 from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
@@ -28,6 +29,9 @@ async def to_frames(
     Serialize a message into a list of Distributed protocol frames.
     Any kwargs are forwarded to protocol.dumps().
     """
+    # Capture the caller's warnings context before potentially offloading
+    # serialization to a worker thread.
+    msg = attach_warning_context(msg)
 
     def _to_frames():
         try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 
 import pytest
 
@@ -318,6 +319,24 @@ async def test_register_plugin(c, s, a, b):
         await c.register_plugin(Dummy2())
     # total number of plugins should be unchanged
     assert n_plugins == len(s.plugins)
+
+
+@gen_cluster(client=True)
+async def test_catch_warnings_from_warm_scheduler(c, s, a, b):
+    """warnings.catch_warnings must reach RPC handlers running on a warm
+    scheduler event loop on free-threaded Python."""
+
+    class Dummy(SchedulerPlugin):
+        name = "Dummy"
+
+    # Warm up the scheduler RPC handler before entering the warnings context
+    await c.register_plugin(Dummy())
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        await c.register_plugin(Dummy())
+
+    assert len(w) == 1
+    assert "Scheduler already contains" in str(w[0].message)
 
 
 @gen_cluster(nthreads=[])

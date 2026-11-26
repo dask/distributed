@@ -34,6 +34,11 @@ from dask.utils import parse_timedelta
 
 from distributed import profile, protocol
 from distributed._async_taskgroup import AsyncTaskGroup, AsyncTaskGroupClosedError
+from distributed._warnings_context import (
+    call_in_warning_context,
+    call_sync_in_warning_context,
+    get_warning_context,
+)
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -748,6 +753,7 @@ class Server:
                         continue
                 if not isinstance(msg, dict):
                     raise TypeError(f"Bad message type.  Expected dict, got\n  {msg}")
+                warning_context = get_warning_context(msg)
 
                 try:
                     op = msg.pop("op")
@@ -791,14 +797,19 @@ class Server:
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         if _expects_comm(handler):
-                            result = handler(comm, **msg)
+                            result = await call_in_warning_context(
+                                handler,
+                                warning_context,
+                                comm,
+                                await_mode="coroutine",
+                                **msg,
+                            )
                         else:
-                            result = handler(**msg)
-                        if inspect.iscoroutine(result):
-                            result = await result
-                        elif inspect.isawaitable(result):
-                            raise RuntimeError(
-                                f"Comm handler returned unknown awaitable. Expected coroutine, instead got {type(result)}"
+                            result = await call_in_warning_context(
+                                handler,
+                                warning_context,
+                                await_mode="coroutine",
+                                **msg,
                             )
                     except CommClosedError:
                         if self.status == Status.running:
@@ -865,6 +876,7 @@ class Server:
                 for msg in msgs:
                     if msg == "OK":
                         break
+                    warning_context = get_warning_context(msg)
                     op = msg.pop("op")
                     if op:
                         if op == "close-stream":
@@ -875,10 +887,15 @@ class Server:
                             )
                             break
                         handler = self.stream_handlers[op]
+                        kwargs = merge(extra, msg)
                         if iscoroutinefunction(handler):
-                            await handler(**merge(extra, msg))
+                            await call_in_warning_context(
+                                handler, warning_context, **kwargs
+                            )
                         else:
-                            handler(**merge(extra, msg))
+                            call_sync_in_warning_context(
+                                handler, warning_context, **kwargs
+                            )
                     else:
                         logger.error("odd message %s", msg)
                 await asyncio.sleep(0)

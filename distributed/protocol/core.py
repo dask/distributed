@@ -4,6 +4,7 @@ import logging
 
 import msgpack
 
+from distributed._warnings_context import ContextMessage, pop_message_context
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.serialize import (
@@ -143,6 +144,13 @@ def loads(frames, deserialize=True, deserializers=None):
     try:
 
         def _decode_default(obj):
+            obj, warning_context = pop_message_context(obj)
+
+            def _finish(result):
+                if warning_context is not None and isinstance(result, dict):
+                    return ContextMessage(result, warning_context=warning_context)
+                return result
+
             offset = obj.get("__Serialized__", 0)
             if offset > 0:
                 sub_header = msgpack.loads(
@@ -170,7 +178,7 @@ def loads(frames, deserialize=True, deserializers=None):
                 if "compression" in sub_header:
                     sub_frames = decompress(sub_header, sub_frames)
                 return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
-            return msgpack_decode_default(obj)
+            return _finish(msgpack_decode_default(obj))
 
         return msgpack.loads(
             frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts
