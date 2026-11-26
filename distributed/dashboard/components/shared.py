@@ -5,7 +5,6 @@ import sys
 import weakref
 
 import tlz as toolz
-from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
     Button,
@@ -26,7 +25,10 @@ import dask
 
 from distributed import profile
 from distributed.compatibility import WINDOWS
-from distributed.dashboard.components import DashboardComponent
+from distributed.dashboard.components import (
+    DashboardComponent,
+    without_property_validation,
+)
 from distributed.dashboard.utils import update
 from distributed.utils import log_errors
 

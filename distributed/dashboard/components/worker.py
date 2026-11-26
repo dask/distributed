@@ -4,7 +4,6 @@ import logging
 import math
 import os
 
-from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
     ColumnDataSource,
@@ -24,14 +23,22 @@ from tlz import merge, partition_all
 
 from dask.utils import format_bytes, format_time
 
-from distributed.dashboard.components import add_periodic_callback
+from distributed.dashboard.components import (
+    add_periodic_callback,
+    without_property_validation,
+)
 from distributed.dashboard.components.shared import (
     DashboardComponent,
     ProfileServer,
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import _DATATABLE_STYLESHEETS_KWARGS, transpose, update
+from distributed.dashboard.utils import (
+    _DATATABLE_STYLESHEETS_KWARGS,
+    set_title,
+    transpose,
+    update,
+)
 from distributed.metrics import time
 from distributed.utils import log_errors
 
@@ -411,7 +418,7 @@ class Counters(DashboardComponent):
                     if name.endswith("duration"):
                         xs *= 1000
                     self.digest_sources[name][i].data.update({"x": xs, "y": ys})
-            fig.title.text = f"{name}: {digest.size()}"
+            set_title(fig, f"{name}: {digest.size()}")
 
         for name, fig in self.counter_figures.items():
             counter = self.server.counters[name]
@@ -426,7 +433,7 @@ class Counters(DashboardComponent):
                     xs = [str(x) for x in xs]
                     d = {"x": xs, "y": ys, "y-center": y_centers, "counts": counts}
                     self.counter_sources[name][i].data.update(d)
-                fig.title.text = f"{name}: {counter.size()}"
+                set_title(fig, f"{name}: {counter.size()}")
                 fig.x_range.factors = [str(x) for x in xs]
 
 

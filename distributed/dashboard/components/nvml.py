@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 
-from bokeh.core.properties import without_property_validation
 from bokeh.models import (
     BasicTicker,
     ColumnDataSource,
@@ -15,9 +14,13 @@ from bokeh.plotting import figure
 
 from dask.utils import format_bytes
 
-from distributed.dashboard.components import DashboardComponent, add_periodic_callback
+from distributed.dashboard.components import (
+    DashboardComponent,
+    add_periodic_callback,
+    without_property_validation,
+)
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
-from distributed.dashboard.utils import update
+from distributed.dashboard.utils import set_title, update
 from distributed.utils import log_errors, url_escape
 
 
@@ -151,8 +154,9 @@ class GPUCurrentLoad(DashboardComponent):
             "escaped_worker": [url_escape(w) for w in worker],
         }
 
-        self.memory_figure.title.text = (
-            f"GPU Memory: {format_bytes(sum(memory))} / {format_bytes(memory_total)}"
+        set_title(
+            self.memory_figure,
+            f"GPU Memory: {format_bytes(sum(memory))} / {format_bytes(memory_total)}",
         )
         self.memory_figure.x_range.end = memory_max
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TypeVar
 
-from bokeh.core.properties import without_property_validation
 from bokeh.models import (
     BasicTicker,
     ColumnDataSource,
@@ -17,14 +16,18 @@ from bokeh.plotting import figure
 
 from dask.utils import format_bytes
 
-from distributed.dashboard.components import DashboardComponent, add_periodic_callback
+from distributed.dashboard.components import (
+    DashboardComponent,
+    add_periodic_callback,
+    without_property_validation,
+)
 from distributed.dashboard.components.scheduler import (
     BOKEH_THEME,
     TICKS_1024,
     XLABEL_ORIENTATION,
     MemoryColor,
 )
-from distributed.dashboard.utils import update
+from distributed.dashboard.utils import set_title, update
 from distributed.utils import log_errors, url_escape
 
 T = TypeVar("T")
@@ -181,7 +184,7 @@ class RMMMemoryUsage(DashboardComponent, MemoryColor):
         title = f"RMM memory used: {format_bytes(sum(rmm_used))} / {format_bytes(sum(rmm_total))}\nGPU memory used: {format_bytes(sum(gpu_used))} / {format_bytes(sum(gpu_total))}"
         if sum(spilled):
             title += f" + {format_bytes(sum(spilled))} spilled to CPU"
-        self.root.title.text = title
+        set_title(self.root, title)
 
         result = {
             "width": width,

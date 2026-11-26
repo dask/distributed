@@ -11,7 +11,7 @@ from numbers import Number
 from typing import Any, TypeVar
 
 import numpy as np
-from bokeh.core.properties import value, without_property_validation
+from bokeh.core.properties import value
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -78,7 +78,10 @@ from dask.utils import (
 )
 
 from distributed.core import Status
-from distributed.dashboard.components import add_periodic_callback
+from distributed.dashboard.components import (
+    add_periodic_callback,
+    without_property_validation,
+)
 from distributed.dashboard.components.shared import (
     DashboardComponent,
     ProfileServer,
@@ -89,6 +92,8 @@ from distributed.dashboard.utils import (
     _DATATABLE_STYLESHEETS_KWARGS,
     BOKEH_VERSION,
     PROFILING,
+    get_title,
+    set_title,
     transpose,
     update,
 )
@@ -196,12 +201,13 @@ class Occupancy(DashboardComponent):
                 color.append("blue")
 
         if total:
-            self.root.title.text = (
+            set_title(
+                self.root,
                 f"Occupancy -- total time: {format_time(total)} "
-                f"wall time: {format_time(total / self.scheduler.total_nthreads)}"
+                f"wall time: {format_time(total / self.scheduler.total_nthreads)}",
             )
         else:
-            self.root.title.text = "Occupancy"
+            set_title(self.root, "Occupancy")
 
         if occupancy:
             result = {
@@ -448,7 +454,7 @@ class ClusterMemory(DashboardComponent, MemoryColor):
         title = f"Bytes stored: {format_bytes(meminfo.process)}"
         if meminfo.spilled:
             title += f" + {format_bytes(meminfo.spilled)} spilled to disk"
-        self.root.title.text = title
+        set_title(self.root, title)
 
         update(self.source, result)
 
@@ -762,8 +768,9 @@ class WorkersTransferBytes(DashboardComponent):
             "y_incoming": y_incoming,
             "y_outgoing": y_outgoing,
         }
-        self.root.title.text = (
-            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}"
+        set_title(
+            self.root,
+            f"Bytes transferring: {format_bytes(sum(transfer_incoming_bytes))}",
         )
         update(self.source, result)
 
@@ -893,7 +900,7 @@ class Hardware(DashboardComponent):
     def update(self):
         if (
             not self.disk_data["size"]
-            or self.disk_figure.title.text == "Disk Bandwidth"
+            or get_title(self.disk_figure) == "Disk Bandwidth"
         ):
             return
 
@@ -903,9 +910,9 @@ class Hardware(DashboardComponent):
         update(self.disk_source, self.disk_data)
         update(self.memory_source, self.memory_data)
         update(self.network_source, self.network_data)
-        self.memory_figure.title.text = "Memory Bandwidth"
-        self.disk_figure.title.text = "Disk Bandwidth"
-        self.network_figure.title.text = "Network Bandwidth"
+        set_title(self.memory_figure, "Memory Bandwidth")
+        set_title(self.disk_figure, "Disk Bandwidth")
+        set_title(self.network_figure, "Network Bandwidth")
 
 
 class BandwidthTypes(DashboardComponent):
@@ -966,7 +973,7 @@ class BandwidthTypes(DashboardComponent):
             "type": list(bw.keys()),
             "bandwidth_text": [format_bytes(x) for x in bw.values()],
         }
-        self.root.title.text = f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
+        set_title(self.root, f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}")
         update(self.source, result)
 
 
@@ -1066,7 +1073,7 @@ class BandwidthWorkers(DashboardComponent):
             "bandwidth": value,
             "bandwidth_text": list(map(format_bytes, value)),
         }
-        self.root.title.text = f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}"
+        set_title(self.root, f"Bandwidth: {format_bytes(self.scheduler.bandwidth)}")
         update(self.source, result)
 
 
@@ -1656,7 +1663,7 @@ class AggregateAction(DashboardComponent):
             agg_time.append(t)
 
         self.root.x_range.factors = agg_names
-        self.root.title.text = "Aggregate Time Per Action"
+        set_title(self.root, "Aggregate Time Per Action")
 
         action_result = {
             "times": agg_time,
@@ -1736,7 +1743,7 @@ class MemoryByKey(DashboardComponent):
             "nbytes_text": [format_bytes(nbytes[name]) for name in names],
             "color": [color_of(name) for name in names],
         }
-        self.root.title.text = f"Total Use: {format_bytes(sum(nbytes.values()))}"
+        set_title(self.root, f"Total Use: {format_bytes(sum(nbytes.values()))}")
 
         update(self.source, result)
 
@@ -3395,14 +3402,15 @@ class TaskProgress(DashboardComponent):
             v for k, v in totals.items() if k != "all"
         )
 
-        self.root.title.text = (
+        set_title(
+            self.root,
             "Progress -- total: {all}, "
             "waiting: {waiting}, "
             "queued: {queued}, "
             "processing: {processing}, "
             "in-memory: {memory}, "
             "no-worker: {no_worker}, "
-            "erred: {erred}".format(**totals)
+            "erred: {erred}".format(**totals),
         )
 
 
