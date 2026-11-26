@@ -20,7 +20,8 @@
     </thead>
     <tbody>
         {% for ws in worker_list %}
-        <tr {{ "style=background-color:#ffcdd2" if time() - ws.last_seen> 60 else ""}}>
+        {% set row_color = worker_row_color(scheduler, ws) %}
+        <tr {% if row_color %}style="background-color:{{ row_color }}"{% end %}>
             <td><a href="../worker/{{ url_escape(ws.address) }}.html">{{ws.address}}</a></td>
             <td> {{ ws.name if ws.name is not None else "" }} </td>
             <td> {{ ws.nthreads }} </td>
