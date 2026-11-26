@@ -5,10 +5,11 @@ import pytest
 pytest.importorskip("bokeh")
 
 import sys
+from types import SimpleNamespace
 
 from bokeh.models import ColumnDataSource, Model
 
-from distributed.dashboard.components.scheduler import Hardware
+from distributed.dashboard.components.scheduler import Hardware, Occupancy
 from distributed.dashboard.components.shared import (
     Processing,
     ProfilePlot,
@@ -23,6 +24,24 @@ def test_basic(Component):
     c = Component()
     assert isinstance(c.source, ColumnDataSource)
     assert isinstance(c.root, Model)
+
+
+def test_occupancy_update():
+    worker = SimpleNamespace(address="tcp://worker", occupancy=0)
+    scheduler = SimpleNamespace(
+        workers={worker.address: worker},
+        idle=[],
+        saturated=[],
+        total_nthreads=1,
+    )
+    plot = Occupancy(scheduler)
+
+    plot.update()
+    assert get_title(plot.root) == "Occupancy"
+
+    worker.occupancy = 1
+    plot.update()
+    assert get_title(plot.root).startswith("Occupancy -- total time")
 
 
 @gen_cluster(client=True, nthreads=[])
