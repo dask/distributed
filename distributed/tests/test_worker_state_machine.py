@@ -622,6 +622,55 @@ async def test_fetch_via_amm_to_compute(c, s, a, b):
     )
 
 
+@gen_cluster(client=True, nthreads=[("", 1)] * 3, config=NO_AMM)
+async def test_fetch_via_amm_to_compute_with_dependency(c, s, w1, w2, w3):
+    """Like test_fetch_via_amm_to_compute, but the task has a dependency which is not
+    in memory on the worker that is fetching it
+    """
+    x = c.submit(inc, 1, key="x", workers=[w3.address])
+    y = c.submit(inc, x, key="y", workers=[w1.address, w2.address])
+    await y
+    a, b = (w1, w2) if "y" in w1.data else (w2, w1)
+
+    with freeze_data_fetching(b):
+        s.request_acquire_replicas(b.address, ["y"], stimulus_id="test")
+        await wait_for_state("y", "fetch", b)
+        await a.close()
+
+    assert await y == 3
+    assert_story(
+        b.state.log,
+        [
+            ("y", "ensure-task-exists", "released"),
+            ("y", "compute-task", "fetch"),
+            ("y", "put-in-memory"),
+        ],
+    )
+
+
+def test_acquire_replicas_to_compute_with_dependency(ws):
+    """A task in fetch state, requested by the AMM, is asked to be computed and its
+    dependency is not in memory on this worker
+    """
+    ws2 = "127.0.0.1:2"
+    instructions = ws.handle_stimulus(
+        PauseEvent(stimulus_id="s1"),
+        AcquireReplicasEvent(who_has={"x": [ws2]}, nbytes={"x": 1}, stimulus_id="s2"),
+        ComputeTaskEvent.dummy("x", who_has={"y": [ws2]}, stimulus_id="s3"),
+    )
+    assert instructions == []
+    assert ws.tasks["x"].state == "waiting"
+    assert ws.tasks["y"].state == "fetch"
+    assert ws.fetch_count == 1
+    assert_story(
+        ws.story("x"),
+        [
+            ("x", "compute-task", "fetch"),
+            ("x", "fetch", "waiting", "waiting", {"y": "fetch"}),
+        ],
+    )
+
+
 @pytest.mark.parametrize("as_deps", [False, True])
 @gen_cluster(
     client=True,
