@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import errno
 import functools
 import importlib
 import inspect
@@ -197,6 +198,17 @@ def _get_ip(host, port, family):
             return hostname_fallback()
         return ip
     except OSError as e:
+        # "Network is unreachable" / "No route to host" / "Network is down"
+        # are expected when the machine has no external connectivity. The
+        # hostname fallback below already yields a usable local address, so
+        # warn for genuine socket errors only, not for ordinary offline use
+        # (e.g. ``LocalCluster(processes=False)`` on a disconnected laptop).
+        if e.errno in {
+            errno.ENETUNREACH,
+            errno.EHOSTUNREACH,
+            errno.ENETDOWN,
+        }:
+            return hostname_fallback()
         warnings.warn(
             "Couldn't detect a suitable IP address for "
             f"reaching {host!r}, defaulting to hostname: {e}",
