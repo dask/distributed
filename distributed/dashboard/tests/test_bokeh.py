@@ -1,14 +1,8 @@
 from __future__ import annotations
 
-import threading
-from time import sleep
+from types import SimpleNamespace
 
-from bokeh.core.property.bases import Property
-from bokeh.models import Title
-from bokeh.plotting import figure
-
-from distributed.dashboard.components import without_property_validation
-from distributed.dashboard.utils import get_title, set_title
+import pytest
 
 
 def test_old_import():
@@ -19,6 +13,16 @@ def test_old_import():
 
 
 def test_without_property_validation_is_thread_safe():
+    pytest.importorskip("bokeh")
+
+    import threading
+    from time import sleep
+
+    from bokeh.models import Title
+    from bokeh.plotting import figure
+
+    from distributed.dashboard.components import without_property_validation
+
     # Bokeh uses a process-global flag to disable validation. Without a lock,
     # two threads updating the dashboard can restore it in the wrong order and
     # leave validation disabled for the whole process.
@@ -33,30 +37,31 @@ def test_without_property_validation_is_thread_safe():
     def second():
         entered.wait(5)
 
-    try:
-        t1 = threading.Thread(target=first)
-        t2 = threading.Thread(target=second)
-        t1.start()
-        t2.start()
-        t1.join(10)
-        t2.join(10)
-        assert not t1.is_alive() and not t2.is_alive()
-        assert Property._should_validate is True
-    finally:
-        Property._should_validate = True
+    t1 = threading.Thread(target=first)
+    t2 = threading.Thread(target=second)
+    t1.start()
+    t2.start()
+    t1.join(10)
+    t2.join(10)
+
+    assert not t1.is_alive() and not t2.is_alive()
+    # If validation were left off, Bokeh would store a plain string here.
+    assert isinstance(figure(title="title").title, Title)
 
 
-def test_set_title_without_property_validation():
-    # With validation disabled, Bokeh stores the string title verbatim rather
-    # than converting it to a Title model.
-    try:
-        Property._should_validate = False
-        fig = figure(title="old")
-        assert isinstance(fig.title, str)
-        set_title(fig, "new")
-        assert isinstance(fig.title, Title)
-        assert get_title(fig) == "new"
-        set_title(fig, "newer")
-        assert get_title(fig) == "newer"
-    finally:
-        Property._should_validate = True
+def test_set_title_with_raw_string():
+    pytest.importorskip("bokeh")
+
+    from bokeh.models import Title
+
+    from distributed.dashboard.utils import get_title, set_title
+
+    fig = SimpleNamespace(title="old")
+    assert get_title(fig) == "old"
+
+    set_title(fig, "new")
+    assert isinstance(fig.title, Title)
+    assert get_title(fig) == "new"
+
+    set_title(fig, "newer")
+    assert get_title(fig) == "newer"
