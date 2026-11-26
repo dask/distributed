@@ -8,11 +8,13 @@ import sys
 
 from bokeh.models import ColumnDataSource, Model
 
+from distributed.dashboard.components.scheduler import Hardware
 from distributed.dashboard.components.shared import (
     Processing,
     ProfilePlot,
     ProfileTimePlot,
 )
+from distributed.dashboard.utils import get_title
 from distributed.utils_test import gen_cluster, slowinc
 
 
@@ -21,6 +23,20 @@ def test_basic(Component):
     c = Component()
     assert isinstance(c.source, ColumnDataSource)
     assert isinstance(c.root, Model)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_hardware_update(c, s):
+    plot = Hardware(s)
+    plot.disk_data = {"size": ["1 MiB"], "bandwidth": [1]}
+    plot.memory_data = {"size": ["1 MiB"], "bandwidth": [1]}
+    plot.network_data = {"size": ["1 MiB"], "bandwidth": [1]}
+
+    plot.update()
+
+    assert get_title(plot.memory_figure) == "Memory Bandwidth"
+    assert get_title(plot.disk_figure) == "Disk Bandwidth"
+    assert get_title(plot.network_figure) == "Network Bandwidth"
 
 
 @pytest.mark.skipif(sys.version_info.minor == 11, reason="Profiler disabled")
