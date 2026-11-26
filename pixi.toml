@@ -8,8 +8,8 @@ platforms = [
     "linux-aarch64",
     "osx-arm64",
     "win-64",
-    { name = "linux-64-cuda", platform = "linux-64", cuda = "12" },
-    { name = "linux-aarch64-cuda", platform = "linux-aarch64", cuda = "12" },
+    { name = "linux-64-cuda", subdir = "linux-64", cuda = "12" },
+    { name = "linux-aarch64-cuda", subdir = "linux-aarch64", cuda = "12" },
 ]
 preview = ["pixi-build"]
 
