@@ -863,8 +863,19 @@ properties:
             properties:
               connect:
                 type: string
+                description: |
+                  Maximum time for repeated attempts to establish the underlying connection before an
+                  OSError is raised. This does not include the subsequent Dask communication handshake. Choose
+                  a value that allows for expected network latency; values that are too large can
+                  delay noticing unreachable peers and make a cluster appear stuck.
               tcp:
                 type: string
+                description: |
+                  Used to configure kernel-level TCP keepalive probes and, on Linux, TCP_USER_TIMEOUT
+                  for established connections. Values must be at least 11 seconds. OS support and
+                  failure reporting vary by platform. A peer may not be declared dead exactly at
+                  this interval. Large values can delay dead-peer detection and make a cluster
+                  appear stuck. This is not a Dask task execution timeout.
 
           require-encryption:
             type:
