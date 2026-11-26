@@ -94,6 +94,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.addressing import addresses_from_user_args
+from distributed.condition import ConditionExtension
 from distributed.core import (
     ErrorMessage,
     OKMessage,
@@ -194,6 +195,7 @@ DEFAULT_EXTENSIONS = {
     "variables": VariableExtension,
     "semaphores": SemaphoreExtension,
     "events": EventExtension,
+    "conditions": ConditionExtension,
     "amm": ActiveMemoryManagerExtension,
     "memory_sampler": MemorySamplerExtension,
     "shuffle": ShuffleSchedulerPlugin,
