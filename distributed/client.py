@@ -74,6 +74,7 @@ from dask.widgets import get_template
 import distributed.utils
 from distributed import cluster_dump, preloading
 from distributed import versions as version_module
+from distributed._warnings_context import warning_context_for
 from distributed.batched import BatchedSend
 from distributed.cfexecutor import ClientExecutor
 from distributed.core import (
@@ -1779,9 +1780,10 @@ class Client(SyncMethodMixin):
 
                     try:
                         handler = self._stream_handlers[op]
-                        result = handler(**msg)
-                        if inspect.isawaitable(result):
-                            await result
+                        with warning_context_for(msg):
+                            result = handler(**msg)
+                            if inspect.isawaitable(result):
+                                await result
                     except Exception as e:
                         logger.exception(e)
                 if breakout:

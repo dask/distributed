@@ -303,9 +303,10 @@ async def test_register_plugin(c, s, a, b):
     await c.register_plugin(Dummy1())
     assert s.foo == "bar"
 
-    with pytest.warns(UserWarning) as w:
+    # The scheduler has already handled an RPC on this connection, so this
+    # also checks that a new warnings context reaches a warm comm handler.
+    with pytest.warns(UserWarning, match="Scheduler already contains"):
         await c.register_plugin(Dummy1())
-    assert "Scheduler already contains" in w[0].message.args[0]
 
     class Dummy2(SchedulerPlugin):
         name = "Dummy2"

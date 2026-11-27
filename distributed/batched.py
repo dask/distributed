@@ -11,6 +11,11 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import parse_timedelta
 
+from distributed._warnings_context import (
+    CONTEXT_AWARE_WARNINGS,
+    capture_warning_context,
+    use_batched_warning_contexts,
+)
 from distributed.core import CommClosedError
 from distributed.metrics import time
 
@@ -49,7 +54,8 @@ class BatchedSend:
         self.waker = locks.Event()
         self.stopped = locks.Event()
         self.please_stop = False
-        self.buffer = []
+        self.buffer: list[Any] = []
+        self._warning_contexts: list[object | None] = []
         self.comm = None
         self.message_count = 0
         self.batch_count = 0
@@ -92,6 +98,7 @@ class BatchedSend:
                 # Send interval not expired yet
                 continue
             payload, self.buffer = self.buffer, []
+            contexts, self._warning_contexts = self._warning_contexts, []
             self.batch_count += 1
             self.next_deadline = time() + self.interval
             try:
@@ -107,11 +114,11 @@ class BatchedSend:
                 # something like `RuntimeWarning: coroutine 'TCP.write' was never
                 # awaited`. By using the `closing` context manager, the `write` coroutine
                 # object is always cleaned up, even if `yield` raises `GeneratorExit`.
-                with contextlib.closing(
-                    self.comm.write(
+                with use_batched_warning_contexts(contexts):
+                    coro = self.comm.write(
                         payload, serializers=self.serializers, on_error="raise"
                     )
-                ) as coro:
+                with contextlib.closing(coro):
                     nbytes = yield coro
                 if nbytes < 1e6:
                     self.recent_message_log.append(payload)
@@ -157,6 +164,10 @@ class BatchedSend:
 
         self.message_count += len(msgs)
         self.buffer.extend(msgs)
+        if CONTEXT_AWARE_WARNINGS:
+            # The background send task runs in its own context; capture the
+            # warnings context of whoever enqueued the messages.
+            self._warning_contexts.extend((capture_warning_context(),) * len(msgs))
         # Avoid spurious wakeups if possible
         if self.next_deadline is None:
             self.waker.set()
@@ -175,13 +186,14 @@ class BatchedSend:
         if not self.comm.closed():
             try:
                 if self.buffer:
-                    self.buffer, payload = [], self.buffer
+                    payload, self.buffer = self.buffer, []
+                    contexts, self._warning_contexts = self._warning_contexts, []
                     # See note in `_background_send` for explanation of `closing`.
-                    with contextlib.closing(
-                        self.comm.write(
+                    with use_batched_warning_contexts(contexts):
+                        coro = self.comm.write(
                             payload, serializers=self.serializers, on_error="raise"
                         )
-                    ) as coro:
+                    with contextlib.closing(coro):
                         yield coro
             except CommClosedError:
                 pass
@@ -192,6 +204,7 @@ class BatchedSend:
             return
         self.please_stop = True
         self.buffer = []
+        self._warning_contexts.clear()
         self.waker.set()
         if not self.comm.closed():
             self.comm.abort()

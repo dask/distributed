@@ -34,6 +34,7 @@ from dask.utils import parse_timedelta
 
 from distributed import profile, protocol
 from distributed._async_taskgroup import AsyncTaskGroup, AsyncTaskGroupClosedError
+from distributed._warnings_context import warning_context_for
 from distributed.comm import (
     Comm,
     CommClosedError,
@@ -748,7 +749,6 @@ class Server:
                         continue
                 if not isinstance(msg, dict):
                     raise TypeError(f"Bad message type.  Expected dict, got\n  {msg}")
-
                 try:
                     op = msg.pop("op")
                 except KeyError as e:
@@ -790,16 +790,17 @@ class Server:
 
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
-                        if _expects_comm(handler):
-                            result = handler(comm, **msg)
-                        else:
-                            result = handler(**msg)
-                        if inspect.iscoroutine(result):
-                            result = await result
-                        elif inspect.isawaitable(result):
-                            raise RuntimeError(
-                                f"Comm handler returned unknown awaitable. Expected coroutine, instead got {type(result)}"
-                            )
+                        with warning_context_for(msg):
+                            if _expects_comm(handler):
+                                result = handler(comm, **msg)
+                            else:
+                                result = handler(**msg)
+                            if inspect.iscoroutine(result):
+                                result = await result
+                            elif inspect.isawaitable(result):
+                                raise RuntimeError(
+                                    f"Comm handler returned unknown awaitable. Expected coroutine, instead got {type(result)}"
+                                )
                     except CommClosedError:
                         if self.status == Status.running:
                             logger.info("Lost connection to %r", address, exc_info=True)
@@ -875,10 +876,11 @@ class Server:
                             )
                             break
                         handler = self.stream_handlers[op]
-                        if iscoroutinefunction(handler):
-                            await handler(**merge(extra, msg))
-                        else:
-                            handler(**merge(extra, msg))
+                        with warning_context_for(msg):
+                            if iscoroutinefunction(handler):
+                                await handler(**merge(extra, msg))
+                            else:
+                                handler(**merge(extra, msg))
                     else:
                         logger.error("odd message %s", msg)
                 await asyncio.sleep(0)
