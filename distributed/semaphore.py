@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 import warnings
+import weakref
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
@@ -353,15 +354,26 @@ class Semaphore(SyncMethodMixin):
             default="s",
         )
         refresh_leases_interval = lease_timeout / 5
+        self_ref = weakref.ref(self)
+
+        async def refresh_leases():
+            semaphore = self_ref()
+            if semaphore is not None:
+                await semaphore._refresh_leases()
+
         pc = PeriodicCallback(
-            self._refresh_leases, callback_time=refresh_leases_interval * 1000
+            refresh_leases, callback_time=refresh_leases_interval * 1000
         )
         self.refresh_callback = pc
 
         # Need to start the callback using IOLoop.add_callback to ensure that the
-        # PC uses the correct event loop.
+        # PC uses the correct event loop. Keep self alive until it starts so that
+        # __del__ cannot stop it before the queued start runs.
         if self.loop is not None:
-            self.loop.add_callback(pc.start)
+            self.loop.add_callback(self._start_refresh_callback)
+
+    def _start_refresh_callback(self):
+        self.refresh_callback.start()
 
     @property
     def scheduler(self):
