@@ -20,6 +20,7 @@ import threading
 import traceback
 import types
 import uuid
+import warnings
 import weakref
 import zipfile
 from collections import deque, namedtuple
@@ -7583,21 +7584,13 @@ async def test_warn_remote(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("", 1)])
 async def test_catch_warnings_from_warm_worker(c, s, a):
     """warnings.catch_warnings must reach worker threads that were started
-    before the context was entered on free-threaded Python."""
-    import warnings
-
-    def warn_simple():
-        warnings.warn("Hello!", UserWarning)
-
+    before the context was entered on free-threaded Python.
+    """
     # Warm up the worker thread before entering the warnings context
     assert await c.submit(inc, 1) == 2
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        await c.submit(warn_simple)
 
-    assert len(w) == 1
-    assert issubclass(w[0].category, UserWarning)
-    assert str(w[0].message) == "Hello!"
+    with pytest.warns(UserWarning, match="Hello!"):
+        await c.submit(warnings.warn, "Hello!", UserWarning)
 
 
 @gen_cluster(client=True, Worker=Nanny)
