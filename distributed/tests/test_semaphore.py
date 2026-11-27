@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import pickle
 import signal
+import weakref
 from datetime import timedelta
 from time import sleep
 
@@ -16,6 +18,31 @@ from distributed import Semaphore, fire_and_forget
 from distributed.core import ConnectionPool
 from distributed.metrics import time
 from distributed.utils_test import BrokenComm, captured_logger, cluster, gen_cluster
+
+
+@pytest.mark.parametrize("started", [False, True])
+@pytest.mark.parametrize("serialized", [False, True])
+@gen_cluster(client=True, nthreads=[])
+async def test_semaphore_garbage_collection(c, s, started, serialized):
+    sem = Semaphore()
+    callbacks = [sem.refresh_callback]
+    if serialized:
+        sem = pickle.loads(pickle.dumps(sem))
+        callbacks.append(sem.refresh_callback)
+    ref = weakref.ref(sem)
+    if started:
+        await asyncio.sleep(0)
+
+    del sem
+    gc.collect()
+    await asyncio.sleep(0)
+    gc.collect()
+    try:
+        assert ref() is None
+        assert not any(callback.is_running() for callback in callbacks)
+    finally:
+        for callback in callbacks:
+            callback.stop()
 
 
 @gen_cluster(client=True)
