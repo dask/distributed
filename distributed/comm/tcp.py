@@ -22,7 +22,6 @@ from tornado.tcpserver import TCPServer
 import dask
 from dask.utils import parse_timedelta
 
-from distributed._warnings_context import ContextFrames
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import (
     BaseListener,
@@ -34,9 +33,9 @@ from distributed.comm.core import (
 from distributed.comm.registry import Backend
 from distributed.comm.utils import (
     ensure_concrete_host,
-    from_comm_frames,
+    from_frames,
     get_tcp_server_address,
-    to_comm_frames,
+    to_frames,
 )
 from distributed.protocol.utils import host_array, pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
@@ -245,7 +244,7 @@ class TCP(Comm):
             raise
         else:
             try:
-                msg = await from_comm_frames(
+                msg = await from_frames(
                     frames,
                     deserialize=self.deserialize,
                     deserializers=deserializers,
@@ -262,7 +261,7 @@ class TCP(Comm):
         if stream is None:
             raise CommClosedError()
 
-        frames = await to_comm_frames(
+        frames = await to_frames(
             msg,
             allow_offload=self.allow_offload,
             serializers=serializers,
@@ -373,7 +372,6 @@ async def read_bytes_rw(stream: IOStream, n: int) -> memoryview:
 def _add_frames_header(
     frames: list[bytes | memoryview],
 ) -> tuple[list[bytes | memoryview], list[int], int]:
-    context_frame = frames.pop() if isinstance(frames, ContextFrames) else None
     frames_nbytes = [nbytes(f) for f in frames]
     frames_nbytes_total = sum(frames_nbytes)
 
@@ -389,8 +387,7 @@ def _add_frames_header(
     # Tornado, because they will be dereferenced soon after they are deserialized.
     # Read uncompressed numpy/parquet buffers, which will survive indefinitely past
     # the end of read(), into their own host arrays so that their memory can be
-    # released independently. The context frame is out of band and must not affect
-    # these zero-copy decisions.
+    # released independently.
     frames_nbytes_nosplit = 0
     first_uncompressed_buffer: object = None
     for frame, nb in zip(frames, frames_nbytes):
@@ -410,25 +407,18 @@ def _add_frames_header(
 
         frames_nbytes_nosplit += nb
 
-    if context_frame is not None:
-        frames.append(context_frame)
     header = pack_frames_prelude(frames)
     header = struct.pack("Q", nbytes(header) + frames_nbytes_nosplit) + header
     header_nbytes = nbytes(header)
+
     frames = [header, *frames]
     frames_nbytes = [header_nbytes, *frames_nbytes]
     frames_nbytes_total += header_nbytes
 
-    # Keep the trailing context frame out of the coalescing heuristic as well.
-    coalesce = frames_nbytes_total < 2**17 or (  # 128 kiB total
+    if frames_nbytes_total < 2**17 or (  # 128 kiB total
         frames_nbytes_total < 2**25  # 32 MiB total
-        and frames_nbytes_total // len(frames_nbytes) < 2**15  # 32 kiB mean
-    )
-    if context_frame is not None:
-        context_nbytes = nbytes(context_frame)
-        frames_nbytes.append(context_nbytes)
-        frames_nbytes_total += context_nbytes
-    if coalesce:
+        and frames_nbytes_total // len(frames) < 2**15  # 32 kiB mean
+    ):
         # very small or very fragmented; send in one go
         frames = [b"".join(frames)]
         frames_nbytes = [frames_nbytes_total]

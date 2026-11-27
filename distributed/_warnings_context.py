@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import os
 import sys
 import threading
 import uuid
 import warnings
-from collections import OrderedDict
+import weakref
+from collections import deque
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from distributed.comm.core import Comm
 
 # Python 3.14t makes warnings filters context-local instead of process-global.
 # This is also available as an opt-in on GIL-enabled Python 3.14+; see
@@ -17,23 +22,18 @@ from typing import Any
 #
 # pytest.warns and pytest.mark.filterwarnings enter warnings.catch_warnings() on
 # the test thread. Distributed runs clients, schedulers, and workers on long-lived
-# event loop threads which were started before the test entered that context, so
-# they would otherwise keep the global ``-W error`` filter and either raise or
-# fail to record warnings issued by RPC handlers and tasks.
+# event loop threads and tasks which were started before the test entered that
+# context, so they would otherwise keep the global ``-W error`` filter and either
+# raise or fail to record warnings issued by RPC handlers and tasks.
 #
-# The current warnings context is carried out of band: as an extra protocol frame
-# for serialized comms, and as an envelope object for InProc comms. Adding a key
-# to the messages themselves would change their serialized header, which in turn
-# changes zero-copy buffer-sharing decisions.
-#
-# The context reference is deliberately not serialized: warning filters are
-# meaningful only within the process that created them, and warnings from a
-# genuinely remote process are surfaced to clients through the existing "warn"
-# event mechanism.
+# Warning filters are meaningful only within the process that created them.
+# During the comm handshake, peers exchange an ephemeral token; when both
+# endpoints live in the same process, they pair up over an in-memory FIFO side
+# channel without altering the wire protocol or frame layout for any transport.
+# Remote peers ignore the unknown handshake key and incur zero per-message cost.
 
-_FRAME_MARKER = b"__distributed_warnings_context__"
-_FRAME_SIZE = len(_FRAME_MARKER) + 16  # UUID bytes
-_MAX_REGISTRY_SIZE = 4096
+_HANDSHAKE_KEY = "_warnings_peer"
+_T = TypeVar("_T")
 
 _WARNINGS_CONTEXT_VAR: contextvars.ContextVar[object] | None = getattr(
     warnings, "_warnings_context", None
@@ -43,20 +43,34 @@ CONTEXT_AWARE_WARNINGS = bool(
 ) and isinstance(_WARNINGS_CONTEXT_VAR, contextvars.ContextVar)
 
 _NO_CONTEXT = nullcontext()
-_registry: OrderedDict[bytes, Any] = OrderedDict()
-_registry_lock: Any = threading.Lock()
+_batched_contexts_var: contextvars.ContextVar[list[object | None] | None] = (
+    contextvars.ContextVar("_distributed_batched_warning_contexts", default=None)
+)
 
 
-def _clear_registry_after_fork() -> None:
+class _Channel:
+    __slots__ = ("incoming", "__weakref__")
+
+    def __init__(self) -> None:
+        self.incoming: deque[Any] = deque()
+
+
+_pending_handshakes: weakref.WeakValueDictionary[bytes, _Channel] = (
+    weakref.WeakValueDictionary()
+)
+_pending_lock: Any = threading.Lock()
+
+
+def _clear_after_fork() -> None:
     # A forked child must not resolve tokens created by its parent, and the lock
     # may have been held by another thread at the time of the fork.
-    global _registry, _registry_lock
-    _registry = OrderedDict()
-    _registry_lock = threading.Lock()
+    global _pending_handshakes, _pending_lock
+    _pending_handshakes = weakref.WeakValueDictionary()
+    _pending_lock = threading.Lock()
 
 
 if hasattr(os, "register_at_fork"):
-    os.register_at_fork(after_in_child=_clear_registry_after_fork)
+    os.register_at_fork(after_in_child=_clear_after_fork)
 
 
 class ContextMessage(dict):
@@ -69,20 +83,18 @@ class ContextMessage(dict):
         self.warning_context = warning_context
 
 
-class DirectMessage:
-    """Envelope used by InProc comms, which do not serialize their messages."""
-
-    def __init__(self, message: Any, context_tree: Any) -> None:
-        self.message = message
-        self.context_tree = context_tree
-
-
-class ContextFrames(list):
-    """Protocol frames with a trailing warnings context reference."""
-
-
-class BatchedMessages(list):
-    """Use the context at enqueue time, not the batch writer's context."""
+@contextmanager
+def _set_contextvar(var: contextvars.ContextVar[_T], value: _T) -> Iterator[None]:
+    token = var.set(value)
+    try:
+        yield
+    finally:
+        try:
+            var.reset(token)
+        except ValueError:
+            # A suspended generator/coroutine may be garbage-collected in a
+            # different Context; its Context is already being discarded.
+            pass
 
 
 def capture_warning_context() -> object | None:
@@ -92,112 +104,138 @@ def capture_warning_context() -> object | None:
     return None
 
 
-def encode_context_frame(context_tree: Any) -> bytes:
-    """Serialize a process-local reference to the warnings context tree."""
-    token = uuid.uuid4().bytes
-    with _registry_lock:
-        if len(_registry) >= _MAX_REGISTRY_SIZE:
-            _registry.popitem(last=False)
-        _registry[token] = context_tree
-    return _FRAME_MARKER + token
-
-
-def pop_context_frame(frames: list) -> tuple[list, Any]:
-    """Detach a local context reference without copying ordinary payload buffers."""
-    if not CONTEXT_AWARE_WARNINGS or len(frames) < 2:
-        return frames, None
-    frame = frames[-1]
-    if isinstance(frame, memoryview) and frame.nbytes == _FRAME_SIZE:
-        frame = bytes(frame)
-    if not (
-        isinstance(frame, bytes)
-        and len(frame) == _FRAME_SIZE
-        and frame.startswith(_FRAME_MARKER)
-    ):
-        return frames, None
-    with _registry_lock:
-        context_tree = _registry.pop(frame[len(_FRAME_MARKER) :], None)
-    # Remote and expired references are unreferenced trailing frames, which the
-    # object protocol already ignores. Do not strip an ordinary payload frame.
-    if context_tree is None:
-        return frames, None
-    return frames[:-1], context_tree
-
-
-def _wrap_outgoing(msg: Any, warning_context: object | None) -> Any:
-    if isinstance(msg, ContextMessage):
-        return msg
-    if type(msg) is dict:
-        return ContextMessage(msg, warning_context)
-    if type(msg) is list:
-        return [_wrap_outgoing(item, warning_context) for item in msg]
-    if type(msg) is tuple:
-        return tuple(_wrap_outgoing(item, warning_context) for item in msg)
-    return msg
-
-
-def wrap_outgoing_message(msg: Any) -> Any:
-    """Capture the warnings context when a message is enqueued by BatchedSend."""
-    context = capture_warning_context()
-    return msg if context is None else _wrap_outgoing(msg, context)
-
-
-def _split_outgoing(msg: Any, current: object | None) -> tuple[Any, Any]:
-    if isinstance(msg, ContextMessage):
-        return dict(msg), msg.warning_context
-    if type(msg) is dict:
-        return msg, current
-    if type(msg) in (list, tuple, BatchedMessages):
-        if isinstance(msg, BatchedMessages):
-            current = None
-        items, contexts = [], []
-        for item in msg:
-            clean, context = _split_outgoing(item, current)
-            items.append(clean)
-            contexts.append(context)
-        return (tuple(items) if type(msg) is tuple else items), (
-            contexts if any(c is not None for c in contexts) else None
-        )
-    return msg, None
-
-
-def split_outgoing_message(msg: Any) -> tuple[Any, Any]:
-    """Strip context wrappers and return the context tree for serialization."""
+def use_batched_warning_contexts(
+    contexts: list[object | None],
+) -> AbstractContextManager[None]:
+    """Pass enqueue-time warning contexts from BatchedSend to its comm write."""
     if not CONTEXT_AWARE_WARNINGS:
-        return msg, None
-    return _split_outgoing(msg, capture_warning_context())
+        return _NO_CONTEXT
+    return _set_contextvar(_batched_contexts_var, contexts)
 
 
-def wrap_decoded_message(msg: Any, context_tree: Any) -> Any:
-    """Attach the resolved warnings context to decoded top-level messages."""
-    if not CONTEXT_AWARE_WARNINGS or context_tree is None:
-        return msg
-    if (
-        isinstance(context_tree, list)
-        and type(msg) in (list, tuple)
-        and len(msg) == len(context_tree)
-    ):
-        return type(msg)(
-            wrap_decoded_message(item, context)
-            for item, context in zip(msg, context_tree)
-        )
-    if type(msg) is dict and not isinstance(context_tree, list):
-        return ContextMessage(msg, context_tree)
+def _wrap_item(item: Any, ctx: object | None) -> Any:
+    if ctx is None:
+        return dict(item) if type(item) is ContextMessage else item
+    if type(item) in (dict, ContextMessage):
+        return ContextMessage(item, ctx)
+    return item
+
+
+def _wrap_decoded_message(msg: Any, entry: Any) -> Any:
+    if entry is None:
+        return dict(msg) if type(msg) is ContextMessage else msg
+    if type(msg) in (dict, ContextMessage) and not isinstance(entry, list):
+        return ContextMessage(msg, entry)
+    if type(msg) in (list, tuple):
+        if isinstance(entry, list):
+            if len(msg) != len(entry):
+                return msg
+            return type(msg)(_wrap_item(item, ctx) for item, ctx in zip(msg, entry))
+        return type(msg)(_wrap_item(item, entry) for item in msg)
     return msg
 
 
-@contextmanager
-def _use_warning_context(context: object) -> Iterator[None]:
-    assert _WARNINGS_CONTEXT_VAR is not None
-    token = _WARNINGS_CONTEXT_VAR.set(context)
+def _attach_local_comm(
+    comm: Comm,
+    channel: _Channel,
+    outgoing: deque[Any],
+) -> None:
+    """Wrap an in-process comm pair to propagate warnings contexts out of band."""
+    comm_ref = weakref.ref(comm)
+    incoming = channel.incoming
+    write_lock = asyncio.Lock()
+
+    def write(msg: Any, *args: Any, **kwargs: Any) -> Any:
+        self = comm_ref()
+        assert self is not None
+        batched = _batched_contexts_var.get(None)
+        if batched is not None:
+            _batched_contexts_var.set(None)
+            entry: Any = batched if any(c is not None for c in batched) else None
+        else:
+            entry = capture_warning_context()
+
+        async def _write() -> Any:
+            async with write_lock:
+                outgoing.append(entry)
+                try:
+                    return await type(self).write(self, msg, *args, **kwargs)
+                except BaseException:
+                    # Nothing was written (closed comm, serialization error, or
+                    # cancellation before writing) or the comm was aborted.
+                    try:
+                        outgoing.pop()
+                    except IndexError:
+                        pass
+                    raise
+
+        return _write()
+
+    def read(*args: Any, **kwargs: Any) -> Any:
+        self = comm_ref()
+        assert self is not None
+
+        async def _read() -> Any:
+            # Hold `channel` for the lifetime of `comm` so the peer can still
+            # resolve our handshake token if it finishes handshake after us.
+            _ = channel
+            msg = await type(self).read(self, *args, **kwargs)
+            try:
+                entry = incoming.popleft()
+            except IndexError:
+                return msg
+            return _wrap_decoded_message(msg, entry)
+
+        return _read()
+
+    comm.write = write  # type: ignore[method-assign]
+    comm.read = read  # type: ignore[method-assign]
+
+
+async def exchange_handshake(comm: Comm, local_info: dict[str, Any]) -> dict[str, Any]:
+    """Exchange comm handshake info and pair in-process peers for warnings context."""
+    if not CONTEXT_AWARE_WARNINGS:
+        await comm.write(local_info)
+        return await comm.read()
+
+    token = uuid.uuid4().bytes
+    channel = _Channel()
+    with _pending_lock:
+        _pending_handshakes[token] = channel
     try:
-        yield
-    finally:
-        _WARNINGS_CONTEXT_VAR.reset(token)
+        # Copy `local_info` so InProc comms do not share a mutated dict.
+        await comm.write({**local_info, _HANDSHAKE_KEY: token})
+        handshake = await comm.read()
+    except BaseException:
+        with _pending_lock:
+            _pending_handshakes.pop(token, None)
+        raise
+
+    peer_token = (
+        handshake.pop(_HANDSHAKE_KEY, None) if isinstance(handshake, dict) else None
+    )
+    if isinstance(peer_token, bytes):
+        with _pending_lock:
+            peer_channel = _pending_handshakes.pop(peer_token, None)
+    else:
+        peer_channel = None
+
+    if peer_channel is not None:
+        _attach_local_comm(comm, channel, peer_channel.incoming)
+    else:
+        # Remote peer (different process or older version) will not pop our token.
+        with _pending_lock:
+            _pending_handshakes.pop(token, None)
+
+    return handshake
 
 
 def warning_context_for(msg: Any) -> AbstractContextManager[None]:
     """Apply the sender's warnings context in the current event loop task."""
-    if isinstance(msg, ContextMessage) and msg.warning_context is not None:
-        return _use_warning_context(msg.warning_context)
+    if (
+        isinstance(msg, ContextMessage)
+        and msg.warning_context is not None
+        and _WARNINGS_CONTEXT_VAR is not None
+    ):
+        return _set_contextvar(_WARNINGS_CONTEXT_VAR, msg.warning_context)
     return _NO_CONTEXT

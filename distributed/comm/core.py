@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 import dask
 from dask.utils import parse_timedelta
 
+from distributed._warnings_context import exchange_handshake
 from distributed.comm import registry
 from distributed.comm.addressing import get_address_host, parse_address, resolve_address
 from distributed.metrics import time
@@ -263,8 +264,7 @@ class Listener(ABC):
     ) -> None:
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
 
-        await comm.write(local_info)
-        handshake = await comm.read()
+        handshake = await exchange_handshake(comm, local_info)
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm.peer_address
@@ -373,8 +373,7 @@ async def connect(
         **comm.handshake_info(),
         **(handshake_overrides or {}),
     }
-    await comm.write(local_info)
-    handshake = await comm.read()
+    handshake = await exchange_handshake(comm, local_info)
 
     comm.remote_info = handshake
     comm.remote_info["address"] = comm._peer_addr

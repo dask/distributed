@@ -13,7 +13,12 @@ from tornado import ioloop
 
 import dask
 
-from distributed._warnings_context import CONTEXT_AWARE_WARNINGS, warning_context_for
+from distributed._warnings_context import (
+    _HANDSHAKE_KEY,
+    CONTEXT_AWARE_WARNINGS,
+    _pending_handshakes,
+    warning_context_for,
+)
 from distributed.batched import BatchedSend
 from distributed.comm import (
     CommClosedError,
@@ -132,6 +137,59 @@ async def test_batched_warning_context(addr):
         assert not writer_warnings
     finally:
         await batch.close()
+        await receiver.close()
+
+
+@pytest.mark.skipif(
+    not CONTEXT_AWARE_WARNINGS, reason="requires context-aware warnings"
+)
+@pytest.mark.parametrize("addr", ["inproc://", "tcp://", "ws://127.0.0.1:0"])
+@gen_test()
+async def test_comm_warning_context_side_channel(addr):
+    sender, receiver = await get_comm_pair(addr)
+    try:
+        assert not _pending_handshakes
+        assert _HANDSHAKE_KEY not in sender.local_info
+        assert _HANDSHAKE_KEY not in sender.remote_info
+        assert _HANDSHAKE_KEY not in receiver.local_info
+        assert _HANDSHAKE_KEY not in receiver.remote_info
+
+        # Wire byte count is unchanged when a warnings context is active.
+        nbytes_plain = await sender.write({"message": "hello"})
+        assert await receiver.read() == {"message": "hello"}
+
+        with warnings.catch_warnings(record=True, action="always") as caught:
+            nbytes_scoped = await sender.write({"message": "hello"})
+        assert nbytes_scoped == nbytes_plain
+
+        msg = await receiver.read()
+        with warning_context_for(msg):
+            warnings.warn(msg["message"], stacklevel=1)
+        assert [str(w.message) for w in caught] == ["hello"]
+
+        # A failed write before transmission must not desync subsequent reads.
+        if addr != "inproc://":
+
+            class Unserializable:
+                def __reduce__(self):
+                    raise TypeError("cannot serialize")
+
+            with (
+                warnings.catch_warnings(record=True, action="always") as failed,
+                pytest.raises(TypeError, match="cannot serialize"),
+            ):
+                await sender.write(
+                    {"bad": Unserializable()}, serializers=[], on_error="raise"
+                )
+            with warnings.catch_warnings(record=True, action="always") as after:
+                await sender.write({"message": "after"})
+            msg = await receiver.read()
+            with warning_context_for(msg):
+                warnings.warn(msg["message"], stacklevel=1)
+            assert not failed
+            assert [str(w.message) for w in after] == ["after"]
+    finally:
+        await sender.close()
         await receiver.close()
 
 

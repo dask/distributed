@@ -12,11 +12,6 @@ from collections import deque, namedtuple
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
-from distributed._warnings_context import (
-    DirectMessage,
-    split_outgoing_message,
-    wrap_decoded_message,
-)
 from distributed.comm.core import BaseListener, Comm, CommClosedError, Connector
 from distributed.comm.registry import Backend, backends
 from distributed.protocol.serialize import _nested_deserialize
@@ -227,21 +222,13 @@ class InProc(Comm):
             self._finalizer.detach()
             raise CommClosedError()
 
-        if isinstance(msg, DirectMessage):
-            context_tree = msg.context_tree
-            msg = msg.message
-        else:
-            context_tree = None
         msg = _nested_deserialize(msg, self.deserialize)
-        return wrap_decoded_message(msg, context_tree)
+        return msg
 
     async def write(self, msg, serializers=None, on_error=None):
         if self.closed():
             raise CommClosedError()
 
-        msg, context_tree = split_outgoing_message(msg)
-        if context_tree is not None:
-            msg = DirectMessage(msg, context_tree)
         # Ensure we feed the queue in the same thread it is read from.
         self._write_loop.add_callback(self._write_q.put_nowait, msg)
 

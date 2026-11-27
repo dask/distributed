@@ -7,13 +7,6 @@ import dask
 from dask.utils import parse_bytes
 
 from distributed import protocol
-from distributed._warnings_context import (
-    ContextFrames,
-    encode_context_frame,
-    pop_context_frame,
-    split_outgoing_message,
-    wrap_decoded_message,
-)
 from distributed.sizeof import safe_sizeof
 from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
@@ -85,23 +78,6 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
         res = _from_frames()
 
     return res
-
-
-async def to_comm_frames(msg, **kwargs):
-    # Capture before offloading serialization, and keep the metadata out of
-    # the serialized payload so it doesn't affect zero-copy buffer handling.
-    msg, context_tree = split_outgoing_message(msg)
-    frames = await to_frames(msg, **kwargs)
-    if context_tree is not None:
-        frames = ContextFrames(frames)
-        frames.append(encode_context_frame(context_tree))
-    return frames
-
-
-async def from_comm_frames(frames, **kwargs):
-    frames, context_tree = pop_context_frame(frames)
-    msg = await from_frames(frames, **kwargs)
-    return wrap_decoded_message(msg, context_tree)
 
 
 def get_tcp_server_addresses(tcp_server):
