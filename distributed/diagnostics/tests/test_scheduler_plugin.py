@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import warnings
 
 import pytest
 
@@ -304,9 +303,10 @@ async def test_register_plugin(c, s, a, b):
     await c.register_plugin(Dummy1())
     assert s.foo == "bar"
 
-    with pytest.warns(UserWarning) as w:
+    # The scheduler has already handled an RPC on this connection, so this
+    # also checks that a new warnings context reaches a warm comm handler.
+    with pytest.warns(UserWarning, match="Scheduler already contains"):
         await c.register_plugin(Dummy1())
-    assert "Scheduler already contains" in w[0].message.args[0]
 
     class Dummy2(SchedulerPlugin):
         name = "Dummy2"
@@ -319,20 +319,6 @@ async def test_register_plugin(c, s, a, b):
         await c.register_plugin(Dummy2())
     # total number of plugins should be unchanged
     assert n_plugins == len(s.plugins)
-
-
-@gen_cluster(client=True)
-async def test_catch_warnings_from_warm_scheduler(c, s, a, b):
-    """warnings.catch_warnings (and wraappers like pytest.warns) must reach RPC handlers
-    running on a warm scheduler event loop on free-threaded Python.
-    """
-
-    class Dummy(SchedulerPlugin):
-        name = "Dummy"
-
-    await c.register_plugin(Dummy())
-    with pytest.warns(UserWarning, match="Scheduler already contains"):
-        await c.register_plugin(Dummy())
 
 
 @gen_cluster(nthreads=[])
