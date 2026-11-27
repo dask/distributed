@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import sys
 import threading
+import warnings
 from functools import partial
 
 import pytest
@@ -11,6 +13,8 @@ from tornado import ioloop
 
 import dask
 
+from distributed._warnings_context import CONTEXT_AWARE_WARNINGS, warning_context_for
+from distributed.batched import BatchedSend
 from distributed.comm import (
     CommClosedError,
     connect,
@@ -96,6 +100,39 @@ async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwar
 
     serv_comm = await q.get()
     return (comm, serv_comm)
+
+
+@pytest.mark.skipif(
+    not CONTEXT_AWARE_WARNINGS, reason="requires context-aware warnings"
+)
+@pytest.mark.parametrize("addr", ["inproc://", "tcp://", "ws://127.0.0.1:0"])
+@gen_test()
+async def test_batched_warning_context(addr):
+    sender, receiver = await get_comm_pair(addr)
+    batch = BatchedSend(interval="1ms")
+    try:
+        with warnings.catch_warnings(record=True, action="always") as writer_warnings:
+            batch.start(sender)
+        with warnings.catch_warnings(record=True, action="always") as first:
+            batch.send({"message": "first"})
+        contextvars.Context().run(batch.send, {"message": "unscoped"})
+        with warnings.catch_warnings(record=True, action="always") as last:
+            batch.send({"message": "last"})
+
+        with warnings.catch_warnings(record=True, action="always") as receiver_warnings:
+            messages = await receiver.read()
+            assert len(messages) == 3
+            for msg in messages:
+                with warning_context_for(msg):
+                    warnings.warn(msg["message"], stacklevel=1)
+
+        assert [str(w.message) for w in first] == ["first"]
+        assert [str(w.message) for w in last] == ["last"]
+        assert [str(w.message) for w in receiver_warnings] == ["unscoped"]
+        assert not writer_warnings
+    finally:
+        await batch.close()
+        await receiver.close()
 
 
 def get_tcp_comm_pair(**kwargs):

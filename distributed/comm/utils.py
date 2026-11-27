@@ -7,7 +7,13 @@ import dask
 from dask.utils import parse_bytes
 
 from distributed import protocol
-from distributed._warnings_context import Frames, split_outgoing_message
+from distributed._warnings_context import (
+    ContextFrames,
+    encode_context_frame,
+    pop_context_frame,
+    split_outgoing_message,
+    wrap_decoded_message,
+)
 from distributed.sizeof import safe_sizeof
 from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
@@ -42,18 +48,24 @@ async def to_frames(
             logger.exception(e)
             raise
 
-    if OFFLOAD_THRESHOLD and allow_offload:
-        # dask.sizeof.sizeof() starts raising RecursionError at ~140 recursion depth,
-        # whereas msgpack can go on for quite a bit longer, until 512 (sometimes 256,
-        # depending on compilation flags). The default default_size of
-        # distributed.sizeof.safe_sizeof() is 1MB, which is less than the
-        # OFFLOAD_THRESHOLD.
-        msg_size = safe_sizeof(msg, default_size=-1)
-        if msg_size == -1 or msg_size > OFFLOAD_THRESHOLD:
-            frames = await offload(_to_frames)
-            return Frames(frames, context_tree)
+    # dask.sizeof.sizeof() can raise RecursionError on deeply nested messages
+    # that msgpack can still serialize. Offload if the size is unknown.
+    if (
+        OFFLOAD_THRESHOLD
+        and allow_offload
+        and (
+            (size := safe_sizeof(msg, default_size=-1)) == -1
+            or size > OFFLOAD_THRESHOLD
+        )
+    ):
+        frames = await offload(_to_frames)
+    else:
+        frames = _to_frames()
 
-    return Frames(_to_frames(), context_tree)
+    if context_tree is not None:
+        frames = ContextFrames(frames)
+        frames.append(encode_context_frame(context_tree))
+    return frames
 
 
 async def from_frames(frames, deserialize=True, deserializers=None, allow_offload=True):
@@ -61,15 +73,12 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
     Unserialize a list of Distributed protocol frames.
     """
     size = False
-    context_tree = getattr(frames, "context_tree", None)
+    frames, context_tree = pop_context_frame(frames)
 
     def _from_frames():
         try:
             return protocol.loads(
-                frames,
-                deserialize=deserialize,
-                deserializers=deserializers,
-                context_tree=context_tree,
+                frames, deserialize=deserialize, deserializers=deserializers
             )
         except EOFError:
             if size > 1000:
@@ -87,7 +96,7 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
     else:
         res = _from_frames()
 
-    return res
+    return wrap_decoded_message(res, context_tree)
 
 
 def get_tcp_server_addresses(tcp_server):

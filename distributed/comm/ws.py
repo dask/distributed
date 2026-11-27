@@ -23,7 +23,6 @@ from tornado.websocket import (
 
 import dask
 
-from distributed._warnings_context import append_context_frame
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import (
     BaseListener,
@@ -148,7 +147,6 @@ class WSHandlerComm(Comm):
             },
             frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
-        frames = append_context_frame(frames)
         n = struct.pack("Q", len(frames))
         nbytes_frames = 0
         try:
@@ -261,7 +259,6 @@ class WS(Comm):
             },
             frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
-        frames = append_context_frame(frames)
         n = struct.pack("Q", len(frames))
         nbytes_frames = 0
         try:

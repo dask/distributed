@@ -4,7 +4,6 @@ import logging
 
 import msgpack
 
-from distributed._warnings_context import pop_context_frame, wrap_decoded_message
 from distributed.protocol import pickle
 from distributed.protocol.compression import decompress, maybe_compress
 from distributed.protocol.serialize import (
@@ -138,12 +137,9 @@ def dumps(  # type: ignore[no-untyped-def]
         raise
 
 
-def loads(frames, deserialize=True, deserializers=None, context_tree=None):
+def loads(frames, deserialize=True, deserializers=None):
     """Transform bytestream back into Python value"""
 
-    frames, wire_context_tree = pop_context_frame(frames)
-    if wire_context_tree is None:
-        wire_context_tree = context_tree
     try:
 
         def _decode_default(obj):
@@ -176,10 +172,9 @@ def loads(frames, deserialize=True, deserializers=None, context_tree=None):
                 return pickle.loads(sub_header["pickled-obj"], buffers=sub_frames)
             return msgpack_decode_default(obj)
 
-        msg = msgpack.loads(
+        return msgpack.loads(
             frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts
         )
-        return wrap_decoded_message(msg, wire_context_tree)
 
     except Exception:
         logger.critical("Failed to deserialize", exc_info=True)

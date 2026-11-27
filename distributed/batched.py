@@ -11,7 +11,11 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import parse_timedelta
 
-from distributed._warnings_context import wrap_outgoing_message
+from distributed._warnings_context import (
+    CONTEXT_AWARE_WARNINGS,
+    BatchedMessages,
+    wrap_outgoing_message,
+)
 from distributed.core import CommClosedError
 from distributed.metrics import time
 
@@ -50,7 +54,7 @@ class BatchedSend:
         self.waker = locks.Event()
         self.stopped = locks.Event()
         self.please_stop = False
-        self.buffer = []
+        self.buffer: list = BatchedMessages() if CONTEXT_AWARE_WARNINGS else []
         self.comm = None
         self.message_count = 0
         self.batch_count = 0
@@ -92,7 +96,7 @@ class BatchedSend:
             if self.next_deadline is not None and time() < self.next_deadline:
                 # Send interval not expired yet
                 continue
-            payload, self.buffer = self.buffer, []
+            payload, self.buffer = self.buffer, type(self.buffer)()
             self.batch_count += 1
             self.next_deadline = time() + self.interval
             try:
@@ -178,7 +182,7 @@ class BatchedSend:
         if not self.comm.closed():
             try:
                 if self.buffer:
-                    self.buffer, payload = [], self.buffer
+                    payload, self.buffer = self.buffer, type(self.buffer)()
                     # See note in `_background_send` for explanation of `closing`.
                     with contextlib.closing(
                         self.comm.write(
@@ -194,7 +198,7 @@ class BatchedSend:
         if self.comm is None:
             return
         self.please_stop = True
-        self.buffer = []
+        self.buffer.clear()
         self.waker.set()
         if not self.comm.closed():
             self.comm.abort()

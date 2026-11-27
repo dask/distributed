@@ -14,7 +14,6 @@ from tornado.ioloop import IOLoop
 
 from distributed._warnings_context import (
     DirectMessage,
-    has_warning_context,
     split_outgoing_message,
     wrap_decoded_message,
 )
@@ -241,7 +240,7 @@ class InProc(Comm):
             raise CommClosedError()
 
         msg, context_tree = split_outgoing_message(msg)
-        if has_warning_context(context_tree):
+        if context_tree is not None:
             msg = DirectMessage(msg, context_tree)
         # Ensure we feed the queue in the same thread it is read from.
         self._write_loop.add_callback(self._write_q.put_nowait, msg)
