@@ -35,10 +35,6 @@ async def to_frames(
     Serialize a message into a list of Distributed protocol frames.
     Any kwargs are forwarded to protocol.dumps().
     """
-    # Capture the caller's warnings context before potentially offloading
-    # serialization to a worker thread, and strip the in-process wrappers so
-    # they don't alter the serialized message.
-    msg, context_tree = split_outgoing_message(msg)
 
     def _to_frames():
         try:
@@ -48,24 +44,17 @@ async def to_frames(
             logger.exception(e)
             raise
 
-    # dask.sizeof.sizeof() can raise RecursionError on deeply nested messages
-    # that msgpack can still serialize. Offload if the size is unknown.
-    if (
-        OFFLOAD_THRESHOLD
-        and allow_offload
-        and (
-            (size := safe_sizeof(msg, default_size=-1)) == -1
-            or size > OFFLOAD_THRESHOLD
-        )
-    ):
-        frames = await offload(_to_frames)
-    else:
-        frames = _to_frames()
+    if OFFLOAD_THRESHOLD and allow_offload:
+        # dask.sizeof.sizeof() starts raising RecursionError at ~140 recursion depth,
+        # whereas msgpack can go on for quite a bit longer, until 512 (sometimes 256,
+        # depending on compilation flags). The default default_size of
+        # distributed.sizeof.safe_sizeof() is 1MB, which is less than the
+        # OFFLOAD_THRESHOLD.
+        msg_size = safe_sizeof(msg, default_size=-1)
+        if msg_size == -1 or msg_size > OFFLOAD_THRESHOLD:
+            return await offload(_to_frames)
 
-    if context_tree is not None:
-        frames = ContextFrames(frames)
-        frames.append(encode_context_frame(context_tree))
-    return frames
+    return _to_frames()
 
 
 async def from_frames(frames, deserialize=True, deserializers=None, allow_offload=True):
@@ -73,7 +62,6 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
     Unserialize a list of Distributed protocol frames.
     """
     size = False
-    frames, context_tree = pop_context_frame(frames)
 
     def _from_frames():
         try:
@@ -96,7 +84,24 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
     else:
         res = _from_frames()
 
-    return wrap_decoded_message(res, context_tree)
+    return res
+
+
+async def to_comm_frames(msg, **kwargs):
+    # Capture before offloading serialization, and keep the metadata out of
+    # the serialized payload so it doesn't affect zero-copy buffer handling.
+    msg, context_tree = split_outgoing_message(msg)
+    frames = await to_frames(msg, **kwargs)
+    if context_tree is not None:
+        frames = ContextFrames(frames)
+        frames.append(encode_context_frame(context_tree))
+    return frames
+
+
+async def from_comm_frames(frames, **kwargs):
+    frames, context_tree = pop_context_frame(frames)
+    msg = await from_frames(frames, **kwargs)
+    return wrap_decoded_message(msg, context_tree)
 
 
 def get_tcp_server_addresses(tcp_server):

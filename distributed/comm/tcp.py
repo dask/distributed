@@ -34,9 +34,9 @@ from distributed.comm.core import (
 from distributed.comm.registry import Backend
 from distributed.comm.utils import (
     ensure_concrete_host,
-    from_frames,
+    from_comm_frames,
     get_tcp_server_address,
-    to_frames,
+    to_comm_frames,
 )
 from distributed.protocol.utils import host_array, pack_frames_prelude, unpack_frames
 from distributed.system import MEMORY_LIMIT
@@ -245,7 +245,7 @@ class TCP(Comm):
             raise
         else:
             try:
-                msg = await from_frames(
+                msg = await from_comm_frames(
                     frames,
                     deserialize=self.deserialize,
                     deserializers=deserializers,
@@ -262,7 +262,7 @@ class TCP(Comm):
         if stream is None:
             raise CommClosedError()
 
-        frames = await to_frames(
+        frames = await to_comm_frames(
             msg,
             allow_offload=self.allow_offload,
             serializers=serializers,

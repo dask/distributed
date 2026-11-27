@@ -39,9 +39,9 @@ from distributed.comm.tcp import (
 )
 from distributed.comm.utils import (
     ensure_concrete_host,
-    from_frames,
+    from_comm_frames,
     get_tcp_server_address,
-    to_frames,
+    to_comm_frames,
 )
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ class WSHandlerComm(Comm):
         else:
             n_frames = struct.unpack("Q", n_frames)[0]
         frames = [(await self.handler.q.get()) for _ in range(n_frames)]
-        return await from_frames(
+        return await from_comm_frames(
             frames,
             deserialize=self.deserialize,
             deserializers=deserializers,
@@ -135,7 +135,7 @@ class WSHandlerComm(Comm):
         )
 
     async def write(self, msg, serializers=None, on_error=None):
-        frames = await to_frames(
+        frames = await to_comm_frames(
             msg,
             allow_offload=self.allow_offload,
             serializers=serializers,
@@ -238,7 +238,7 @@ class WS(Comm):
 
         frames = [(await self.sock.read_message()) for _ in range(n_frames)]
 
-        msg = await from_frames(
+        msg = await from_comm_frames(
             frames,
             deserialize=self.deserialize,
             deserializers=deserializers,
@@ -247,7 +247,7 @@ class WS(Comm):
         return msg
 
     async def write(self, msg, serializers=None, on_error=None):
-        frames = await to_frames(
+        frames = await to_comm_frames(
             msg,
             allow_offload=self.allow_offload,
             serializers=serializers,
