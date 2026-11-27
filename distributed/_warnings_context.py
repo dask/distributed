@@ -11,6 +11,8 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any, Literal, cast
 
+import msgpack
+
 # Python 3.14t makes warnings filters context-local instead of process-global.
 # This is also available as an opt-in on GIL-enabled Python 3.14+; see
 # https://docs.python.org/3/using/cmdline.html#envvar-PYTHON_CONTEXT_AWARE_WARNINGS
@@ -21,13 +23,18 @@ from typing import Any, Literal, cast
 # they would otherwise keep the global ``-W error`` filter and either raise or
 # fail to record warnings issued by RPC handlers and tasks.
 #
-# This module attaches a process-local reference to the current warnings context
-# to outgoing messages and restores it around the matching remote handler. The
-# reference is deliberately not serialized: warning filters are meaningful only
-# within the process that created them, and warnings from a genuinely remote
-# process are surfaced to clients through the existing "warn" event mechanism.
+# The current warnings context is carried out of band: as an extra protocol frame
+# for serialized comms, and as an envelope object for InProc comms. Adding a key
+# to the messages themselves would change their serialized header, which in turn
+# changes zero-copy buffer-sharing decisions.
+#
+# The context reference is deliberately not serialized: warning filters are
+# meaningful only within the process that created them, and warnings from a
+# genuinely remote process are surfaced to clients through the existing "warn"
+# event mechanism.
 
-CONTEXT_KEY = "__distributed_warnings_context__"
+FRAME_MARKER = b"__distributed_warnings_context__"
+CONTEXT_KEY = "__distributed_warnings_context__"  # legacy keys are stripped
 _MARKER = "distributed.warnings_context"
 _MAX_REGISTRY_SIZE = 4096
 
@@ -66,6 +73,22 @@ class ContextMessage(dict):
         self.warning_context = warning_context
 
 
+class DirectMessage:
+    """Envelope used by InProc comms, which do not serialize their messages."""
+
+    def __init__(self, message: Any, context_tree: Any) -> None:
+        self.message = message
+        self.context_tree = context_tree
+
+
+class Frames(list):
+    """Protocol frames carrying their warnings context as out-of-band metadata."""
+
+    def __init__(self, frames: list, context_tree: Any = None) -> None:
+        super().__init__(frames)
+        self.context_tree = context_tree
+
+
 def get_warning_context(msg: Any) -> object | None:
     """Return the warnings context attached to a decoded message, if any."""
     if isinstance(msg, ContextMessage):
@@ -94,10 +117,10 @@ def capture_warning_context() -> object | None:
     return warning_context
 
 
-def _register_warning_context(warning_context: object) -> dict[str, object]:
+def _register_context(value: object) -> dict[str, object]:
     token = uuid.uuid4().hex
     with _registry_lock:
-        _registry[token] = warning_context
+        _registry[token] = value
         _registry.move_to_end(token)
         while len(_registry) > _MAX_REGISTRY_SIZE:
             _registry.popitem(last=False)
@@ -113,66 +136,139 @@ def _is_context_token(payload: Any) -> bool:
     )
 
 
-def _resolve_warning_context(payload: dict[str, object]) -> object | None:
+def _resolve_context(payload: dict[str, object]) -> object | None:
     if payload["pid"] != os.getpid():
         return None
     token = cast(str, payload["token"])
     with _registry_lock:
-        warning_context = _registry.get(token)
-        if warning_context is not None:
+        value = _registry.get(token)
+        if value is not None:
             _registry.move_to_end(token)
-    return warning_context
+    return value
 
 
-def pop_message_context(msg: dict) -> tuple[dict, object | None]:
-    """Strip the internal context key from a decoded msgpack object."""
-    payload = msg.get(CONTEXT_KEY, _MISSING)
+def encode_context_frame(context_tree: Any) -> bytes:
+    """Serialize a process-local reference to the warnings context tree."""
+    payload = _register_context(context_tree)
+    return FRAME_MARKER + msgpack.dumps(payload, use_bin_type=True)
+
+
+def pop_context_frame(frames: list) -> tuple[list, Any]:
+    """Remove the trailing context frame, if present, and resolve its payload."""
+    if not frames:
+        return frames, None
+    try:
+        data = bytes(frames[-1])
+    except (TypeError, ValueError):
+        return frames, None
+    if not data.startswith(FRAME_MARKER):
+        return frames, None
+    try:
+        payload = msgpack.loads(data[len(FRAME_MARKER) :], raw=False)
+    except Exception:
+        return frames, None
     if not _is_context_token(payload):
-        return msg, None
+        return frames, None
+    return frames[:-1], _resolve_context(payload)
+
+
+def has_warning_context(context_tree: Any) -> bool:
+    if isinstance(context_tree, list):
+        return any(has_warning_context(item) for item in context_tree)
+    return context_tree is not None
+
+
+def _context_frame(frames: Any) -> bytes | None:
+    context_tree = getattr(frames, "context_tree", None)
+    if not CONTEXT_AWARE_WARNINGS or not has_warning_context(context_tree):
+        return None
+    return encode_context_frame(context_tree)
+
+
+def append_context_frame(frames: Any) -> list:
+    """Return plain frames with the context metadata in a trailing frame."""
+    context_frame = _context_frame(frames)
+    if context_frame is None:
+        return list(frames)
+    return [*frames, context_frame]
+
+
+def detach_context_frame(frames: Any) -> tuple[list, bytes | None]:
+    """Return plain frames and the context metadata as a separate frame."""
+    return list(frames), _context_frame(frames)
+
+
+def _clean_dict(msg: dict) -> dict:
     out = dict(msg)
-    del out[CONTEXT_KEY]
-    return out, _resolve_warning_context(cast(dict[str, object], payload))
+    out.pop(CONTEXT_KEY, None)
+    return out
 
 
-def _attach_warning_context(msg: Any, token: dict[str, object]) -> Any:
+def _wrap_outgoing(msg: Any, warning_context: object | None) -> Any:
     if isinstance(msg, ContextMessage):
-        if CONTEXT_KEY in msg:
-            return msg
-        out = dict(msg)
-        if msg.warning_context is None:
-            out[CONTEXT_KEY] = token
-        else:
-            out[CONTEXT_KEY] = _register_warning_context(msg.warning_context)
-        return out
-    # Only top-level messages and the elements of a BatchedSend payload receive
-    # the key. Adding it to arbitrary nested user data would change its meaning.
+        return msg
     if type(msg) is dict:
-        if CONTEXT_KEY in msg:
-            return msg
-        out = dict(msg)
-        out[CONTEXT_KEY] = token
-        return out
+        out = _clean_dict(msg)
+        return ContextMessage(out, warning_context) if warning_context else out
     if type(msg) is list:
-        return [_attach_warning_context(item, token) for item in msg]
+        return [_wrap_outgoing(item, warning_context) for item in msg]
     if type(msg) is tuple:
-        return tuple(_attach_warning_context(item, token) for item in msg)
+        return tuple(_wrap_outgoing(item, warning_context) for item in msg)
     return msg
 
 
-def attach_warning_context(msg: Any, warning_context: object | None = None) -> Any:
-    """Attach the current warnings context to an outgoing message or batch.
-
-    BatchedSend calls this when messages are enqueued; to_frames calls it as a
-    fallback for direct comm writes. The latter must not overwrite a context
-    captured earlier at enqueue time.
-    """
+def wrap_outgoing_message(msg: Any, warning_context: object | None = None) -> Any:
+    """Capture the warnings context when a message is enqueued by BatchedSend."""
     if not CONTEXT_AWARE_WARNINGS:
         return msg
     if warning_context is None:
         warning_context = capture_warning_context()
-    if warning_context is None:
+    return _wrap_outgoing(msg, warning_context)
+
+
+def _split_outgoing(msg: Any, current: object | None) -> tuple[Any, Any]:
+    if isinstance(msg, ContextMessage):
+        return _clean_dict(msg), msg.warning_context
+    if type(msg) is dict:
+        return _clean_dict(msg), current
+    if type(msg) is list:
+        items = []
+        contexts = []
+        for item in msg:
+            clean, context = _split_outgoing(item, current)
+            items.append(clean)
+            contexts.append(context)
+        return items, contexts if has_warning_context(contexts) else None
+    if type(msg) is tuple:
+        items = []
+        contexts = []
+        for item in msg:
+            clean, context = _split_outgoing(item, current)
+            items.append(clean)
+            contexts.append(context)
+        return tuple(items), contexts if has_warning_context(contexts) else None
+    return msg, None
+
+
+def split_outgoing_message(msg: Any) -> tuple[Any, Any]:
+    """Strip context wrappers and return the context tree for serialization."""
+    if not CONTEXT_AWARE_WARNINGS:
+        return msg, None
+    return _split_outgoing(msg, capture_warning_context())
+
+
+def wrap_decoded_message(msg: Any, context_tree: Any) -> Any:
+    """Attach the resolved warnings context to decoded top-level messages."""
+    if not CONTEXT_AWARE_WARNINGS or context_tree is None:
         return msg
-    return _attach_warning_context(msg, _register_warning_context(warning_context))
+    if isinstance(context_tree, list) and type(msg) in (list, tuple):
+        return type(msg)(
+            wrap_decoded_message(item, context)
+            for item, context in zip(msg, context_tree)
+        )
+    if type(msg) is dict and not isinstance(context_tree, list):
+        return ContextMessage(msg, context_tree)
+    return msg
 
 
 def _set_warning_context(warning_context: object | None) -> Any:

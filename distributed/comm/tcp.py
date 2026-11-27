@@ -22,6 +22,7 @@ from tornado.tcpserver import TCPServer
 import dask
 from dask.utils import parse_timedelta
 
+from distributed._warnings_context import detach_context_frame
 from distributed.comm.addressing import parse_host_port, unparse_host_port
 from distributed.comm.core import (
     BaseListener,
@@ -273,7 +274,10 @@ class TCP(Comm):
             },
             frame_split_size=self.max_shard_size,
         )
-        frames, frames_nbytes, frames_nbytes_total = _add_frames_header(frames)
+        frames, context_frame = detach_context_frame(frames)
+        frames, frames_nbytes, frames_nbytes_total = _add_frames_header(
+            frames, context_frame
+        )
 
         try:
             # trick to enqueue all frames for writing beforehand
@@ -371,6 +375,7 @@ async def read_bytes_rw(stream: IOStream, n: int) -> memoryview:
 
 def _add_frames_header(
     frames: list[bytes | memoryview],
+    context_frame: bytes | None = None,
 ) -> tuple[list[bytes | memoryview], list[int], int]:
     frames_nbytes = [nbytes(f) for f in frames]
     frames_nbytes_total = sum(frames_nbytes)
@@ -387,7 +392,8 @@ def _add_frames_header(
     # Tornado, because they will be dereferenced soon after they are deserialized.
     # Read uncompressed numpy/parquet buffers, which will survive indefinitely past
     # the end of read(), into their own host arrays so that their memory can be
-    # released independently.
+    # released independently. The context frame is out of band and must not affect
+    # these zero-copy decisions.
     frames_nbytes_nosplit = 0
     first_uncompressed_buffer: object = None
     for frame, nb in zip(frames, frames_nbytes):
@@ -407,17 +413,27 @@ def _add_frames_header(
 
         frames_nbytes_nosplit += nb
 
-    header = pack_frames_prelude(frames)
+    prelude_frames = [*frames, context_frame] if context_frame is not None else frames
+    header = pack_frames_prelude(prelude_frames)
     header = struct.pack("Q", nbytes(header) + frames_nbytes_nosplit) + header
     header_nbytes = nbytes(header)
 
     frames = [header, *frames]
     frames_nbytes = [header_nbytes, *frames_nbytes]
     frames_nbytes_total += header_nbytes
+    context_nbytes = 0
+    if context_frame is not None:
+        context_nbytes = nbytes(context_frame)
+        frames.append(context_frame)
+        frames_nbytes.append(context_nbytes)
+        frames_nbytes_total += context_nbytes
 
-    if frames_nbytes_total < 2**17 or (  # 128 kiB total
-        frames_nbytes_total < 2**25  # 32 MiB total
-        and frames_nbytes_total // len(frames) < 2**15  # 32 kiB mean
+    # Decide whether to coalesce frames based on the payload alone.
+    payload_nbytes_total = frames_nbytes_total - context_nbytes
+    payload_nframes = len(frames) - (context_frame is not None)
+    if payload_nbytes_total < 2**17 or (  # 128 kiB total
+        payload_nbytes_total < 2**25  # 32 MiB total
+        and payload_nbytes_total // payload_nframes < 2**15  # 32 kiB mean
     ):
         # very small or very fragmented; send in one go
         frames = [b"".join(frames)]

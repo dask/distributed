@@ -7,7 +7,7 @@ import dask
 from dask.utils import parse_bytes
 
 from distributed import protocol
-from distributed._warnings_context import attach_warning_context
+from distributed._warnings_context import Frames, split_outgoing_message
 from distributed.sizeof import safe_sizeof
 from distributed.utils import get_ip, get_ipv6, nbytes, offload
 
@@ -30,8 +30,9 @@ async def to_frames(
     Any kwargs are forwarded to protocol.dumps().
     """
     # Capture the caller's warnings context before potentially offloading
-    # serialization to a worker thread.
-    msg = attach_warning_context(msg)
+    # serialization to a worker thread, and strip the in-process wrappers so
+    # they don't alter the serialized message.
+    msg, context_tree = split_outgoing_message(msg)
 
     def _to_frames():
         try:
@@ -49,9 +50,10 @@ async def to_frames(
         # OFFLOAD_THRESHOLD.
         msg_size = safe_sizeof(msg, default_size=-1)
         if msg_size == -1 or msg_size > OFFLOAD_THRESHOLD:
-            return await offload(_to_frames)
+            frames = await offload(_to_frames)
+            return Frames(frames, context_tree)
 
-    return _to_frames()
+    return Frames(_to_frames(), context_tree)
 
 
 async def from_frames(frames, deserialize=True, deserializers=None, allow_offload=True):
@@ -59,11 +61,15 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
     Unserialize a list of Distributed protocol frames.
     """
     size = False
+    context_tree = getattr(frames, "context_tree", None)
 
     def _from_frames():
         try:
             return protocol.loads(
-                frames, deserialize=deserialize, deserializers=deserializers
+                frames,
+                deserialize=deserialize,
+                deserializers=deserializers,
+                context_tree=context_tree,
             )
         except EOFError:
             if size > 1000:

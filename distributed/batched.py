@@ -11,7 +11,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask.utils import parse_timedelta
 
-from distributed._warnings_context import attach_warning_context
+from distributed._warnings_context import wrap_outgoing_message
 from distributed.core import CommClosedError
 from distributed.metrics import time
 
@@ -159,7 +159,7 @@ class BatchedSend:
         self.message_count += len(msgs)
         # The background send task runs in its own context; capture the warnings
         # context of whoever enqueued the messages.
-        self.buffer.extend(attach_warning_context(msgs))
+        self.buffer.extend(wrap_outgoing_message(msgs))
         # Avoid spurious wakeups if possible
         if self.next_deadline is None:
             self.waker.set()
